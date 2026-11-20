@@ -22,30 +22,35 @@ How to work on this Linux client, test it, and deploy it to a device. See
 ## What this is
 
 A Python package (`musegadget`) that makes any Linux computer into a Muse
-Home Link. It pairs with the Muse phone app over BLE, then holds an encrypted
+Gadget. It pairs with the Muse phone app over BLE, then holds an encrypted
 Noise session to the user's Muse VM and runs the commands Muse sends it. It is
 the Linux counterpart of the ESP32 firmware in `../esp32` and speaks the same
 pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `chat`, `info`, `unpair` |
 | `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
 | `ble_setup.py` | Setup commands behind the GATT characteristics (no BlueZ dependency) |
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
-| `identity.py` | Persistent identity: `homelink-xxxxxx` node id, `MuseGadgetXXXXXX` BLE name |
+| `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
+| `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
+| `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
+| `device_guide.py` | `device.guide`'s spec and the Linux client's own guide |
 | `noise/` | Noise XX handshake, framing and service envelopes |
-| `data/` | The systemd unit and the hash-pinned `requirements.lock`, shipped in the package |
+| `data/` | The systemd unit, the hash-pinned `requirements.lock` and the default `guide.md`, shipped in the package |
 
 ## Prerequisites
 
@@ -71,7 +76,7 @@ Apple Silicon wheel, so run it under an x86-64 Python on a Mac:
 
 ```sh
 uv run --no-project --isolated --python cpython-3.9-macos-x86_64 \
-  --with pytest --with cryptography==3.3.2 --with websockets==13.1 \
+  --with pytest --with cryptography==3.3.2 --with websockets==15.0.1 \
   env PYTHONPATH=src python -m pytest -q
 ```
 
@@ -92,18 +97,28 @@ Reinstalling keeps the pairing. It restarts the service, which kills any
 command Muse is running at that moment, so check the log for recent `invoke`
 lines first.
 
-For a quicker loop, build a wheel and install it into the existing venv:
+To install a wheel you built, give it to the installer:
 
 ```sh
 uv build --wheel
 # on the device:
-sudo /opt/musegadget/bin/uv pip install --python /opt/musegadget/venv/bin/python --no-deps --reinstall musegadget-*.whl
-sudo systemctl restart musegadget
+bash install.sh --from musegadget-*.whl --run-as USER --yes   # copy just one wheel
 ```
 
+Pass the same `--run-as` as before: without it, commands run as the account
+running the installer.
+
+Upgrade through the installer only. It checks `/opt/musegadget/bin/uv`
+against a pinned checksum, and builds a new venv, before running anything there
+as root. Don't run that uv with `sudo` yourself.
+
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
-`--from SOURCE`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
-keep it that way.
+`--from SOURCE`, `--proxy URL`, `--no-proxy HOSTS`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
+keep it that way. Root runs everything under `/opt/musegadget`, so the
+installer never runs a file there that another account could have changed.
+To move to a new uv, update `UV_VERSION` and both checksums for each target
+in `uv_release`, from the release's `.sha256` files and the binaries in the
+archives. `tests/test_install_sh.py` checks that each target has both.
 
 ## Run and debug
 
@@ -129,9 +144,18 @@ never has a command's parameters, output or error message.
   A Pi has no button, so the app's own confirmation stands in for it, and BLE
   only advertises while `musegadget pair` runs.
 - The BLE name is `MuseGadget` plus the last six hex digits of the identity,
-  with **no hyphen**: the apps compare the text after the prefix with the text
-  after `homelink-` in the node id. `get_device_info` must report
+  with **no hyphen**: the apps compare the text after the prefix with the six
+  hex digits that end the node id. `get_device_info` must report
   `model: "hatch_link"`.
+- Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
+  (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
+  offers `gadget-` and those six digits (lowercase) in `get_device_info` and
+  the transcript; without it (the default) it offers `homelink-` and the same
+  digits. Either way it
+  stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
+  (`link.register`, token refresh, chat turns) until the device is paired
+  again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
+  Never rename a stored id.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.
@@ -156,15 +180,24 @@ never has a command's parameters, output or error message.
   Both directions carry JSON messages, each prefixed with a little-endian u32
   length. The device sends `link.register`, then a `link.result` for each
   `link.invoke`. `link.unpaired` means the Muse removed the device.
-- Register as `platform: "linux"`, `device_family: "homehub"`. Never use family
-  `link` or advertise `device.ota`: the server pushes ESP32 firmware updates to
-  every `link` device.
+- Register as `platform: "linux"` and `device_family: "gadget"`, with
+  `model_id` and `metadata.model_name` from the `DeviceDescription`
+  (`../protocols/DEVICE.md`). Every device built with this SDK registers
+  `device_family: "gadget"`; other families are reserved for Muse's own
+  devices.
 - Messages from the device to the Muse (`musegadget send-user-msg`) go as separate
   `POST /chat/stream` requests on the same session, with `device_id` set to the
   node id and `"output_modality": "text"`. `session_id` picks the chat;
   `chat_id` is not an API field and is ignored. The response is only the ack
   (`message_id`); the reply appears in the Muse chat. Replies are text: to
   speak them, use a text-to-speech API of your choice.
+- `send-user-msg --wait` (the local socket's `"wait"`) opens `/chat/subscribe`
+  before sending and returns the answer's text: what follows the message's own
+  `message.user` event, as on the ESP32, read through `MuseTurn`. A new side
+  chat is created by the message, so it is sent first. One waiting request per
+  chat at a time; the whole wait, queueing included, is bounded by its seconds,
+  plus at most 2 s of cleanup. On a new side chat, an answer finished before
+  the follow-up subscription opens is missed and the wait times out.
 - The VM accepts at most 256 KB per `/link-control` message, so command output
   is cut at 96 KB per stream.
 
@@ -205,10 +238,37 @@ never has a command's parameters, output or error message.
   bounded, restart idle after settlement, and never suspend the overall timer.
 - A validated end-call ACK is not undone by a delayed media EOF if a bounded
   stream reset succeeds; report the incomplete drain separately.
+- `voice-call --wake-word` waits for local detection before admitting a call;
+  the default is unchanged. `WakeWordInput` owns the capture iterator and a
+  bounded one-second pre-roll and a startup queue sized from the start
+  stages' limits (`wakeword_input.STARTUP_SECONDS`); always await `aclose()`.
+  The call reads the listener itself and sends its queued backlog at up to
+  three times real time (wall-clock paced) until it is down to one frame.
+  Its detector tap alone uses a streaming 24-to-16 kHz FIR (native from the
+  detector's `resampler()`; `Pcm24To16` is the Python reference). Active calls never
+  run detection, and live mode resets/re-arms only after successful cleanup.
+  Detection is `wakeword/build.sh`'s `libmuse_wakeword.so`: the ESP32 runner,
+  model and front end (`../esp32/components/muse_wakeword`), loaded with
+  ctypes; no Python ML packages. A wake-started voice call passes
+  `speech_timeout` with `speech_after_bytes` (the listener's pre-roll) and
+  ends as `no_speech` when no locally voiced audio follows the pre-roll;
+  server VAD events don't count, since the pre-roll is the wake word itself.
+  Video calls keep their idle timer and pace the queued backlog as voice does. See
+  `wakeword/README.md` and `../skills/gadget-linux-wakeword/SKILL.md` for setup.
+  Hardware-free tests use synthetic detectors and tones, never recordings.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put
   real recordings, credentials, internal documents or captured events here.
   `test_streaming.py`, `test_voice_call.py` and `test_voice_cli.py` exercise real
   Noise against an in-process fake VM without hardware or external calls.
+- Video calls use `VideoCall`, not the realtime stream: media endpoint and
+  JOIN over Noise, then SRTP straight to the endpoint. The client mints the
+  JOIN's credentials and SRTP key and never logs them. Connectivity is an
+  ICE-lite check over UDP and RFC 4571 TCP at once (the first to answer
+  carries the call), repeated as consent. Accept media only from the endpoint's
+  SSRCs, inside the SRTP replay window, and bound every parse and reassembly.
+  Admit only `mcu-wearable` video. End the call explicitly on every path. Video
+  never blocks or ends the call; drops resume at a keyframe (ask with a PLI).
+  `rtc_fake_edge.py` is the loopback media endpoint for tests.
 
 ## Adding a command
 
@@ -240,7 +300,12 @@ listed here. Everything else is internal and can change.
 
 - `identity.load_or_create()` returns the device `Identity`. It creates one on
   first use and keeps it across unpairing.
-- `Identity.node_id` is the `homelink-xxxxxx` ID that Muse knows the device by.
+- `Identity.node_id` is the ID that Muse knows the device by: the one stored
+  with its pairing (a pairing made before ids were stored keeps
+  `homelink-xxxxxx`), or, while it isn't paired, the one a new pairing
+  offers (`Identity.setup_node_id`: `gadget-xxxxxx` when
+  `MUSEGADGET_GADGET_NODE_ID` is `1`, else `homelink-xxxxxx`). `load_or_create()` reads it from the pairing, and
+  `Service` follows the pairing it connects with.
   `Identity.ble_name` is the name the Muse app shows during pairing.
 - `config.state_dir()` is the directory for device state. Set
   `MUSEGADGET_STATE_DIR` to move it.
@@ -254,11 +319,15 @@ listed here. Everything else is internal and can change.
 - `config.PAIRING_FILE` is the file that holds the pairing.
 - `config.STATE_DIR_ENV` and `config.SDK_TOKEN_ENV` hold the names of the two
   environment variables, `MUSEGADGET_STATE_DIR` and `MUSEGADGET_SDK_TOKEN`.
+  `config.GADGET_NODE_ID_ENV` names `MUSEGADGET_GADGET_NODE_ID`: `1` makes a
+  new pairing offer a `gadget-` node id. It is off by default; turn it on for
+  development.
 
 ### Pairing
 
 - `pair.pair(on_open=..., force=False, timeout_s=600)` opens Bluetooth setup
-  so that the Muse app can pair the device. It prints nothing.
+  so that the Muse app can pair the device. It prints nothing. Like
+  `Service.run()`, it first raises `tls.TrustStoreError` for an unsafe trust store.
 - Just before setup opens, it calls `on_open` with a `SetupWindow`. Use it to
   tell the user what to do. `ble_name` is the device to choose in the Muse
   app, `timeout_s` is how long setup stays open, and `has_sdk_token` is false
@@ -272,11 +341,12 @@ listed here. Everything else is internal and can change.
 
 - `service.Service` keeps a paired device connected to its Muse. It fetches the
   device's VMs, connects, reconnects with backoff and rotates the device token.
-- `Service(identity, executor, sdk_token=None, display_name=...)` is a
-  dataclass. A dataclass subclass can add fields with defaults. `executor`
+- `Service(identity, executor, sdk_token=None, display_name=..., model_id=...,
+  model_name=..., guide=...)` is a dataclass. A dataclass subclass can add fields with defaults. `executor`
   is an `executor.Executor` instance.
 - `await Service.run()` runs until `Service.stop()` is called or `serve()`
-  returns `Outcome.STOPPED`.
+  returns `Outcome.STOPPED`. It first raises `tls.TrustStoreError` if the
+  system trust store can't be read or still has a compromised root CA.
 - To describe your own device, or to run your own work while it is connected,
   subclass `Service` and override any of these three methods.
 - `describe()` returns the `DeviceDescription` to register with Muse.
@@ -296,10 +366,31 @@ listed here. Everything else is internal and can change.
   at a `pathlib.Path`. It returns an `asyncio.Server` that the caller must
   close. The socket forwards to the registered session while `serve()` runs.
   `Service.run()` does not start this socket itself.
-- `link_client.DeviceDescription(node_id, display_name, version, commands)` describes the
-  device to Muse. `commands` maps each command name to its spec: a
-  `description`, `required` and `optional` parameters, and an optional
-  `timeout_ms`.
+- `link_client.DeviceDescription(node_id, display_name, version, commands,
+  model_id=..., model_name=..., guide=None)` describes the device to Muse.
+  `commands` maps each command name to its spec: a `description`, `required`
+  and `optional` parameters, and an optional `timeout_ms`.
+- `model_id` and `model_name` name your hardware (`../protocols/DEVICE.md`);
+  the defaults are `muse-gadget-linux` and `Linux gadget`.
+- `guide` is the Markdown `device.guide` returns, at most 4096 bytes. When
+  it's set, the session advertises `device.guide` and answers it itself.
+  `Service`'s default is the Linux client's own guide
+  (`device_guide.default_guide()`, from `data/guide.md`); a gadget that
+  changes what the device does should set its own.
+  - `data/guide.md` is generic and follows "Guides in this repository" in
+    `../protocols/DEVICE.md`, which the tests check.
+  - Your own gadget's guide is free-form: say what it's for and how you want
+    Muse to use its commands. Only the 4096-byte limit is checked.
+- Set your device's `model_id`, `model_name` and `guide` on `Service`, not
+  by changing what `describe()` returns: `describe()` sizes the owner's
+  drop-in commands against the registration limit with them. `Service` and
+  `DeviceDescription` raise `ValueError` for values outside the rules, and
+  `Service.run()` checks `describe()` before it connects. For example:
+
+  ```python
+  service = Service(identity, executor, model_id="acme-robot", model_name="Acme Robot",
+                    guide=Path("guide.md").read_text())
+  ```
 - `link_client.Outcome` says how a session ended: `CLOSED`, `AUTH_REJECTED`, `FORBIDDEN`,
   `UNPAIRED` or `STOPPED`.
 
@@ -314,11 +405,14 @@ run_command=...)` is one encrypted session with a Muse VM.
   the same threading and result contract as `Service.run_command`.
 - `registered` is an `asyncio.Event` that is set once Muse accepts the device.
   It clears when the session ends.
-- `send_chat(message, session_id=None, *, output_modality="text")` sends a
-  user message as coming from this device. Without `session_id` it goes to
-  the main chat.
-- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None)`
-  sends a WAV voice note of at most 2 MiB.
+- `send_chat(message, session_id=None, *, output_modality="text",
+  device=None)` sends a user message as coming from this device. Without
+  `session_id` it goes to the main chat.
+- `send_voice(wav_bytes, session_id=None, *, message="", output_modality=None,
+  device=None)` sends a WAV voice note of at most 2 MiB.
+- `device="mcu-wearable"` on a spoken turn (dictation or a voice note) asks
+  Muse for short plain sentences, for that request only. Omit it for typed
+  messages.
 - `send_image(image_bytes, mime_type, session_id=None, *, message="",
   filename=None, output_modality="text")` sends a picture of at most
   `link_client.MAX_IMAGE_BYTES` (2 MiB), with `message` as its text.
@@ -332,7 +426,8 @@ run_command=...)` is one encrypted session with a Muse VM.
   `SideChat.exists` is false for an ID that Muse does not know yet. The first
   `send_chat` to that ID creates the chat. The lookup closes its subscription
   without reading events.
-- `subscribe_chat(session_id=None)` yields Muse's chat events.
+- `subscribe_chat(session_id=None, *, opened=None)` yields Muse's chat events.
+  `opened`, an `asyncio.Event`, is set once Muse accepts that subscription.
   `chat_subscribed` is set while a subscription is open.
 - `stream_tts(message_id)` yields MP3 audio for a reply that Muse gave in voice
   mode.
@@ -375,6 +470,70 @@ run_command=...)` is one encrypted session with a Muse VM.
   `ReplayScope.retire_request(response)` retires a request that no turn
   follows. `ReplayScope.observe_idle(event, session_id)` retires an event
   seen while no turn is open.
+
+### Voice call events
+
+- `VoiceCall(..., on_event=callback)` calls `callback(event)` for each
+  `voice_call.VoiceEvent`, on the event loop. It must not block. An
+  exception it raises ends the call. Without `on_event` no events are built.
+  Raised outside `barge_in()`, `KeyboardInterrupt` and `SystemExit` can stop
+  the event loop, as asyncio lets them, before the explicit end-call.
+- If `barge_in()`'s flush fails, it still sends `response.cancel` for the open
+  response, and `run()` raises the failure after cleanup. Once `run()` has
+  started shutting down, `barge_in()` raises the failure itself. If `run()` is
+  cancelled or raises another error, it logs the failure's type once.
+  `StopIteration` is raised as `RuntimeError`.
+- `ResponseStarted(response_id)` and `ResponseDone(response_id, status)` come
+  from `response.created` and `response.done` (or `response.completed`).
+  `status` is as Muse reports it, such as `"completed"` or `"cancelled"`, or
+  None. Audio of a response can still arrive after its `ResponseDone`.
+  A held reply's words and audio can follow its `ResponseDone` and even the
+  next `ResponseStarted`.
+- `TranscriptDelta(response_id, text)` and `TranscriptDone(response_id, text)`
+  carry the words Muse speaks. The wire events name no response, so
+  `response_id` is that of the latest `ResponseStarted` when Muse sent the
+  words, and held words keep it. Words go with that response's audio, the
+  provider audio streams first heard since its `response.created`. Each
+  `response.created` starts a new set of streams, even if its ID repeats or is
+  missing. Words are delivered while one of those streams plays, held while
+  one waits for its caller's turn and then delivered in order with it, and
+  dropped once all of them are dropped. Words that come before the response's
+  first audio are delivered, held or dropped as new audio would be. Words of
+  the response open at a barge-in or the caller's speech never arrive. The
+  text is as Muse sent it, control characters included: strip them before
+  printing it to a terminal.
+- `AudioChunk(response_id, offset, pcm)` is reply PCM accepted for playback,
+  delivered before the output writes it. Held audio is delivered when its
+  turn confirms it, joined into one chunk per run between held words.
+  Dropped audio never is. `offset` counts the samples
+  delivered for `response_id` before this chunk, so `offset / SAMPLE_RATE`
+  is where it starts in that response's speech. `response_id` is the latest
+  `ResponseStarted`'s when the chunk's provider audio stream was first heard,
+  so a reply still playing when the next response opens keeps its own.
+  Audio without a provider response id takes the latest at arrival.
+- `Working(working)` changes when Muse starts or stops working on a caller
+  turn, by the ESP32 client's rule (`muse_vc_call_working()`): a turn is
+  open from its `turn_started` until a settlement names it. A settlement with
+  `async_handoffs_pending` of 1 or more (such as a spoken approval prompt) is
+  a boundary where Muse waits on the caller: not working until the next caller
+  turn starts. One reporting 0 retires every open turn, except, once, the
+  latest caller turn whose reply hasn't finished (a reply without a response
+  ID never counts as finished). Only a non-negative integer count does
+  either. This doesn't change the call's idle tracking. No `Working(False)`
+  comes when the call ends: once `run()` returns, Muse is no longer working
+  on the call.
+- `PlaybackFlushed(response_ids)` says audio already delivered, still queued
+  or playing, was discarded: a barge-in, the caller talking over the reply,
+  a continuation replacing it, or the call ending. `response_ids` names the
+  responses that audio belonged to, in playback order. An output that queues
+  audio says how much: `write(pcm)` returns the bytes still queued and
+  `flush()` the bytes it discarded, as a non-boolean `numbers.Integral`
+  count. One that plays at once returns None. Any other `write()` return
+  value counts as None, any other `flush()` return value as nothing
+  discarded by the output, and without `on_event`
+  the return value is ignored. If `flush()` raises, the event still reports
+  the audio discarded from the call's own queue. If the callback also
+  raises, the output's error wins and the callback's error type is logged.
 
 ## Say Muse, never Hatch
 

@@ -17,10 +17,13 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
 
 /*
  * StopWatch with realtime enabled defaults to a held-mic call: hold yellow to
@@ -40,6 +43,7 @@ typedef enum {
     MUSE_VOICE_VIEW_READY,
     MUSE_VOICE_VIEW_LISTENING,
     MUSE_VOICE_VIEW_THINKING,
+    MUSE_VOICE_VIEW_WORKING,   /* nothing playing or said, Muse still has a caller turn open */
     MUSE_VOICE_VIEW_SPEAKING,
     MUSE_VOICE_VIEW_ENDING,
 } muse_voice_view_t;
@@ -53,6 +57,13 @@ const char *muse_voice_call_hint(void);    /* yellow button, NULL outside PTT */
  * shutdown is cancelled (only when the board's power-off operation fails). */
 void muse_voice_shutdown(int wait_ms);
 void muse_voice_cancel_shutdown(void);
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Wake word: the next record() starts with this audio (copied,
+ * whole 20 ms chunks, at most a second) instead of the push-to-talk
+ * pre-roll ring, so a hands-free note includes the wake word itself. */
+void muse_voice_seed_preroll(const int16_t *pcm, size_t frames);   /* NULL clears */
+#endif
 
 /* While on (settings' Sound page), idle mic audio feeds muse_voice_monitor_db(). */
 void muse_voice_set_monitor(bool on);
@@ -70,6 +81,10 @@ void muse_voice_request_mp3test(void);
 
 /* Asleep with nothing to play: codecs off, Wi-Fi dozing. */
 bool muse_voice_resting(void);
+
+/* Reply audio has drained: use a quiet avatar pose, retaining reply status,
+ * captions and progress. False again as soon as more audio plays. */
+bool muse_voice_reply_waiting(void);
 
 /* Voice notes recorded out of Hatch's reach wait to go, the oldest from the
  * last half hour: worth keeping Wi-Fi up for. */

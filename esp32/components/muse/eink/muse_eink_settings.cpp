@@ -47,6 +47,7 @@ extern "C" {
 #include "muse_ui.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
+#include "network_proxy.h"
 }
 
 namespace muse_eink {
@@ -68,7 +69,7 @@ static const Rect BACK = {8, 8, 56, 48};
 #define SHOWN_MAX 96
 #define TEXT_MAX (MUSE_TOKEN_MAX + 1)
 
-enum Page { HOME, WIFI, HATCH, BLE, SOUND, SLEEP, BATTERY, POWER, TEXT, PAGE_COUNT };
+enum Page { HOME, WIFI, HATCH, BLE, SOUND, SLEEP, BATTERY, POWER, PROXY, TEXT, PAGE_COUNT };
 
 enum : ActionId {
     ACT_NAV = ACTION_SETTINGS_BASE,
@@ -100,6 +101,10 @@ enum : ActionId {
     ACT_KB_DEL,
     ACT_KB_OK,
     ACT_KB_LANG,
+    ACT_WIFI_PROXY,
+    ACT_PROXY_MODE,
+    ACT_PROXY_FIELD,
+    ACT_PROXY_SAVE,
     ACT_LAST,
 };
 
@@ -341,6 +346,11 @@ static int64_t s_forget_armed_us;
 static char s_join_ssid[MUSE_SSID_MAX + 1];
 static char s_mac[18];
 
+/* Proxy. */
+static char s_proxy_ssid[MUSE_SSID_MAX + 1], s_proxy_mode[32], s_proxy_port[6], s_proxy_status[96];
+static network_proxy_config_t s_proxy_edit;
+static bool s_proxy_saving;
+
 /* Muse. */
 static char s_link_status[128], s_link_reset_lbl[24] = "Reset pairing", s_hatch_status[128];
 static char s_hatch_host[MUSE_HOST_MAX + 1], s_hatch_vm[MUSE_VM_MAX + 1], s_hatch_token[16], s_hatch_sdk[24];
@@ -455,6 +465,10 @@ bool settings_back(void)
         close_text();
         return true;
     }
+    if (s_page == PROXY) {
+        show(WIFI);
+        return true;
+    }
     if (s_page != HOME) {
         show(HOME);
         return true;
@@ -464,6 +478,7 @@ bool settings_back(void)
 
 void settings_home(void)
 {
+    network_proxy_wipe(&s_proxy_edit, sizeof(s_proxy_edit));
     if (s_page == TEXT && s_text) memset(s_text, 0, TEXT_MAX);
     show(HOME);
 }
@@ -510,6 +525,15 @@ static void on_hatch_token_done(const char *text)
 static void on_hatch_sdk_token_done(const char *text)
 {
     if (text[0] && !muse_link_sdk_token_set(text)) s_sdk_token_bad_us = esp_timer_get_time();
+}
+
+static void proxy_host_done(const char *v) { strlcpy(s_proxy_edit.host, v, sizeof(s_proxy_edit.host)); }
+static void proxy_user_done(const char *v) { strlcpy(s_proxy_edit.username, v, sizeof(s_proxy_edit.username)); }
+static void proxy_pass_done(const char *v) { strlcpy(s_proxy_edit.password, v, sizeof(s_proxy_edit.password)); }
+static void proxy_port_done(const char *v) {
+    char *end;
+    long port = strtol(v, &end, 10);
+    s_proxy_edit.port = *v && !*end && port > 0 && port <= 65535 ? port : 0;
 }
 
 static void text_ready(void)
@@ -564,6 +588,36 @@ static void on_action(const ActionEvent &e, void *)
             s_forget_armed_us = now;
         }
         settings_tick();
+        break;
+    case ACT_WIFI_PROXY:
+        if (s_page != WIFI || e.value < 0 || e.value >= s_saved_n) break;
+        strlcpy(s_proxy_ssid, s_saved[e.value].ssid, sizeof(s_proxy_ssid));
+        muse_link_wifi_proxy_get(s_proxy_ssid, &s_proxy_edit);
+        s_proxy_saving = false;
+        s_proxy_status[0] = 0;
+        show(PROXY);
+        break;
+    case ACT_PROXY_MODE:
+        if (s_page != PROXY) break;
+        s_proxy_edit.type = s_proxy_edit.type == NETWORK_PROXY_OFF ? NETWORK_PROXY_HTTP
+            : s_proxy_edit.type == NETWORK_PROXY_HTTP ? NETWORK_PROXY_SOCKS5 : NETWORK_PROXY_OFF;
+        if (s_proxy_edit.type == NETWORK_PROXY_OFF) network_proxy_wipe(&s_proxy_edit, sizeof(s_proxy_edit));
+        break;
+    case ACT_PROXY_FIELD:
+        if (s_page != PROXY) break;
+        if (e.value == 0) open_text("Proxy server", s_proxy_edit.host, false, NETWORK_PROXY_HOST_MAX, "Host name or IP", proxy_host_done, PROXY);
+        if (e.value == 1) open_text("Proxy port", s_proxy_port, false, 5, "1-65535", proxy_port_done, PROXY);
+        if (e.value == 2) open_text("Proxy username", s_proxy_edit.username, false, NETWORK_PROXY_AUTH_MAX, "Optional", proxy_user_done, PROXY);
+        if (e.value == 3) open_text("Proxy password", s_proxy_edit.password, true, NETWORK_PROXY_AUTH_MAX, "Optional", proxy_pass_done, PROXY);
+        break;
+    case ACT_PROXY_SAVE:
+        if (s_page != PROXY) break;
+        if (!network_proxy_valid(&s_proxy_edit)) {
+            strlcpy(s_proxy_status, "Check server, port and authentication", sizeof(s_proxy_status));
+        } else {
+            s_proxy_saving = muse_link_wifi_proxy_set(s_proxy_ssid, &s_proxy_edit);
+            strlcpy(s_proxy_status, s_proxy_saving ? "Saving..." : "Busy or network forgotten; try again", sizeof(s_proxy_status));
+        }
         break;
     case ACT_WIFI_OTHER:
         g_app->clearTapFlash();
@@ -910,11 +964,30 @@ static void tick_battery(void)
     if (layout_changed) navigation_changed();
 }
 
+static void tick_proxy(void) {
+    SET(s_proxy_mode, s_proxy_edit.type == NETWORK_PROXY_OFF ? "Off"
+        : s_proxy_edit.type == NETWORK_PROXY_HTTP ? "Manual: HTTP CONNECT"
+        : s_proxy_edit.type == NETWORK_PROXY_SOCKS5 ? "Manual: SOCKS5" : "Invalid; select mode");
+    char port[6];
+    snprintf(port, sizeof(port), "%u", s_proxy_edit.port);
+    SET(s_proxy_port, s_proxy_edit.port ? port : "");
+    if (s_proxy_saving) {
+        network_proxy_config_t check;
+        int state = muse_link_wifi_proxy_get(s_proxy_ssid, &check);
+        network_proxy_wipe(&check, sizeof(check));
+        if (state != 1) {
+            s_proxy_saving = false;
+            if (SET_NOTE(s_proxy_status, state == 0 ? "Saved" : "Save failed; try again")) navigation_changed();
+        }
+    }
+}
+
 bool settings_tick(void)
 {
     switch (s_page) {
     case HOME: tick_home(); break;
     case WIFI: tick_wifi(); break;
+    case PROXY: tick_proxy(); break;
     case HATCH: tick_hatch(); break;
     case BLE: tick_ble(); break;
     case SOUND: tick_sound(); break;
@@ -960,7 +1033,10 @@ static void page_wifi(Column &c)
     switch_row(c, "Wi-Fi", s_wifi_on, ACT_WIFI_SW);
     note(c, s_wifi_status);
     if (s_saved_n > 0) note(c, "Saved networks");
-    for (int i = 0; i < s_saved_n; i++) row(c, LV_SYMBOL_WIFI, s_saved[i].ssid, s_saved_vals[i], ACT_WIFI_SAVED, (int16_t)i);
+    for (int i = 0; i < s_saved_n; i++) {
+        row(c, LV_SYMBOL_WIFI, s_saved[i].ssid, s_saved_vals[i], ACT_WIFI_SAVED, (int16_t)i);
+        row(c, nullptr, "Configure Proxy", nullptr, ACT_WIFI_PROXY, (int16_t)i);
+    }
     if (s_wifi_on) {
         button(c, s_wifi_scanning ? "Scanning..." : LV_SYMBOL_REFRESH "  Scan for networks", ACT_WIFI_SCAN);
         for (int i = 0; i < s_ap_n; i++) row(c, nullptr, s_aps[i].ssid, s_ap_vals[i], ACT_WIFI_AP, (int16_t)i);
@@ -975,6 +1051,19 @@ static void page_wifi(Column &c)
     }
     info_row(c, "MAC address", s_mac);
     note(c, "Muse remembers up to 8 networks and joins the strongest one in range. Tap a saved one twice to forget it.");
+}
+
+static void page_proxy(Column &c)
+{
+    note(c, s_proxy_ssid);
+    row(c, nullptr, "Configure Proxy", s_proxy_mode, ACT_PROXY_MODE);
+    row(c, nullptr, "Server", s_proxy_edit.host, ACT_PROXY_FIELD, 0);
+    row(c, nullptr, "Port", s_proxy_port, ACT_PROXY_FIELD, 1);
+    row(c, nullptr, "Username", s_proxy_edit.username, ACT_PROXY_FIELD, 2);
+    row(c, nullptr, "Password", s_proxy_edit.password[0] ? "********" : "", ACT_PROXY_FIELD, 3);
+    button(c, "Save", ACT_PROXY_SAVE);
+    note(c, s_proxy_status);
+    note(c, "Cloud connections use this network's proxy. Local traffic stays direct.");
 }
 
 static void page_hatch(Column &c)
@@ -1144,13 +1233,14 @@ void settings_screen(Screen &screen)
         return;
     }
     static const char *const TITLES[PAGE_COUNT] = {"SETTINGS", "WI-FI", "MUSE", "BLUETOOTH", "SOUND",
-                                                   "AUTO-SLEEP", "BATTERY", "POWER", ""};
+                                                   "AUTO-SLEEP", "BATTERY", "POWER", "PROXY", ""};
     title(screen, TITLES[s_page], s_page != HOME);
     Column c{&screen, g_w / 2 - LIST_W / 2, LIST_TOP - s_scroll};
     screen.target().setClipRect(Rect{0, LIST_TOP, (int16_t)g_w, (int16_t)(g_h - LIST_TOP)});
     switch (s_page) {
     case HOME: page_home(c); break;
     case WIFI: page_wifi(c); break;
+    case PROXY: page_proxy(c); break;
     case HATCH: page_hatch(c); break;
     case BLE: page_ble(c); break;
     case SOUND: page_sound(c); break;

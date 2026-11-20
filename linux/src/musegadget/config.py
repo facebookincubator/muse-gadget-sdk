@@ -29,10 +29,18 @@ IDENTITY_FILE = "identity.json"
 PAIRING_FILE = "pairing.json"
 SDK_TOKEN_ENV = "MUSEGADGET_SDK_TOKEN"
 SDK_TOKEN_FILE = "sdk_token"
+# "1": new pairings offer gadget- node ids (identity.py). Off by default; turn
+# it on for development.
+GADGET_NODE_ID_ENV = "MUSEGADGET_GADGET_NODE_ID"
 COMMANDS_DIR_ENV = "MUSEGADGET_COMMANDS_DIR"
 DEFAULT_COMMANDS_DIR = Path("/etc/musegadget/commands.d")
 # mgst_ plus 43 canonical base64url characters, as issued by gadgets.muse.ai.
 _SDK_TOKEN = re.compile(r"mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]")
+
+
+def gadget_node_ids() -> bool:
+    """Whether a new pairing offers a gadget- node id (GADGET_NODE_ID_ENV)."""
+    return os.environ.get(GADGET_NODE_ID_ENV) == "1"
 
 
 def state_dir() -> Path:
@@ -84,6 +92,20 @@ def load_json(name: str, directory: Path | None = None) -> dict | None:
     except (OSError, ValueError):  # ValueError covers bad JSON and bad UTF-8
         return None
     return data if isinstance(data, dict) else None
+
+
+def pairing_problem(saved: object) -> str | None:
+    """Describe an invalid saved pairing without including credential values."""
+    if not isinstance(saved, dict) or not all(
+        isinstance(saved.get(key), str) and saved[key].strip()
+        for key in ("access_token", "refresh_token")
+    ):
+        return "Saved pairing lacks device tokens."
+    # Older records omit the timestamp and are refreshed on first use.
+    stamp = saved.get("access_token_saved_at", 0)
+    if type(stamp) not in (int, float) or not 0 <= stamp < float("inf"):
+        return "Saved pairing has an invalid token timestamp."
+    return None
 
 
 def save_json(name: str, data: dict, directory: Path | None = None) -> None:

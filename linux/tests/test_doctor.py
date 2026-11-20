@@ -39,6 +39,18 @@ def test_invalid_pairing_is_reported_without_echoing_contents(
     assert "secret" not in doctor.format_check(result)
 
 
+@pytest.mark.parametrize("stamp", [None, "123", True, -1, float("nan"), float("inf")])
+def test_invalid_pairing_timestamp_is_reported(tmp_path: Path, stamp: object) -> None:
+    config.save_json(config.PAIRING_FILE, {
+        "access_token": "secret-access", "refresh_token": "secret-refresh",
+        "access_token_saved_at": stamp,
+    }, tmp_path)
+    result = doctor.check_pairing(tmp_path)
+    assert result["status"] == "FAIL"
+    assert "timestamp" in result["detail"]
+    assert "secret" not in doctor.format_check(result)
+
+
 def test_pairing_accepts_saved_tokens_without_creating_identity(tmp_path: Path) -> None:
     (tmp_path / config.PAIRING_FILE).write_text(
         json.dumps({"access_token": "secret-access", "refresh_token": "secret-refresh"}),
@@ -130,7 +142,7 @@ def test_service_checks_both_state_and_exit_code(
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
         ["/usr/bin/systemctl", "--no-pager", "is-active", "musegadget.service"],
-        capture_output=True, text=True, timeout=5, check=False,
+        capture_output=True, text=True, errors="replace", timeout=5, check=False,
     )
 
 
@@ -167,7 +179,7 @@ def test_bluetooth_checks_default_controller_power(
     assert result["status"] == status
     assert "secret" not in doctor.format_check(result)
     run.assert_called_once_with(
-        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True,
+        ["/usr/bin/bluetoothctl", "show"], capture_output=True, text=True, errors="replace",
         timeout=5, check=False,
     )
 
@@ -197,6 +209,69 @@ def test_network_reuses_setup_probe_with_timeout(
     monkeypatch.setattr(doctor.network, "is_online", probe)
     assert doctor.check_network()["status"] == status
     probe.assert_called_once_with(timeout=5.0)
+
+
+@pytest.mark.parametrize("online,status,words", [
+    (True, "OK", "reachable on port 443 through the proxy"),
+    (False, "FAIL", "Could not reach"),
+])
+def test_network_names_the_proxy_without_its_credentials(
+    monkeypatch: pytest.MonkeyPatch, online: bool, status: str, words: str,
+) -> None:
+    monkeypatch.setattr(doctor.network, "api_proxy",
+                        Mock(return_value="http://user:secret@proxy.example:3128"))
+    probe: Mock = Mock(return_value=online)
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
+    assert result["status"] == status
+    assert words in result["detail"] and "http://proxy.example:3128" in result["detail"]
+    assert "secret" not in doctor.format_check(result) and "user" not in doctor.format_check(result)
+    probe.assert_called_once_with(timeout=5.0)
+
+
+def test_network_fails_on_an_unsupported_proxy_without_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(doctor.network, "api_proxy", Mock(return_value="socks5://proxy.example:1080"))
+    probe: Mock = Mock(side_effect=AssertionError("must not probe"))
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
+    assert result["status"] == "FAIL"
+    assert "not an http:// proxy" in result["detail"]
+    assert "HTTP CONNECT proxies only" in result["hint"]
+
+
+@pytest.mark.parametrize("problem", [
+    "the system trust store still trusts emSign ECC Root CA - G3",
+    "can't read the system trust store",
+])
+def test_trust_store_fails_while_musegadget_would_refuse_to_connect(
+    monkeypatch: pytest.MonkeyPatch, problem: str,
+) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=problem))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning",
+                        Mock(return_value="the system trust store still trusts emSign Root CA - C1"))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == "FAIL"     # a failure wins over the retired-root warning
+    assert problem[1:] in result["detail"]
+    assert "update your ca-certificates package" in result["hint"].lower()
+
+
+def test_trust_store_is_ok_without_distrusted_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
+    assert doctor.check_trust_store()["status"] == "OK"
+
+
+def test_trust_store_warns_about_retired_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    warning = ("the system trust store still trusts emSign ECC Root CA - C3, "
+               "emSign Root CA - C1, which Mozilla has retired")
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=warning))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == "WARN"
+    assert warning[1:] in result["detail"] and "still connects" in result["detail"]
+    assert "deselect it in the system trust store" in result["hint"]
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
@@ -236,6 +311,8 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     before: dict[str, bytes] = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
-    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK"]
+    assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

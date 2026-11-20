@@ -82,23 +82,28 @@ commands outside the sandbox.
 
 ## Or do it yourself
 
-### 1. Install ESP-IDF v6.0.1
+### 1. Install ESP-IDF v6.0.3
 
-This firmware is built with Espressif's ESP-IDF, **version 6.0.1**. Other
+This firmware is built with Espressif's ESP-IDF, **version 6.0.3**. Other
 versions aren't supported. If you already have it installed, skip ahead.
 
 On macOS, install the prerequisites first with `brew install cmake ninja
 dfu-util python3`. On Linux, follow
-[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32c5/get-started/linux-macos-setup.html).
+[Espressif's prerequisites](https://docs.espressif.com/projects/esp-idf/en/v6.0.3/esp32c5/get-started/linux-macos-setup.html).
 Then:
 
 ```sh
-git clone -b v6.0.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
+git clone -b v6.0.3 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v6
 ~/esp/esp-idf-v6/install.sh esp32c5,esp32s3,esp32c6,esp32
 . ~/esp/esp-idf-v6/export.sh
 ```
 
 Run the last line in every new terminal you build from.
+
+To move an existing clone from an earlier v6.0 release, run
+`git fetch --tags && git checkout v6.0.3 && git submodule update --init --recursive`
+in it, then its `install.sh` again. Delete each build directory's generated
+`sdkconfig` afterwards (see Configuration gotchas in `AGENTS.md`).
 
 ### 2. Build
 
@@ -143,14 +148,18 @@ run `idf.py -p PORT erase-flash` first.
 
 ### 4. Set it up with Muse
 
-Once flashed, the status light breathes **orange**: the device is ready for
-setup. In the Muse app, turn on **Settings > Devices > Developer mode**, then
-add the device (**Settings > Devices > Add Device**, the **+** icon in the top
-right). It shows up as `MuseGadget-XXXXXX`. When the light breathes **blue**, press the **BOOT**
-button to confirm it's really you. The light turns **green** when Muse is
-connected.
+In the Muse app, turn on **Settings > Devices > Developer mode**, then add the
+device (**Settings > Devices > Add Device**, the **+** icon in the top right).
+It shows up as `MuseGadget-XXXXXX`. On boards with a status light, orange means
+ready for setup and blue means the app is waiting for button confirmation.
+When the device asks you to confirm, briefly press its pairing button. On
+display boards, follow the on-screen prompt instead: it may show a pairing code
+to enter in the app, or ask you to press the button.
 
-| Light | What it means |
+The CrowPanel Advance has no RGB status light, so the color guide below does
+not apply to it. Use the display and its BOOT button for setup.
+
+| Status light | What it means |
 |---|---|
 | Orange, breathing | Ready for setup |
 | Blue, breathing | Press the button to confirm pairing |
@@ -171,12 +180,87 @@ a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
 
+If nothing comes back from Muse, the device reconnects on its own: after about
+65 seconds when its tunnel pings go unanswered, or after 150 seconds of
+silence. Boards with PSRAM keep a short history of Wi-Fi, session and tunnel
+outages, which Muse reads with `device.health`. After a silent drop, the device
+checks the internet by opening a TCP connection to 1.1.1.1 (then 8.8.8.8) on
+port 443; it sends no data.
+
+## Per-network proxy
+
+For Wi-Fi networks that require a proxy, open **Settings → Wi-Fi → Configure
+Proxy** beneath the saved network. Select **Off**, **Manual: HTTP CONNECT** or
+**Manual: SOCKS5**, enter the server and port, optionally enter a username and
+password, then tap **Save**. The device confirms the NVS write and reconnects
+when editing the active network. Other remembered networks keep their own
+settings. Proxy servers are host names or unbracketed IP literals (127 bytes
+maximum), with a port from 1 to 65535. Authentication fields accept up to 63
+bytes each; HTTP Basic user names cannot contain a colon.
+
+The serial equivalent works on headless boards too; send each command as one
+line followed by a newline, using the exact saved SSID:
+
+```text
+>wifi_proxy={"ssid":"Office","proxy":{"type":"http","host":"proxy.example","port":8080,"username":"user","password":"example"}}
+>wifi_proxy={"ssid":"Office"}
+>wifi_proxy={"ssid":"Office","proxy":{"type":"off"}}
+```
+
+Use `"type":"socks5"` for SOCKS5. The status command shows the protocol,
+server, port, authentication presence and whether a write is pending; credentials
+are omitted. Full UI boards answer `saving` and then `saved` (or a storage
+error) after the keeper writes and reads back the value. Headless boards answer
+`saved` after readback; the change applies to subsequent cloud connections.
+
+The encrypted BLE `provision_v2` object optionally accepts the same `proxy`
+object. An absent field preserves the saved setting for that SSID; an explicit
+`{"type":"off"}` clears it. Invalid fields produce `error_invalid_proxy` before
+Wi-Fi or credentials change. The Muse phone app needs its own change to send
+this field.
+
+Link's WSS channel, the full UI's Noise channel and cloud API token/VM requests
+use the proxy. HTTP CONNECT and SOCKS5 negotiate a TCP tunnel before TLS;
+cloud hostname and certificate verification remain enabled. SOCKS5 resolves
+cloud hostnames at the proxy. A refused or unreachable proxy fails the
+connection. LAN tunnel/discovery traffic keeps its existing direct sockets;
+cloud endpoint overrides using loopback/private IP literals, single-label names,
+`localhost` or `.local` names also connect directly.
+
+Proxy credentials share the remembered network's NVS storage and reset/forget
+lifecycle. Firmware predating proxy support ignores the added fields; rewriting
+a network on that firmware may discard its proxy settings, and once proxies
+make the saved-network list longer than it reads, it drops the other saved
+networks. Proxy authentication travels in plaintext to the selected proxy,
+while the cloud session remains protected by TLS. PAC/Automatic mode,
+TLS-to-proxy and app configuration UI are follow-ups. OTA, image downloads and
+diagnostic uploads keep their existing direct paths.
+
+## USB settings in a browser
+
+The [web flasher](../web-flasher/README.md#device-settings)'s Device settings
+card reads a connected board's settings over USB and changes its screen
+brightness, screen sleep, speaker volume, speaker on/off and microphone gain.
+It works on boards with the full UI, using their existing console commands.
+
 ## Boards
+
+On LVGL touch-screen boards with speaker audio, drag up or down on the main
+avatar or its background to raise or lower volume. A temporary percentage
+appears above a vertical filled bar while dragging; lifting your finger saves
+the setting, then the indicator briefly holds and fades away. Dragging through
+three quarters of the screen height covers the full 0–100 range. Horizontal
+swipes still open Settings. Buttons, reply paging, Settings, wake touches and
+image/video views retain their existing controls. Reaching 0% mutes the speaker
+immediately; increasing volume unmutes it and restores the speaker icon.
+The gesture is unavailable on boards without touch or speaker audio and on
+the separate FreeInk UI.
 
 Boards marked UI run the full on-screen UI: an animated avatar, push-to-talk and
 settings. Audio and image support vary by board, so check the feature table in
 [`devices/`](devices). The others show status on a light, a ring or a simple
-status screen.
+status screen. The experimental reSpeaker XVF3800 profile uses app prompts and
+serial logs because its vendor LED ring is not a Muse status indicator.
 
 | Board | What you get | Build it |
 |---|---|---|
@@ -185,41 +269,61 @@ status screen.
 | Espressif ESP32-S3-DevKitC-1 | Status light and button | `tools/board.sh espressif-s3-devkitc-1 build` |
 | ideaspark ESP32 with 1.9" display | Status on screen, images | `tools/board.sh ideaspark build` |
 | Waveshare ESP32-C6-LCD-1.47 | Status on screen, images | `tools/board.sh waveshare-c6-lcd-147 build` |
+| ESP32-2432S028 Cheap Yellow Display (experimental) | Status on screen, images | `tools/board.sh esp32-2432s028 build` |
+| ESP32-C3 with 0.42" OLED | Status and agent name as text | `tools/board.sh c3-oled-042 build` |
 | Seeed SenseCAP Indicator | Status on a 4" screen, images | `tools/board.sh sensecap-indicator build` |
 | Waveshare ESP32-S3-1.54inch-ePaper V2 | Status on a 1.54" e-paper, black and white | `tools/board.sh waveshare-s3-epaper-154 build` |
-| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours | `tools/board.sh waveshare-s3-epaper-154g build` |
+| Waveshare ESP32-S3-ePaper-1.54G | Status on a 1.54" e-paper, four colours, push-to-talk | `tools/board.sh waveshare-s3-epaper-154g build` |
 | Seeed reTerminal E1001 | Status on a 7.5" e-paper, black and white images | `tools/board.sh reterminal-e1001 build` |
 | Seeed reTerminal E1002 | Status on a 7.3" e-paper, six-colour images | `tools/board.sh reterminal-e1002 build` |
 | Seeed reTerminal Sticky (experimental) | 3.97" portrait e-paper UI on FreeInk, touch, PDM voice notes, battery, SD and SHT40 | `tools/board.sh reterminal-sticky build` |
 | Seeed reTerminal Sticky Link status (experimental) | 3.97" e-paper status screen and SHT40 only; no Muse UI | `tools/board.sh reterminal-sticky-link build` |
 | Home Assistant Voice Preview Edition | Status on the LED ring, push-to-talk, volume dial | `tools/board.sh home-assistant-voice build` |
 | Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental) | Single RGB LED, BOOT push-to-talk; 16 kHz XMOS I2S required | [Setup](devices/seeed-respeaker-lite.md) |
+| Seeed reSpeaker XVF3800 with XIAO ESP32-S3 (experimental) | No Muse status LED, BOOT push-to-talk; 16 kHz I2S-slave XMOS 1.0.9 baseline | [Setup](devices/seeed-respeaker-xvf3800.md) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-LCD-1.85B | UI, touch, settings; push-to-talk and images (unverified) | `tools/muse/board.sh build 185b` |
+| Waveshare ESP32-S3-Touch-LCD-1.9 | UI, touch, push-to-talk, settings, images (unverified) | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 | UI, touch, push-to-talk, settings, images (unverified) | [S3 2.06 setup](devices/waveshare-s3-206.md) |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43C | UI, push-to-talk, settings, images (touch, mics and battery unverified) | [1.43C notes](devices/README.md#waveshare-esp32-s3-touch-amoled-143c) |
 | OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | ALIENTEK ATK-DNESP32S3-BOX V1.1 | UI, push-to-talk, two-key menu, images | `tools/muse/board.sh build atk-box`, see [setup](devices/atk-dnesp32s3-box.md) |
+| ALIENTEK ATK-DNESP32S3-BOX2 (experimental) | UI, push-to-talk, menu, speaker and power keys, turns over with the box (battery unverified) | `tools/muse/board.sh build atk-box2`, see [setup](devices/atk-dnesp32s3-box2.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
 | Seeed SenseCAP Watcher | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
+| M5Stack AtomS3 + Atomic Voice Base (experimental) | UI, front-button push-to-talk, voice notes with text replies | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| M5Stack TriviaPOD (experimental) | UI, touch, push-to-talk, settings; sleep, wake and battery unverified | `tools/muse/board.sh build triviapod` |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
-| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
+| Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added PDM or I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
-| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| Waveshare ESP32-S3-Touch-LCD-3.49 V2 | UI, touch, push-to-talk, settings, images | `tools/muse/board.sh build lcd349` |
+| Waveshare ESP32-S3-Touch-LCD-1.46 (also 1.46B, 1.46C) | UI, touch, hold-the-face or BOOT push-to-talk, settings, images | `tools/muse/board.sh build 146` |
+| Waveshare ESP32-S3-Touch-AMOLED-1.43 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build 143` |
+| LilyGO T-Display-S3 AMOLED 1.75 | UI, touch, settings; text replies, no audio | `tools/muse/board.sh build lilygo175` |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5 | 3.5 inch touch UI, push-to-talk, settings, images; Wi-Fi and BLE on its C6 | [Setup](devices/waveshare-p4-lcd35.md) |
+| SpotPear ESP32-AI-1.28 v1.0 (experimental) | Round UI, BOOT push-to-talk, MAX98357A speaker and NP0557 mic | `tools/muse/board.sh build spotpear` |
+| VIEWE SmartRing-Plus | UI, round touch, on-screen mic, settings, images | `tools/muse/board.sh build smartring-plus` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| Elecrow CrowPanel Advance 4.3 V1.3 | UI, touch, BOOT push-to-talk, settings, speaker and mic, images | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | UI, BOOT push-to-talk, Vol+/Vol- menu, images | `tools/muse/board.sh build vn183` |
 | FoloToy AI Passport (experimental) | UI, push-to-talk with text replies, three-button menu | `tools/muse/board.sh build ai-passport` |
 | Deotaland RoRoLee | UI, BOOT push-to-talk, VOL-/VOL+ menu, images | `tools/muse/board.sh build rorolee` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 | Status on screen, images | `tools/board.sh waveshare-s3-lcd-35 build` |
+| Waveshare ESP32-S3-Touch-LCD-3.5 (UI) | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build s3lcd35` |
+| DFRobot UNIHIKER K10 | UI, A push-to-talk, B menu, RGB status LEDs | [K10 setup](devices/dfrobot-unihiker-k10.md), `tools/muse/board.sh build k10` |
 
 See [`devices/`](devices) for each board's hardware, features, and where to
 buy one.
@@ -232,6 +336,12 @@ Boards that support images can show pictures Muse sends them:
 Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
+
+## Cable screen mirror
+
+Full Muse LVGL builds can mirror their screen and controls over the console
+cable with `MUSE_MIRROR=1`. See [the mirror guide](docs/mirror.md) for building
+the opt-in firmware, starting the desktop viewer, and saving captures.
 
 ## Power characterization
 
@@ -281,15 +391,62 @@ same Wi-Fi, then open Phone camera on the board: the phone encodes H.264 or
 VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../protocols/VIDEO.md`](../protocols/VIDEO.md) explains how, and
 [`AGENTS.md`](AGENTS.md#video-from-a-phone) which boards can.
 
+[`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
+itself to Muse: its family, its model and its usage guide.
+
+To let Muse run a small app of its own on a board's screen,
+build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a
+WebAssembly app on its VM, and the board's `app.run` command loads it and runs
+it in place of the face, with LVGL widgets, the buttons and touch, the chat
+and the board's sensors (apps API 1.1, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
+`app.install` keeps an app on the board, for its launcher (Apps, in Settings).
+[`components/muse_apps/sdk/README.md`](components/muse_apps/sdk/README.md) shows how to write one and how to ask Muse
+for one, and [`AGENTS.md`](AGENTS.md#webassembly-apps) how it works.
+
 To work on the UI without a board, use the
 [`simulator/`](simulator/README.md) desktop preview. It runs the production UI
 and avatar renderer in a 412 x 412 SenseCAP Watcher window, supports mouse and
 keyboard input, and can render scripted screenshots without a display server.
 
+On full-size LVGL displays at least 400 pixels wide, turning the speaker off
+shows replies in the original pixel caption font at twice its normal size
+(always on such boards without a speaker; not on boards with rim controls,
+such as the StopWatch). The text is centred beneath the smaller avatar;
+turning the speaker back on restores the compact captions. Live-call captions keep the latest whole words
+visible when the larger text fills the reading area.
+
+On PSRAM boards with the LVGL touchscreen UI, Muse's text-option questions
+open a scrollable picker. Tap one answer to send it as a follow-up message;
+the subsequent reply uses the normal caption path. The picker stays inside
+round displays, and repeated taps cannot submit the same question twice.
+See [reply option selection](docs/reply-option-selection.md) for supported
+prompts, USB diagnostics, validation, and the current server limitation on
+synchronizing selected-button state with the phone.
+
+The on-device "Hey Muse" wake word (off by default; not enabled on any
+board yet) runs its model with the ExecuTorch runtime and ESP-NN delegate
+and TensorFlow Lite Micro's microfrontend, which come from the ESP
+Component Registry only into builds with `MUSE_WAKEWORD_ENABLE`;
+[`docs/executorch.md`](docs/executorch.md) says how the pins are updated,
+and [`components/muse_wakeword/models/README.md`](components/muse_wakeword/models/README.md)
+describes the model.
+
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
-answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app). Two
-things you can change:
+answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app).
+On boards with the full UI other than the Watcher, voice notes require a
+600 ms button hold and at
+least 500 ms of audio captured during that hold before uploading starts.
+Pre-roll and the release tail are preserved in accepted notes but do not count
+toward either minimum. These checks measure duration, not whether speech is
+present; a shorter press shows "Hold longer to talk". A press that wakes the
+screen only wakes it unless it is held long enough for a note. With live calls,
+a tap released within 300 ms still starts a call on boards other than the
+StopWatch. The Watcher keeps its existing wheel click/hold gesture. Buffering
+the hold costs about 5 KB more internal RAM on boards without PSRAM, and about
+19 KB more PSRAM on the others.
+
+Two things you can change:
 
 - **Shorter answers.** Ask for them in the message itself, such as "Answer in
   one sentence."
@@ -314,7 +471,9 @@ and builds without it don't change. With it on:
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
   holding still sends a voice note. The mic is off while Muse talks, except on
-  the Voice PE when its audio chip reports echo cancellation.
+  the Voice PE when its audio chip reports echo cancellation. ESP32-S3 boards
+  with enough PSRAM can opt into [software echo cancellation](docs/software-aec.md)
+  to allow hands-free interruption during playback.
 - A call also ends when Muse ends it, after 45 seconds of quiet (not counting
   time Muse is still working on something), or after 15 minutes. Muse may not
   hang up by itself when it says goodbye: press to end the call. If the
@@ -334,7 +493,7 @@ A few things worth knowing:
   revoke it on gadgets.muse.ai, generate a new one, and rebuild or send the
   new one over serial.
 - **We strongly recommend enabling NVS encryption** if your board supports it.
-  NVS stores Wi-Fi credentials and device tokens in flash; without encryption,
+  NVS stores Wi-Fi/proxy credentials and device tokens in flash; without encryption,
   anyone with physical access to the board can read them. Enable it with
   `CONFIG_HOMEHUB_NVS_ENCRYPTION` in `idf.py menuconfig` (under "ESP32 Device
   SDK"). The encryption key is derived from an HMAC key in eFuse, which is
@@ -349,6 +508,48 @@ A few things worth knowing:
 - Builds are signed with the included development key and never turn on
   Secure Boot, so you can reflash your board as often as you like.
 
+### Toggle voice-note recording
+
+Boards with a talk button normally record while it is held. For hands-free
+recording, set `CONFIG_MUSE_REALTIME_VOICE=n` and
+`CONFIG_MUSE_VOICE_NOTE_TOGGLE=y` in the build's `sdkconfig` or enable the
+option in `idf.py menuconfig`. The optional
+[`sdkconfig.muse-voice-note-toggle`](devices/sdkconfig.muse-voice-note-toggle)
+overlay can be loaded after the Muse and board overlays.
+
+Press the talk button once to record, release it and speak, then press again
+to send. Releasing the first press does not send the note. A press that wakes
+the display only wakes it. A note shorter than 500 ms isn't sent ("Record a
+longer note"), and the normal 15-second limit still applies. While a note
+records, the other buttons don't open the menu or sleep the screen. Replies
+use the existing text-caption path. This option does not add TTS or
+enable live voice calls, and is off by default for every board. It isn't
+available on the SenseCAP Watcher (a short wheel click sleeps) or on
+e-paper boards with the FreeInk UI.
+
+### Latest reply on the Waveshare 1.75C
+
+With `CONFIG_MUSE_LATEST_REPLY` (on by default for the 1.75C), swipe right
+from Main to reread the latest answer received by the gadget. Scroll vertically;
+swipe left to return. The same three bottom dots indicate Latest reply, Main,
+and Settings on all three screens. The reader uses the main screen's pixel
+caption font. While reading, a floating
+**New reply ↓** button scrolls smoothly to the top of a newer answer. Returning
+from Main preserves the displayed answer and its scroll position. Completed
+messages from one gadget turn are joined together.
+
+The answer survives screen sleep and clears on reboot. Empty or failed requests
+keep the preceding answer. This is local reply retention, not server chat history.
+The combined answer is capped at 32 KiB, ending in `...` if cut.
+It uses PSRAM: eight 32 KiB receiver slots, a 32 KiB saved answer, a 32 KiB display
+snapshot, plus LVGL layout memory. The new-reply animation temporarily needs
+one extra 32 KiB snapshot while both answers are on screen. It does not write
+conversation text to flash.
+Screenshot builds also accept `>ui=reply`, `>ui.reply=down`, and `>ui.reply=new`
+on the USB console for repeatable on-device checks. `>ui.reply=test-long` replaces
+the saved answer with an oversized synthetic reply; `>ui.reply=end` scrolls to
+the end to check truncation. These commands are disabled in normal builds.
+
 ## Tests
 
 The tests run on your computer, with no board attached:
@@ -358,6 +559,11 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 Run `idf.py build` once first so the downloaded components are in place.
+The loopback proxy/TLS tests also use the OpenSSL CLI and development library
+(`openssl` with `pkg-config` on macOS; `openssl libssl-dev pkg-config` on Debian
+or Ubuntu). They compile the production transport with a host ESP-TLS substitute
+using real TLS, verify SNI/certificates, and exercise HTTP/SOCKS5 handshakes,
+authentication, refusals, timeouts and direct local connections.
 
 Two crypto tests are skipped unless the host has what they need. Install the
 host Mbed TLS library (`brew install mbedtls pkgconf` on macOS,
@@ -388,10 +594,36 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- The ST7789 tuning table in
+  [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
+  from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
+  [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
 - The JD9853A initialization sequence in
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
   [`devices/licenses/Seeed_GFX2.txt`](devices/licenses/Seeed_GFX2.txt).
+- The GC9107 initialization sequence in
+  [`components/muse/boards/board_m5stack_atoms3.c`](components/muse/boards/board_m5stack_atoms3.c),
+  from M5GFX's `Panel_GC9107` (LovyanGFX), is FreeBSD. See
+  [`devices/licenses/LovyanGFX.txt`](devices/licenses/LovyanGFX.txt).
+- [`components/esp_lcd_gc9107`](components/esp_lcd_gc9107), Espressif's GC9107
+  panel driver 2.0.0 from the ESP Component Registry with one change to build
+  on ESP-IDF 6, is Apache-2.0 under Espressif's copyright. See
+  [`components/esp_lcd_gc9107/license.txt`](components/esp_lcd_gc9107/license.txt).
+- [`components/muse/boards/viewe_smartring_display_init.h`](components/muse/boards/viewe_smartring_display_init.h),
+  the SmartRing-Plus panel initialization table from VIEWE's BSP, is
+  Apache-2.0 under VIEWE's copyright, as its header says.
+- [`components/muse/boards/waveshare_s3_185b_init.h`](components/muse/boards/waveshare_s3_185b_init.h),
+  the Waveshare 1.85B panel initialization tables from Waveshare's BSP, is
+  Apache-2.0, as its header says.
+- [`components/muse/fonts/`](components/muse/fonts/), the caption and
+  button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
+  the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
+  Medium (SIL OFL 1.1); see its README.
+- [`main/fonts/epaper_154g_caption_font.h`](main/fonts/epaper_154g_caption_font.h),
+  the Waveshare 1.54G's reply font, is a subset of GNU Unifont 16.0.04 (SIL OFL
+  1.1, or GPL-2.0+ with the font embedding exception); see
+  [`main/fonts/README.md`](main/fonts/README.md).
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
@@ -403,6 +635,15 @@ their upstream licenses:
   copyright, with Google's patent grant. See
   [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
   [`PATENTS`](components/libvpx_vp8/PATENTS).
+- [`components/muse_wakeword/models/hey_muse.pte`](components/muse_wakeword/models),
+  the opt-in wake word model, was trained for this SDK on public-domain, CC0
+  and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)
+  credits it as CC BY requires.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
-under their own licenses.
+under their own licenses. For the opt-in wake word these are the ExecuTorch
+runtime with its ESP-NN delegate (`pytorch/executorch`: BSD-3-Clause and
+others, see its `LICENSE`), `espressif/esp-nn` (Apache-2.0) and
+`esphome/esp-micro-speech-features`, TensorFlow Lite Micro's microfrontend
+(Apache-2.0; its kissfft files BSD-3-Clause); builds without the wake word
+don't fetch them.

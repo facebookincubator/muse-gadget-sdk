@@ -66,6 +66,9 @@ static esp_err_t init(void)
         return ESP_OK;
     }
     (void)muse_pmu_poll_key();
+    /* PWR talks: the 10 s hold-off back on, whatever a reset in a held talk
+     * left (a 16 s shutdown cleared then stays off, the datasheet default). */
+    (void)muse_pmu_set_key_shutdown(true);   /* logs if it can't */
 
     /* Only DCDC1 (VCC3V3) and ALDO1 (A3V3, for the codecs) feed anything; the
      * schematic leaves the rest unconnected. Waveshare's AXP2101 example and
@@ -231,6 +234,9 @@ static unsigned poll_buttons(void)
                 pwr_held = true;
             if (pmu & MUSE_PMU_KEY_RELEASE)
                 pwr_held = false;
+            /* A talk can outlast the PMU's hold-off: held, PWR mustn't power off. */
+            if (pmu & (MUSE_PMU_KEY_PRESS | MUSE_PMU_KEY_RELEASE))
+                (void)muse_pmu_set_key_shutdown(!pwr_held);   /* logs if it can't */
         }
     }
     bool held = key_held || pwr_held;

@@ -36,7 +36,7 @@ Hardware references: [Seeed guide](https://wiki.seeedstudio.com/xiao_respeaker/)
 
 ## Build and pair
 
-Use ESP-IDF v6.0.1. Connect USB to the **small XIAO board**, which exposes the
+Use ESP-IDF v6.0.3. Connect USB to the **small XIAO board**, which exposes the
 ESP32's USB Serial/JTAG console (`303a:1001`). From `esp32/`:
 
 ```sh

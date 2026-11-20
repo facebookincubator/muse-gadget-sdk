@@ -2811,6 +2811,131 @@ static void ptt_stop_paced_ack_eof(void) { ptt_stop_paced(1, 125); }
 static void ptt_stop_paced_eof_ack(void) { ptt_stop_paced(2, 125); }
 static void ptt_stop_paced_output_only(void) { ptt_stop_paced(1, 75); }
 
+/* Either kind of call shows WORKING while Muse has a caller turn open and
+ * the caller isn't talking; this one is hands-free. */
+static void hands_free_working(void)
+{
+    int64_t id = live_call();
+    assert(!muse_voice_call_working());
+    line(id, ev_speech("i1"));
+    poll();
+    assert(!muse_voice_call_working());   /* the caller talking, no turn yet */
+    line(id, ev_turn("s1", "i1"));
+    poll();
+    assert(!muse_voice_call_working());   /* about to answer: still LISTENING */
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\"}}");
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\",\"status\":\"completed\"}}");
+    poll();
+    assert(muse_voice_call_working());    /* answered ("on it"), turn still open: working */
+    line(id, ev_turn("s1b", "i1"));       /* a delayed reply's turn for the same item */
+    poll();
+    assert(muse_voice_call_working());
+    line(id, ev_speech("tv"));            /* side speech the server then drops */
+    poll();
+    assert(!muse_voice_call_working());
+    line(id, ev_suppressed("tv"));
+    poll();
+    assert(muse_voice_call_working());
+    line(id, ev_speech("i2"));
+    poll();
+    assert(!muse_voice_call_working());   /* the caller talks again */
+    line(id, "{\"type\":\"input_audio_buffer.speech_stopped\",\"event_id\":\"e\",\"item_id\":\"i2\"}");
+    poll();
+    assert(muse_voice_call_working());
+    line(id, ev_settled("s1b"));
+    poll();
+    assert(!muse_voice_call_working());
+    line(id, ev_turn("s3", "i3"));
+    poll();
+    assert(!muse_voice_call_working());   /* a new turn waits for its reply again */
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r3\"}}");
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r3\",\"status\":\"cancelled\"}}");
+    poll();
+    assert(muse_voice_call_working());
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+    assert(!muse_voice_call_working());   /* an ended call never works */
+}
+
+/* The caller talks over a reply: their new turn starts before the old reply
+ * finishes and settles with nothing pending. The new turn neither counts as
+ * answered nor retires; a server hold ends the caller's speech. */
+static void hands_free_interrupted_settle(void)
+{
+    int64_t id = live_call();
+    line(id, ev_turn("s1", "i1"));
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\","
+             "\"submission_message_id\":\"s1\"}}");
+    line(id, ev_speech("i2"));
+    line(id, "{\"type\":\"input_audio_buffer.speech_stopped\",\"event_id\":\"e\",\"item_id\":\"i2\"}");
+    line(id, ev_turn("s2", "i2"));
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\",\"status\":\"cancelled\"}}");
+    line(id, "{\"type\":\"hatch.voice.turn_settled\",\"event_id\":\"e\",\"response_message_id\":\"s1\","
+             "\"async_handoffs_pending\":0}");
+    poll();
+    assert(!muse_voice_call_working());   /* s2 kept, but not answered by r1 */
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"rx\","
+             "\"submission_message_id\":\"s1\"}}");   /* older work speaking first */
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"rx\",\"status\":\"completed\"}}");
+    poll();
+    assert(!muse_voice_call_working());   /* not s2's answer */
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r2\","
+             "\"submission_message_id\":\"s2\"}}");
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r2\",\"status\":\"completed\"}}");
+    poll();
+    assert(muse_voice_call_working());    /* s2 is still open: it wasn't retired */
+    line(id, ev_speech("i3"));
+    poll();
+    assert(!muse_voice_call_working());
+    line(id, "{\"type\":\"hatch.voice.switch_input_hold\",\"event_id\":\"e\",\"held\":true}");
+    poll();
+    assert(muse_voice_call_working());    /* the hold ended the caller's speech */
+    expect_event(MUSE_VOICE_CALL_EV_HOLD);
+    line(id, "{\"type\":\"hatch.voice.switch_input_hold\",\"event_id\":\"e\",\"held\":false}");
+    poll();
+    expect_event(MUSE_VOICE_CALL_EV_RESUME);
+    line(id, "{\"type\":\"hatch.voice.turn_settled\",\"event_id\":\"e\",\"response_message_id\":\"s2\","
+             "\"async_handoffs_pending\":0}");
+    poll();
+    assert(!muse_voice_call_working());
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+/* Early media: the reply's response is created, unmarked, before its turn
+ * starts, and the turn adopts it. A reply never seen keeps its turn through
+ * one nothing-pending settlement only. */
+static void hands_free_early_media_and_keep_cap(void)
+{
+    int64_t id = live_call();
+    line(id, ev_speech("i1"));
+    line(id, "{\"type\":\"input_audio_buffer.speech_stopped\",\"event_id\":\"e\",\"item_id\":\"i1\"}");
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\"}}");
+    line(id, ev_turn("s1", "i1"));
+    poll();
+    assert(!muse_voice_call_working());
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r1\",\"status\":\"completed\"}}");
+    poll();
+    assert(muse_voice_call_working());    /* the adopted reply answered s1 */
+    line(id, ev_speech("i2"));
+    line(id, "{\"type\":\"input_audio_buffer.speech_stopped\",\"event_id\":\"e\",\"item_id\":\"i2\"}");
+    line(id, ev_turn("s2", "i2"));        /* its reply never comes */
+    const char *settle0 = "{\"type\":\"hatch.voice.turn_settled\",\"event_id\":\"e\",\"async_handoffs_pending\":0}";
+    line(id, settle0);
+    poll();
+    assert(!muse_voice_call_working());   /* s1 retired, s2 kept but unanswered */
+    line(id, settle0);
+    line(id, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"r9\"}}");
+    line(id, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"r9\",\"status\":\"completed\"}}");
+    poll();
+    assert(!muse_voice_call_working());   /* a second settlement retired s2 too */
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2831,7 +2956,8 @@ int main(int argc, char **argv)
                                     ptt_end_while_held_reply, ptt_end_mid_pump, ptt_stop_drains_deferred,
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
-                                    ptt_stop_paced_interrupts };
+                                    ptt_stop_paced_interrupts, hands_free_working,
+                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

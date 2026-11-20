@@ -52,6 +52,7 @@
 #include "config_store.h"
 #include "link_pairing.h"
 #include "factory_test.h"
+#include "helper_task.h"
 
 static const char *TAG = "link.ble";
 
@@ -125,6 +126,8 @@ typedef struct {
     char *api_url;
     char *api_url_v2;
     char *noise_host;
+    bool proxy_present;
+    network_proxy_config_t proxy;
     uint32_t session_generation;
 } provision_args_t;
 
@@ -170,6 +173,7 @@ static void provision_task(void *arg) {
                           a->api_url ? a->api_url : "",
                           a->api_url_v2 ? a->api_url_v2 : "",
                           a->noise_host ? a->noise_host : "",
+                          a->proxy_present ? &a->proxy : NULL,
                           a->session_generation);
     }
     secure_free_str(a->ssid);
@@ -181,9 +185,10 @@ static void provision_task(void *arg) {
     secure_free_str(a->api_url);
     secure_free_str(a->api_url_v2);
     secure_free_str(a->noise_host);
+    network_proxy_wipe(&a->proxy, sizeof(a->proxy));
     free(a);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 static void scan_task(void *arg) {
@@ -433,6 +438,14 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                 delete_command_json(root, decrypted);
                 return;
             }
+            cJSON *proxy = cJSON_GetObjectItemCaseSensitive(root, "proxy");
+            a->proxy_present = proxy != NULL;
+            if (!network_proxy_parse(proxy, &a->proxy)) {
+                free(a);
+                ble_server_send_status("error_invalid_proxy");
+                delete_command_json(root, decrypted);
+                return;
+            }
             a->ssid = dup_str(s->valuestring);
             a->password = dup_str(p->valuestring);
             a->access_token = dup_str(at->valuestring);
@@ -451,6 +464,7 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                     secure_free_str(a->access_token);
                     secure_free_str(a->refresh_token);
                     secure_free_str(a->username);
+                    network_proxy_wipe(&a->proxy, sizeof(a->proxy));
                     free(a);
                     ble_server_send_status("error_operation_in_progress");
                     delete_command_json(root, decrypted);
@@ -474,7 +488,7 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
             // stack during TLS handshake than v5's 3.x (~2 KB more peak).
             a->session_generation = link_pairing_mark_provisioning_active();
             if (a->session_generation == 0
-                || xTaskCreate(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
+                || helper_task_create(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
                 uint32_t generation = a->session_generation;
                 secure_free_str(a->ssid);
                 secure_free_str(a->password);
@@ -485,6 +499,7 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                 secure_free_str(a->api_url);
                 secure_free_str(a->api_url_v2);
                 secure_free_str(a->noise_host);
+                network_proxy_wipe(&a->proxy, sizeof(a->proxy));
                 free(a);
                 ble_server_send_pairing_status("error_operation_in_progress", generation);
                 ble_server_disconnect_pairing_session(generation);

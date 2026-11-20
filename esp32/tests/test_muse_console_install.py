@@ -15,12 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConsoleInstall(unittest.TestCase):
-    def run_install(self, uart, failure):
+    def run_install(self, uart, failure, usb_console=True, vfs_io=True):
         with tempfile.TemporaryDirectory() as folder:
             p = Path(folder)
             headers = {
                 'esp_err.h': 'typedef int esp_err_t;\n#define ESP_OK 0\n',
-                'sdkconfig.h': f'#define CONFIG_MUSE_CONSOLE_UART {int(uart)}\n#define CONFIG_PM_LIGHT_SLEEP_CALLBACKS 0\n#define CONFIG_ESP_CONSOLE_UART_NUM 0\n',
+                'sdkconfig.h': f'#define CONFIG_MUSE_CONSOLE_UART {int(uart)}\n#define CONFIG_PM_LIGHT_SLEEP_CALLBACKS 0\n#define CONFIG_ESP_CONSOLE_UART_NUM 0\n'
+                               f'#define CONFIG_VFS_SUPPORT_IO {int(vfs_io)}\n#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED {int(usb_console)}\n',
                 'freertos/FreeRTOS.h': '#define portMAX_DELAY 0xffffffffu\n#define pdMS_TO_TICKS(ms) (ms)\n',
                 'driver/usb_serial_jtag.h': '''typedef struct {int rx_buffer_size;} usb_serial_jtag_driver_config_t;
 #define USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT() ((usb_serial_jtag_driver_config_t){0})
@@ -68,6 +69,11 @@ int main(int argc,char **argv) {(void)argc;fail=atoi(argv[1]);int rc=muse_consol
 
     def test_usb_vfs_uses_installed_driver(self):
         self.assertEqual(self.run_install(False, 0), (0, 1, 0, 1, 4096))
+
+    def test_no_usb_vfs_without_a_usb_console(self):
+        # IDF builds usb_serial_jtag_vfs.c only for a USB Serial/JTAG console.
+        self.assertEqual(self.run_install(False, 0, usb_console=False), (0, 0, 0, 1, 4096))
+        self.assertEqual(self.run_install(False, 0, vfs_io=False), (0, 0, 0, 1, 4096))
 
     def test_failed_usb_install_does_not_switch_vfs(self):
         self.assertEqual(self.run_install(False, 7), (7, 0, 0, 1, 4096))

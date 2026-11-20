@@ -21,10 +21,15 @@ import logging
 import os
 import sys
 
-from musegadget import __version__, config, doctor, identity
+from musegadget import __version__, config, doctor, identity, tls
 from musegadget.pair import SETUP_WINDOW_S, PairOutcome, SetupWindow, pair
 
 log = logging.getLogger("musegadget")
+
+# EX_CONFIG: the trust store needs fixing first, so the systemd unit doesn't restart on it.
+EXIT_TRUST_STORE = 78
+# Seconds a call started by a wake word waits for the caller to speak.
+WAKE_SPEECH_TIMEOUT = 5.0
 
 
 def _setup_open(window: SetupWindow) -> None:
@@ -54,6 +59,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from musegadget.executor import Account, Executor
     from musegadget.service import run_service
 
+    tls.client_context()
     if os.geteuid() == 0:
         if not args.run_as:
             print("Pass --run-as ACCOUNT (the account whose permissions commands get).",
@@ -118,6 +124,24 @@ def _read_image(path: str) -> dict | None:
             "data_base64": base64.b64encode(data).decode("ascii")}
 
 
+def _wait_seconds(value: str) -> int:
+    from musegadget.service import MAX_WAIT_S
+
+    try:
+        seconds = int(value)
+    except ValueError:
+        seconds = 0
+    if not 1 <= seconds <= MAX_WAIT_S:
+        raise argparse.ArgumentTypeError(f"must be a whole number of seconds from 1 to {MAX_WAIT_S}")
+    return seconds
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    # Imported here so other commands, the service included, never load curses.
+    from musegadget.terminal_chat import command
+    return command(args)
+
+
 def cmd_send_user_msg(args: argparse.Namespace) -> int:
     import json
     import socket
@@ -131,9 +155,11 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         if image is None:
             return 1
         request["image"] = image
+    if args.wait:
+        request["wait"] = args.wait
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(90)
+            sock.settimeout(args.wait + 30 if args.wait else 90)
             sock.connect(str(config.socket_path()))
             sock.sendall(json.dumps(request).encode() + b"\n")
             reply = json.loads(sock.makefile("rb").readline())
@@ -141,8 +167,25 @@ def cmd_send_user_msg(args: argparse.Namespace) -> int:
         print(f"Could not reach the musegadget service: {exc}", file=sys.stderr)
         return 1
     if not reply.get("ok"):
-        print(f"Not delivered: {reply.get('error') or reply}", file=sys.stderr)
+        unknown = reply.get("sent") == "unknown"
+        prefix = "May not have been delivered" if unknown else "Not delivered"
+        print(f"{prefix}: {reply.get('error') or reply}", file=sys.stderr)
         return 1
+    if args.wait:
+        from musegadget.link_client import printable
+
+        text, detail = reply.get("reply"), printable(str(reply.get("detail") or ""))
+        if not isinstance(text, str):
+            print(f"Sent to your Muse, but got no answer: {detail}", file=sys.stderr)
+            return 3
+        if text:
+            print(text)
+        else:
+            print("Muse finished without a text answer.", file=sys.stderr)
+        if reply.get("partial"):
+            print(f"Muse was still answering: {detail}", file=sys.stderr)
+            return 3
+        return 0
     print("Sent to your Muse.")
     return 0
 
@@ -155,13 +198,21 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     from musegadget.link_client import DeviceDescription, LinkSession
     from musegadget.service import DEFAULT_NOISE_HOST
     from musegadget.voice_audio import LiveAudio, WavAudio
-    from musegadget.voice_call import VoiceCall
+    from musegadget.voice_call import TRANSPORT_READY_TIMEOUT_S, VoiceCall
+    from musegadget.wakeword_input import WakeWordBacklogError
 
+    tls.client_context()
+    # With video on standard output, everything this command prints goes to stderr.
+    report = sys.stderr if args.video_out == "-" else sys.stdout
     if args.live and (args.in_wav or args.out_wav):
         print("Choose --live or both --in-wav and --out-wav.", file=sys.stderr)
         return 2
     if not args.live and not (args.in_wav and args.out_wav):
         print("WAV mode requires --in-wav and --out-wav.", file=sys.stderr)
+        return 2
+    if ((args.wake_model or args.wake_sensitivity != "default" or args.wake_timeout)
+            and not args.wake_word):
+        print("Wake-word options require --wake-word.", file=sys.stderr)
         return 2
     pairing = config.load_json(config.PAIRING_FILE)
     if not pairing or not pairing.get("access_token"):
@@ -172,11 +223,16 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     # for a credentialed call, even when the CLI was invoked with -v.
     logging.getLogger("websockets").setLevel(logging.WARNING)
 
-    async def run(audio):
-        vms, status = await asyncio.to_thread(
-            muse_api.fetch_vms_with_status, pairing["access_token"],
-            muse_api.api_root(pairing.get("api_url_v2", "")),
-        )
+    async def invoke(audio, source):
+        current_pairing = config.load_json(config.PAIRING_FILE)
+        if not current_pairing or not current_pairing.get("access_token"):
+            raise ConnectionError("paired device credentials are no longer available")
+        # The whole lookup within its limit, not just each socket operation:
+        # wake word capture is queued for exactly the start's stage limits.
+        vms, status = await asyncio.wait_for(asyncio.to_thread(
+            muse_api.fetch_vms_with_status, current_pairing["access_token"],
+            muse_api.api_root(current_pairing.get("api_url_v2", "")),
+        ), muse_api.FETCH_TIMEOUT_S)
         if status != 200:
             raise ConnectionError("VM lookup failed; refresh the paired device credentials")
         matches = [vm for vm in vms if vm["vm_id"] == args.vm_id]
@@ -184,7 +240,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
             raise ValueError("--vm-id must exactly match one leased VM")
         vm = matches[0]
         session = LinkSession(
-            noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
+            noise_host=current_pairing.get("noise_host") or DEFAULT_NOISE_HOST,
             vm_id=vm["vm_id"], vm_auth_token=vm["vm_auth_token"], app_id=args.app_id,
             register_device=False,
             device=DeviceDescription(ident.node_id, "Muse voice", __version__, {}),
@@ -192,49 +248,188 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
         )
         stop = asyncio.Event()
         connection = asyncio.create_task(session.run(stop))
+        try:
+            await session.wait_transport_ready(TRANSPORT_READY_TIMEOUT_S)
+            options = dict(device_id=ident.node_id, thread_id=args.thread_id,
+                           half_duplex=not args.full_duplex, mic_threshold=args.mic_threshold,
+                           idle_timeout=args.idle_timeout, overall_timeout=args.overall_timeout)
+            if video is None:
+                if detector is not None:
+                    # A false wake opens a call too: one that hears no speech
+                    # after the wake word's pre-roll ends. (Video calls keep
+                    # their idle timer.)
+                    options["speech_timeout"] = WAKE_SPEECH_TIMEOUT
+                    options["speech_after_bytes"] = getattr(source, "preroll_bytes", 0)
+                call = VoiceCall(session, **options)
+            else:
+                from musegadget.video_call import VideoCall
+
+                call = VideoCall(session, video_output=video, **options)
+            calls[:] = [call]  # only the current call; earlier ones are released
+            try:
+                return await call.run(source, audio, realtime_input=args.live)
+            except WakeWordBacklogError:
+                # The call failed closed (its audio is never truncated). Live
+                # mode listens again only if the call really ended: a failed
+                # end-call stops the command, and so does a Ctrl-C that came
+                # in while the call was cleaning up.
+                if call.cleanup_cancelled:
+                    raise asyncio.CancelledError from None
+                if not args.live or call.cleanup_error is not None:
+                    raise
+                return "capture_backlog"
+        finally:
+            stop.set()
+            try:
+                await asyncio.wait_for(connection, 3)
+            except asyncio.CancelledError:
+                # Ctrl-C during teardown still stops the command; live
+                # wake-word mode must not go back to listening.
+                connection.cancel()
+                await asyncio.gather(connection, return_exceptions=True)
+                raise
+            except Exception:
+                connection.cancel()
+                await asyncio.gather(connection, return_exceptions=True)
+
+    async def run(audio):
         current = asyncio.current_task()
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signum, current.cancel)
         try:
-            await session.wait_transport_ready(35)
-            call = VoiceCall(
-                session, device_id=ident.node_id, thread_id=args.thread_id,
-                half_duplex=not args.full_duplex,
-                mic_threshold=args.mic_threshold, idle_timeout=args.idle_timeout,
-                overall_timeout=args.overall_timeout,
-            )
-            return await call.run(audio.frames(), audio, realtime_input=args.live)
+            if detector is None:
+                return await invoke(audio, audio.frames())
+            from musegadget.wakeword_input import WakeWordInput
+
+            while True:
+                listener = WakeWordInput(audio.frames(), detector, realtime=args.live)
+                try:
+                    print("Listening locally for Hey Muse (Ctrl-C to stop).", file=report)
+                    wait = listener.wait()
+                    detected = (await asyncio.wait_for(wait, args.wake_timeout)
+                                if args.wake_timeout else await wait)
+                    if not detected:
+                        return "no_wake_word"
+                    print("Hey Muse detected; starting voice call.", file=report)
+                    reason = await invoke(audio, listener)
+                finally:
+                    await listener.aclose()
+                if not args.live:
+                    return reason
+                print(f"Voice call ended: {reason}; returning to wake-word listening.", file=report)
         finally:
-            stop.set()
-            try:
-                await asyncio.wait_for(connection, 3)
-            except (Exception, asyncio.CancelledError):
-                connection.cancel()
-                await asyncio.gather(connection, return_exceptions=True)
             for signum in (signal.SIGINT, signal.SIGTERM):
                 loop.remove_signal_handler(signum)
 
     audio = None
+    detector = None
+    calls = []
     try:
+        video = _video_output(args)
+    except (OSError, ValueError) as exc:
+        print(f"Video output failed: {exc}", file=sys.stderr)
+        return 2
+    try:
+        if args.wake_word:
+            from musegadget.wakeword import WakeWordDetector, WakeWordUnavailableError
+
+            try:
+                detector = WakeWordDetector(model_path=args.wake_model, sensitivity=args.wake_sensitivity)
+            except WakeWordUnavailableError as exc:
+                print(f"Wake word unavailable: {exc}", file=sys.stderr)
+                return 1
+            guard = ("" if video else f", and a call that hears no speech in its first "
+                     f"{WAKE_SPEECH_TIMEOUT:g} s ends")
+            print("Wake word on. Measured on synthetic voices, it wakes falsely about 0.3 to "
+                  "1.4 times an hour (low to high sensitivity); real voices haven't been "
+                  f"measured. Each wake starts a call that sends audio to Muse{guard}.",
+                  file=sys.stderr)
         audio = LiveAudio() if args.live else WavAudio(args.in_wav, args.out_wav)
         reason = asyncio.run(run(audio))
-        print(f"Voice call ended: {reason}.")
+        print(f"{'Video' if video else 'Voice'} call ended: {reason}.", file=report)
         return 0
     except (KeyboardInterrupt, asyncio.CancelledError):
-        print("Voice call stopped.")
+        print(f"{'Video' if video else 'Voice'} call stopped.", file=report)
         return 130
     except Exception as exc:
         # Exception bodies from network/device libraries may echo credentials
         # or user data. Keep CLI diagnostics limited to the failure class.
-        print(f"Voice call failed ({type(exc).__name__}).", file=sys.stderr)
+        print(f"{'Video' if video else 'Voice'} call failed ({type(exc).__name__}).", file=sys.stderr)
         return 1
     finally:
+        if detector is not None:
+            try:
+                detector.close()
+            except Exception:
+                log.warning("could not close wake-word detector")
         if audio is not None:
             try:
                 audio.close()
             except Exception:
                 log.warning("could not close audio device or WAV file")
+        if video is not None:
+            try:
+                video.close()
+            except Exception:
+                log.warning("could not close call video output")
+            if calls:  # after closing, so the outputs' last drops are counted
+                print(_video_report(calls[-1].summary(), video), file=report)
+
+
+def _video_report(stats: dict, video) -> str:
+    if not stats["frames"]:
+        return "Video: Muse sent no video on this call."
+    text = ("Video: {frames} frame(s) ({size}), {fps} fps, {kbit_per_s} kbit/s over {transport}, "
+            "{dropped} dropped.").format(dropped=video.dropped, **stats)
+    if stats["stopped"]:
+        text += " The video output stopped part-way; the call went on with audio."
+    elif getattr(video, "failed", None):
+        text += " One video output stopped part-way."
+    return text
+
+
+def _video_output(args: argparse.Namespace):
+    """The call's video outputs, or None for a voice-only call."""
+    import os
+    import shlex
+    from pathlib import Path
+
+    from musegadget.voice_video import VideoOutputs, VideoPlayer, VideoStream, player_command
+
+    if not (args.video_out or args.video_player):
+        return None
+    from musegadget.rtc.opus import OpusUnavailable, ensure_available
+
+    try:
+        ensure_available()
+    except OpusUnavailable as exc:
+        raise ValueError(str(exc)) from None
+    outputs = []
+    try:
+        if args.video_out == "-":
+            if sys.stdout.isatty():
+                raise ValueError("--video-out - writes video data; redirect standard output")
+            # A private descriptor: the writer thread never holds sys.stdout's lock.
+            outputs.append(VideoStream(os.dup(sys.stdout.fileno()), close_fd=True))
+        elif args.video_out:
+            target = Path(args.video_out)
+            for wav in filter(None, (args.in_wav, args.out_wav)):
+                if (target.resolve() == Path(wav).resolve()
+                        or (target.exists() and Path(wav).exists() and target.samefile(wav))):
+                    raise ValueError("--video-out must not be a WAV path")
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            outputs.append(VideoStream(fd, close_fd=True))
+        if args.video_player:
+            command = (player_command(args.video_player) if args.video_player in ("auto", "mpv", "ffplay")
+                       else shlex.split(args.video_player))
+            if not command:
+                raise ValueError("the video player command is empty")
+            outputs.append(VideoPlayer(command))
+    except BaseException:
+        VideoOutputs(outputs).close()
+        raise
+    return VideoOutputs(outputs) if outputs else None
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -246,7 +441,7 @@ def cmd_info(args: argparse.Namespace) -> int:
         sdk_token = "not valid"
     paired_with = (pairing or {}).get("sdk_token_hint")
     print(f"version:   {__version__}")
-    print(f"node id:   {ident.node_id}")
+    print(f"node id:   {ident.node_id}{'' if pairing else ' (when paired)'}")
     print(f"BLE name:  {ident.ble_name}")
     print(f"SDK token: {sdk_token}")
     if pairing is None:
@@ -295,9 +490,15 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("message", nargs="+", help="the message, or - to read it from stdin")
     send.add_argument("--session-id",
                      help="send to this side chat (a new id starts one) instead of the main chat")
+    send.add_argument("--wait", type=_wait_seconds, metavar="SECONDS",
+                     help="wait up to this long (1 to 600) for Muse's answer and print it")
     send.add_argument("--image", metavar="FILE",
                      help="attach a JPEG, PNG, GIF or WebP picture of at most 2 MiB for Muse to look at")
     send.set_defaults(func=cmd_send_user_msg)
+
+    chat = sub.add_parser("chat", help="chat with your Muse through the running service")
+    chat.add_argument("--session-id", help="use this side chat instead of the main chat")
+    chat.set_defaults(func=cmd_chat)
 
     from musegadget.link_client import validate_app_id
     from musegadget.voice_call import positive_seconds
@@ -316,7 +517,20 @@ def main(argv: list[str] | None = None) -> int:
                        help="hang up after this many inactive seconds (default: %(default)s)")
     voice.add_argument("--overall-timeout", type=positive_seconds, default=300,
                        help="maximum call seconds (default: %(default)s)")
+    voice.add_argument("--wake-word", action=argparse.BooleanOptionalAction, default=False,
+                       help="listen locally for Hey Muse before a call; off by default")
+    voice.add_argument("--wake-model", help="alternative wake-word model with the bundled model's contract")
+    voice.add_argument("--wake-sensitivity", choices=("low", "default", "high"), default="default",
+                       help="wake-word sensitivity: low (fewest false wakes), default or high "
+                            "(easiest to trigger); default: %(default)s")
+    voice.add_argument("--wake-timeout", type=positive_seconds,
+                       help="optional maximum seconds waiting for a wake word")
     voice.add_argument("--thread-id", help="target thread, otherwise the primary thread")
+    voice.add_argument("--video-out", metavar="FILE",
+                       help="make a video call and write Muse's video as H.264 to FILE (- for standard output)")
+    voice.add_argument("--video-player", nargs="?", const="auto", metavar="PLAYER",
+                       help="make a video call and show Muse's video: auto (the default), mpv, ffplay, "
+                            "or a command that reads raw H.264 on standard input")
     voice.set_defaults(func=cmd_voice_call)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
@@ -330,6 +544,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         return args.func(args)
+    except tls.TrustStoreError as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_TRUST_STORE
     except PermissionError as exc:
         # The state directory is root-only on an installed device.
         print(f"Can't access {exc.filename or config.state_dir()}; run this with sudo.",

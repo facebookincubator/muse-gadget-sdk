@@ -27,12 +27,17 @@ static const struct { bool epaper; } board = { false }, *muse_board = &board;
 static muse_voice_view_t view;
 static float source_level;
 static muse_pose_t rendered;
+static bool in_call = true, reply_waiting;
 static struct { void *data; } s_image_dsc;
 static void *s_tv;
 static void send_snapshot(void) {}
 static void image_sync(void) {}
 static void image_hide_locked(void) {}
 static void muse_ui_show_face(void) {}
+#if CONFIG_MUSE_VOICE_NOTE_TOGGLE
+static bool s_note_listening;
+static void update_tileview_swipe(void) {}
+#endif
 static bool update_sleep(void) { return false; }
 static void update_chrome(float now) { (void)now; }
 static bool muse_menu_tick(float now) { (void)now; return false; }
@@ -44,7 +49,8 @@ int64_t esp_timer_get_time(void) { return 1000000; }
 muse_mode_t muse_state_mode(float *t) { if (t) *t=0; return mode; }
 float muse_state_level(void) { return source_level; }
 float muse_state_happiness(void) { return 0; }
-bool muse_voice_in_call(void) { return true; }
+bool muse_voice_in_call(void) { return in_call; }
+bool muse_voice_reply_waiting(void) { return reply_waiting; }
 muse_voice_view_t muse_voice_call_view(void) { return view; }
 void muse_pixel_render(const muse_pose_t *pose) { rendered=*pose; }
 
@@ -65,5 +71,14 @@ int main(int argc,char **argv)
     view=MUSE_VOICE_VIEW_SPEAKING; source_level=0.9f;
     frame_tick(NULL);
     assert(fabsf(rendered.level-0.048f)<0.0001f); /* only the previous mic level decays */
+    /* A voice-note reply keeps its speaking status/progress while only its
+     * avatar rests between audio segments. update_status asserts that mode. */
+    in_call=false; mode=MUSE_MODE_SPEAKING; view=MUSE_VOICE_VIEW_NONE;
+    source_level=0; reply_waiting=true;
+    frame_tick(NULL);
+    assert(rendered.mode==MUSE_MODE_IDLE);
+    source_level=0.9f; reply_waiting=false;
+    frame_tick(NULL);
+    assert(rendered.mode==MUSE_MODE_SPEAKING);
     return 0;
 }

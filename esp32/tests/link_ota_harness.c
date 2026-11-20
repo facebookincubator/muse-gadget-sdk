@@ -52,9 +52,13 @@ const esp_partition_t *esp_ota_get_running_partition(void) { return running_part
 
 #if VIBE_MODE_BUILD
 /* The ESP-Mosaico's retained layout (partitions_mosaico.csv): Vibe Mode in
- * `factory`, its records in `sysmeta`. Each piece can go missing. */
+ * `factory`, its records in `sysmeta`. Each piece can go missing. The test
+ * names the subtype for Vibe Mode 0.2 (app/test). */
+#ifndef VIBE_SUBTYPE
+#define VIBE_SUBTYPE ESP_PARTITION_SUBTYPE_APP_FACTORY
+#endif
 static const esp_partition_t factory_part = {
-    .type = ESP_PARTITION_TYPE_APP, .subtype = ESP_PARTITION_SUBTYPE_APP_FACTORY,
+    .type = ESP_PARTITION_TYPE_APP, .subtype = VIBE_SUBTYPE,
     .address = 0x10000, .label = "factory" };
 static const esp_partition_t sysmeta_part = {
     .type = ESP_PARTITION_TYPE_DATA, .subtype = ESP_PARTITION_SUBTYPE_DATA_NVS,
@@ -64,7 +68,7 @@ static esp_ota_img_states_t running_state = ESP_OTA_IMG_PENDING_VERIFY;
 const esp_partition_t *esp_partition_find_first(esp_partition_type_t type,
                                                 esp_partition_subtype_t subtype,
                                                 const char *label) {
-    if (type == ESP_PARTITION_TYPE_APP && subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY && !label) {
+    if (type == ESP_PARTITION_TYPE_APP && subtype == VIBE_SUBTYPE && !label) {
         return has_factory ? &factory_part : NULL;
     }
     assert(type == ESP_PARTITION_TYPE_DATA && subtype == ESP_PARTITION_SUBTYPE_DATA_NVS);
@@ -252,7 +256,7 @@ static void check_vibe_mode(void) {
     assert(!ota_installed_by_vibe_mode());
     running_state = ESP_OTA_IMG_PENDING_VERIFY;
 #if CONFIG_HOMEHUB_OTA_ENABLED
-    /* device.ota's own update keeps its health check. */
+    /* ota_start's own update keeps its health check. */
     assert(config_set_str("ota_verify", "00020000:"
                           "0000000000000000000000000000000000000000000000000000000000000000"));
     assert(ota_verify_recorded_for_running());

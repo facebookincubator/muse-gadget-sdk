@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
 JSON = Path(os.environ.get(
@@ -38,7 +40,7 @@ class LinkSensecapSensorsTest(unittest.TestCase):
         cc = shlex.split(os.environ.get("CC", "cc"))
         flags = ["-Wall", "-Wextra", "-Werror", "-DCJSON_NESTING_LIMIT=16", "-I", str(JSON), "-I", str(out)]
         commands = [
-            [*cc, "-std=c11", *flags, "-c", str(JSON / "cJSON.c"), "-o", str(out / "cjson.o")],
+            [*cc, "-std=c11", *flags, "-c", *cjson_source(JSON), "-o", str(out / "cjson.o")],
             [*cc, "-std=c11", *flags, str(ROOT / "tests/link_sensecap_sensors_harness.c"), str(out / "cjson.o"), "-lm", "-o", str(out / "sensors")],
         ]
         for cmd in commands:

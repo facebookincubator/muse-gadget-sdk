@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <s3|s3n|s3-216|s3-206|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|146|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -24,23 +24,39 @@
 # the other's.
 # MUSE_VIDEO=1 adds devices/sdkconfig.muse-video (the phone camera over
 # Wi-Fi, on boards whose panel driver has draw_frame) in build-muse-<profile>-video/.
+# MUSE_CAMERA=1 adds devices/sdkconfig.muse-<profile>-camera (camera.capture,
+# for a board that has one) in build-muse-<profile>-camera/.
+# MUSE_WAKEWORD=1 adds devices/sdkconfig.muse-wakeword (the "Hey Muse" wake
+# word) in build-muse-<profile>-wakeword/.
+# MUSE_POWER_TEST=1 adds the board's diagnostic overlay and a -power-test suffix.
+# MUSE_APPS=1 adds devices/sdkconfig.muse-apps (WebAssembly apps: app.run) in
+# build-muse-<profile>-apps/.
+# MUSE_MIRROR=1 adds the cable mirror in build-muse-<profile>-mirror/.
 # mosaico (Espressif ESP-Mosaico, ESP32-S31) builds with ESP-IDF master
 # (IDF_EXPORT_S31) and Espressif's esp-mosaico-utils (MOSAICO_UTILS), and
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?s3|s3n|s3-216|s3-206|185c|mosaico|aipi|atk-box|box3|c6|c6-206|watcher|sticks3|plus2|cardputer-adv|stopwatch|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|vn183|ai-passport|echoear|p4lcd35|rorolee}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
     s3n)     profile=waveshare-s3-175;     target=esp32s3 ;;
+    s3-18)   profile=waveshare-s3-18;      target=esp32s3 ;;
     s3-216)  profile=waveshare-s3-216;     target=esp32s3 ;;
     s3-206)  profile=waveshare-s3-206;     target=esp32s3 ;;
+    185b)    profile=waveshare-s3-185b;    target=esp32s3 ;;
     185c)    profile=waveshare-s3-185c;    target=esp32s3 ;;
+    143c)    profile=waveshare-s3-143c;    target=esp32s3 ;;
+    143)     profile=waveshare-s3-143;     target=esp32s3 ;;
+    lilygo175) profile=lilygo-s3-amoled-175; target=esp32s3 ;;
+    146)     profile=waveshare-s3-146;     target=esp32s3 ;;
     # ESP-Mosaico: ESP-IDF master (IDF_EXPORT_S31, default ~/.espressif/esp-idf-s31).
     mosaico) profile=esp-mosaico;          target=esp32s31 ;;
+    k10)     profile=dfrobot-unihiker-k10; target=esp32s3 ;;
     aipi)    profile=aipi;                 target=esp32s3 ;;
     atk-box) profile=atk-dnesp32s3-box;     target=esp32s3 ;;
+    atk-box2) profile=atk-dnesp32s3-box2;   target=esp32s3 ;;
     echoear) profile=ostb-echoear-2st; target=esp32s3 ;;
     box3)    profile=espressif-box-3;       target=esp32s3 ;;
     c6)      profile=waveshare-c6-18;      target=esp32c6 ;;
@@ -49,17 +65,25 @@ case $board in
     # so pace the writes (paced_esptool.py) at the baud they were tested at.
     watcher) profile=sensecap-watcher;     target=esp32s3; baud=115200; paced=1 ;;
     cardputer-adv) profile=m5stack-cardputer-adv; target=esp32s3 ;;
+    atoms3) profile=m5stack-atoms3; target=esp32s3 ;;
     sticks3) profile=m5stack-sticks3;      target=esp32s3 ;;
+    crowpanel-43) profile=crowpanel-advance-43; target=esp32s3 ;;
     stopwatch) profile=m5stack-stopwatch;  target=esp32s3 ;;
+    triviapod) profile=m5stack-triviapod; target=esp32s3 ;;
     xiao147) profile=seeed-xiao-s3-147;    target=esp32s3 ;;
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
     fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
     jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
     lcd7) profile=waveshare-s3-lcd7; target=esp32s3 ;;
+    spotpear) profile=spotpear-esp32-ai-128; target=esp32s3 ;;
     lcd128) profile=waveshare-s3-lcd128; target=esp32s3 ;;
+    lcd349) profile=waveshare-s3-lcd349; target=esp32s3 ;;
     vn183)   profile=vn-s3-183;            target=esp32s3 ;;
     p4lcd35) profile=waveshare-p4-lcd35;   target=esp32p4 ;;
     rorolee) profile=deotaland-rorolee;    target=esp32s3 ;;
+    smartring-plus) profile=viewe-smartring-plus; target=esp32s3 ;;
+    lcd19)   profile=waveshare-s3-lcd19;   target=esp32s3 ;;
+    s3lcd35) profile=waveshare-s3-lcd-35;  target=esp32s3 ;;
     # Its CH9102 USB-UART bridge drops out above 230400 baud.
     plus2)   profile=m5stack-stickc-plus2; target=esp32; baud=230400 ;;
     # The Core2's bridge is a CP2104 or a CH9102F: 230400 is safe on both.
@@ -77,37 +101,66 @@ if [ "$target" = esp32s31 ]; then
     MOSAICO_UTILS=${MOSAICO_UTILS:-$HOME/mosaico/esp-mosaico-vibe/submodule/esp-mosaico-utils}
     [ -d "$MOSAICO_UTILS/ESP-Iris/components/esp_iris" ] || { echo "esp-mosaico-utils not found at $MOSAICO_UTILS (set MOSAICO_UTILS)" >&2; exit 1; }
     iris="-DMOSAICO_UTILS=$MOSAICO_UTILS"
+    # Vibe Mode 0.2 tools talk only to 0.2 boards, whose layout keeps Vibe Mode
+    # in `vibe_mode` (app/test) instead of `factory`: build for the checkout's
+    # generation, in a directory of its own.
+    [ -d "$MOSAICO_UTILS/esp-mosaico-vibe-mode" ] && vibe2=0.2
+    echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
     . "$IDF_EXPORT" >/dev/null 2>&1
 elif ! command -v idf.py >/dev/null 2>&1; then
-    for d in "$HOME/.espressif/esp-idf-v6.0.1" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.1" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
+    for d in "$HOME/.espressif/esp-idf-v6.0.3" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
         [ -n "$d" ] && [ -f "$d/export.sh" ] && { . "$d/export.sh" >/dev/null 2>&1; break; }
     done
 fi
-command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF v6.0.1 first" >&2; exit 1; }
+command -v idf.py >/dev/null 2>&1 || { echo "idf.py not found; activate ESP-IDF v6.0.3 first" >&2; exit 1; }
 cd "$root"
 B=build-muse-$profile
 defaults="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-$profile"
 if [ -n "${MUSE_VIDEO:-}" ]; then
     B=$B-video; defaults="$defaults;devices/sdkconfig.muse-video"
 fi
+if [ -n "${MUSE_CAMERA:-}" ]; then
+    [ -f "devices/sdkconfig.muse-$profile-camera" ] || { echo "no camera overlay for $board" >&2; exit 1; }
+    B=$B-camera; defaults="$defaults;devices/sdkconfig.muse-$profile-camera"
+fi
+if [ -n "${MUSE_WAKEWORD:-}" ]; then
+    B=$B-wakeword; defaults="$defaults;devices/sdkconfig.muse-wakeword"
+fi
+if [ -n "${MUSE_APPS:-}" ]; then
+    B=$B-apps; defaults="$defaults;devices/sdkconfig.muse-apps"
+fi
+if [ -n "${MUSE_MIRROR:-}" ]; then
+    B=$B-mirror; defaults="$defaults;devices/sdkconfig.muse-mirror"
+fi
 if [ -n "${MUSE_BENCH:-}" ]; then
     B=$B-bench; defaults="$defaults;devices/sdkconfig.muse-bench"
 fi
 [ -n "${iris:-}" ] && defaults="$defaults;devices/sdkconfig.muse-$profile-iris"
+if [ -n "${vibe2:-}" ]; then
+    B=$B-vibe2; defaults="$defaults;devices/sdkconfig.muse-$profile-vibe2"
+fi
+if [ -n "${MUSE_POWER_TEST:-}" ]; then
+    [ -z "${MUSE_VIDEO:-}${MUSE_BENCH:-}" ] || { echo "power-test cannot be combined with video/bench" >&2; exit 2; }
+    power_profile=$profile
+    [ "$board" = watcher ] && power_profile=watcher
+    [ -f "devices/sdkconfig.muse-$power_profile-power-test" ] || { echo "no power-test overlay for $board" >&2; exit 2; }
+    B=$B-power-test; defaults="$defaults;devices/sdkconfig.muse-$power_profile-power-test"
+fi
 log=/tmp/muse_build_$board.log
 # ESP-Mosaico: its Vibe Mode firmware installs an ESP-Iris System Update
-# bundle (the app and this partition table; never the bootloader or the
+# bundle (the app and its partition table; never the bootloader or the
 # retained first 2 MB). Built with Espressif's tools, in a venv of their own.
 mosaico_bundle() {
     local venv=${MOSAICO_IRIS_VENV:-$HOME/.cache/muse-mosaico-iris} tools="$MOSAICO_UTILS/ESP-Iris/components/esp_iris/tools"
     if [ ! -x "$venv/bin/python" ]; then
         python3 -m venv "$venv" && "$venv/bin/pip" -q install -r "$tools/requirements.lock" || return 1
     fi
+    local csv; csv=$(sed -n 's/^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="\(.*\)"$/\1/p' $B/sdkconfig)
     rm -rf "$B/system-update"
     "$venv/bin/python" "$MOSAICO_UTILS/mosaico-tools/tools/prepare_system_update.py" \
-        --partition-csv partitions_mosaico.csv --partition-table $B/partition_table/partition-table.bin \
+        --partition-csv "$csv" --partition-table $B/partition_table/partition-table.bin \
         --application $B/muse-gadget.bin --stage-dir $B/system-update --release 1.0.0 >> $log 2>&1 &&
     "$venv/bin/python" "$tools/esp_iris.py" bundle build $B/system-update/manifest.json \
         --component-root $B/system-update --output $B/muse-gadget-system-update.irisfw >> $log 2>&1 || { tail -5 $log; return 1; }
@@ -133,8 +186,8 @@ fi
 if [ -n "${iris:-}" ]; then
     # Through the board's Vibe Mode firmware, with Espressif's product command:
     # it switches the running app to Vibe Mode over ESP-Iris (or uses Vibe Mode
-    # if the board is in it), installs the bundle into ota_0 and checks the app
-    # comes up healthy. Never esptool: `factory` holds Vibe Mode.
+    # if the board is in it), installs the bundle into the app slot and checks
+    # the app comes up healthy. Never esptool: the first 2 MB hold Vibe Mode.
     # mosaico.py runs a Gateway per application project in its workspace:
     # this directory is that project (projects/muse_gadget, a link here).
     ws=${MOSAICO_WORKSPACE:-$(cd "$MOSAICO_UTILS/../.." && pwd)}

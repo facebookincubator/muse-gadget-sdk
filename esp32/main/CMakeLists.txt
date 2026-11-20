@@ -31,6 +31,8 @@ set(GADGET_SRCS
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
+    "link_events.c"
+    "link_probe.c"
     "stack_monitor.c"
     "bug_report.c"
     "ota.c"
@@ -50,6 +52,7 @@ set(GADGET_SRCS
 
 set(GADGET_REQUIRES
     nvs_flash
+    network_proxy
     esp_wifi
     esp_event
     esp_netif
@@ -64,6 +67,7 @@ set(GADGET_REQUIRES
     esp_psram
     esp_coex
     driver
+    esp_adc
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_ledc
@@ -75,6 +79,8 @@ set(GADGET_REQUIRES
     mbedtls
     efuse
     muse
+    # WebAssembly apps (CONFIG_MUSE_WASM_APPS); without them it builds nothing.
+    muse_apps
     # The voice board's. Requirements are resolved before the configuration
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
@@ -84,9 +90,9 @@ set(GADGET_REQUIRES
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h.
 if(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_uc8179.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6)
-    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c")
+    list(APPEND GADGET_SRCS "epaper_status.c" "epd_spectra6.c" "reterminal_battery.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677)
     list(APPEND GADGET_SRCS "epaper_status.c" "epd_ssd1677.c")
 elseif(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_SSD1681)
@@ -101,8 +107,22 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
+# image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
+# Kconfig is not loaded yet when requirements expand.
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND GADGET_REQUIRES esp_driver_jpeg)
+endif()
+
 if(CONFIG_HOMEHUB_LED_BACKEND_DEVKIT_GPIO27 OR CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING OR CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
     list(APPEND GADGET_REQUIRES led_strip)
+endif()
+
+if(CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341)
+    list(APPEND GADGET_REQUIRES esp_lcd_ili9341)
+endif()
+
+if(CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_S3_ST7796)
+    list(APPEND GADGET_REQUIRES esp_lcd_st7796)
 endif()
 
 if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
@@ -111,6 +131,9 @@ endif()
 if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
 endif()
+if(CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3)
+    list(APPEND GADGET_SRCS "waveshare_154g_shtc3.c")
+endif()
 
 if(CONFIG_HOMEHUB_VOICE)
     list(APPEND GADGET_SRCS
@@ -118,11 +141,7 @@ if(CONFIG_HOMEHUB_VOICE)
         "voice_muse_chat.c"
         "voice_player.c"
     )
-    if(CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
-        list(APPEND GADGET_SRCS "voice_board_respeaker_lite.c")
-    else()
-        list(APPEND GADGET_SRCS "voice_board.c")
-    endif()
+    include("voice_board_select.cmake")
 endif()
 
 idf_component_register(
@@ -131,6 +150,12 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# device.guide's Markdown, embedded as muse_device_guide_md (NUL-terminated).
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
+idf_build_get_property(gadget_project_dir PROJECT_DIR)
+muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
+target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
 
 # fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
 # driver calls them across archives, so the linker can redirect them).

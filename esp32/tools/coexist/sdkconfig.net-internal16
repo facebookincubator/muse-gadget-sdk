@@ -18,3 +18,8 @@
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 CONFIG_LWIP_TCP_WND_DEFAULT=16384
+# Back to sdkconfig.defaults' receive path. Without window scaling (it needs
+# lwIP in PSRAM) ESP-IDF caps the TCP receive mailbox at 64 and would drop the
+# C5's 96 back to its default of 6.
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64

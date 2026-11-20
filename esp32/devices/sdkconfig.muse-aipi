@@ -15,6 +15,8 @@
 # AIPI Lite: ESP32-S3R8 (8 MB octal PSRAM), 16 MB flash, two buttons, no touch.
 # Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-aipi"
+CONFIG_MUSE_DEVICE_MODEL_NAME="AIPI Lite"
 CONFIG_MUSE_BOARD_AIPI=y
 
 CONFIG_SPIRAM=y
@@ -64,3 +66,6 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+
+# Replies fill the screen while Muse answers; Text size in the menu.
+CONFIG_MUSE_SMALL_FULL_REPLY=y

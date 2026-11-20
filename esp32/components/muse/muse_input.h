@@ -22,6 +22,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
 
 /*
  * Buttons, as the board reports them. The talk button is push-to-talk. On touch
@@ -33,7 +34,8 @@
  * wakes from sleep; the talk button's press is also posted, marked `wake`, so
  * holding it on through waking records a note. Waking also retries Wi-Fi at
  * once if it's down. Also runs auto-sleep and refreshes battery status into
- * muse_state.
+ * muse_state. The Watcher's single wheel instead uses a click for sleep/wake,
+ * a 300 ms hold for talk, and rotation for reviewing reply pages.
  */
 
 typedef enum {
@@ -47,6 +49,13 @@ typedef struct {
     bool wake;   /* a press that woke the screen: a tap only wakes */
     uint32_t epoch;   /* a dropped call edge invalidates this and all older gestures */
     uint32_t mark;    /* DOWN: its pending-call mark (muse_input_clear_call_pending), or 0 */
+    int64_t at_us;    /* input edge time, before queueing or voice-task delays */
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    bool synthetic;   /* posted by the wake word glue, not a finger: an
+                       * intentional hold, ended by endpointing, and a real
+                       * press during it takes over instead of retriggering */
+    uint32_t disables;   /* synthetic: the disable generation at the wake */
+#endif
 } muse_input_event_t;
 
 /*
@@ -72,6 +81,10 @@ void muse_input_clear_call_pending(uint32_t mark);
  * on another queued event. Only a fresh DOWN in the new epoch can start one. */
 uint32_t muse_input_call_epoch(void);
 
+/* CONFIG_MUSE_VOICE_NOTE_TOGGLE: a toggled note is recording, so the other
+ * buttons act as if talk were held (no menu, no sleep). From the voice task. */
+void muse_input_note_toggled(bool on);
+
 /*
  * Console '>' lines go to hook first, without the '>'; it returns false for a
  * line that isn't its own. The app sets the SDK token this way
@@ -81,6 +94,9 @@ void muse_input_set_console_hook(bool (*hook)(const char *line));
 
 /* LVGL microphone press/release edges; handled by the existing input task. */
 void muse_input_touch_talk(bool pressed);
+
+/* MUSE_BTN_* edges, consumed by the existing input task. */
+void muse_input_inject(unsigned events);
 
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);

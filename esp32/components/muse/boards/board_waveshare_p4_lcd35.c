@@ -24,7 +24,11 @@
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "bsp/touch.h"
+#include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_st7796.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "freertos/FreeRTOS.h"
@@ -34,6 +38,9 @@
 #include "muse_audio.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#if CONFIG_MUSE_P4_CSI_CAMERA
+#include "p4_csi_camera.h"
+#endif
 
 #define PMU_KEY_EVERY 2         /* poll the PMU over I2C every 20 ms */
 
@@ -47,6 +54,10 @@ static esp_err_t init(void)
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
     ESP_RETURN_ON_ERROR(muse_gpio_button_init(&s_talk, GPIO_NUM_35), TAG, "BOOT");
+#if CONFIG_MUSE_P4_CSI_CAMERA
+    /* The OV5647 shares the I2C bus; it starts on the first capture. */
+    p4_csi_camera_register(bsp_i2c_get_handle());
+#endif
     /* Only the PMU sees PWR: latch its edges for poll_buttons(). */
     esp_err_t err = muse_pmu_init(bsp_i2c_get_handle(), true);
     if (err != ESP_OK) {
@@ -57,23 +68,77 @@ static esp_err_t init(void)
     return ESP_OK;
 }
 
+/*
+ * The BSP's bsp_display_new_with_handles(), with one change: LVGL's frame
+ * buffers are in PSRAM, and from ESP-IDF v6.0.3 the SPI panel IO only sends
+ * from PSRAM by DMA when asked (psram_dma_direct). Without it, each whole-frame
+ * transfer would first be copied into a 300 KB internal bounce buffer.
+ */
+static esp_err_t lcd_new(esp_lcd_panel_io_handle_t *ret_io, esp_lcd_panel_handle_t *ret_panel)
+{
+    const spi_bus_config_t bus = {
+        .sclk_io_num = BSP_LCD_SPI_CLK,
+        .mosi_io_num = BSP_LCD_SPI_MOSI,
+        .miso_io_num = GPIO_NUM_NC,
+        .quadwp_io_num = GPIO_NUM_NC,
+        .quadhd_io_num = GPIO_NUM_NC,
+        .max_transfer_sz = BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t),
+    };
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO), TAG, "SPI bus");
+    const esp_lcd_panel_io_spi_config_t io_cfg = {
+        .dc_gpio_num = BSP_LCD_DC,
+        .cs_gpio_num = BSP_LCD_SPI_CS,
+        .pclk_hz = BSP_LCD_PIXEL_CLOCK_MHZ * 1000 * 1000,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+        .spi_mode = 3,
+        .trans_queue_depth = 10,
+        .flags.psram_dma_direct = 1,
+    };
+    const esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = BSP_LCD_RST,
+        .rgb_ele_order = BSP_LCD_COLOR_SPACE,
+        .bits_per_pixel = BSP_LCD_BITS_PER_PIXEL,
+    };
+    esp_lcd_panel_io_handle_t io = NULL;
+    esp_lcd_panel_handle_t panel = NULL;
+    esp_err_t err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_cfg, &io);
+    if (err == ESP_OK) err = esp_lcd_new_panel_st7796(io, &panel_cfg, &panel);
+    if (err == ESP_OK) err = esp_lcd_panel_reset(panel);
+    if (err == ESP_OK) err = esp_lcd_panel_init(panel);
+    if (err == ESP_OK) err = esp_lcd_panel_invert_color(panel, true);
+    if (err == ESP_OK) err = esp_lcd_panel_mirror(panel, true, false);
+    if (err == ESP_OK) err = esp_lcd_panel_disp_on_off(panel, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "LCD: %s", esp_err_to_name(err));
+        if (panel) esp_lcd_panel_del(panel);
+        if (io) esp_lcd_panel_io_del(io);
+        spi_bus_free(SPI2_HOST);
+        return err;
+    }
+    *ret_io = io;
+    *ret_panel = panel;
+    return ESP_OK;
+}
+
 static lv_display_t *display_start(lv_indev_t **touch)
 {
     esp_lv_adapter_config_t cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
     cfg.task_core_id = MUSE_UI_CORE;
     cfg.task_priority = MUSE_UI_PRIORITY;
     cfg.task_stack_size = 32 * 1024;
-    bsp_lcd_handles_t lcd;
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_handle_t panel;
     if (esp_lv_adapter_init(&cfg) != ESP_OK || bsp_display_brightness_init() != ESP_OK
-        || bsp_display_new_with_handles(NULL, &lcd) != ESP_OK) {
+        || lcd_new(&io, &panel) != ESP_OK) {
         return NULL;
     }
     /* A whole frame takes 31 ms over SPI, the limit for a swipe. With two
      * frame buffers LVGL draws the next one meanwhile; the BSP's single
      * 50-row buffer made a swipe wait for both, at 16 FPS. */
     const esp_lv_adapter_display_config_t dc = ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_DEFAULT_CONFIG(
-        lcd.panel, lcd.io, BSP_LCD_H_RES, BSP_LCD_V_RES, ESP_LV_ADAPTER_ROTATE_0);
-    s_panel = lcd.panel;
+        panel, io, BSP_LCD_H_RES, BSP_LCD_V_RES, ESP_LV_ADAPTER_ROTATE_0);
+    s_panel = panel;
     lv_display_t *disp = esp_lv_adapter_register_display(&dc);
     const bsp_touch_config_t tc = { 0 };
     esp_lcd_touch_handle_t tp;

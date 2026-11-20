@@ -19,6 +19,8 @@
 # main/boards/xiaozhi-ai-iot-vietnam-1st/
 # Load last, after sdkconfig.defaults and sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-vn-s3-183"
+CONFIG_MUSE_DEVICE_MODEL_NAME="VN ESP32-S3 1.83-inch NV3023"
 CONFIG_MUSE_BOARD_VN_S3_183=y
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -38,6 +40,10 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# Vietnamese captions keep their tones (fonts/muse_font_latin_16.c).
+CONFIG_MUSE_LATIN_FONT=y
+# The screen's own text in Vietnamese too (components/muse/muse_lang.c).
+CONFIG_MUSE_UI_LANG_VI=y
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Static buffers in PSRAM: Wi-Fi's, lwIP's and BT's, and those marked

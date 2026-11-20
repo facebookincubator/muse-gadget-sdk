@@ -15,6 +15,8 @@
  */
 
 #include "wifi_mgr.h"
+#include "wifi_known.h"
+#include "network_proxy_tls.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -24,11 +26,14 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "soc/soc_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
+
+#include "link_events.h"
 
 static const char *TAG = "link.wifi";
 
@@ -57,6 +62,9 @@ static atomic_bool s_connect_pending = ATOMIC_VAR_INIT(false);
 static atomic_bool s_sta_idle = ATOMIC_VAR_INIT(true);
 static int s_retry = 0;
 static int s_reconnect_backoff_ms = 1000;  // grows on consecutive failures
+// Connectivity history: record only IP-up/down transitions, not every retry.
+static bool s_has_ip = false;
+static int64_t s_ip_lost_us = 0;
 #define MAX_INITIAL_RETRY        3
 #define RECONNECT_BACKOFF_MIN_MS 1000
 #define RECONNECT_BACKOFF_MAX_MS 60000
@@ -158,6 +166,13 @@ static void event_handler(void *arg, esp_event_base_t base,
         ESP_LOGW(TAG, "station disconnected reason=%u rssi=%d",
                  ev ? ev->reason : 0, ev ? ev->rssi : 0);
 
+        if (s_has_ip) {
+            s_has_ip = false;
+            s_ip_lost_us = esp_timer_get_time();
+            link_events_record(LINK_EVENT_WIFI_DOWN, "esp-idf reason=%u rssi=%d",
+                               ev ? ev->reason : 0u, ev ? ev->rssi : 0);
+        }
+
         xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP);
         atomic_store(&s_sta_idle, true);
         const wifi_event_sta_disconnected_t *event =
@@ -187,6 +202,15 @@ static void event_handler(void *arg, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&ev->ip_info.ip));
+        if (!s_has_ip) {
+            s_has_ip = true;
+            if (s_ip_lost_us) {
+                link_events_record(LINK_EVENT_WIFI_UP, "got IP after %llus without Wi-Fi",
+                                   (unsigned long long)((esp_timer_get_time() - s_ip_lost_us) / 1000000));
+            } else {
+                link_events_record(LINK_EVENT_WIFI_UP, "got IP");
+            }
+        }
         s_retry = 0;
         s_keep_connected = true;
         s_reconnect_backoff_ms = RECONNECT_BACKOFF_MIN_MS;  // reset on success
@@ -223,7 +247,11 @@ void wifi_mgr_init(void) {
 #if SOC_WIFI_SUPPORT_5G
     ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO));
 #endif
+#ifdef CONFIG_HOMEHUB_WIFI_MIN_MODEM
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+#else
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+#endif
     s_inited = true;
 
     uint8_t mac[6] = {0};
@@ -328,6 +356,11 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
         esp_wifi_disconnect();
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+
+    network_proxy_config_t proxy;
+    wifi_known_get_proxy(ssid, &proxy);
+    network_proxy_set_active(&proxy);
+    network_proxy_wipe(&proxy, sizeof(proxy));
 
     s_retry = 0;
     s_connecting = true;

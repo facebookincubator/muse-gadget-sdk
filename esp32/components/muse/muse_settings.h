@@ -21,11 +21,13 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 /*
  * User settings, persisted in NVS. Setters save immediately and then notify the
  * change listener (from the caller's task), which applies the setting to the
- * hardware. Brightness, auto-sleep and the speaker are polled where they're used.
+ * hardware. Brightness, auto-sleep and the speaker are polled where they're used,
+ * as is the reply text size, which notifies nothing.
  */
 
 #define MUSE_SSID_MAX 32
@@ -46,6 +48,9 @@ typedef enum {
     MUSE_SETTING_BLE,
     MUSE_SETTING_HATCH,
     MUSE_SETTING_VOICE_NOTES,
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    MUSE_SETTING_WAKEWORD,      /* the wake word opt-in changed */
+#endif
 } muse_setting_t;
 
 typedef void (*muse_setting_cb_t)(muse_setting_t what);
@@ -58,11 +63,22 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
 int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
 int muse_settings_brightness(void);     /* 10..100 */
 int muse_settings_sleep_s(void);        /* 0 = never */
+/* Reply text size on small screens with full-screen replies. */
+enum { MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE };
+int muse_settings_text_size(void);
 bool muse_settings_wifi_on(void);
 bool muse_settings_ble_on(void);
 /* StopWatch: false selects realtime PTT; true selects voice notes only. */
 bool muse_settings_voice_notes(void);
 void muse_settings_set_voice_notes(bool on);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+bool muse_settings_wakeword_on(void);   /* hands-free listening opt-in; default off */
+#endif
+/* With CONFIG_MUSE_APP_VIEW, Apps in Settings (off until the person turns
+ * them on): whether the gadget runs the apps their Muse makes. Changing it
+ * restarts the gadget, so Muse learns of the app commands as it reconnects. */
+bool muse_settings_apps_on(void);
+void muse_settings_set_apps_on(bool on);
 
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1]);
 void muse_settings_hatch_host(char out[MUSE_HOST_MAX + 1]);
@@ -75,8 +91,12 @@ void muse_settings_set_speaker_on(bool on);
 void muse_settings_set_mic_gain(int db);
 void muse_settings_set_brightness(int pct);
 void muse_settings_set_sleep_s(int secs);
+void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+void muse_settings_set_wakeword_on(bool on);
+#endif
 /* A network name is remembered first among the saved ones and joined now;
  * an empty ssid forgets every saved network. */
 void muse_settings_set_wifi(const char *ssid, const char *pass);

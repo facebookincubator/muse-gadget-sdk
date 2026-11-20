@@ -22,7 +22,7 @@
 The board posts the text to your Muse as a typed turn and streams the reply
 back over its console (muse_hatch_text_turn in components/muse/muse_chat.h),
 so this machine needs no token or network setup. Boards with PSRAM (s3,
-s3-216, s3-206, aipi, sticks3, stopwatch, cores3, watcher, plus2, jc3248w535, lcd7, rorolee) can
+s3-18, s3-216, s3-206, aipi, sticks3, stopwatch, cores3, watcher, plus2, jc3248w535, lcd7, rorolee) can
 do it; the C6 can't. The Watcher needs firmware with MUSE_CONSOLE_UART, and its
 CH342 drops bytes from whole packets, so writes to it are paced.
 
@@ -178,6 +178,10 @@ class Board:
             time.sleep(0.1)
 
     def write_line(self, cmd):
+        # One console line: a CR or LF inside cmd (from a file name, say)
+        # would start another command, such as >sdk_token=.
+        if "\r" in cmd or "\n" in cmd:
+            raise ValueError("a console command can't contain a line break")
         self.write(b">" + cmd.encode() + b"\n")
 
     def read_line(self, deadline):

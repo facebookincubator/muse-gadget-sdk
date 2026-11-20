@@ -12,7 +12,7 @@ speaker codec and ES7210 microphone ADC.
 
 ## Build on Windows
 
-Use an **ESP-IDF v6.0.1** PowerShell environment. The repository requires this
+Use an **ESP-IDF v6.0.3** PowerShell environment. The repository requires this
 version; a 5.5 environment is not supported. From the repository's `esp32`
 directory, define the profile arguments once:
 
@@ -43,7 +43,7 @@ The firmware is `build-muse-espressif-box-3/muse-gadget.bin`. Flashing also
 needs the bootloader and partition table from that directory; use `idf.py`
 with the same arguments instead of writing just the app at an assumed offset.
 
-On Linux/macOS, after activating ESP-IDF v6.0.1:
+On Linux/macOS, after activating ESP-IDF v6.0.3:
 
 ```sh
 tools/muse/board.sh build box3

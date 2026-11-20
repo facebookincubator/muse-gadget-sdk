@@ -70,6 +70,10 @@ void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb);
 // Override the Noise host. NULL or empty restores the compiled default.
 void noise_ctrl_set_host(const char *host);
 
+// The node id link.register sends from the next registration on: setup gives
+// a device set up by earlier firmware its new id without a restart.
+void noise_ctrl_set_node_id(const char *node_id);
+
 // Off (the default), the session checks for traffic every tick. On, once it
 // has been quiet POWER_SAVE_QUIET_MS, every POWER_SAVE_POLL_MS instead, so the
 // CPU can sleep between (Muse with its screen off); traffic goes back to every
@@ -96,6 +100,12 @@ void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
 
+// Builds the device.health payload object; the caller owns it. Also embedded in
+// bug.report so a filed bug carries the connectivity history. The bug.report
+// copy holds the full history but leaves out the SSID, like the rest of the
+// report's explicit fields; device.health holds only the recent events.
+cJSON *noise_ctrl_device_health_json(bool for_bug_report);
+
 // ---- Extra daemon requests on this session (CONFIG_HOMEHUB_DAEMON_REQUESTS) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this
@@ -103,11 +113,12 @@ void noise_ctrl_send_command_result(
 // history, files on the user's VM). A refused or reset request never
 // affects the control session. Up to 3 run at once; queued body bytes are
 // capped (4 KB without PSRAM, 16 KB with it), and one send of more than 8 KB
-// (4 KB on Muse boards without PSRAM, 2 KB on the Cardputer ADV and AI
-// Passport) can't be framed and ends that request. Each response frame has to fit
-// the session's inbound buffer (12 KB, 17 KB on Muse boards without PSRAM): a
-// larger one ends the whole session, which reconnects, and the request with
-// NOISE_CTRL_REQ_TOO_LARGE. Ask for responses that stay under it.
+// (4 KB on Muse boards without PSRAM and the CYD, 2 KB on the Cardputer ADV
+// and AI Passport) can't be framed and ends that request. Each response frame
+// has to fit the session's inbound buffer (12 KB, 17 KB on Muse boards without
+// PSRAM and the CYD): a larger one ends the whole session, which reconnects,
+// and the request with NOISE_CTRL_REQ_TOO_LARGE. Ask for responses that stay
+// under it.
 //
 // The callback runs on the session task and must return quickly. status is the
 // HTTP status on the response head (with any inline body), 0 on a later body

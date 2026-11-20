@@ -19,6 +19,8 @@ import subprocess
 import tempfile
 import unittest
 
+from host_cjson import cjson_source
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -356,6 +358,8 @@ static void text_modality(void) {
     cJSON *text=cJSON_Parse(MUSE_HATCH_NOTE_HEAD MUSE_HATCH_NOTE_TAIL);
     assert(text);
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(text,"output_modality")),"text"));
+    const char *device=cJSON_GetStringValue(cJSON_GetObjectItem(text,"device"));
+    assert(device && !strcmp(device,"mcu-wearable"));
     cJSON_Delete(text);
 }
 static muse_chat_image_result_t image_result;
@@ -548,7 +552,7 @@ int main(int argc,char **argv) {
         compiled = subprocess.run([
             os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
             '-I', str(cjson), '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),
-            str(c), str(ROOT / 'components/muse/muse_chat_image.c'), str(cjson / 'cJSON.c'), '-o', str(cls.binary)
+            str(c), *cjson_source(cjson), '-o', str(cls.binary)
         ], capture_output=True, text=True)
         if compiled.returncode:
             raise RuntimeError(compiled.stderr)

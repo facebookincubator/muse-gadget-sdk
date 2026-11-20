@@ -23,16 +23,22 @@
 #include "sdkconfig.h"
 
 /*
- * Bring up the display and build the UI: the avatar on the first tile,
- * settings one swipe to the left. Also owns screen sleep and brightness.
+ * Bring up the display and build the UI: the avatar on the main tile,
+ * settings one swipe left, and optional Latest reply one swipe right. Also owns screen sleep and brightness.
  */
 esp_err_t muse_ui_start(void);
 
 /* From any task: the screen has gone dark for sleep (and not yet woken). */
 bool muse_ui_dark(void);
 
+/* From any task: the brightness a running app asks for, 1 to 100, or 0 for
+ * the person's own setting again. */
+void muse_ui_app_brightness(int pct);
+
 /* From any task: the face tile is the currently visible tile. */
 bool muse_ui_face_active(void);
+/* From any task: a vertical volume drag owns the current touch (no hold PTT). */
+bool muse_ui_volume_swiping(void);
 
 /* The functions below run in the LVGL task (or with the display lock held). */
 
@@ -46,7 +52,9 @@ void muse_ui_preview_brightness(int pct);
 /*
  * display.draw_url, from any task. An image covers the face until a tap, a
  * talk, the menu or muse_ui_image_hide(). Pixels are RGB565, high byte first.
- * The size is false without PSRAM for the image or before the UI is up.
+ * The size is false without PSRAM for the image. Before the UI is up, the
+ * LVGL UI already gives the board's size, so display.* can be listed early;
+ * draws fail until the UI starts.
  */
 bool muse_ui_image_size(int *w, int *h);
 /* What the panel shows of those pixels: 16 (colour), or 2 on a four-gray e-paper. */

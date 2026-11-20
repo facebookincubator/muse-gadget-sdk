@@ -34,9 +34,9 @@
 #define GUARD_BYTE 0xa5
 
 /* muse_chat_text.c's captions page to the screen; nothing here pages. */
-void muse_state_page(bool cjk, int *cols, int *lines)
+void muse_state_page(const char *text, int *cols, int *lines)
 {
-    (void)cjk;
+    (void)text;
     *cols = 16;
     *lines = 2;
 }

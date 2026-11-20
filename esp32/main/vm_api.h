@@ -21,6 +21,9 @@
 #define VM_API_MAX_VMS 8
 #define VM_API_ERR_FAILED -1
 #define VM_API_ERR_AUTH   -2
+// A device-token mint or refresh refused with a 401: the token service says
+// the credential will never work again (revoked, replaced or already used).
+#define VM_API_ERR_REVOKED -3
 #define VM_API_DEFAULT_BASE_URL "https://api.muse.ai"
 
 typedef struct {
@@ -56,13 +59,16 @@ void vm_api_set_sdk_token(const char *sdk_token);
 int vm_api_fetch_vms(const char *access_token, vm_info_t *out, int max);
 
 // Exchange a user/session token for a short-lived device token pair.
-// Returns 0 on success, VM_API_ERR_AUTH on 401/403, or VM_API_ERR_FAILED.
+// Returns 0 on success, VM_API_ERR_REVOKED on 401, VM_API_ERR_AUTH on 403, or
+// VM_API_ERR_FAILED.
 int vm_api_mint_device_token(const char *access_token, const char *device_id,
                              vm_device_tokens_t *out);
 
 // Refresh an existing device token pair. Tries access_token first, then
 // refresh_token with the service-specific prefix when the access token is
-// rejected. Returns 0 on success and sets *method when non-NULL.
+// rejected. Returns 0 on success and sets *method when non-NULL; otherwise
+// VM_API_ERR_REVOKED when the last leg tried got a 401, VM_API_ERR_AUTH on a
+// 403, or VM_API_ERR_FAILED.
 //
 // Pass access_token = NULL to SKIP the access-token leg and go straight to the
 // refresh token. Callers that just had the access token refused should do

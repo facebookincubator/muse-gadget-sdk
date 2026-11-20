@@ -18,23 +18,39 @@
 #
 # lwIP pbufs and TCP segments, and the Wi-Fi driver's heap allocations
 # (including its dynamic RX buffers), prefer the 8 MB PSRAM, so TCP windows
-# stop costing scarce internal RAM. That pays for 64 KiB windows in each
+# stop costing scarce internal RAM. That pays for 96 KiB windows in each
 # direction. Wi-Fi DMA buffers stay in internal RAM.
 #
-# A 64 KiB receive window needs a receive path deep enough to take a whole
-# window in one burst: with ESP-IDF's 32 dynamic RX buffers and 4 queued
-# out-of-order segments, a paired gadget lost segments about ten times per
-# 4 MB transfer and VM-to-gadget throughput fell to 1.8 Mbit/s. 64 dynamic RX
-# buffers and 12 out-of-order segments fix it (tools/coexist/README.md has
-# the numbers). The block-ack window stays at sdkconfig.defaults' 32.
+# A window over 64 KiB needs TCP window scaling, which ESP-IDF offers only
+# when PSRAM is required at boot. At the ~100 ms round trip between a gadget
+# and its VM, 64 KiB caps each direction near 5 Mbit/s: VM-to-gadget transfers
+# ran at 3.2 Mbit/s with the CPU at 68%, and at 4.1-4.9 Mbit/s (median 4.7),
+# CPU-bound, with 96 KiB (tools/coexist/README.md has the numbers).
 #
-# PSRAM can fail to start (CONFIG_SPIRAM_IGNORE_NOTFOUND keeps the gadget
-# running): lwIP and Wi-Fi then fall back to internal RAM. The out-of-order
-# queue stays bounded (12 segments per connection, not ESP-IDF's "0 =
-# unlimited") so even then a connection can't queue a whole window there, and
-# the gadget logs the missing PSRAM at boot.
+# Requiring PSRAM costs two things:
+# - PSRAM can fail to start on a power-on reset (sdkconfig.defaults). The
+#   gadget now resets and starts again instead of running without it, and a
+#   board whose PSRAM never starts doesn't boot.
+# - The Wi-Fi driver switches to static TX buffers, allocated in internal RAM
+#   at boot (about 1.7 KiB each). 4 instead of ESP-IDF's 16 hold the cost to
+#   about 8 KiB of internal RAM; frames beyond them wait in a PSRAM queue.
+#   4, 6, 8 and 16 measured the same through the tunnel, where the CPU is the
+#   limit.
+#
+# The receive window needs a receive path deep enough to take a whole window
+# in one burst: with ESP-IDF's 32 dynamic RX buffers and 4 queued
+# out-of-order segments, a 64 KiB window lost segments about ten times per
+# 4 MB transfer and VM-to-gadget throughput fell to 1.8 Mbit/s. 96 dynamic RX
+# buffers (in PSRAM) and a 96-entry receive mailbox match 96 KiB. The
+# out-of-order queue stays bounded (12 segments per connection, not ESP-IDF's
+# "0 = unlimited"). The block-ack window stays at sdkconfig.defaults' 32.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
-CONFIG_LWIP_TCP_WND_DEFAULT=65535
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_SPIRAM_IGNORE_NOTFOUND=n
+CONFIG_LWIP_WND_SCALE=y
+CONFIG_LWIP_TCP_RCV_SCALE=1
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=98304
+CONFIG_LWIP_TCP_WND_DEFAULT=98304
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=96
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=96
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4
 CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=12

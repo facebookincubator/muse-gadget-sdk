@@ -95,8 +95,11 @@ The gadget's ring (`muse_vstream.c`) takes the bytes as they come and
 hands the decoder one whole frame at a time. A damaged header makes it
 search for the next one (a header is believed when a start code follows it,
 or for VP8 a frame tag that fits the frame and, on a keyframe, the sync
-code); the frame after a gap is marked so the decoder
-drops it unless it's a keyframe, and asks for one.
+code; with two bands, a top band length that fits, then the top band's
+start code, or both VP8 bands' tags). Every frame is checked in the band
+layout `start` gave, which the decoder then splits it by. The frame after
+a gap is marked so the decoder drops it unless it's a keyframe, and asks
+for one.
 
 ## Wi-Fi
 
@@ -178,7 +181,17 @@ ends treat what they receive as untrusted and limit what a stranger gets:
   picture (nothing is allocated for it), and tinyh264 refuses sizes whose
   arithmetic would overflow. Drawing reads only what the decoded picture
   holds, and pictures being drawn are never freed under the show task
-  (the decoder waits for both before new parameter sets or a keyframe).
+  (the decoder waits for both before any access unit with a parameter
+  set or an IDR slice, which may switch to another parameter set sent
+  earlier, and before a VP8 keyframe; a band that doesn't start with a
+  start code is one NAL unit to the decoder, so its first byte counts).
+  Drawing writes exactly the piece of the panel it's filling, whatever
+  the sizes: each colour converter writes only the rows it's asked for,
+  and two bands meet where the top band's rows end, on whole rows of the
+  converter, so a piece across the seam splits into parts the converters
+  draw whole. The decode task takes two bands only in the layout above
+  (the top band whole macroblocks and shorter than the picture, the two
+  making its height).
   `esp32/tests/test_video_untrusted.py` checks these.
 - **The apps** clamp what `hello` claims (sizes, rates, buffer) before
   sizing encoders and buffers from it, and take launch options (Android
@@ -402,8 +415,9 @@ experimental.
 ## Checking a change
 
 - **Host tests:** `esp32/tests/test_muse_video.py` (the ring and the Wi-Fi
-  messages, H.264 and VP8), `test_video_untrusted.py` (hostile sizes and
-  the port's guards), `test_tinyh264_pie.py` (the S31 SIMD model),
+  messages, H.264 and VP8), `test_video_untrusted.py` (hostile sizes,
+  the port's guards, and drawing: every piece written exactly at every
+  band seam and scale), `test_tinyh264_pie.py` (the S31 SIMD model),
   `test_libvpx_vp8.py` (the VP8 decoder against libvpx's output).
 - **Live:** Muse Gadgets Test's screen and log (Android: `adb logcat -s
   MuseCam`; iPhone: Xcode's console, or `MuseCam:` lines in the device log) show

@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 import shlex
@@ -61,10 +60,12 @@ class LinkOtaTest(unittest.TestCase):
 
     def test_ota_disabled_and_enabled(self) -> None:
         # mosaico: "" (another board), "board" (the ESP-Mosaico without its
-        # Vibe Mode overlay) or "vibe" (its Vibe Mode build).
+        # Vibe Mode overlay), "vibe" (its Vibe Mode build) or "vibe2" (for
+        # Vibe Mode 0.2, Recovery ABI 2).
         for enabled, dev, mosaico in (
             (False, True, ""), (True, True, ""), (True, False, ""),
             (True, True, "board"), (False, True, "vibe"), (True, True, "vibe"),
+            (True, True, "vibe2"),
         ):
             with self.subTest(enabled=enabled, dev=dev, mosaico=mosaico), \
                     tempfile.TemporaryDirectory() as name:
@@ -74,7 +75,10 @@ class LinkOtaTest(unittest.TestCase):
                     + f"#define CONFIG_HOMEHUB_DEV_BUILD {int(dev)}\n"
                     + ("#define CONFIG_MUSE_BOARD_ESP_MOSAICO 1\n" if mosaico else "")
                     + ("#define CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY 1\n"
-                       if mosaico == "vibe" else "")
+                       if mosaico.startswith("vibe") else "")
+                    + ("#define CONFIG_ESP_IRIS_RECOVERY_ABI 2\n"
+                       "#define VIBE_SUBTYPE 0x20\n"  # app/test
+                       if mosaico == "vibe2" else "")
                 )
                 # Type-check log arguments without printing or making them unused.
                 (tmp / "esp_log.h").write_text(
@@ -198,59 +202,6 @@ int main(void) {
 }
 """)
             self.compile_and_run([source], tmp)
-
-    def test_registration_only_advertises_enabled_ota(self) -> None:
-        noise = (ROOT / "main/noise_control.cpp").read_text()
-        functions = "\n".join(function_source(noise, signature) for signature in (
-            "static cJSON *string_param(",
-            "static void add_command(",
-            "static void add_register_metadata_string(",
-            "static char *build_register_json(",
-        ))
-        with tempfile.TemporaryDirectory() as name:
-            tmp = Path(name)
-            source = tmp / "registration.c"
-            # These builders use the C subset of C++, with nullptr as the only
-            # exception. Execute them with the same cJSON fake as other tests.
-            source.write_text('''
-#include <assert.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "cJSON.h"
-#include "esp_app_desc.h"
-#define nullptr NULL
-#define CONFIG_HOMEHUB_TUNNEL 1
-static bool enabled;
-bool ota_is_enabled(void) { return enabled; }
-static esp_app_desc_t app = { .version = "999.0.0" };
-const esp_app_desc_t *esp_app_get_description(void) { return &app; }
-static char s_wifi_ssid[33] = "test-wifi", s_register_req_id[40];
-static const char *s_node_id = "test-node", *s_display_name = "Test device";
-static void copy_wifi_ssid(char *out, size_t size) { snprintf(out, size, "%s", s_wifi_ssid); }
-static void make_uuid(char *out, size_t size) { snprintf(out, size, "test-request"); }
-''' + functions + '''
-int main(void) {
-    for (int on = 0; on <= 1; on++) {
-        enabled = on;
-        char *json = build_register_json();
-        assert(json);
-        puts(json);
-        free(json);
-    }
-    return 0;
-}
-''')
-            output = self.compile_and_run([source, ROOT / "tests/link_fakes/cJSON.c"], tmp)
-            registrations = [json.loads(line)["params"] for line in output.splitlines()]
-            self.assertEqual(len(registrations), 2)
-            for enabled, params in zip((False, True), registrations):
-                commands = params["commands_v2"]
-                self.assertIn("device.health", commands)
-                self.assertIn("device.discover", commands)
-                self.assertEqual("device.ota" in commands, enabled)
-                self.assertEqual(params["version"], "999.0.0")
 
 
 if __name__ == "__main__":

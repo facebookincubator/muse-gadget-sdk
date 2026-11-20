@@ -15,7 +15,10 @@
 # Waveshare ESP32-S3-Touch-AMOLED-1.75C: 32 MB flash, 8 MB octal PSRAM.
 # Load last, after sdkconfig.muse.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-s3-175c"
+CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-S3-Touch-AMOLED-1.75C"
 CONFIG_MUSE_BOARD_WAVESHARE_S3_175C=y
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/muse-waveshare-s3-175c.md"
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="32MB"
 
@@ -65,3 +68,14 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # actually slept, and how long each power lock kept the chip awake.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 CONFIG_PM_PROFILING=y
+# Internal RAM is tight at boot and around pairing (the heartbeat's minimum
+# free dips under 8 KB), and code and rodata run from PSRAM above, so:
+# - setup task stacks (pairing, provisioning, the Muse VM lookup) go to
+#   PSRAM: the 8 KB provisioning and lookup stacks otherwise find no free
+#   block, and pairing ends with error_operation_in_progress or Muse can't
+#   reach its VM (the StopWatch and CrowPanel do the same);
+# - allocations of 1 KB and up try PSRAM first (sdkconfig.muse: 4 KB),
+#   leaving the 16 KB of DMA-capable RAM Link waits for before it sends
+#   link.register.
+CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024

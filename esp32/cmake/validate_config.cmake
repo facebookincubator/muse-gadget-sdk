@@ -16,6 +16,22 @@
 set(GADGET_CONFIG_REGEN_HINT
     "Generated sdkconfig values override newer defaults; regenerate the active isolated profile configuration.")
 
+string(LENGTH "${CONFIG_MUSE_DEVICE_MODEL_ID}" model_id_len)
+if(NOT CONFIG_MUSE_DEVICE_MODEL_ID MATCHES "^[a-z0-9-]+$" OR model_id_len GREATER 64)
+    message(FATAL_ERROR
+        "CONFIG_MUSE_DEVICE_MODEL_ID \"${CONFIG_MUSE_DEVICE_MODEL_ID}\" must be 1 to 64 lowercase letters, digits and hyphens.")
+endif()
+# Printable ASCII without " or \, so link.register's JSON never escapes it
+# and its size test can count the name at its maximum.
+string(LENGTH "${CONFIG_MUSE_DEVICE_MODEL_NAME}" model_name_len)
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\"" model_name_quote)
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\\" model_name_backslash)
+if(model_name_len GREATER 128 OR NOT CONFIG_MUSE_DEVICE_MODEL_NAME MATCHES "^[ -~]+$" OR
+   NOT model_name_quote EQUAL -1 OR NOT model_name_backslash EQUAL -1)
+    message(FATAL_ERROR
+        "CONFIG_MUSE_DEVICE_MODEL_NAME must be 1 to 128 printable ASCII characters, without \" or \\.")
+endif()
+
 if(NOT CONFIG_CJSON_NESTING_LIMIT EQUAL 16)
     message(FATAL_ERROR
         "ESP32 Device SDK requires cJSON nesting limit 16. ${GADGET_CONFIG_REGEN_HINT}")
@@ -25,28 +41,37 @@ endif()
 # during tunnel bursts even when sdkconfig.defaults has been updated.
 # TCP limits: the no-PSRAM Cardputer and AI Passport have no tunnel and use
 # four-MSS windows.
-# The C5 may use up to 64 KiB (sdkconfig.defaults.esp32c5), and only with the
+# The C5 may use up to 96 KiB (sdkconfig.defaults.esp32c5), and only with the
 # setup that was measured: PSRAM with lwIP and Wi-Fi buffers preferring it, a
-# receive path that takes a whole window (at least 64 dynamic RX buffers) and
-# a bounded out-of-order queue (1 to 12 segments; 0 means unlimited).
+# receive path that takes a whole window (at least 64 dynamic RX buffers and a
+# 64-entry TCP receive mailbox up to 64 KiB; past that, window scaling, PSRAM
+# required at boot and at least 96 of each) and a bounded out-of-order queue
+# (1 to 12 segments; 0 means unlimited). Without window scaling ESP-IDF caps
+# the mailbox at 64 and drops a larger value back to its default of 6.
 # The data-path bench (CONFIG_HOMEHUB_PIPELINE_BENCH, never shipped) may try
 # any window.
 if((NOT CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 16384 OR
     NOT CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 16384) AND
    NOT CONFIG_HOMEHUB_PIPELINE_BENCH AND
    NOT (CONFIG_IDF_TARGET_ESP32C5 AND CONFIG_SPIRAM AND CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP AND
-        CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM GREATER_EQUAL 64 AND
         CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS GREATER 0 AND
         CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS LESS_EQUAL 12 AND
         CONFIG_LWIP_TCP_SND_BUF_DEFAULT GREATER_EQUAL 16384 AND
-        CONFIG_LWIP_TCP_SND_BUF_DEFAULT LESS_EQUAL 65535 AND
         CONFIG_LWIP_TCP_WND_DEFAULT GREATER_EQUAL 16384 AND
-        CONFIG_LWIP_TCP_WND_DEFAULT LESS_EQUAL 65535) AND
+        ((CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM GREATER_EQUAL 64 AND
+          CONFIG_LWIP_TCP_RECVMBOX_SIZE GREATER_EQUAL 64 AND
+          CONFIG_LWIP_TCP_SND_BUF_DEFAULT LESS_EQUAL 65535 AND
+          CONFIG_LWIP_TCP_WND_DEFAULT LESS_EQUAL 65535) OR
+         (CONFIG_LWIP_WND_SCALE AND NOT CONFIG_SPIRAM_IGNORE_NOTFOUND AND
+          CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM GREATER_EQUAL 96 AND
+          CONFIG_LWIP_TCP_RECVMBOX_SIZE GREATER_EQUAL 96 AND
+          CONFIG_LWIP_TCP_SND_BUF_DEFAULT LESS_EQUAL 98304 AND
+          CONFIG_LWIP_TCP_WND_DEFAULT LESS_EQUAL 98304))) AND
    NOT ((CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV OR CONFIG_MUSE_BOARD_AI_PASSPORT) AND NOT CONFIG_SPIRAM AND
         NOT CONFIG_HOMEHUB_TUNNEL AND CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 5760 AND
         CONFIG_LWIP_TCP_WND_DEFAULT EQUAL 5760))
     message(FATAL_ERROR
-        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (up to 65535 on the C5 with sdkconfig.defaults.esp32c5: PSRAM, CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, 64+ dynamic RX buffers and 1-12 out-of-order segments; 5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
+        "ESP32 Device SDK requires TCP send buffer and receive window 16384 (up to 65535 on the C5 with PSRAM, CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, 64+ dynamic RX buffers, a 64+ entry TCP receive mailbox and 1-12 out-of-order segments, or up to 98304 as in sdkconfig.defaults.esp32c5, adding window scaling, PSRAM required at boot, 96+ dynamic RX buffers and a 96+ entry mailbox; 5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
 endif()
 
 # With BLE kept up after setup, the gadget keeps advertising a connectable
@@ -117,4 +142,22 @@ if(CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH)
         message(FATAL_ERROR
             "Manufacturer pairing builds must use production epoch 1. ${GADGET_CONFIG_REGEN_HINT}")
     endif()
+endif()
+
+# Cross-signed bundle verification: before v6.0.3, ESP-IDF's bundle callback
+# allocates the subject of each root it offers and nothing frees it, so every
+# TLS handshake, including one with a forged certificate, leaks heap. Those
+# releases also reject every bundle-anchored chain with it on once
+# CONFIG_MBEDTLS_HAVE_TIME_DATE is set.
+if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY AND
+   "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_LESS 6.0.3)
+    message(FATAL_ERROR
+        "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY needs ESP-IDF v6.0.3 or later (this is v${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}): earlier releases leak heap on every TLS handshake with it on.")
+endif()
+
+# Stale bundle choice: a build directory configured before sdkconfig.defaults
+# picked the common bundle still trusts the full one.
+if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL)
+    message(WARNING
+        "This build trusts ESP-IDF's full root CA bundle, but sdkconfig.defaults picks the common one. If you didn't choose it in menuconfig: ${GADGET_CONFIG_REGEN_HINT}")
 endif()

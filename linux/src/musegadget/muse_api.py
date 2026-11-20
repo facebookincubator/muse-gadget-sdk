@@ -24,13 +24,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from musegadget import __version__
+from musegadget import __version__, tls
 
 log = logging.getLogger(__name__)
 
 API_BASE = "https://api.muse.ai"
 FETCH_PATH = "/fetch_vms"
 REFRESH_PATH = "/device_token/refresh"
+FETCH_TIMEOUT_S = 15   # the VM lookup's socket timeout (callers may bound the whole lookup by it)
 
 
 def api_root(api_url_v2: str = "") -> str:
@@ -71,13 +72,13 @@ def fetch_vms_with_status(
     req.add_header("X-API-Version", "1.0.0")
     req.add_header("User-Agent", user_agent())
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_S, context=tls.client_context()) as resp:
             status = resp.getcode()
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         log.error("VM fetch failed: HTTP %d", exc.code)
         return [], exc.code
-    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, UnicodeError, OSError) as exc:
         log.error("VM fetch failed: %s", exc)
         return [], None
 
@@ -125,7 +126,7 @@ def _post_refresh(
     req.add_header("Authorization", auth_header)
     req.add_header("Content-Type", "application/json")
     req.add_header("User-Agent", user_agent())
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15, context=tls.client_context()) as resp:
         data = json.loads(resp.read())
     if isinstance(data, dict) and isinstance(data.get("payload"), dict):
         data = data["payload"]
@@ -161,6 +162,6 @@ def refresh_device_token(
         else:
             log.warning("token refresh failed: HTTP %d", exc.code)
         return None, exc.code
-    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError, UnicodeError, OSError) as exc:
         log.warning("token refresh failed: %s", exc)
         return None, None
