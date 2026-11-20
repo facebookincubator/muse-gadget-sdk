@@ -476,14 +476,12 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    mdns_entry_t *found = calloc(MAX_MDNS, sizeof(mdns_entry_t));
-    mdns_addr_t *addrs = found ? calloc(MAX_MDNS_ADDRS, sizeof(mdns_addr_t)) : NULL;
-    if (!addrs) {
-        free(found);
-        source->error = "out_of_memory";
-        close(sock);
-        return;
-    }
+    // One allocation for both tables: alone, the 10 KB address table is small
+    // enough to come from internal RAM (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL).
+    mdns_entry_t *found = calloc(1, MAX_MDNS * sizeof(mdns_entry_t)
+                                    + MAX_MDNS_ADDRS * sizeof(mdns_addr_t));
+    if (!found) { source->error = "out_of_memory"; close(sock); return; }
+    mdns_addr_t *addrs = (mdns_addr_t *)(found + MAX_MDNS);
     int fc = 0, ac = 0;
     bool addrs_full = false;
 
@@ -530,7 +528,6 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     }
 
     free(found);
-    free(addrs);
     setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mr, sizeof(mr));
     close(sock);
     ESP_LOGI(TAG, "mDNS: %d unique services", fc);
