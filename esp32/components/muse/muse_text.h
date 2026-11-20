@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,6 +81,21 @@ bool muse_text_has_latin(const char *s);
 
 /* text, or if it needs stand-ins and fits in cap bytes, a copy with them in buf. */
 const char *muse_text_showable(const char *text, char *buf, size_t cap);
+
+/*
+ * Muse often answers in Markdown, which the screen would show as is. Takes
+ * the markers out of s, in place, so a caption reads as plain text:
+ * **bold**, *italic*, _italic_, ~~struck~~ and `code` keep only their text
+ * (code as it is); "# " headings and "> " quotes lose their marker; "* " and
+ * "+ " bullets become "- "; [text](url) links keep their text; table rows
+ * lose their outer bars and separate cells with ", "; table dividers, "---"
+ * rules and ``` fences go. A lone * or _ inside a word or between spaces
+ * ("2 * 3", "snake_case") stays. Works a line ("\n") at a time, so it can
+ * run on a wrapped page: bit i of `wrapped` marks line i as wrapped from the
+ * line before, so the "+" of a wrapped "7 + 5" isn't taken for a bullet
+ * (lines past the 64th count as unwrapped). Returns the new length.
+ */
+size_t muse_text_strip_markdown(char *s, uint64_t wrapped);
 
 #ifdef __cplusplus
 }

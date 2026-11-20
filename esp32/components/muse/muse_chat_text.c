@@ -203,6 +203,16 @@ static bool next_line(const char **text, int cols, int px, const char **start, s
     return end != p;
 }
 
+/* Whether the wrapped line at `start` begins a line of `text`, rather than
+ * carrying on the one before (muse_text_strip_markdown's `wrapped`). */
+static bool starts_line(const char *text, const char *start)
+{
+    while (start > text && start[-1] == ' ') {
+        start--;
+    }
+    return start == text || start[-1] == '\n';
+}
+
 /*
  * Wraps `text` to the screen's page (muse_state_page) and puts the page holding
  * byte `at` in `out`. Pages overlap by a line: a page's last line starts the
@@ -211,7 +221,7 @@ static bool next_line(const char **text, int cols, int px, const char **start, s
  * one starts at that line, so lines of multibyte characters aren't skipped
  * either.
  */
-bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
+static bool caption_at(const char *text, size_t at, char *out, size_t cap, uint64_t *wrapped)
 {
     int cols, lines;
     muse_state_page(text, &cols, &lines);
@@ -223,6 +233,7 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
         size_t len, o = 0;
         int n = 0;
         out[0] = '\0';
+        *wrapped = 0;
         const char *line = p;
         while (n < lines && next_line(&p, cols, px, &start, &len)) {
             if (o + 1 + len >= cap) {
@@ -231,6 +242,9 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
             }
             line = p;
             o += snprintf(out + o, cap - o, "%s%.*s", o ? "\n" : "", (int)len, start);
+            if (n < 64 && !starts_line(text, start)) {
+                *wrapped |= 1ull << n;
+            }
             last = start;
             n++;
         }
@@ -243,6 +257,18 @@ bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
         }
         page = next;
     }
+}
+
+/* The page is wrapped from the reply as Muse sent it, so `at` and the page
+ * turns stay in step with the speech; only the page shown loses its Markdown. */
+bool muse_hatch_caption_at(const char *text, size_t at, char *out, size_t cap)
+{
+    uint64_t wrapped = 0;
+    bool found = caption_at(text, at, out, cap, &wrapped);
+    if (cap) {
+        muse_text_strip_markdown(out, wrapped);
+    }
+    return found;
 }
 
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
@@ -263,6 +289,7 @@ int muse_chat_caption_page(const char *text, int page, char *out, size_t cap)
     const char *first = text, *start;
     size_t len;
     int pages = 0;
+    uint64_t wrapped = 0;
     for (;;) {
         const char *p = first, *last = first;
         size_t o = 0;
@@ -273,8 +300,14 @@ int muse_chat_caption_page(const char *text, int page, char *out, size_t cap)
             if (!next_line(&q, cols, s_caption_px, &start, &len)) break;
             if (n && o + 1 + len >= cap) break;   /* whole lines only */
             if (copy) {
-                if (!n) o = 0;
+                if (!n) {
+                    o = 0;
+                    wrapped = 0;
+                }
                 o += snprintf(out + o, cap - o, "%s%.*s", n ? "\n" : "", (int)len, start);
+                if (n < 64 && !starts_line(text, start)) {
+                    wrapped |= 1ull << n;
+                }
             } else {
                 o += (n ? 1 : 0) + len;
             }
@@ -288,6 +321,7 @@ int muse_chat_caption_page(const char *text, int page, char *out, size_t cap)
         if (!next_line(&rest, cols, s_caption_px, &start, &len)) break;
         first = n > 1 ? last : p;
     }
+    muse_text_strip_markdown(out, wrapped);
     return pages;
 }
 #endif
