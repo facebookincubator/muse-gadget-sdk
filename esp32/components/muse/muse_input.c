@@ -298,10 +298,6 @@ static void aux_button(bool pressed, bool edge)
             swallow = true;
             power_off();
         }
-        if (s_restart_requested) {
-            s_restart_requested = false;
-            restart();
-        }
         return;
     }
     if (edge && !pressed && !swallow) {
@@ -792,6 +788,10 @@ static void input_task(void *arg)
         if (s_power_off_requested) {
             s_power_off_requested = false;
             power_off();
+        }
+        if (s_restart_requested) {
+            s_restart_requested = false;
+            restart();
         }
 
         TickType_t now = xTaskGetTickCount();

@@ -65,6 +65,7 @@ int64_t esp_timer_get_time(void);
 void *heap_caps_malloc(size_t, unsigned);
 void *heap_caps_realloc(void *, size_t, unsigned);
 const char *esp_err_to_name(esp_err_t);
+void esp_restart(void);
 
 typedef int gpio_num_t;
 typedef void *esp_codec_dev_handle_t;
