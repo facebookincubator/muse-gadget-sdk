@@ -85,6 +85,63 @@ typedef struct {
 
 static bssid_cache_entry_t s_bssid_cache[MAX_CACHED_SCANS];
 static int s_bssid_cache_count = 0;
+// Guards s_bssid_cache: a scan and a connect (both holding s_scan_mutex)
+// update and read it, and so do the event loop's GOT_IP (cache_connected_ap,
+// which can't take s_scan_mutex: a connect holds it while it waits for that
+// very event) and wifi_mgr_has_cached_ap. Held for copies only, never a log.
+static portMUX_TYPE s_bssid_lock = portMUX_INITIALIZER_UNLOCKED;
+
+// The access point just joined goes into the cache too (the one actually
+// associated with, replacing a scan's strongest for that SSID), so a rejoin
+// after a drop goes straight to it (wifi_mgr_has_cached_ap).
+static void cache_connected_ap(void) {
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK || !ap.ssid[0]) return;
+    ap.ssid[sizeof(ap.ssid) - 1] = '\0';   // a C string for the copies below
+    const char *ssid = (const char *)ap.ssid;
+    portENTER_CRITICAL(&s_bssid_lock);
+    int k = -1;
+    for (int i = 0; i < s_bssid_cache_count; i++) {
+        if (strcmp(s_bssid_cache[i].ssid, ssid) == 0) {
+            k = i;
+            break;
+        }
+    }
+    if (k < 0 && s_bssid_cache_count < MAX_CACHED_SCANS) k = s_bssid_cache_count++;
+    if (k >= 0) {
+        bssid_cache_entry_t *e = &s_bssid_cache[k];
+        strlcpy(e->ssid, ssid, sizeof(e->ssid));
+        memcpy(e->bssid, ap.bssid, sizeof(e->bssid));
+        e->rssi = ap.rssi;
+        e->channel = ap.primary;
+    }
+    portEXIT_CRITICAL(&s_bssid_lock);
+}
+
+// A drop leaves the joined AP's cached signal at the last one heard, so a
+// gadget that moved away from it probes for a nearer one next time
+// (wifi_mgr_has_cached_ap's floor) instead of going straight back.
+static void cache_disconnect_rssi(const wifi_event_sta_disconnected_t *ev) {
+    if (!ev || ev->rssi >= 0) return;
+    portENTER_CRITICAL(&s_bssid_lock);
+    for (int i = 0; i < s_bssid_cache_count; i++) {
+        if (memcmp(s_bssid_cache[i].bssid, ev->bssid, sizeof(ev->bssid)) == 0) {
+            s_bssid_cache[i].rssi = ev->rssi;
+        }
+    }
+    portEXIT_CRITICAL(&s_bssid_lock);
+}
+
+bool wifi_mgr_has_cached_ap(const char *ssid, int min_rssi) {
+    if (!ssid || !ssid[0]) return false;
+    bool found = false;
+    portENTER_CRITICAL(&s_bssid_lock);
+    for (int i = 0; i < s_bssid_cache_count && !found; i++) {
+        found = strcmp(s_bssid_cache[i].ssid, ssid) == 0 && s_bssid_cache[i].rssi >= min_rssi;
+    }
+    portEXIT_CRITICAL(&s_bssid_lock);
+    return found;
+}
 static struct {
     char ssid[33];
     uint8_t channel;
@@ -171,6 +228,7 @@ static void event_handler(void *arg, esp_event_base_t base,
             s_ip_lost_us = esp_timer_get_time();
             link_events_record(LINK_EVENT_WIFI_DOWN, "esp-idf reason=%u rssi=%d",
                                ev ? ev->reason : 0u, ev ? ev->rssi : 0);
+            cache_disconnect_rssi(ev);
         }
 
         xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP);
@@ -202,6 +260,7 @@ static void event_handler(void *arg, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&ev->ip_info.ip));
+        cache_connected_ap();
         if (!s_has_ip) {
             s_has_ip = true;
             if (s_ip_lost_us) {
@@ -317,18 +376,24 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     // Fall back to the full scan when no cache is available (e.g. reconnect
     // after the AP changed channels).
     bool have_bssid = false;
+    int cached_rssi = 0;
+    portENTER_CRITICAL(&s_bssid_lock);
     for (int i = 0; i < s_bssid_cache_count; i++) {
         if (strcmp(s_bssid_cache[i].ssid, ssid) == 0) {
             memcpy(wc.sta.bssid, s_bssid_cache[i].bssid, 6);
             wc.sta.bssid_set = true;
             wc.sta.channel = s_bssid_cache[i].channel;
+            cached_rssi = s_bssid_cache[i].rssi;
             have_bssid = true;
-            ESP_LOGI(TAG, "using cached BSSID %02x:%02x:%02x:%02x:%02x:%02x ch%d (rssi %d)",
-                     wc.sta.bssid[0], wc.sta.bssid[1], wc.sta.bssid[2],
-                     wc.sta.bssid[3], wc.sta.bssid[4], wc.sta.bssid[5],
-                     wc.sta.channel, s_bssid_cache[i].rssi);
             break;
         }
+    }
+    portEXIT_CRITICAL(&s_bssid_lock);
+    if (have_bssid) {
+        ESP_LOGI(TAG, "using cached BSSID %02x:%02x:%02x:%02x:%02x:%02x ch%d (rssi %d)",
+                 wc.sta.bssid[0], wc.sta.bssid[1], wc.sta.bssid[2],
+                 wc.sta.bssid[3], wc.sta.bssid[4], wc.sta.bssid[5],
+                 wc.sta.channel, cached_rssi);
     }
 
     bool have_channel_hint = !have_bssid && s_channel_hint.channel != 0
@@ -400,7 +465,9 @@ bool wifi_mgr_connect(const char *ssid, const char *password, int timeout_ms) {
     if (!connected && have_bssid) {
         // Cached BSSID didn't work — invalidate so next attempt does a full
         // scan (AP may have changed channel or gone away).
+        portENTER_CRITICAL(&s_bssid_lock);
         s_bssid_cache_count = 0;
+        portEXIT_CRITICAL(&s_bssid_lock);
     }
 
 done:
@@ -559,6 +626,7 @@ int wifi_mgr_scan(wifi_scan_entry_t *out, int max_entries, uint8_t channel,
         // since recs is RSSI-sorted). Retain entries missed by a BLE
         // coexistence refresh so Connect can still use the boot-scan target.
         int cached = -1;
+        portENTER_CRITICAL(&s_bssid_lock);
         for (int j = 0; j < s_bssid_cache_count; j++) {
             if (strcmp(s_bssid_cache[j].ssid, ssid) == 0) {
                 cached = j;
@@ -576,6 +644,7 @@ int wifi_mgr_scan(wifi_scan_entry_t *out, int max_entries, uint8_t channel,
             entry->rssi = recs[i].rssi;
             entry->channel = recs[i].primary;
         }
+        portEXIT_CRITICAL(&s_bssid_lock);
         n++;
     }
     free(recs);

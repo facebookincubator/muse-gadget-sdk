@@ -44,6 +44,10 @@ bool wifi_mgr_seed_channel_hint(const char *ssid, uint8_t channel);
 
 // Read the channel of the currently associated AP.
 bool wifi_mgr_get_connected_channel(uint8_t *channel);
+// Whether a cached access point for ssid (the one last joined, or a scan's
+// strongest), last heard at min_rssi dBm or stronger, is there for
+// wifi_mgr_connect() to go straight to rather than search for the network.
+bool wifi_mgr_has_cached_ap(const char *ssid, int min_rssi);
 
 void wifi_mgr_disconnect(void);
 

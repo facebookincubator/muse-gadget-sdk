@@ -123,6 +123,7 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define WIFI_JOIN_TRY_MIN_MS    8000    // each one's share of the timeout, at least
 #define WIFI_JOIN_SCAN_MAX      40      // as many networks as a scan reports
 #define WIFI_QUICK_MIN_RSSI     (-75)   // near enough to join without a full scan
+#define WIFI_REJOIN_MS          12000   // straight to the cached access point, then the probe
 #define MAX_SCAN_RESULTS        25
 #define TOKEN_BUF_BYTES         2048
 #define VM_AUTH_REFRESH_RETRY_INTERVAL_US (60LL * 1000000LL)
@@ -528,6 +529,24 @@ static app_wifi_join_t join_saved_networks(int timeout_ms, join_mode_t mode,
         tries = 1;
         ok = join_saved_network(list, 0, join_ms_left(deadline), led, -1, joined);
         goto done;
+    }
+
+    // Rejoining the network it was on (after a drop): straight to the
+    // access point cached at that join (wifi_mgr_has_cached_ap), without
+    // probing its channel first, if it was last heard (at the join, or as the
+    // link dropped) at the probe's floor or better: on a mesh, a weak one
+    // probes for a nearer node. A miss drops the cache
+    // (wifi_mgr_connect), and the probe and the scan below follow. The cap
+    // leaves time for a slow DHCP: a shorter one re-triggered the connect
+    // while DHCP was still running.
+    if (mode == JOIN_ANY && wifi_mgr_has_cached_ap(list->nets[0].ssid, WIFI_QUICK_MIN_RSSI)) {
+        restore_wifi_channel_hint(list->nets[0].ssid);
+        // Neither tries nor tried[]: the probe and the scan below count what
+        // they find, so a miss away from home is still "not nearby", and the
+        // scan may still find this network through another access point.
+        int ms = join_ms_left(deadline) / 2;
+        ok = join_saved_network(list, 0, ms < WIFI_REJOIN_MS ? ms : WIFI_REJOIN_MS, led, -1, joined);
+        if (ok) goto done;
     }
 
     channel = saved_wifi_channel(list->nets[0].ssid);
