@@ -24,6 +24,8 @@
  *              caption shows (muse_text.c, test_muse_caption_wrap.py)
  *   latin      the same with CONFIG_MUSE_LATIN_FONT's accented letters kept,
  *              after "1:" if it has any or "0:"
+ *   markdown   stdin is a reply's text: prints it without its Markdown
+ *              (test_muse_markdown_captions.py)
  *   page       stdin is a reply's text: prints "cjk" or "latin" for the caption
  *              font it takes, then for the page it asks for (test_muse_caption_wrap.py) */
 #include <stdio.h>
@@ -150,7 +152,7 @@ int main(int argc, char **argv)
         muse_text_to_caption(shown, sizeof(shown));
         printf("%d:%s", muse_text_has_latin(shown), shown);
     } else if (argc > 1 && !strcmp(argv[1], "markdown")) {
-        size_t n = muse_text_strip_markdown(in);
+        size_t n = muse_text_strip_markdown(in, 0);
         if (n != strlen(in)) {
             return 3;
         }

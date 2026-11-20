@@ -143,6 +143,16 @@ class MarkdownCaptionTest(unittest.TestCase):
             "Good morning! Here's the plan:\n- Coffee at 8\n- Walk at 9",
         )
 
+    def test_wrapped_lines_keep_what_they_start_with(self) -> None:
+        # A "+", "*" or ">" that a line wraps before is text, not a marker.
+        for reply, shown in (
+            ("The answer is 7 + 5 = 12", "The answer is 7\n+ 5 = 12"),
+            ("The answer is 6 * 7 = 42", "The answer is 6\n* 7 = 42"),
+            ("Keep it on if x > 3 or so", "Keep it on if x\n> 3 or so"),
+            ("* Coffee at eight then a walk", "- Coffee at\neight then a\nwalk"),
+        ):
+            self.assertEqual(self.run_harness("caption", reply, "15"), shown, reply)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -384,11 +384,11 @@ static const char *md_link(const char *p, const char *eol, const char **text, si
     return end + 1;
 }
 
-size_t muse_text_strip_markdown(char *s)
+size_t muse_text_strip_markdown(char *s, uint64_t wrapped)
 {
     char *w = s;   /* writes never pass reads: every rule keeps or shortens */
     const char *r = s;
-    while (*r) {
+    for (int i = 0; *r; i++) {
         const char *eol = strchr(r, '\n');
         if (!eol) {
             eol = r + strlen(r);
@@ -398,25 +398,26 @@ size_t muse_text_strip_markdown(char *s)
         while (p < eol && *p == ' ') {
             p++;
         }
-        if (md_rule(p, eol) || (eol - p >= 3 && !strncmp(p, "```", 3))) {
+        bool starts = i >= 64 || !(wrapped >> i & 1);   /* only there are line markers */
+        if (starts && (md_rule(p, eol) || (eol - p >= 3 && !strncmp(p, "```", 3)))) {
             r = next;   /* the line goes */
             continue;
         }
         memmove(w, r, p - r);   /* the indent */
         w += p - r;
-        if (*p == '>') {
+        if (starts && *p == '>') {
             p += p + 1 < eol && p[1] == ' ' ? 2 : 1;
         }
         int hashes = 0;
         while (p + hashes < eol && p[hashes] == '#') {
             hashes++;
         }
-        if (hashes && hashes <= 6 && (p + hashes == eol || p[hashes] == ' ')) {
+        if (starts && hashes && hashes <= 6 && (p + hashes == eol || p[hashes] == ' ')) {
             p += hashes;
             while (p < eol && *p == ' ') {
                 p++;
             }
-        } else if ((*p == '*' || *p == '+') && p + 1 < eol && p[1] == ' ') {
+        } else if (starts && (*p == '*' || *p == '+') && p + 1 < eol && p[1] == ' ') {
             *w++ = '-';
             p++;
         }
