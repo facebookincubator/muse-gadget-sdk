@@ -97,6 +97,7 @@ static portMUX_TYPE s_bssid_lock = portMUX_INITIALIZER_UNLOCKED;
 static void cache_connected_ap(void) {
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK || !ap.ssid[0]) return;
+    ap.ssid[sizeof(ap.ssid) - 1] = '\0';   // a C string for the copies below
     const char *ssid = (const char *)ap.ssid;
     portENTER_CRITICAL(&s_bssid_lock);
     int k = -1;
