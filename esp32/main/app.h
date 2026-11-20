@@ -54,8 +54,10 @@ bool app_wifi_nap(void);
 // Starts the BLE server if needed and keeps it advertising (or not) for Muse's
 // phone-setup service once setup is complete.
 void app_ble_companion_set(bool advertise);
-// A talk-button press. Returns true when it confirmed a pending pairing.
-bool app_confirm_pairing_press(void);
+// A talk-button press that began after pressed_after_us (esp_timer's clock).
+// Returns true when a pairing waits for a press: the press is Link's then,
+// and confirms it only if it began after the prompt.
+bool app_confirm_pairing_press(int64_t pressed_after_us);
 // Full setup reset and reboot, from a worker task.
 void app_reset_setup_async(void);
 #endif

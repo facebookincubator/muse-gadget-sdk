@@ -424,7 +424,7 @@ static unsigned poll_buttons(void)
             tp_on_face = false;   /* a volume drag owns this touch */
         } else if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
             tp_talking = true;
-            ev |= MUSE_BTN_TALK_PRESS;
+            ev |= MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;   /* a hold, not an edge: never confirms pairing */
         }
     }
     return ev;

@@ -62,6 +62,19 @@ def _sanitizer_flags(cc: list[str], tmp: Path) -> list[str]:
     return flags if run.returncode == 0 else []
 
 
+def _pattern_init_flags(cc: list[str], tmp: Path) -> list[str]:
+    # Uninitialised locals get a nonzero pattern, so an object the code
+    # forgets to clear (the JPEG decoder's) never happens to read as zero.
+    flags = ["-ftrivial-auto-var-init=pattern"]
+    proc = subprocess.run(
+        [*cc, "-x", "c", "-std=c11", *flags, "-o", str(tmp / "pattern_probe"), "-"],
+        input=b"int main(void) { return 0; }\n",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return flags if proc.returncode == 0 else []
+
+
 class LinkImageFetchHarnessTest(unittest.TestCase):
     def run_harness(self, spiram: bool) -> None:
         cc = _cc_command()
@@ -86,6 +99,7 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
                 "-g",
                 "-O1",
                 *sanitizer_flags,
+                *_pattern_init_flags(cc, tmp),
                 "-DLINK_FAKE_CUSTOM_TASKS",
                 "-DLINK_FAKE_CUSTOM_HEAP_CAPS",
                 f"-DCONFIG_SPIRAM={int(spiram)}",

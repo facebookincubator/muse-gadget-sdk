@@ -190,7 +190,7 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         worker = _function_body(ble, "static void pairing_client_finished_task(")
         disconnected = _function_body(app, "static void on_client_disconnected(")
 
-        self.assertIn("link_pairing_confirm_active_session()", button)
+        self.assertIn("link_pairing_confirm_active_session(button_pressed_after_us())", button)
         self.assertIn("notify_pairing_confirmed(session_generation)", button)
         self.assertIn('open_setup_window("button short-press")', button)
         self.assertIn("link_pairing_session_is_current(generation)", worker)
