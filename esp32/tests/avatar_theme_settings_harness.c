@@ -9,6 +9,12 @@
  * limitations under the License.
  */
 #include <assert.h>
+#include "esp_log.h"
+/* Retain log-tag references when compiling the settings source with host stubs. */
+#undef ESP_LOGI
+#undef ESP_LOGW
+#define ESP_LOGI(tag, ...) ((void)(tag))
+#define ESP_LOGW(tag, ...) ((void)(tag))
 #include "muse_settings.c"
 #include "muse_theme.c"
 static bool present[2], staged[2], fail_commit;
