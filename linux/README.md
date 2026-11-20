@@ -57,6 +57,39 @@ The installer checks your system, installs what it needs into
 your account, it asks, and tells you if that account can use sudo. Then it
 opens Bluetooth pairing.
 
+### Behind a proxy
+
+If the machine reaches the internet only through an HTTP proxy, give it to
+the installer:
+
+```sh
+bash install.sh --sdk-token mgst_… --proxy http://proxy.example:3128
+```
+
+The installer uses the proxy for its own downloads and for pairing, and saves
+it for the service in `/etc/systemd/system/musegadget.service.d/`, in a file
+only root can read, since the URL can hold a password
+(`http://user:password@host:port`). Later runs reuse it. `--no-proxy HOSTS`
+lists hosts to reach directly, `--proxy none` removes the proxy, and
+`--uninstall` removes it too.
+
+Avoid a user name or password that needs percent-encoding in the URL, such
+as `p%40ss` for `p@ss`. websockets before 17.2, which the installer uses,
+sends it still encoded, so pairing works but the proxy refuses the Muse
+connection with a 407.
+
+`sudo` drops your shell's proxy settings, so when you run `musegadget pair`
+or `musegadget doctor` yourself, set `https_proxy` (and `no_proxy`) and keep
+them:
+
+```sh
+sudo --preserve-env=https_proxy,no_proxy musegadget pair
+```
+
+Only HTTP proxies that support `CONNECT` work, given with their port; SOCKS
+proxies don't. Video
+calls send their media directly, not through the proxy.
+
 ## Set it up with Muse
 
 When the installer says pairing is open, go to the Muse app:
@@ -205,6 +238,106 @@ records. On a stop or remote EOF the client drains queued
 speech for at most 5.2 seconds, then explicitly ends the call. Without that
 server support, use explicit hang-up or the client idle timer. The SDK adds no
 server events or permissions itself.
+
+### Video calls
+
+Add `--video-player` (mpv or ffplay, or any command that reads raw H.264 on
+standard input) or `--video-out FILE` (raw H.264; `-` for standard output,
+which moves the CLI's own messages to standard error) to make a video call:
+
+```sh
+musegadget voice-call --vm-id YOUR_VM_ID --live --video-player
+musegadget voice-call --vm-id YOUR_VM_ID --live --video-out - | ffplay -f h264 -i -
+```
+
+A video call is signaled over the Noise session (`/voice/calls/media-endpoint`,
+`/voice/calls/join`, `/voice/end-call`) and its media goes straight to Muse's
+media endpoint as SRTP: Opus audio both ways and Muse's H.264 video, about
+1 Mbit/s. It tries UDP and TCP on the same port at once and keeps whichever
+answers first, so it works where UDP is blocked. Video calls need the system
+Opus library (`apt install libopus0`); there is no other dependency beyond
+`cryptography`. Half duplex is the default here too: while Muse speaks and for
+about half a second after, live microphone audio is replaced with silence and
+WAV input waits. The call ends on the idle or overall timer, when media stops for 10
+seconds or the endpoint stops answering connectivity checks for 30, or on
+Ctrl-C, and always with an explicit end-call. Video never stalls
+or ends the call: an output that falls behind drops frames and resumes at the
+next keyframe, and one that fails stops video only. In code, use
+`VideoCall(session, device_id=..., video_output=...)` with any object that has a
+nonblocking `write_unit(bytes)`; `voice_video` has the CLI's outputs.
+
+### Optional Hey Muse wake word
+
+Wake-word listening is **off by default**. Detection runs in a small native
+library built from the ESP32 firmware's own wake word runner and model
+(`libmuse_wakeword.so`, about 170 KB): TensorFlow Lite Micro's microfrontend,
+the int8 model through ExecuTorch's ESP-NN delegate, and the detector, on one
+thread, with no torch or other Python packages at run time. It uses about
+0.4% of one core, with the 24 to 16 kHz resampling of its tap. The setup skill is
+[`gadget-linux-wakeword`](../skills/gadget-linux-wakeword/SKILL.md), and
+[`wakeword/README.md`](wakeword/README.md) has the details.
+
+From the SDK repository root, preview the setup, then remove `--dry-run` to
+install:
+
+```sh
+bash linux/wakeword/setup.sh --dry-run
+```
+
+The helper installs the voice extra into `linux/.venv-wakeword`, builds the
+library (`linux/wakeword/build.sh`: a C/C++ compiler plus three pinned,
+checksum-verified ESP Component Registry archives, the same ones the firmware
+uses), and checks it without opening the microphone, pairing, or restarting
+the normal service. System prerequisites require the explicit
+`--install-system-packages` option; reusing an existing environment requires
+`--reuse-venv`; `--library FILE` uses an already built library.
+
+To check an environment again, without audio or network access:
+
+```sh
+linux/.venv-wakeword/bin/python -m musegadget.wakeword_check
+```
+
+Enable live listening only when wanted:
+
+```sh
+linux/.venv-wakeword/bin/musegadget voice-call --vm-id YOUR_VM_ID --live --wake-word
+```
+
+Setup installs the library into the environment (`lib/musegadget/`), where
+it is found first; `MUSE_WAKEWORD_LIBRARY` overrides that, and a checkout run
+in place falls back to `linux/wakeword/build/`. Waiting audio stays local. A detection admits
+the same realtime voice call as above, retaining up to one second of pre-roll
+at 24 kHz. Only the detector's tap is resampled to 16 kHz; voice upload and
+playback stay unchanged. Detection is paused throughout the call (including
+speaker playback and server input holds). A voice call started by a wake word
+ends if the microphone picks up no speech in the first 5 s of audio after the
+wake word's pre-roll (the pre-roll holds the wake word itself, so it doesn't
+count), so a false wake in a quiet room doesn't stream on. After a successful hangup, live mode resets
+the detector and returns to local listening. Ctrl-C stops it; omit
+`--wake-word` or use `--no-wake-word` for the original immediate-call
+behavior. The normal `musegadget run` service never opens the microphone or
+enables this feature.
+
+`--wake-sensitivity low|default|high` selects the ESP32 detector's presets.
+Measured on synthetic voices (held-out text-to-speech voices) and 23.5 hours
+of real non-wake audio, low wakes falsely about 0.3 times an hour and catches
+71% of wake words, default about 0.4 and 74%, high about 1.4 and 80%; real
+voices and Linux microphones haven't been measured. Each false wake followed
+by speech starts a call that sends audio until the call ends (by default
+after 45 quiet seconds).
+`--wake-model PATH` selects another model with the bundled model's contract.
+`--wake-timeout SECONDS` bounds each local wait; call idle/overall timers
+start only after activation.
+WAV mode also accepts `--wake-word`, runs at most one call, and exits without
+admitting a call if the file ends before a detection. Audio queued after a
+detection (the pre-roll and capture from before the call was ready) is sent up
+to three times faster than real time until it has caught up, so speech doesn't
+arrive later and later. The queue holds the pre-roll plus every start stage's
+full limit (VM lookup 15 s, transport 35 s, call readiness 35 s) and a little
+slack, 91 seconds; a live capture backlog beyond that fails the call closed rather than silently truncating the user's
+question, and live mode then returns to listening.
+Startup needs the configured VM to be reachable.
 
 ### Lifecycle diagnostics
 
@@ -437,17 +570,50 @@ bash install.sh --uninstall              # remove it (add --purge to forget the 
 
 `doctor` checks saved pairing credentials, SDK token format, the systemd
 service, Bluetooth controller power, TCP connectivity to the default
-Muse API on port 443, and whether the system still trusts root CAs that
-musegadget refuses. Each check prints `OK`, `FAIL`, or `WARN` and a next
-step. It exits with code 1 if any check fails, or 0 otherwise. Bluetooth
-problems are warnings because Bluetooth is only needed for pairing. Refused
-root CAs are warnings because musegadget skips them itself; update the
-`ca-certificates` package so the rest of the system does too.
+Muse API on port 443 (through the proxy, if one is set), and whether the
+system trust store is safe to use.
+Each check prints `OK`, `FAIL`, or `WARN` and a next step. It exits with code
+1 if any check fails, or 0 otherwise. Bluetooth problems are warnings because
+Bluetooth is only needed for pairing.
 
 Run it on the gadget with sudo so it can read the root-owned state files.
 It never changes settings, starts services, opens pairing, or prints tokens.
 It does not validate credentials online or confirm a live Muse VM session;
 an active service and reachable API alone do not establish that connection.
+
+### Root CAs
+
+musegadget uses the system trust store and checks it for four root CAs
+linked to eMudhra:
+
+- **Compromised:** emSign ECC Root CA - G3, whose intermediates' private keys
+  became public, and Comodo AAA Services root, which cross-signed them.
+  musegadget won't start or connect (exit code 78), and `doctor` reports
+  `FAIL`, while the store can't be read or still trusts either. Update the
+  `ca-certificates` package, then restart musegadget. The installer updates
+  that package, and stops if the store still trusts one of these roots.
+- **Retired:** emSign Root CA - C1 and emSign ECC Root CA - C3, which Mozilla
+  removed at eMudhra's request as it retires its dual-purpose roots, not
+  because of a compromise. Some distros' `ca-certificates` packages still
+  include them. musegadget still connects, but logs a warning, `doctor`
+  reports `WARN`, and the installer prints a warning.
+
+To stop trusting the retired roots yourself on Debian, Ubuntu or Raspberry Pi
+OS, put `!` in front of their lines in `/etc/ca-certificates.conf` (change the
+existing lines rather than adding new ones), then rebuild the store:
+
+```sh
+sudo sed -i -e 's|^mozilla/emSign_Root_CA_-_C1\.crt$|!&|' \
+    -e 's|^mozilla/emSign_ECC_Root_CA_-_C3\.crt$|!&|' /etc/ca-certificates.conf
+sudo update-ca-certificates
+```
+
+`sudo dpkg-reconfigure ca-certificates` lets you deselect them interactively
+instead. On Fedora and Arch, put a copy of each certificate in the p11-kit
+blocklist (`/etc/pki/ca-trust/source/blocklist/` on Fedora,
+`/etc/ca-certificates/trust-source/blocklist/` on Arch), then run
+`sudo update-ca-trust`. The PEM block for each root, under its name, is in
+[`tests/vectors/distrusted_roots.pem`](tests/vectors/distrusted_roots.pem).
 
 ## Develop
 

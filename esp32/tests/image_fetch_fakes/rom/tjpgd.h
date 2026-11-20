@@ -18,7 +18,8 @@
 
 #include <stdint.h>
 
-// Only what image_fetch.c names; the harness serves raw RGB565, not JPEG.
+// Only what image_fetch.c names, and the MCU size the harness's model of the
+// ROM decoder keeps in the object.
 typedef unsigned int UINT;
 typedef uint8_t BYTE;
 
@@ -40,6 +41,7 @@ typedef struct {
 
 typedef struct JDEC {
     uint16_t width, height;
+    BYTE msx, msy;
     void *device;
 } JDEC;
 

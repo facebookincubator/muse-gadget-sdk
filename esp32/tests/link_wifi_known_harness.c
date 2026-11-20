@@ -409,8 +409,43 @@ static void test_clear_setup_forgets_networks(void) {
     CHECK(fake_get("device_state") != NULL, "device keys kept");
 }
 
+static void test_proxy_follows_its_network(void) {
+    fake_reset();
+    remember("Office", "wifi1", 0);
+    network_proxy_config_t proxy = {.type = NETWORK_PROXY_SOCKS5, .host = "proxy.example",
+                                     .port = 1080, .username = "agent", .password = "secret"};
+    CHECK(wifi_known_set_proxy("Office", &proxy), "set remembered network proxy");
+    CHECK(load() == 1 && s_list.nets[0].proxy.type == NETWORK_PROXY_SOCKS5, "primary round trip");
+    CHECK(!strcmp(s_list.nets[0].proxy.password, "secret"), "proxy password round trip");
+    remember("Home", "wifi2", 0);
+    CHECK(load() == 2 && s_list.nets[0].proxy.type == NETWORK_PROXY_OFF, "new network defaults to direct");
+    CHECK(s_list.nets[1].proxy.port == 1080, "moving to others keeps proxy");
+    CHECK(!strcmp(s_list.nets[1].proxy.username, "agent"), "secondary auth round trip");
+    remember("Office", "new-wifi-password", -1);
+    CHECK(load() == 2 && s_list.nets[0].proxy.port == 1080, "password edit preserves proxy");
+    CHECK(wifi_known_forget("Home"), "forget another network");
+    CHECK(load() == 1 && s_list.nets[0].proxy.port == 1080, "forget preserves survivor proxy");
+    CHECK(!wifi_known_set_proxy("missing", &proxy), "cannot create phantom networks");
+    network_proxy_config_t off = {0};
+    CHECK(wifi_known_set_proxy("Office", &off), "turn proxy off");
+    CHECK(load() == 1 && s_list.nets[0].proxy.type == NETWORK_PROXY_OFF, "off round trip");
+    CHECK(!fake_get("wifi_proxy"), "off erases credentials");
+    CHECK(wifi_known_set_proxy("Office", &proxy), "set again");
+    fake_put("ssid", "Downgraded Home");
+    CHECK(load() == 1 && s_list.nets[0].proxy.type == NETWORK_PROXY_OFF,
+          "older firmware moving the first network cannot attach its predecessor's proxy");
+    CHECK(config_clear_setup() && !fake_get("wifi_proxy"), "full setup reset erases proxy");
+    remember("Office", "wifi1", 0);
+    fake_put("wifi_proxy", "{bad json");
+    CHECK(load() == 1 && s_list.nets[0].proxy.type == NETWORK_PROXY_INVALID, "corrupt primary proxy fails closed");
+    remember("Home", "wifi2", 0);
+    CHECK(load() == 2 && s_list.nets[1].proxy.type == NETWORK_PROXY_INVALID, "invalid proxy survives MRU reorder");
+    CHECK(wifi_known_forget("Office") && load() == 1, "forget removes network and proxy");
+}
+
 int main(void) {
     wifi_known_init();
+    test_proxy_follows_its_network();
     test_empty_and_round_trip();
     test_legacy_single_network();
     test_remember_reorders_and_caps();

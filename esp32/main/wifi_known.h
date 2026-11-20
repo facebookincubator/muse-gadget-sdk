@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include "network_proxy.h"
 
 // The Wi-Fi networks this device remembers, most recently joined first.
 // The first is kept in the "ssid" and "password" keys, as before, so code
@@ -25,6 +26,8 @@
 // "wifi_others". "wifi_channel" belongs to the first network and is erased
 // whenever a different network becomes first.
 //
+// Each record also carries its proxy; the first record uses "wifi_proxy",
+// bound to its SSID so old firmware reordering cannot move the proxy.
 // These read and write NVS: call them only from tasks with internal-RAM
 // stacks.
 
@@ -35,6 +38,7 @@
 typedef struct {
     char ssid[WIFI_KNOWN_SSID_MAX + 1];
     char password[WIFI_KNOWN_PASS_MAX + 1];
+    network_proxy_config_t proxy;
     bool hidden;          // joined by name; doesn't show in scans
 } wifi_known_net_t;
 
@@ -63,3 +67,7 @@ bool wifi_known_forget_all(void);
 
 // Clears the passwords from a list before it goes out of scope.
 void wifi_known_wipe(wifi_known_list_t *list);
+
+// Existing remembered networks only. NULL is not an Off setting.
+bool wifi_known_set_proxy(const char *ssid, const network_proxy_config_t *proxy);
+bool wifi_known_get_proxy(const char *ssid, network_proxy_config_t *out);

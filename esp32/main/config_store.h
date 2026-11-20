@@ -20,7 +20,7 @@
 #include <stddef.h>
 
 // Persistent key/value config stored in NVS.
-// Setup keys: ssid, password, wifi_channel, wifi_others, wifi_hidden (see
+// Setup keys: ssid, password, wifi_channel, wifi_others, wifi_hidden, wifi_proxy (see
 // wifi_known.h), access_token, refresh_token, vm_url, username, api_url,
 // api_url_v2, noise_host, setup_complete. Device-level keys are
 // preserved by config_clear_pairing(), config_unpair() and config_clear_setup().
@@ -59,6 +59,9 @@ bool config_unpair(void);
 bool config_clear_setup(void);
 
 bool config_is_provisioned(void);
+// The node id stored with the device tokens (identity.h). False if none is
+// stored (not set up, or set up by firmware that stored none).
+bool config_get_node_id(char *out, size_t size);
 bool config_setup_complete(void);
 bool config_mark_setup_complete(void);
 bool config_clear_setup_complete(void);

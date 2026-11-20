@@ -18,12 +18,14 @@
 # sdkconfig.muse-waveshare-c6-18, sdkconfig.muse-waveshare-s3-18,
 # sdkconfig.muse-sensecap-watcher,
 # sdkconfig.muse-espressif-box-3, sdkconfig.muse-m5stack-sticks3,
-# sdkconfig.muse-m5stack-stopwatch, sdkconfig.muse-m5stack-cores3,
+# sdkconfig.muse-m5stack-stopwatch, sdkconfig.muse-m5stack-triviapod,
+# sdkconfig.muse-m5stack-cores3,
 # sdkconfig.muse-m5stack-stickc-plus2, sdkconfig.muse-guition-jc3248w535 or
 # sdkconfig.muse-deotaland-rorolee.
 # Link owns Wi-Fi, BLE pairing, credentials and OTA; the display shows Link's
 # status instead of a status LED.
 CONFIG_HOMEHUB_LED_BACKEND_MUSE=y
+CONFIG_MUSE_DEVICE_GUIDE="devices/guides/muse.md"
 # These boards pair in community mode (no factory key). The Hatch app lists
 # community devices by this name, and only with hatch_link.community_devices on.
 CONFIG_HOMEHUB_BLE_NAME_PREFIX="MuseGadget"
@@ -62,6 +64,11 @@ CONFIG_LV_LOG_PRINTF=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+# Without the central and observer roles nothing scans, so leave the
+# controller's scanner out too: about 3 KB of IRAM (internal SRAM on the S3)
+# and its advertising-report buffers. Only the S3 and C3 controllers have
+# the option; other chips ignore it.
+CONFIG_BT_CTRL_BLE_SCAN=n
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 
 # Muse's Hatch client derives its Noise keys with HKDF.
@@ -79,6 +86,9 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
 CONFIG_ESP_WIFI_RX_BA_WIN=16
 CONFIG_ESP_WIFI_TX_BA_WIN=16
+# Every S3 board here has quad flash, so leave out the octal MXIC flash
+# driver, which sits in IRAM. A board with octal flash turns it back on.
+CONFIG_SPI_FLASH_SUPPORT_MXIC_OPI_CHIP=n
 
 # These boards carry no board-specific PHY calibration blob; use the embedded
 # default like the stock Muse firmware.

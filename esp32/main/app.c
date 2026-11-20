@@ -30,7 +30,7 @@
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
 #include "freertos/idf_additions.h"
 #endif
 #include "esp_timer.h"
@@ -44,9 +44,13 @@
 
 #include "identity.h"
 #include "sdk_token_console.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
+#include "network_proxy_tls.h"
 #include "customer_product_info.h"
 #include "ble_coex.h"
 #if CONFIG_HOMEHUB_BLE_COMMANDS
@@ -90,10 +94,14 @@
 #elif CONFIG_MUSE_P4_CSI_CAMERA
 #include "boards/p4_csi_camera.h"
 #define camera_capture_base64 p4_csi_camera_capture
+#elif CONFIG_MUSE_MOSAICO_CAMERA
+#include "boards/mosaico_camera.h"
+#define camera_capture_base64 mosaico_camera_capture
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
 #include "muse_input.h"
+#include "muse_wakeword_glue.h"
 // Muse joins Wi-Fi from its own settings, before or without pairing.
 #define WIFI_WITHOUT_PAIRING 1
 #else
@@ -133,8 +141,8 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 // OTA rollback: how long a freshly-installed (PENDING_VERIFY) image has to
 // reach the authenticated control WebSocket before the bootloader reverts it
 // (on every board; on the ESP-Mosaico, not for a Vibe Mode install).
-// The control WS is the recovery channel — if a new image can't reach it,
-// no future device.ota could repair the device, so rolling back is correct.
+// An image that can't reach the control WS can't reach Muse at all, so
+// rolling back is correct.
 #define OTA_VERIFY_TIMEOUT_US (300LL * 1000000LL)
 
 // Static IPs for the raw L3 tunnel. ESP side hosts .1; VM side .2.
@@ -842,11 +850,14 @@ static void defer_unpair_after_revocation(void) {
     atomic_store_explicit(&s_unpair_pending, true, memory_order_release);
 }
 
+// node_id: the id the tokens are for: identity_node_id(), except in setup,
+// which mints for the id it offers (identity_setup_node_id()).
 static bool mint_and_store_device_tokens_unlocked(const char *source_token,
                                                   const char *username,
+                                                  const char *node_id,
                                                   bool *revoked) {
     vm_device_tokens_t tokens = {0};
-    int rc = vm_api_mint_device_token(source_token, identity_node_id(), &tokens);
+    int rc = vm_api_mint_device_token(source_token, node_id, &tokens);
     if (rc == 0) {
         bool ok = store_token_pair_unlocked(tokens.access_token, tokens.refresh_token);
         if (ok) identity_note_paired_sdk_token();
@@ -872,7 +883,12 @@ static bool accept_pairing_credentials(const char *access_token,
     if (!access_token || !*access_token) return false;
     auth_lock_take();
     bool ok = false;
-    if (refresh_token && *refresh_token) {
+    // The node id device_info offered, which the app's tokens are for, goes
+    // with them: stored first, so no tokens from this setup are ever kept
+    // without it (a failed setup clears both).
+    if (!config_set_str("node_id", identity_setup_node_id())) {
+        ESP_LOGW(TAG, "could not store the node id");
+    } else if (refresh_token && *refresh_token) {
         ok = store_token_pair_unlocked(access_token, refresh_token);
         if (ok) {
             identity_note_paired_sdk_token();
@@ -883,9 +899,16 @@ static bool accept_pairing_credentials(const char *access_token,
         ok = false;
     } else {
         ESP_LOGI(TAG, "no refresh_token supplied; minting device token pair");
-        ok = mint_and_store_device_tokens_unlocked(access_token, username, NULL);
+        ok = mint_and_store_device_tokens_unlocked(access_token, username,
+                                                   identity_setup_node_id(), NULL);
     }
     auth_lock_give();
+    // From here the device goes by the new setup's id (a device set up by
+    // earlier firmware leaves its homelink- id behind with its old tokens).
+    if (ok && identity_refresh_node_id()) {
+        ESP_LOGI(TAG, "node id is now %s", identity_node_id());
+        noise_ctrl_set_node_id(identity_node_id());
+    }
     return ok;
 }
 
@@ -905,7 +928,7 @@ static bool migrate_legacy_auth_token_locked(bool *revoked) {
         return false;
     }
     ESP_LOGI(TAG, "migrating legacy auth_token to device token pair");
-    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, revoked);
+    bool ok = mint_and_store_device_tokens_unlocked(legacy, NULL, identity_node_id(), revoked);
     free(legacy);
     return ok;
 }
@@ -958,7 +981,7 @@ static bool ensure_access_token_ready_with_gate_held(
     if (!refresh) {
         if (vm_auth_backoff_active_unlocked()) goto done;
         ESP_LOGI(TAG, "access_token has no refresh_token; minting device pair");
-        ok = mint_and_store_device_tokens_unlocked(access, NULL, &revoked);
+        ok = mint_and_store_device_tokens_unlocked(access, NULL, identity_node_id(), &revoked);
         goto done;
     }
 
@@ -1244,6 +1267,7 @@ static void on_provision(const char *ssid, const char *password,
                          const char *api_url,
                          const char *api_url_v2,
                          const char *noise_host,
+                         const network_proxy_config_t *proxy,
                          uint32_t session_generation) {
     if (session_generation == 0) return;
     if (!operation_gate_take(0, "BLE provision")) {
@@ -1271,6 +1295,13 @@ static void on_provision(const char *ssid, const char *password,
     ui_set_status("wifi_connected");
     led_status_set_state(LED_STATE_WIFI_CONNECTED);
     remember_joined_wifi(ssid, password);
+    if (proxy) {
+        if (!wifi_known_set_proxy(ssid, proxy)) {
+            setup_fail_for_session("storage", "error_storage", session_generation);
+            goto done;
+        }
+        network_proxy_set_active(proxy);
+    }
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 
@@ -1428,6 +1459,9 @@ static void on_wifi_scan(void) {
 }
 
 static void set_vm_with_gate_held(const char *url) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();  // an app the last VM ran doesn't act on the next one
+#endif
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
     led_status_set_state(LED_STATE_VM_SWITCHING);
@@ -1475,6 +1509,9 @@ static void finish_setup_reset_with_gate_held(void) {
     led_status_set_state(LED_STATE_UNPAIRED);
     ble_server_send_status("unpaired");
     link_pairing_reset();
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_forget_all();  // the next owner doesn't get the last one's apps
+#endif
 }
 
 static bool reset_setup_with_gate_held(const char *source,
@@ -1516,7 +1553,8 @@ static void on_get_device_info(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "device_info");
-    cJSON_AddStringToObject(root, "node_id", identity_node_id());
+    // The id a setup on this connection takes (identity.h).
+    cJSON_AddStringToObject(root, "node_id", identity_setup_node_id());
     cJSON_AddStringToObject(root, "version", desc ? desc->version : "unknown");
     link_pairing_add_device_info(root);
     char build_sha[17] = {0};
@@ -1654,7 +1692,7 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
 }
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
 typedef struct {
     noise_ctrl_session_generation_t session_generation;
     char request_id[64];
@@ -1770,6 +1808,9 @@ static bool reset_setup_from_control(const char *source,
 }
 
 static void reset_default_vm_with_gate_held(void) {
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_vm_changed();
+#endif
     config_erase_key("vm_url");
     ble_server_send_status("vm_switching");
     ui_set_status("vm_switching");
@@ -1843,6 +1884,10 @@ static cJSON *queue_ws_control(ws_control_action_t action, char *url) {
                                  "failed to clear setup credentials");
         }
         args->setup_credentials_cleared = true;
+#if CONFIG_MUSE_WASM_APPS
+        // Now, not after the worker's disconnect: a failed start below reboots first.
+        muse_apps_forget_all();
+#endif
     }
 
     if (xTaskCreate(ws_control_task, "ws_control", 8192, args, 4, NULL)
@@ -1941,6 +1986,29 @@ static cJSON *bug_report_command(
 
 #endif  // CONFIG_HOMEHUB_BLE_COMMANDS
 
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* Muse may only turn listening off. Turning it on is the device's own
+ * choice (Settings, the quick menu, serial), so no remote command can make
+ * the gadget start sending audio. */
+static cJSON *wakeword_disable_command(void) {
+    muse_wakeword_set_enabled(false);
+    muse_wakeword_status_t st;
+    muse_wakeword_status(&st);
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_CreateObject();
+    if (!result || !payload) {
+        cJSON_Delete(result);
+        cJSON_Delete(payload);
+        return command_error("out_of_memory", "failed to allocate wake word result");
+    }
+    cJSON_AddBoolToObject(payload, "enabled", st.enabled);
+    cJSON_AddBoolToObject(payload, "listening", st.listening);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddItemToObject(result, "payload", payload);
+    return result;
+}
+#endif
+
 static cJSON *on_ws_command(
     const char *command, cJSON *params, const char *request_id,
     noise_ctrl_session_generation_t session_generation) {
@@ -1957,6 +2025,11 @@ static cJSON *on_ws_command(
         if (!url) return command_error("missing_param", "url is required");
         return queue_ws_control(WS_CONTROL_SET_VM, url);
     }
+#if CONFIG_MUSE_WASM_APPS
+    if (muse_apps_handles(command)) {
+        return muse_apps_command(command, params, request_id, session_generation);
+    }
+#endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
     if (draw_file || strcmp(command, "display.draw_url") == 0) {
@@ -1991,7 +2064,7 @@ static cJSON *on_ws_command(
         return result;
     }
 #endif
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
     if (strcmp(command, "camera.capture") == 0) {
         watcher_camera_task_args_t *args = calloc(1, sizeof(*args));
         if (!args) return command_error("out_of_memory", "failed to allocate camera request");
@@ -2025,6 +2098,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_WAVESHARE_154G_SHTC3
     if (strcmp(command, "sensors.read") == 0) {
         return waveshare_154g_shtc3_command();
+    }
+#endif
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    if (strcmp(command, "wakeword.disable") == 0) {
+        return wakeword_disable_command();
     }
 #endif
     if (strcmp(command, "device.reset_vm") == 0) {
@@ -2291,10 +2369,13 @@ static void on_button_short_press(void) {
             ESP_LOGI(TAG, "button short-press ignored; no active BLE session");
             return;
         }
-        uint32_t session_generation = link_pairing_confirm_active_session();
+        uint32_t session_generation =
+            link_pairing_confirm_active_session(button_pressed_after_us());
         if (session_generation) {
             notify_pairing_confirmed(session_generation);
             ESP_LOGI(TAG, "button short-press confirmed active pairing session");
+        } else {
+            ESP_LOGI(TAG, "button short-press didn't confirm (prompt not armed or expired, or the press began before it)");
         }
         return;
     }
@@ -2446,8 +2527,10 @@ static const vm_info_t *find_vm_by_id(const vm_info_t *vms, int count, const cha
     return NULL;
 }
 
-// Runs on an internal-RAM stack: the caller's may be in PSRAM, and this reads
-// and (on token refresh) writes NVS.
+// Reads and (on token refresh) writes NVS, so its stack is in internal RAM
+// (the caller's may be in PSRAM) unless code and rodata run from PSRAM and the
+// board puts setup task stacks there (helper_task.h): with live calls on, the
+// StopWatch has no 8 KB internal block left once Wi-Fi and Link are up.
 static void hatch_vm_task(void *arg) {
     hatch_vm_request_t *req = arg;
     if (config_is_provisioned() && operation_gate_take(pdMS_TO_TICKS(15000), "Muse VM lookup")) {
@@ -2476,7 +2559,7 @@ static void hatch_vm_task(void *arg) {
     }
     xTaskNotifyGive(req->waiter);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    helper_task_delete(NULL);
 }
 
 bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
@@ -2486,7 +2569,8 @@ bool app_hatch_vm_credentials(const char *want_vm, char *vm_id, size_t id_cap,
         .vm_name = vm_name, .name_cap = name_cap,
         .waiter = xTaskGetCurrentTaskHandle(),
     };
-    if (xTaskCreate(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+    if (helper_task_create(hatch_vm_task, "muse_vm", 8192, &req, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Muse VM lookup: no memory for its task");
         return false;
     }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -2502,15 +2586,17 @@ void app_ble_companion_set(bool advertise) {
     if (config_setup_complete()) ui_set_ble(advertise ? "companion" : "off");
 }
 
-bool app_confirm_pairing_press(void) {
+bool app_confirm_pairing_press(int64_t pressed_after_us) {
     factory_test_on_button_press();
     if (!link_pairing_confirmation_required() || !ble_server_has_connection()) {
         return false;
     }
-    uint32_t session_generation = link_pairing_confirm_active_session();
+    uint32_t session_generation = link_pairing_confirm_active_session(pressed_after_us);
     if (session_generation) {
         notify_pairing_confirmed(session_generation);
         ESP_LOGI(TAG, "talk button confirmed active pairing session");
+    } else {
+        ESP_LOGI(TAG, "talk press didn't confirm (prompt not armed or expired, or the press began before it)");
     }
     return true;
 }
@@ -2592,9 +2678,9 @@ static void on_ws_control_status(const char *status) {
 // startup. Marking the running image valid (a) commits a PENDING_VERIFY image
 // so the bootloader stops trying to revert it, and (b) blesses a normal boot
 // so the running slot becomes a valid rollback target for the *next* OTA.
-// We gate validation on the control WS coming up: that's the channel a future
-// device.ota would arrive on, so if the new image can't reach it, reverting is
-// the only way to keep the device recoverable.
+// We gate validation on the control WS coming up: an image that can't reach
+// it can't reach Muse at all, so reverting is the way to keep the device
+// working.
 static void ota_verify_task(void *arg) {
     (void)arg;
     int64_t deadline = esp_timer_get_time() + OTA_VERIFY_TIMEOUT_US;
@@ -2698,7 +2784,8 @@ void app_run(void) {
     }
     ESP_LOGI(TAG, "========================");
 
-    link_pairing_init(identity_node_id(), identity_device_id(), identity_mac(),
+    // Setup offers the new-setup id (identity.h).
+    link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
 #if !CONFIG_MUSE_ENABLED
@@ -2728,7 +2815,7 @@ void app_run(void) {
 #endif
 
     // Arm OTA rollback verification. If the running image was just installed
-    // by device.ota it boots as PENDING_VERIFY and must reach the control WS
+    // by an OTA update it boots as PENDING_VERIFY and must reach the control WS
     // within OTA_VERIFY_TIMEOUT_US, else the bootloader reverts it on reboot.
     // The one exception is the ESP-Mosaico in Vibe Mode: its Vibe Mode
     // firmware installs apps itself and leaves them PENDING_VERIFY, and that
@@ -2889,12 +2976,15 @@ void app_run(void) {
         ble_coex_set_active(true);
         ui_set_ble("companion");
 #endif
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43 && \
+    !CONFIG_MUSE_BOARD_WAVESHARE_S3_175 && !CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
         // Muse may turn on its BLE companion later. The controller needs a
         // 30 KB internal block that TLS and the VM session leave fragmented,
         // so bring the stack up now; it stays silent until advertising is on.
         // The CrowPanel starts it lazily instead, after muse_app_run() has
-        // reserved its internal I2S DMA buffers.
+        // reserved its internal I2S DMA buffers. So do the 1.75 and 1.75C:
+        // the idle stack leaves no 8 KB block for the muse_vm task and chat
+        // never connects (#351).
         start_ble_setup_server_if_needed();
 #endif
     }

@@ -61,6 +61,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
+#include "network_proxy_tls.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
@@ -77,11 +78,12 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#include "muse_options.h"
 #include "sdkconfig.h"
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call_priv.h"
 #endif
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 #include "muse_review.h"
 #endif
 
@@ -118,8 +120,8 @@ static const char *TAG = "muse_chat_session";
 static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP3 buffer empty");
 #define EV_TEXT 72
 #define CAPTION_TEXT 1024                  /* a message's text, for captions timed to its speech */
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for wheel review, in PSRAM */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+#define TEXT_MAX (32 * 1024)               /* the whole reply, kept for later review, in PSRAM */
 #else
 #define TEXT_MAX CAPTION_TEXT
 #endif
@@ -158,7 +160,7 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_INCOMING, CMD_OPTION };
 
 struct cmd_t {
     cmd_type_t type;
@@ -201,7 +203,7 @@ static int64_t s_auto_backoff_us = AUTO_RETRY_MIN_US;
 
 /* ---- Streams on the connection ---- */
 
-enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_CALL, K_END_CALL };
+enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_CALL, K_END_CALL, K_OPTION_STATE };
 
 struct stream_t {
     int64_t id;
@@ -230,7 +232,8 @@ struct msg_t {
     bool done;
     tts_t tts;
     uint32_t pcm_start;      /* where its speech starts in the reply audio */
-    uint32_t pcm_frames;     /* how long it is; 0 until the MP3 has all arrived */
+    uint32_t pcm_frames;     /* estimated duration, refined as MP3 completes */
+    uint32_t pcm_end;        /* final queued cursor, including the caption hold */
 };
 
 struct resampler_t {
@@ -242,7 +245,7 @@ struct resampler_t {
 struct turn_t {
     phase_t phase;
     uint32_t gen;
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     uint32_t review;         /* this turn's identity for reply review (typed turns all have gen 0) */
 #endif
     bool text;               /* typed at the console: the reply goes there, unspoken */
@@ -302,6 +305,9 @@ struct pending_t {
  * there (the AIPI), so Wi-Fi setup and TLS have the internal RAM. */
 EXT_RAM_BSS_ATTR static turn_t s_turn;
 EXT_RAM_BSS_ATTR static pending_t s_pending;
+static muse_options_t *s_option_send, *s_option_save;
+static bool s_option_sending;
+static int64_t s_option_state_us;
 static std::atomic<bool> s_incoming{false};   /* a reply is held: muse_hatch_incoming() */
 static std::atomic<bool> s_incoming_used{false};   /* a voice task plays them (the Voice PE's doesn't) */
 
@@ -791,6 +797,8 @@ static bool send_body(int64_t id, const uint8_t *data, size_t len, bool end_body
 
 static void disconnect(const char *why)
 {
+    muse_options_disconnected();
+    s_option_sending = false;
     if (s_conn.tls) {
         ESP_LOGI(TAG, "disconnect: %s", why);
         esp_tls_conn_destroy(s_conn.tls);
@@ -889,7 +897,7 @@ static bool connect_once(char *err, size_t err_cap, int *http_status)
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.timeout_ms = 15000;
     int64_t t0 = now_us();
-    if (esp_tls_conn_new_sync(s_host, strlen(s_host), NOISE_PORT, &cfg, c.tls) != 1) {
+    if (network_proxy_tls_connect(s_host, strlen(s_host), NOISE_PORT, &cfg, c.tls) != 1) {
         snprintf(err, err_cap, "Can't reach %s", s_host);
         return false;
     }
@@ -1022,6 +1030,11 @@ static void turn_reset_streams(void)
 
 static void turn_finish(void)
 {
+    if (s_option_sending) {
+        muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                            "Check the Muse app before answering again.");
+        s_option_sending = false;
+    }
     turn_reset_streams();
     s_turn.phase = P_IDLE;
     s_turn.dict_id = s_turn.chat_id = 0;
@@ -1032,6 +1045,11 @@ static void turn_finish(void)
 
 static void turn_fail(const char *why)
 {
+    if (s_option_sending) {
+        muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                            "Check the Muse app before answering again.");
+        s_option_sending = false;
+    }
     ESP_LOGW(TAG, "turn failed: %s", why);
     if (s_turn.text) {
         muse_hatch_console("error", why, nullptr);
@@ -1069,7 +1087,7 @@ static bool turn_start(uint32_t gen, bool text)
     s_turn.note = note;
     s_turn.texts = texts;
     s_turn.gen = gen;
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
     s_turn.review = muse_review_turn();
 #endif
     s_turn.text = text;
@@ -1242,12 +1260,14 @@ static bool record_note(void)
  * parts, since each frame has to fit SCRATCH. A spoken turn names the device
  * (MUSE_CHAT_SPOKEN_DEVICE); a typed one doesn't.
  */
-static void send_chat(const char *text, const char *modality, bool spoken)
+static void send_chat(const char *text, const char *modality, bool spoken, cJSON *provided = nullptr)
 {
     s_turn.chat_posted = true;
-    cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "message", text);
-    cJSON_AddStringToObject(body, "output_modality", modality);
+    cJSON *body = provided ? provided : cJSON_CreateObject();
+    if (!provided) {
+        cJSON_AddStringToObject(body, "message", text);
+        cJSON_AddStringToObject(body, "output_modality", modality);
+    }
     if (spoken) {
         cJSON_AddStringToObject(body, "device", MUSE_CHAT_SPOKEN_DEVICE);
     }
@@ -1493,11 +1513,15 @@ static void message_done(int i, const char *final_text)
     }
     m.done = true;
     mark(M_DONE);
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
-    /* Keep complete final text, rather than the 1 KB automatic-caption copy. */
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+    /* Keep complete final text, rather than the 1 KB automatic-caption copy.
+     * turn_detach()'s own "working on it" notice isn't an answer: keep the last one. */
     const char *review = final_text && final_text[0] ? final_text
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
-    muse_review_store(s_turn.review, review);
+    if (strcmp(m.id, "local-notice")) {
+        muse_review_store_complete(s_turn.review, review,
+            !(final_text && final_text[0]) && review && m.len > strlen(review));
+    }
 #endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
@@ -1576,11 +1600,74 @@ static bool pending_held(const char *id)
     return false;
 }
 
-/* A finished message's text: its display text, else its content. */
-static const char *reply_text(cJSON *payload)
+/* A transcript block that is reply text: not commentary, which isn't shown. */
+static bool reply_block(cJSON *block)
 {
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+    const char *to = cJSON_GetStringValue(cJSON_GetObjectItem(block, "recipient"));
+    return type && !strcmp(type, "text") && text && text[0] && !(to && !strcasecmp(to, "commentary"));
+}
+
+/* The transcript's assistant message with this id, even one with no reply text,
+ * so another message isn't read in its place. Only when its messages carry no
+ * ids: the last one with reply text. */
+static cJSON *reply_row(cJSON *rows, const char *id)
+{
+    cJSON *row, *block, *last = nullptr;
+    bool ids = false;
+    cJSON_ArrayForEach(row, rows) {
+        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(row, "role"));
+        if (!role || strcmp(role, "assistant")) continue;
+        const char *own = cJSON_GetStringValue(cJSON_GetObjectItem(row, "id"));
+        if (own && own[0]) {
+            ids = true;
+            if (!strncmp(own, "assistant-msg-", 14)) own += 14;
+            if (id && !strcmp(own, id)) return row;
+        }
+        bool text = false;
+        cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+            text = text || reply_block(block);
+        }
+        if (text) last = row;
+    }
+    return ids ? nullptr : last;
+}
+
+/* A finished message's text. Canonical rows can carry only a transcript;
+ * collect one assistant message's text into a bounded buffer; release it with free(). */
+static const char *reply_text(cJSON *payload, const char *id, char **owned)
+{
+    *owned = nullptr;
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "display_text"));
-    return text ? text : cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+    if (text && text[0]) return text;
+    text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "content"));
+    if (text && text[0]) return text;
+    cJSON *rows = cJSON_GetObjectItem(cJSON_GetObjectItem(payload, "transcript"), "messages");
+    cJSON *row = cJSON_IsArray(rows) ? reply_row(rows, id) : nullptr;
+    if (!row) return nullptr;
+    cJSON *block;
+    size_t used = 0;
+    cJSON_ArrayForEach(block, cJSON_GetObjectItem(row, "content")) {
+        if (!reply_block(block)) continue;
+        text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
+        if (!*owned) {
+            *owned = static_cast<char *>(psram_alloc(TEXT_MAX));
+            if (!*owned) return nullptr;
+            (*owned)[0] = '\0';
+        }
+        size_t room = TEXT_MAX - 1 - used;
+        if (used && room) {
+            (*owned)[used++] = '\n';
+            room--;
+        }
+        size_t n = whole_chars(text, strnlen(text, room));
+        memcpy(*owned + used, text, n);
+        used += n;
+        (*owned)[used] = '\0';
+        if (n < strlen(text) || used == TEXT_MAX - 1) return *owned;
+    }
+    return *owned;
 }
 
 /* With no turn running: Muse's status, and the reply of a request still waiting on it. */
@@ -1606,11 +1693,16 @@ static void pending_event(const char *event, cJSON *payload, cJSON *line)
         return;   /* only the finished row names the request */
     }
     const char *id = msg_id(payload, line);
-    const char *text = reply_text(payload);
     /* An id too long for a turn's message couldn't be played as itself. */
     if (!ours || !id || strlen(id) >= sizeof(msg_t::id) || pending_played(id) || pending_held(id) ||
         cJSON_GetArraySize(s_pending.replies) >= MAX_MSGS ||
-        cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready")) || !text || !text[0]) {
+        cJSON_IsFalse(cJSON_GetObjectItem(payload, "display_text_ready"))) {
+        return;
+    }
+    char *owned;
+    const char *text = reply_text(payload, id, &owned);
+    if (!text || !text[0]) {
+        free(owned);
         return;
     }
     if (!s_pending.replies) {
@@ -1631,6 +1723,7 @@ static void pending_event(const char *event, cJSON *payload, cJSON *line)
         row = nullptr;
     }
     free(kept);
+    free(owned);
     if (row && cJSON_AddItemToArray(s_pending.replies, row)) {
         ESP_LOGI(TAG, "the reply to a request that outlived its turn has come: holding it for the voice task");
         s_incoming = true;
@@ -1754,6 +1847,24 @@ static void on_event(cJSON *line)
         last = v > last ? v : last;
     }
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
+    if (!strcmp(event, "widget.state_updated")) {
+        muse_options_receive(payload);
+        return;
+    }
+    if (!strcmp(event, "message.assistant") || !strcmp(event, "delta.message_done")) {
+        const char *id = msg_id(payload, line);
+        int i = s_turn.phase == P_WAIT_REPLY && id ? find_msg(id) : -1;
+        /* Done events can carry widgets without repeating the streamed text. */
+        const char *text = i >= 0 && s_turn.msgs[i].len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+        if (muse_options_receive_message(payload, id, text) && s_turn.text) {
+            /* Serial diagnostics expose only widget data, never credentials. */
+            char *widgets = cJSON_PrintUnformatted(cJSON_GetObjectItem(payload, "widgets"));
+            if (widgets) {
+                muse_hatch_console("options", widgets, nullptr);
+                cJSON_free(widgets);
+            }
+        }
+    }
     if (s_turn.phase == P_IDLE) {
         pending_event(event, payload, line);
         return;
@@ -1799,20 +1910,19 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "text"));
         if (text && text[0] && s_turn.text) {
             mark(M_TEXT);
-#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER
+            /* Retain typed text too: a later widget may need its question. */
             append_text(m, text);
-#else
-            m.len += strlen(text);
-#endif
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             add_reply_text(i, text);
         }
     } else if (done || full) {
-        const char *text = reply_text(payload);
         cJSON *ready = cJSON_GetObjectItem(payload, "display_text_ready");
         if (done || !cJSON_IsFalse(ready)) {
+            char *owned;
+            const char *text = reply_text(payload, id, &owned);
             message_done(i, text);
+            free(owned);
         }
     }
 }
@@ -1834,6 +1944,31 @@ static void on_chat_ack(stream_t *s)
     mark(M_ACK);
     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
     cJSON_Delete(root);
+    if (s_option_sending) {
+        if (!s_turn.user_ids[0][0]) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
+                                "No acknowledgement. Check the Muse app.");
+            s_option_sending = false;
+            return;
+        }
+        s_option_sending = false;
+        *s_option_save = *s_option_send;
+        muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false, "Answer sent. Saving selection...");
+        char mutation[40];
+        uint32_t a = esp_random(), b = esp_random(), c = esp_random(), d = esp_random();
+        snprintf(mutation, sizeof(mutation), "%08lx-%04lx-4%03lx-8%03lx-%04lx%08lx",
+                 (unsigned long)a, (unsigned long)(b >> 16), (unsigned long)(b & 0xfff),
+                 (unsigned long)(c & 0xfff), (unsigned long)(c >> 16), (unsigned long)d);
+        cJSON *body = muse_options_state_body(s_option_save, mutation);
+        char *json = body ? cJSON_PrintUnformatted(body) : nullptr;
+        cJSON_Delete(body);
+        bool sent = json && open_stream(K_OPTION_STATE, "POST", "/widgets/state", "application/json",
+                                         "application/json", json, true);
+        cJSON_free(json);
+        s_option_state_us = now_us();
+        if (!sent) muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false,
+                                       "Answer sent. Selection could not be saved.");
+    }
     emit(MUSE_HATCH_EV_SENT, nullptr);
 }
 
@@ -1917,6 +2052,7 @@ static void pace_silently(void)
         s_turn.pcm_out += n;
     }
     if (s_turn.pcm_out >= end) {
+        m.pcm_end = s_turn.pcm_out;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
         s_turn.silent = false;
@@ -1983,6 +2119,7 @@ static void decode(void)
         m.pcm_frames = s_turn.pcm_out - m.pcm_start + rest;
     }
     if (s_turn.mp3_ended && !s_turn.mp3_len) {
+        m.pcm_end = s_turn.pcm_out;
         m.pcm_frames = s_turn.pcm_out - m.pcm_start;
         m.tts = TTS_FINISHED;
         s_turn.tts_msg = -1;
@@ -2103,8 +2240,10 @@ static void stream_data(stream_t *s, ConstByteSpan data)
     case K_DICT:
         feed_lines(s, data.data(), data.size(), on_dictation_line);
         break;
-    case K_CHAT: {
+    case K_CHAT:
+    case K_OPTION_STATE: {
         size_t take = data.size() < s->cap - 1 - s->len ? data.size() : s->cap - 1 - s->len;
+        if (take < data.size()) s->overflow = true;
         memcpy(s->line + s->len, data.data(), take);
         s->len += take;
         break;
@@ -2149,6 +2288,16 @@ static bool stream_end(stream_t *s, bool ok)
     case K_TTS:
         tts_end(s, ok);
         break;
+    case K_OPTION_STATE: {
+        s->line[s->len] = '\0';
+        cJSON *response = cJSON_Parse(s->line);
+        bool saved = ok && !s->overflow && muse_options_state_response(s_option_save, response);
+        muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, saved,
+                            saved ? "" : "Answer sent. Check selection in the Muse app.");
+        cJSON_Delete(response);
+        close_stream(s);
+        break;
+    }
 #if CONFIG_MUSE_REALTIME_VOICE
     case K_CALL:
     case K_END_CALL: {
@@ -2299,6 +2448,7 @@ static void handle(const cmd_t &cmd)
         }
         break;
     case CMD_FORGET:
+        muse_options_clear();
         if (s_turn.phase != P_IDLE) {
             turn_fail("SETTINGS CHANGED");
         }
@@ -2353,6 +2503,60 @@ static void handle(const cmd_t &cmd)
         }
         incoming_play(cmd.gen);
         break;
+    case CMD_OPTION: {
+        if (!s_option_send) s_option_send = static_cast<muse_options_t *>(psram_alloc(sizeof(*s_option_send)));
+        if (!s_option_save) s_option_save = static_cast<muse_options_t *>(psram_alloc(sizeof(*s_option_save)));
+        if (!s_option_send || !s_option_save) {
+            muse_options_t q;
+            if (muse_options_snapshot(&q)) muse_options_result(q.generation, MUSE_OPTIONS_READY, false, "Out of memory. Try again.");
+            ev_t ev = {}; ev.type = MUSE_HATCH_EV_ERROR; ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!muse_options_take(s_option_send)) {
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        bool saving = false;
+        for (const auto &stream : s_streams) if (stream.kind == K_OPTION_STATE) saving = true;
+        if (cmd.gen != s_gen.load() || s_turn.phase != P_IDLE || call_busy() || saving) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_READY, false, "Muse is busy. Try again.");
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!s_connected) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_STALE, false, "Reconnect and continue in the Muse app.");
+            ev_t ev = {};
+            ev.type = MUSE_HATCH_EV_ERROR;
+            ev.gen = cmd.gen;
+            xQueueSend(s_events, &ev, 0);
+            break;
+        }
+        if (!turn_start(cmd.gen, false)) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_STALE, false, "Reconnect and continue in the Muse app.");
+            break;
+        }
+        char interaction[40];
+        uint32_t a = esp_random(), b = esp_random(), c = esp_random(), d = esp_random();
+        snprintf(interaction, sizeof(interaction), "%08lx-%04lx-4%03lx-8%03lx-%04lx%08lx",
+                 (unsigned long)a, (unsigned long)(b >> 16), (unsigned long)(b & 0xfff),
+                 (unsigned long)(c & 0xfff), (unsigned long)(c >> 16), (unsigned long)d);
+        cJSON *body = muse_options_chat_body(s_option_send, interaction);
+        if (!body) {
+            muse_options_result(s_option_send->generation, MUSE_OPTIONS_READY, false, "Out of memory. Try again.");
+            turn_fail("OUT OF MEMORY");
+            break;
+        }
+        s_option_sending = true;
+        send_chat(s_option_send->labels[s_option_send->selected], "text", false, body);
+        break;
+    }
     }
 }
 
@@ -2425,6 +2629,13 @@ static void hatch_task(void *arg)
             continue;
         }
         check_turn();
+        for (auto &stream : s_streams) {
+            if (stream.kind == K_OPTION_STATE && now_us() - s_option_state_us > 15000000) {
+                muse_options_result(s_option_save->generation, MUSE_OPTIONS_SELECTED, false,
+                                    "Answer sent. Saving selection timed out.");
+                send_reset(stream.id);
+            }
+        }
         if (s_turn.phase == P_IDLE && s_pending.replies) {
             s_incoming = true;   /* held rows not played yet (a press or a typed turn came first) */
         }
@@ -2432,7 +2643,7 @@ static void hatch_task(void *arg)
         int64_t t = now_us();
         if (t - s_conn.last_rx_us > DEAD_US) {
             drop_connection("server went quiet");
-        } else if (s_turn.phase == P_IDLE && !call_busy() && !s_pending.active && t - s_conn.last_use_us > IDLE_CLOSE_US) {
+        } else if (s_turn.phase == P_IDLE && !call_busy() && !s_pending.active && !muse_options_waiting() && t - s_conn.last_use_us > IDLE_CLOSE_US) {
             disconnect("idle");
             muse_hatch_report(MUSE_HATCH_UNTESTED, "");
             s_auto_next_us = INT64_MAX;   /* the next turn connects */
@@ -2489,7 +2700,15 @@ extern "C" void muse_hatch_start(void)
     s_turn.chunk = static_cast<uint8_t *>(psram_alloc(DICT_CHUNK_BYTES + sizeof(MUSE_HATCH_NOTE_TAIL)));
     s_turn.mp3 = static_cast<uint8_t *>(psram_alloc(MP3_BUF));
     s_turn.note = VOICE_NOTE ? static_cast<uint8_t *>(psram_alloc(NOTE_PART_BYTES)) : nullptr;
+#if CONFIG_MUSE_LATEST_REPLY
+    s_turn.texts = static_cast<char *>(heap_caps_malloc(MAX_MSGS * TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!s_turn.texts) {
+        ESP_LOGW(TAG, "latest reply receiver allocation failed");
+        muse_review_unavailable();
+    }
+#else
     s_turn.texts = static_cast<char *>(psram_alloc(MAX_MSGS * TEXT_MAX));   /* captions just stay untimed without it */
+#endif
     s_pcm = static_cast<int16_t *>(psram_alloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t)));
     s_pcm16 = static_cast<int16_t *>(psram_alloc((MINIMP3_MAX_SAMPLES_PER_FRAME + 8) * sizeof(int16_t)));
     for (auto &s : s_streams) {
@@ -2629,6 +2848,12 @@ extern "C" void muse_hatch_text_cancel(void)
 extern "C" bool muse_hatch_incoming(void)
 {
     s_incoming_used = true;
+    if (muse_options_pending()) {
+        uint32_t gen = ++s_gen;
+        drain_out();
+        post(CMD_OPTION, gen);
+        return true;
+    }
     if (!s_incoming.exchange(false)) {
         return false;
     }
@@ -2651,18 +2876,44 @@ extern "C" muse_hatch_ev_t muse_hatch_turn_event(char *text, size_t cap)
     return MUSE_HATCH_EV_NONE;
 }
 
+/* Both caption paging and the rim follow the message at the playback cursor. */
+static int reply_message_at(size_t played)
+{
+    int message = -1;
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        const msg_t &m = s_turn.msgs[i];
+        if (m.tts >= TTS_ACTIVE && m.len && m.pcm_start <= played) message = i;
+    }
+    return message;
+}
+
+static uint32_t reply_frames(const msg_t &m, size_t caption_len)
+{
+    return m.pcm_frames ? m.pcm_frames : (uint32_t)((uint64_t)caption_len * MIC_RATE / SPEECH_CHARS_PER_S);
+}
+
+extern "C" float muse_turn_progress(size_t played, int *message)
+{
+    int i = reply_message_at(played);
+    if (message) *message = i;
+    if (i < 0) return 0;
+    const msg_t &m = s_turn.msgs[i];
+    size_t len = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
+    uint32_t frames = reply_frames(m, len);
+    if (!frames) return 0;
+    size_t elapsed = played - m.pcm_start;
+    bool complete = m.tts == TTS_FINISHED && m.pcm_end && played >= m.pcm_end;
+    if (complete) return 1;
+    float fraction = (float)elapsed / frames;
+    return fraction < 0.99f ? fraction : 0.99f;
+}
+
 extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
 {
-    /* The message being spoken: the last one whose speech has started. */
-    const msg_t *m = nullptr;
-    const char *text = nullptr;
-    for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
-        const msg_t &c = s_turn.msgs[i];
-        if (c.tts >= TTS_ACTIVE && c.len && c.pcm_start <= played) {
-            m = &c;
-            text = s_turn.texts + i * TEXT_MAX;
-        }
-    }
+    if (!s_turn.texts) return false;
+    int i = reply_message_at(played);
+    const msg_t *m = i >= 0 ? &s_turn.msgs[i] : nullptr;
+    const char *text = i >= 0 ? s_turn.texts + i * TEXT_MAX : nullptr;
     if (!m) {
         /* Nothing said yet: the reply's opening page, to read while the speech is on its way. */
         for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
@@ -2673,7 +2924,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         return false;
     }
     size_t len = CAPTION_LEN(text);
-    uint32_t frames = m->pcm_frames ? m->pcm_frames : (uint32_t)(len * MIC_RATE / SPEECH_CHARS_PER_S);
+    uint32_t frames = reply_frames(*m, len);
     size_t at = frames ? (size_t)((uint64_t)(played - m->pcm_start) * len / frames) : 0;
     if (at >= len) {
         at = len ? len - 1 : 0;

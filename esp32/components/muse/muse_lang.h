@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "sdkconfig.h"
 #if !CONFIG_MUSE_UI_FREEINK
 #include "lvgl.h"
@@ -39,8 +41,14 @@ const char *muse_lang_status(const char *en);
 /* Captions ("CAN'T REACH MUSE"). */
 const char *muse_lang_message(const char *en);
 
-/* The button menu and the pairing card ("Volume", "Pairing code"). */
+/* The button menu and the pairing card ("Volume", "Pairing code"), and on
+ * touch boards the settings pages. */
 const char *muse_lang_menu(const char *en);
+
+/* True if `text` has accented letters and all of them are ones the screen
+ * language's fonts draw, so it can be shown as it is rather than folded to
+ * ASCII (muse_text_showable). Always false in English. */
+bool muse_lang_showable(const char *text);
 
 #if !CONFIG_MUSE_UI_FREEINK   /* the LVGL UI's fonts; e-paper draws English only */
 /* A Montserrat font LVGL builds in, with the language's letters to fall back

@@ -70,6 +70,9 @@ class LinkBugReportHarnessTest(unittest.TestCase):
             "s_connected.store(false, std::memory_order_relaxed)", source
         )
         self.assertNotIn("volatile bool s_connected", source)
+        # rx_idle_seconds reads a 32-bit copy: 64-bit reads tear on the C5.
+        self.assertIn("static std::atomic<uint32_t> s_last_rx_s{UINT32_MAX};", source)
+        self.assertIn("s_last_rx_s.load(", source)
 
     def test_bug_report_harness_and_opaque_json_contract(self) -> None:
         cc = _cc_command()
@@ -153,8 +156,8 @@ class LinkBugReportHarnessTest(unittest.TestCase):
                     "device",
                     "runtime",
                     "network",
-                    "tunnel",
                     "ota",
+                    "device_health",
                     "logs",
                 },
             )
@@ -163,6 +166,11 @@ class LinkBugReportHarnessTest(unittest.TestCase):
             self.assertEqual(report["redaction_profile"], "hatch-link-support-v1")
             self.assertEqual(report["device"]["model_id"], "hatch-link")
             self.assertEqual(report["network"], {"wifi_connected": True, "rssi_dbm": -47})
+            self.assertEqual(
+                report["device_health"]["connectivity_events"],
+                ["12s ago tunnel_down: keepalive timeout (dma_free=1 dma_largest=1)"],
+            )
+            self.assertNotIn("network_ssid", report["device_health"])
             self.assertEqual(report["logs"]["format"], "hatch-link-application-log-v1")
             self.assertEqual(report["logs"]["sensitivity"], "restricted")
             self.assertTrue(report["logs"]["contains_pii"])

@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "muse_console.h"
+#include "muse_audio.h"
 #include "muse_input.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
@@ -27,8 +28,10 @@
 #include "muse_voice.h"
 
 /* The preview drives modes directly; it has no live call transport. */
-bool muse_voice_in_call(void) { return false; }
-muse_voice_view_t muse_voice_call_view(void) { return MUSE_VOICE_VIEW_NONE; }
+static bool s_in_call;
+bool muse_voice_in_call(void) { return s_in_call; }
+bool muse_voice_reply_waiting(void) { return false; }
+muse_voice_view_t muse_voice_call_view(void) { return s_in_call ? MUSE_VOICE_VIEW_SPEAKING : MUSE_VOICE_VIEW_NONE; }
 
 #define SIM_DEFAULT_NAME "MuseGadget-SIM001"
 #define SIM_DEFAULT_SSID "Muse Simulator"
@@ -49,6 +52,7 @@ static muse_hatch_status_t s_chat = {
 };
 static muse_link_state_t s_link = MUSE_LINK_ONLINE;
 static int s_brightness = 75;
+static int s_volume = 70;
 static bool s_speaker = true;
 
 static void copy_text(char *out, size_t cap, const char *text)
@@ -85,7 +89,9 @@ void sim_services_reset(void)
     };
     s_link = MUSE_LINK_ONLINE;
     s_brightness = 75;
+    s_volume = 70;
     s_speaker = true;
+    s_in_call = false;
 }
 
 void sim_services_set_wifi(muse_wifi_state_t state, const char *ssid)
@@ -146,6 +152,10 @@ int muse_settings_brightness(void)
     return s_brightness;
 }
 
+int muse_settings_volume(void) { return s_volume; }
+void muse_settings_set_volume(int pct) { s_volume = pct; }
+void muse_audio_set_volume(int pct) { (void)pct; }
+
 bool muse_settings_speaker_on(void)
 {
     return s_speaker;
@@ -187,12 +197,14 @@ void muse_hatch_status(muse_hatch_status_t *out)
     }
 }
 
-/* The simulator pages no replies (muse_chat_text.c isn't built). */
+/* The latest-reply harness links the production text helpers. */
+#if !CONFIG_MUSE_LATEST_REPLY
 void muse_chat_set_caption_px(int width_px, int (*glyph_px)(uint32_t letter, uint32_t next))
 {
     (void)width_px;
     (void)glyph_px;
 }
+#endif
 
 muse_link_state_t muse_link_state(void)
 {
@@ -255,4 +267,9 @@ bool muse_console_write(const void *buf, size_t n)
 void muse_input_touch_talk(bool pressed)
 {
     (void)pressed;
+}
+
+void sim_services_set_call(bool on)
+{
+    s_in_call = on;
 }

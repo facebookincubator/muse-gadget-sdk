@@ -211,15 +211,67 @@ def test_network_reuses_setup_probe_with_timeout(
     probe.assert_called_once_with(timeout=5.0)
 
 
-@pytest.mark.parametrize("present,status", [([], "OK"), (["emSign ECC Root CA - G3"], "WARN")])
-def test_trust_store_warns_about_distrusted_roots_without_failing(
-    monkeypatch: pytest.MonkeyPatch, present: list[str], status: str,
+@pytest.mark.parametrize("online,status,words", [
+    (True, "OK", "reachable on port 443 through the proxy"),
+    (False, "FAIL", "Could not reach"),
+])
+def test_network_names_the_proxy_without_its_credentials(
+    monkeypatch: pytest.MonkeyPatch, online: bool, status: str, words: str,
 ) -> None:
-    monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=present))
-    result: doctor.CheckResult = doctor.check_trust_store()
+    monkeypatch.setattr(doctor.network, "api_proxy",
+                        Mock(return_value="http://user:secret@proxy.example:3128"))
+    probe: Mock = Mock(return_value=online)
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
     assert result["status"] == status
-    for name in present:
-        assert name in result["detail"]
+    assert words in result["detail"] and "http://proxy.example:3128" in result["detail"]
+    assert "secret" not in doctor.format_check(result) and "user" not in doctor.format_check(result)
+    probe.assert_called_once_with(timeout=5.0)
+
+
+def test_network_fails_on_an_unsupported_proxy_without_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(doctor.network, "api_proxy", Mock(return_value="socks5://proxy.example:1080"))
+    probe: Mock = Mock(side_effect=AssertionError("must not probe"))
+    monkeypatch.setattr(doctor.network, "is_online", probe)
+    result: doctor.CheckResult = doctor.check_network()
+    assert result["status"] == "FAIL"
+    assert "not an http:// proxy" in result["detail"]
+    assert "HTTP CONNECT proxies only" in result["hint"]
+
+
+@pytest.mark.parametrize("problem", [
+    "the system trust store still trusts emSign ECC Root CA - G3",
+    "can't read the system trust store",
+])
+def test_trust_store_fails_while_musegadget_would_refuse_to_connect(
+    monkeypatch: pytest.MonkeyPatch, problem: str,
+) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=problem))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning",
+                        Mock(return_value="the system trust store still trusts emSign Root CA - C1"))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == "FAIL"     # a failure wins over the retired-root warning
+    assert problem[1:] in result["detail"]
+    assert "update your ca-certificates package" in result["hint"].lower()
+
+
+def test_trust_store_is_ok_without_distrusted_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
+    assert doctor.check_trust_store()["status"] == "OK"
+
+
+def test_trust_store_warns_about_retired_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    warning = ("the system trust store still trusts emSign ECC Root CA - C3, "
+               "emSign Root CA - C1, which Mozilla has retired")
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=warning))
+    result: doctor.CheckResult = doctor.check_trust_store()
+    assert result["status"] == "WARN"
+    assert warning[1:] in result["detail"] and "still connects" in result["detail"]
+    assert "deselect it in the system trust store" in result["hint"]
 
 
 @pytest.mark.parametrize("status,exit_code", [("OK", 0), ("FAIL", 1), ("WARN", 0)])
@@ -259,7 +311,8 @@ def test_doctor_continues_after_failures_without_changing_saved_files(
     before: dict[str, bytes] = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     monkeypatch.setattr(doctor.shutil, "which", Mock(return_value=None))
     monkeypatch.setattr(doctor.network, "is_online", Mock(return_value=True))
-    monkeypatch.setattr(doctor.tls, "distrusted_system_roots", Mock(return_value=[]))
+    monkeypatch.setattr(doctor.tls, "trust_store_problem", Mock(return_value=None))
+    monkeypatch.setattr(doctor.tls, "trust_store_warning", Mock(return_value=None))
     results: tuple[doctor.CheckResult, ...] = doctor.run_checks()
     assert [result["status"] for result in results] == ["FAIL", "OK", "FAIL", "WARN", "OK", "OK"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

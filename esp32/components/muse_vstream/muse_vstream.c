@@ -163,14 +163,14 @@ static bool vp8_tag_ok(const muse_vstream_t *s, uint32_t avail, uint32_t i, uint
     return true;
 }
 
-/* A VP8 frame, or two bands of them (the top band's u32 length first): which
- * one is told by whether a frame tag fits at the start. */
+/* A VP8 frame, or with two bands (f->bands) two of them, the top band's u32
+ * length first. */
 static bool vp8_frame_ok(const muse_vstream_t *s, uint32_t avail, const muse_vframe_t *f)
 {
     bool key = f->flags & MUSE_VIDEO_FRAME_KEY;
     const uint32_t at = MUSE_VIDEO_FRAME_HEADER_LEN;
-    if (f->len >= 3 && vp8_tag_ok(s, avail, at, f->len, key)) {
-        return true;
+    if (f->bands != 2) {
+        return f->len >= 3 && vp8_tag_ok(s, avail, at, f->len, key);
     }
     if (f->len < 10 || avail < at + 4) {
         return avail < at + 4 && f->len >= 10;
@@ -195,10 +195,16 @@ static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
     if (f->len < 4 || f->len > s->max_frame) {
         return false;
     }
+    /* One layout for the check and the decode: the caller splits the bands
+     * by f->bands. */
+    f->bands = s->bands == 2 ? 2 : 1;
     if (s->codec == MUSE_VIDEO_CODEC_VP8) {
         return vp8_frame_ok(s, avail, f);
     }
-    if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 4 && !start_code_at(s, 8)) {
+    if (f->bands != 2) {
+        return avail < MUSE_VIDEO_FRAME_HEADER_LEN + 4 || start_code_at(s, 8);
+    }
+    if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 4) {
         /* Two bands (muse_video_params_t.tiles): the top band's u32
          * length, then its access unit. Its start code is checked as far as
          * the bytes are in, as for VP8: a frame that has only reached the

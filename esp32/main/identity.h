@@ -21,12 +21,24 @@
 
 #define IDENTITY_SDK_TOKEN_LEN 48
 
-// Both buffers must be at least 32 bytes. XXXXXX = last 3 WiFi STA MAC octets.
-// node_id "homelink-XXXXXX" (lower) is the backend device identifier (used by
-// device-token mint/refresh); ble_name "MuseGadget-XXXXXX" (upper) is the
-// advertised BLE name.
+// XXXXXX = last 3 WiFi STA MAC octets. The node id (lower hex) is the backend
+// device identifier (device-token mint/refresh, link.register, chat turns);
+// ble_name "MuseGadget-XXXXXX" (upper) is the advertised BLE name.
+//
+// Node ids: a new setup offers "gadget-XXXXXX" with
+// CONFIG_MUSE_GADGET_NODE_ID_PREFIX (off by default), else "homelink-XXXXXX"
+// (identity_setup_node_id()), and stores it with the device tokens (NVS
+// "node_id"). The stored id is the one
+// in use (identity_node_id()) until the device is set up again. A device set
+// up by earlier firmware, which stored no id, keeps "homelink-XXXXXX", the id
+// its tokens were issued for; one not set up uses the setup id.
 void identity_init(void);
 const char *identity_node_id(void);
+const char *identity_setup_node_id(void);
+// Reads the stored id again (identity_init() does it at boot): call once
+// setup has stored new credentials or they were erased. Returns true when
+// the id in use changed.
+bool identity_refresh_node_id(void);
 const char *identity_ble_name(void);
 const char *identity_mac(void);
 const char *identity_device_id(void);

@@ -16,14 +16,21 @@
 
 #include "ble_commands.h"
 #include "noise_control.h"
+#if CONFIG_MUSE_WASM_APPS
+#include "muse_apps.h"
+#endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
+#include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
+#include "link_events.h"
+#include "link_probe.h"
 #include "ws_mask.h"
 #if CONFIG_HOMEHUB_FAST_GCM
 #include "fast_gcm.h"
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -32,6 +39,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_tls.h"
+#include "network_proxy_tls.h"
 #include "esp_crt_bundle.h"
 #include "esp_random.h"
 #include "esp_heap_caps.h"
@@ -49,7 +57,7 @@ extern "C" {
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
 #include "reterminal_battery.h"
 #endif
-#include "ota.h"
+#include "tunnel_netif.h"
 #if CONFIG_MUSE_ENABLED
 extern "C" {
 #include "muse_state.h"
@@ -86,6 +94,11 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define RECONNECT_AUTH_FAILED_MS  60000
 #define RECONNECT_DELAY_STEP_MS   250
 #define KEEPALIVE_INTERVAL_MS     60000
+// A half-open TCP connection (the WAN drops, then comes back with the NAT
+// mapping gone) keeps accepting our writes, so a send failure can take lwIP's
+// whole retransmit budget (15+ minutes) to surface. Only inbound traffic proves
+// the VM can still reach us: give up after two unanswered keepalive pings.
+#define RX_IDLE_TIMEOUT_MS        150000
 #define POWER_SAVE_QUIET_MS       1000    // noise_ctrl_set_power_save(): quiet this long,
 #define POWER_SAVE_POLL_MS        100     // then poll this often
 #define IDLE_QUIET_MS             50      // otherwise quiet this long,
@@ -119,9 +132,9 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // but the tunnel stream (multiplexed on this session) carries ~8 KB IP-packet
 // batches, so scratch must fit a full batch plus ServiceFrame/envelope overhead.
 // Chat subscriptions deliver 16 KB body chunks plus framing, even on boards
-// without PSRAM. Reserve enough inbound space for those frames. Not on the
-// ESP32-C3 AI Passport: three 17 KB buffers beside its UI leave too little to
-// upload a voice note. It takes 12 KB, as Link boards without PSRAM do.
+// without PSRAM. Reserve enough inbound space for those frames. The ESP32-C3
+// AI Passport and AtomS3 take 12 KB: larger buffers leave too little RAM for
+// the session to stay up beside Wi-Fi and the UI.
 // With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
 // so extra requests (display.draw_file) can take large replies in few frames;
 // the two buffers cost 104 KB of PSRAM more than 12 KB ones.
@@ -129,7 +142,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // can't be skipped: Noise's nonces and the ordered framer would desync), the
 // request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
 // reconnects.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define SVC_FRAME_SCRATCH (12 * 1024)
 #elif CONFIG_SPIRAM
 #define SVC_FRAME_SCRATCH (64 * 1024)
@@ -137,10 +151,12 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
 #endif
 
-// The ADV and the ESP32-C3 AI Passport cannot allocate the session with the
-// larger inbound buffers and the usual outbound buffers together. Keep this
-// reduction local to those boards.
-#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || CONFIG_MUSE_BOARD_AI_PASSPORT)
+// These small boards cannot allocate the session with the larger inbound
+// buffers and the usual outbound buffers together. Keep this reduction local
+// to the profiles that need it.
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || \
+                              CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                              CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define CARDPUTER_CONTROL_SESSION 1
 #else
 #define CARDPUTER_CONTROL_SESSION 0
@@ -174,7 +190,8 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define WS_BUF_SIZE (SMALL_CONTROL_SESSION ? 7 * 1024 : 16 * 1024)
 #endif
 // Inbound WebSocket frames: SVC_FRAME_SCRATCH plus framing and the AEAD tag.
-#if SMALL_CONTROL_SESSION && CONFIG_MUSE_BOARD_AI_PASSPORT
+#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define WS_RX_BUF_SIZE (SVC_FRAME_SCRATCH + 1024)
 #else
 #define WS_RX_BUF_SIZE (SMALL_CONTROL_SESSION ? 17 * 1024 : WS_BUF_SIZE)
@@ -264,6 +281,23 @@ static void store_wifi_ssid(const char *ssid) {
     size_t len = strnlen(ssid, sizeof(s_wifi_ssid) - 1);
     memcpy(s_wifi_ssid, ssid, len);
     s_wifi_ssid[len] = '\0';
+}
+
+// Longest server Reset reason kept. Enough for every reason the server sends
+// ("chunk for stream with completed body" is 36) while leaving the
+// "server reset stream, code=N: " prefix room in a TUNNEL_FAILURE_MAX detail.
+static constexpr size_t RESET_REASON_MAX = 40;
+
+// Copy a Reset reason off the wire for logs and the connectivity history:
+// printable ASCII only (anything else becomes '?'), cut at RESET_REASON_MAX.
+static void copy_reset_reason(StringView reason, char *out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    size_t len = std::min(reason.size(), out_len - 1);
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)reason[i];
+        out[i] = (c >= 0x20 && c <= 0x7e) ? (char)c : '?';
+    }
+    out[len] = '\0';
 }
 
 static constexpr int64_t WS_FRAME_TIMEOUT_US = 15000000;
@@ -1026,6 +1060,25 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
     return ws_send_frame_inplace(c->tls, buf + r.offset, r.size);
 }
 
+// Reset TUNNEL_STREAM_ID so the server drops its record of the old stream
+// before noise_tunnel_maybe_reopen reuses the id.
+static bool tunnel_reset_stream(void *vctx) {
+    auto *c = static_cast<tunnel_emit_ctx *>(vctx);
+    ResetView reset;
+    reset.code = ResetCode::Cancelled;
+    reset.reason = StringView("tunnel reopen");
+    auto sws = c->session->StartOutboundReset(
+        ServiceType::Daemon, TUNNEL_STREAM_ID, reset,
+        ByteSpan(c->svc_scratch, OUT_SVC_SCRATCH),
+        ByteSpan(c->env_scratch, OUT_ENV_SCRATCH));
+    if (!sws.ok()) {
+        ESP_LOGE(TAG, "tunnel StartOutboundReset failed: %s",
+                 sws.status().str());
+        return false;
+    }
+    return flush_outbound(c->tls, *c->session, c->ws_buf);
+}
+
 // ---- Extra daemon requests (noise_ctrl_req_*) --------------------------------
 
 // Opened by Muse and by an app's own code (CONFIG_HOMEHUB_DAEMON_REQUESTS);
@@ -1327,6 +1380,12 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
 
 // ---- JSON message builders -------------------------------------------------
 
+#ifndef MUSE_DEVICE_FAMILY
+#define MUSE_DEVICE_FAMILY "gadget"
+#endif
+
+extern "C" const char muse_device_guide_md[];
+
 static cJSON *string_param(const char *description) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "string");
@@ -1370,6 +1429,12 @@ static void add_register_metadata_string(cJSON **metadata, cJSON *params,
                                          const char *key,
                                          const char *value) {
     if (!value || !value[0]) return;
+    // A control character escapes to six JSON bytes (\u00XX), which
+    // link.register has no room for. Only an SSID, which may hold any byte,
+    // can have one: leave it out rather than fail to register.
+    for (const unsigned char *c = (const unsigned char *)value; *c; c++) {
+        if (*c < 0x20) return;
+    }
     if (!*metadata) {
         *metadata = cJSON_CreateObject();
         if (!*metadata) return;
@@ -1398,18 +1463,28 @@ static char *build_register_json(void) {
     cJSON_AddStringToObject(params, "platform", "esp32");
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(params, "version", desc ? desc->version : "unknown");
-    cJSON_AddStringToObject(params, "device_family", "link");
-    cJSON_AddStringToObject(params, "model_id", "esp-link");
+    cJSON_AddStringToObject(params, "device_family", MUSE_DEVICE_FAMILY);
+    cJSON_AddStringToObject(params, "model_id", CONFIG_MUSE_DEVICE_MODEL_ID);
     cJSON_AddBoolToObject(params, "is_wakeup_supported", false);
     cJSON *metadata = nullptr;
+    add_register_metadata_string(&metadata, params, "model_name",
+                                 CONFIG_MUSE_DEVICE_MODEL_NAME);
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 
     cJSON *commands = cJSON_CreateObject();
     add_command(commands, "device.health",
-                "Report basic Link health, including battery level (percent), "
-                "voltage, and whether it is charging or on USB power; each is "
-                "null when the device has no battery or can't measure it",
+                "Report Link health: battery level (percent), voltage, whether "
+                "it is charging or on USB power (each null if not measurable), "
+                "and connectivity_events, recent Wi-Fi, session and tunnel "
+                "outages with causes",
                 nullptr, nullptr);
+    add_command(commands, "device.guide",
+                "This device's usage guide (Markdown): what it is, its "
+                "controls and limits."
+#if CONFIG_MUSE_WASM_APPS
+                " Also returns structured capabilities: board, devices and WASM API discovery."
+#endif
+                , nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
                 "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
@@ -1531,6 +1606,10 @@ static char *build_register_json(void) {
     }
 #endif
 
+#if CONFIG_MUSE_WASM_APPS
+    muse_apps_advertise(commands);   // app.run and app.stop
+#endif
+
 #if CONFIG_HOMEHUB_VOICE
     cJSON *volume_optional = cJSON_CreateObject();
     cJSON *volume_param = cJSON_CreateObject();
@@ -1568,34 +1647,29 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    add_command(commands, "wakeword.disable",
+                "Turn off hands-free \"Hey Muse\" listening at once, ending any "
+                "hands-free voice note in progress. Only someone at the device "
+                "can turn it back on. Kept across restarts. Returns enabled and "
+                "listening (both false).",
+                nullptr, nullptr);
+#endif
+
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_P4_CSI_CAMERA || CONFIG_MUSE_MOSAICO_CAMERA
     add_command(commands, "camera.capture",
 #if CONFIG_MUSE_WATCHER_CAMERA
                 "Capture one still JPEG frame from the SenseCAP Watcher camera. "
-#else
+#elif CONFIG_MUSE_P4_CSI_CAMERA
                 "Capture one still 1280x960 JPEG frame from the device camera. "
+#else
+                "Capture one still JPEG frame from the device camera. "
 #endif
                 "The frame is returned as base64 only when this command is explicitly invoked.",
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "camera.capture"), "timeout_ms", 30000);
 #endif
-
-    if (ota_is_enabled()) {
-        cJSON *ota_required = cJSON_CreateObject();
-        cJSON_AddItemToObject(ota_required, "url",
-                              string_param("HTTPS URL of the .bin firmware image to flash."));
-        cJSON *ota_optional = cJSON_CreateObject();
-        cJSON *force_param = cJSON_CreateObject();
-        cJSON_AddStringToObject(force_param, "type", "boolean");
-        cJSON_AddStringToObject(force_param, "description",
-                                "Install even if the image version is not newer.");
-        cJSON_AddItemToObject(ota_optional, "force", force_param);
-        add_command(commands, "device.ota",
-                    "Download a firmware image from `url` and apply it "
-                    "(esp_https_ota), then reboot.",
-                    ota_required, ota_optional);
-    }
 
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     ble_commands_register(commands);
@@ -1621,14 +1695,9 @@ static char *build_register_json(void) {
     return json;
 }
 
-// ---- OTA callback ----------------------------------------------------------
+// ---- Async results ---------------------------------------------------------
 
-struct ota_ctx {
-    noise_ctrl_session_generation_t session_generation;
-    char request_id[64];
-};
-
-// Queued result from OTA or other async operations.
+// Queued result from an asynchronous command.
 static void queue_result(noise_ctrl_session_generation_t session_generation,
                          const char *request_id, cJSON *result) {
     if (!session_generation || !s_result_q || !request_id) {
@@ -1650,50 +1719,9 @@ static void queue_result(noise_ctrl_session_generation_t session_generation,
     }
 }
 
-static void noise_ota_status(const ota_event_t *ev, void *user) {
-    auto *ctx = static_cast<ota_ctx *>(user);
-    cJSON *result = cJSON_CreateObject();
-
-    switch (ev->result) {
-        case OTA_RESULT_APPLIED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"applied\",\"version\":\"%s\",\"rebooting\":true}",
-                     ev->new_version ? ev->new_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        case OTA_RESULT_SKIPPED: {
-            cJSON_AddBoolToObject(result, "ok", true);
-            char payload[192];
-            snprintf(payload, sizeof(payload),
-                     "{\"status\":\"skipped\",\"version\":\"%s\",\"running\":\"%s\"}",
-                     ev->new_version ? ev->new_version : "",
-                     ev->running_version ? ev->running_version : "");
-            cJSON_AddStringToObject(result, "payload_json", payload);
-            break;
-        }
-        default: {
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "ota_failed");
-            cJSON_AddStringToObject(error, "message",
-                                    ev->detail ? ev->detail : "ota failed");
-            cJSON_AddItemToObject(result, "error", error);
-            break;
-        }
-    }
-
-    queue_result(ctx->session_generation, ctx->request_id, result);
-    free(ctx);
-}
-
 // ---- Inbound message dispatch -----------------------------------------------
 
-static void send_device_health(
-    noise_ctrl_session_generation_t session_generation,
-    const char *request_id) {
+extern "C" cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
     char wifi_ssid[sizeof(s_wifi_ssid)];
     copy_wifi_ssid(wifi_ssid, sizeof(wifi_ssid));
 
@@ -1741,13 +1769,42 @@ static void send_device_health(
     cJSON_AddItemToObject(metrics, "usb_power",
                           usb_power ? usb_power : cJSON_CreateNull());
     cJSON_AddItemToObject(health, "metrics", metrics);
-    if (wifi_ssid[0]) {
+#if CONFIG_HOMEHUB_TUNNEL
+    cJSON_AddBoolToObject(health, "tunnel_connected", noise_tunnel_is_connected());
+    // tunnel_connected only means the stream is open. Idle time and counters
+    // show whether it is passing traffic. No control-side idle time: this
+    // request itself just arrived on control.
+    tunnel_stats_t tun_stats;
+    tunnel_netif_get_stats(&tun_stats);
+    cJSON *tunnel = cJSON_CreateObject();
+    uint32_t tun_idle_s = noise_tunnel_rx_idle_s();
+    if (tun_idle_s != UINT32_MAX) {
+        cJSON_AddNumberToObject(tunnel, "rx_idle_seconds", tun_idle_s);
+    }
+    cJSON_AddNumberToObject(tunnel, "rx_packets", tun_stats.rx_pkts);
+    cJSON_AddNumberToObject(tunnel, "rx_bytes", tun_stats.rx_bytes);
+    cJSON_AddNumberToObject(tunnel, "tx_packets", tun_stats.tx_pkts);
+    cJSON_AddNumberToObject(tunnel, "tx_bytes", tun_stats.tx_bytes);
+    cJSON_AddNumberToObject(tunnel, "tx_dropped", tun_stats.tx_dropped);
+    cJSON_AddItemToObject(health, "tunnel", tunnel);
+#endif
+    link_events_add_json(health, "connectivity_events",
+                         for_bug_report ? LINK_EVENTS_CAPACITY
+                                        : LINK_EVENTS_HEALTH_MAX);
+    if (!for_bug_report && wifi_ssid[0]) {
         cJSON_AddStringToObject(health, "network_ssid", wifi_ssid);
     }
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(health, "version",
                             desc ? desc->version : "unknown");
+    return health;
+}
 
+static void send_device_health(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id) {
+    cJSON *health = noise_ctrl_device_health_json(false);
+    if (!health) return;
     char *payload = cJSON_PrintUnformatted(health);
     cJSON_Delete(health);
     if (!payload) return;
@@ -1756,6 +1813,32 @@ static void send_device_health(
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "payload_json", payload);
     free(payload);
+    queue_result(session_generation, request_id, result);
+}
+
+static void send_device_guide(
+    noise_ctrl_session_generation_t session_generation,
+    const char *request_id) {
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+    cJSON *guide = cJSON_CreateStringReference(muse_device_guide_md);
+    if (!cJSON_AddBoolToObject(result, "ok", true) || !payload
+        || !cJSON_AddStringToObject(payload, "format", "markdown")
+        || !cJSON_AddItemToObject(payload, "guide", guide)
+#if CONFIG_MUSE_WASM_APPS
+        /* Once guide is attached, result owns it, including on a later failure. */
+        || !(guide = nullptr, muse_apps_add_capabilities(payload))
+#endif
+        ) {
+        cJSON_Delete(guide);
+        cJSON_Delete(result);
+        result = cJSON_CreateObject();
+        cJSON *error = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(error, "code", "out_of_memory");
+        cJSON_AddStringToObject(error, "message", "could not build the device guide");
+        if (!cJSON_AddItemToObject(result, "error", error)) cJSON_Delete(error);
+    }
     queue_result(session_generation, request_id, result);
 }
 
@@ -1801,39 +1884,10 @@ static void handle_invoke_request(
 
     ESP_LOGI(TAG, "invoke request: command=%s", command);
 
-    if (strcmp(command, "device.ota") == 0) {
-        cJSON *url = cmd_params ? cJSON_GetObjectItem(cmd_params, "url") : nullptr;
-        cJSON *force = cmd_params ? cJSON_GetObjectItem(cmd_params, "force") : nullptr;
-        if (cJSON_IsString(url) && url->valuestring && url->valuestring[0]) {
-            auto *ctx = static_cast<ota_ctx *>(malloc(sizeof(ota_ctx)));
-            if (ctx) {
-                ctx->session_generation = session_generation;
-                strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
-                ctx->request_id[sizeof(ctx->request_id) - 1] = '\0';
-                ota_start(url->valuestring, cJSON_IsTrue(force),
-                          noise_ota_status, ctx);
-            } else {
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddBoolToObject(result, "ok", false);
-                cJSON *error = cJSON_CreateObject();
-                cJSON_AddStringToObject(error, "code", "out_of_memory");
-                cJSON_AddStringToObject(error, "message",
-                                        "failed to allocate OTA context");
-                cJSON_AddItemToObject(result, "error", error);
-                queue_result(session_generation, request_id, result);
-            }
-        } else {
-            cJSON *result = cJSON_CreateObject();
-            cJSON_AddBoolToObject(result, "ok", false);
-            cJSON *error = cJSON_CreateObject();
-            cJSON_AddStringToObject(error, "code", "invalid_params");
-            cJSON_AddStringToObject(error, "message",
-                                    "device.ota requires a non-empty url");
-            cJSON_AddItemToObject(result, "error", error);
-            queue_result(session_generation, request_id, result);
-        }
-    } else if (strcmp(command, "device.health") == 0) {
+    if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
+    } else if (strcmp(command, "device.guide") == 0) {
+        send_device_guide(session_generation, request_id);
     } else if (s_command_cb) {
         cJSON *result = s_command_cb(command, cmd_params, request_id,
                                      session_generation);
@@ -2044,8 +2098,22 @@ static void idle_wait(esp_tls_t *tls, uint64_t last_busy_us) {
     lwip_select(fd + 1, &rd, nullptr, nullptr, &tv);
 }
 
+// Connectivity history: failed attempts between sessions are summarized in
+// the next session_up rather than recorded one by one. noise_ctrl_task-owned.
+static uint32_t s_failed_attempts = 0;
+static const char *s_last_attempt_failure = "";
+static uint64_t s_session_down_us = 0;
+
+static void note_attempt_failed(const char *reason) {
+    ++s_failed_attempts;
+    s_last_attempt_failure = reason;
+}
+
 static session_result_t run_session(stack_monitor_t *stack) {
     session_result_t result = SESSION_FAILED;
+    const char *end_reason = "stopped";
+    bool went_silent = false;  // torn down because nothing came back from the VM
+    uint64_t session_up_us = 0;
     uint8_t *ws_buf = nullptr, *rx_buf = nullptr;
     uint8_t *svc_scratch = nullptr, *env_scratch = nullptr;
     uint8_t *tf_scratch = nullptr, *sr_scratch = nullptr;
@@ -2057,17 +2125,19 @@ static session_result_t run_session(stack_monitor_t *stack) {
     esp_tls_t *tls = esp_tls_init();
     if (!tls) {
         ESP_LOGE(TAG, "esp_tls_init failed");
+        note_attempt_failed("TLS init failed");
         return SESSION_FAILED;
     }
     esp_tls_cfg_t cfg = {};
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.timeout_ms = 15000;
 
-    int r = esp_tls_conn_new_sync(s_noise_host, static_cast<int>(strlen(s_noise_host)),
+    int r = network_proxy_tls_connect(s_noise_host, static_cast<int>(strlen(s_noise_host)),
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
         esp_tls_conn_destroy(tls);
+        note_attempt_failed("TLS connect failed");
         return SESSION_FAILED;
     }
     ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
@@ -2096,6 +2166,9 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // blip. Saying so takes the 60s auth backoff instead of the 15s
         // network cap, and raises ws_auth_failed so app.c re-fetches the
         // token from fetch_vms — the only thing that can actually fix it.
+        note_attempt_failed(upgrade == NOISE_UPGRADE_AUTH_REJECTED
+                                ? "WebSocket upgrade auth rejected"
+                                : "WebSocket upgrade failed");
         return upgrade == NOISE_UPGRADE_AUTH_REJECTED ? SESSION_AUTH_FAILED
                                                      : SESSION_FAILED;
     }
@@ -2137,6 +2210,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (!ws_buf || !rx_buf || !svc_scratch || !env_scratch
         || !tf_scratch || !sr_scratch) {
         ESP_LOGE(TAG, "session buffer alloc failed");
+        end_reason = "session buffer alloc failed";
         goto cleanup;
     }
 
@@ -2146,6 +2220,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     if (!noise_handshake(tls, session, ws_buf, ws_buf_size)) {
         ESP_LOGE(TAG, "Noise handshake failed");
         result = SESSION_AUTH_FAILED;
+        end_reason = "Noise handshake failed";
         goto cleanup;
     }
     session_generation = noise_ctrl_next_session_generation(
@@ -2166,9 +2241,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
         if (!open_sws.ok()) {
             ESP_LOGE(TAG, "StartOutboundApplicationRequest failed: %s",
                      open_sws.status().str());
+            end_reason = "control stream open failed";
             goto cleanup;
         }
-        if (!flush_outbound(tls, session, ws_buf)) goto cleanup;
+        if (!flush_outbound(tls, session, ws_buf)) {
+            end_reason = "control stream open failed";
+            goto cleanup;
+        }
         ESP_LOGI(TAG, "opened POST /link-control stream");
     }
 
@@ -2194,8 +2273,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+            end_reason = "link.register build failed";
             goto cleanup;
         }
+#if CONFIG_MUSE_WASM_APPS
+        // Apps add to it, and it must stay under 8 KB.
+        ESP_LOGI(TAG, "link.register: %u bytes", (unsigned)strlen(reg_json));
+#endif
         control_tx = {reg_json, strlen(reg_json), 0, false, session_generation};
         control_tx.is_registration = true;
     }
@@ -2205,6 +2289,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         int sockfd = -1;
         if (esp_tls_get_conn_sockfd(tls, &sockfd) != ESP_OK || sockfd < 0) {
             ESP_LOGE(TAG, "get_conn_sockfd failed");
+            end_reason = "socket setup failed";
             goto cleanup;
         }
         int flags = lwip_fcntl(sockfd, F_GETFL, 0);
@@ -2213,6 +2298,16 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
     s_connected = true;
     notify_status("ws_connected");
+    session_up_us = esp_timer_get_time();
+    if (s_failed_attempts) {
+        link_events_record(LINK_EVENT_SESSION_UP,
+                           "established after %us: %u failed attempts, last: %s",
+                           (unsigned)((session_up_us - s_session_down_us) / 1000000),
+                           (unsigned)s_failed_attempts, s_last_attempt_failure);
+    } else {
+        link_events_record(LINK_EVENT_SESSION_UP, "established");
+    }
+    s_failed_attempts = 0;
 
     HeaderView hdr_storage[16];
     bool error = false;
@@ -2220,8 +2315,10 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // last_rx_us tracks inbound liveness (app frames + keepalive pongs),
     // distinct from last_activity_us which also counts our TX.
     uint64_t last_rx_us = last_activity_us;
+    uint64_t last_ws_ping_us = 0;
     bool heartbeat_sent = false;
     uint64_t last_heartbeat_us = 0;
+    int64_t dma_held_since_us = 0, dma_held_warned_us = 0;
 
     // Tunnel data-plane stream, multiplexed on this session. Deferred: it is
     // opened from inside the loop only after the link.register reply arrives
@@ -2230,7 +2327,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // registration and takes a 403 + slow reopen.
     tunnel_emit_ctx tun_ctx = {tls, &session, svc_scratch, env_scratch, ws_buf};
     noise_tunnel_emit_t tun_emit = {&tun_ctx, tunnel_open_stream, tunnel_send_body,
-                                    tunnel_send_body_inplace};
+                                    tunnel_send_body_inplace, tunnel_reset_stream};
     bool tunnel_opened = false;
     uint64_t last_busy_us = esp_timer_get_time();
 
@@ -2242,6 +2339,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         if (SHOW_AGENT_NAME && !identity.requested && s_register_acked) {
             identity.requested = true;
             if (!identity_request(tls, session, svc_scratch, env_scratch, ws_buf)) {
+                end_reason = "identity request failed";
                 error = true;
                 break;
             }
@@ -2285,6 +2383,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         static_cast<size_t>(n) > SVC_FRAME_SCRATCH + CryptoBackend::kAes256GcmTagSize) {
                         s_req_too_large = true;
                     }
+                    end_reason = "inbound frame rejected";
                     error = true;
                     break;
                 }
@@ -2308,11 +2407,21 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         if (is_tunnel) {
                             // Tunnel stream reset is non-fatal for the control
                             // session; drop the tunnel and keep control alive.
-                            ESP_LOGW(TAG, "server reset tunnel stream");
-                            noise_tunnel_on_session_down();
+                            // The reason is bytes off the wire: printable ASCII
+                            // only, capped. The code alone doesn't say which of
+                            // the server's ProtocolError cases this was.
+                            char reason[RESET_REASON_MAX + 1];
+                            copy_reset_reason(frame.reset.reason, reason, sizeof(reason));
+                            ESP_LOGW(TAG, "server reset tunnel stream: code=%d reason=\"%s\"",
+                                     (int)frame.reset.code, reason);
+                            char why[TUNNEL_FAILURE_MAX];
+                            snprintf(why, sizeof(why), "server reset stream, code=%d%s%s",
+                                     (int)frame.reset.code, reason[0] ? ": " : "", reason);
+                            noise_tunnel_on_server_drop(why);
                         } else {
                             ESP_LOGW(TAG, "server reset stream %lld",
                                      (long long)frame.stream_id);
+                            end_reason = "server reset control stream";
                             error = true;
                             break;
                         }
@@ -2323,10 +2432,14 @@ static session_result_t run_session(stack_monitor_t *stack) {
                             if (is_tunnel) {
                                 ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
                                          frame.response.status);
-                                noise_tunnel_on_session_down();
+                                char why[TUNNEL_FAILURE_MAX];
+                                snprintf(why, sizeof(why), "server rejected open: %d",
+                                         (int)frame.response.status);
+                                noise_tunnel_on_server_drop(why);
                             } else {
                                 ESP_LOGE(TAG, "server rejected /link-control: %d",
                                          frame.response.status);
+                                end_reason = "server rejected /link-control";
                                 error = true;
                                 break;
                             }
@@ -2335,10 +2448,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 }
             } else if (n == 0) {
                 ESP_LOGI(TAG, "peer closed");
+                end_reason = "server closed connection";
                 error = true;
                 break;
             } else if (n == -1) {
                 ESP_LOGW(TAG, "rx error");
+                end_reason = "socket read error";
                 error = true;
                 break;
             } else if (n == -3) {
@@ -2398,6 +2513,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 if (control_tx.is_heartbeat) {
                     ESP_LOGW(TAG, "heartbeat send failed");
                 }
+                end_reason = "control send failed";
                 error = true;
                 break;
             }
@@ -2419,6 +2535,32 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 clear_pending_json_body(control_tx);
             }
         }
+        // A control message Link holds back while DMA-capable RAM is under its
+        // reserve (the registration, a command's result) otherwise waits
+        // silently, and a held registration leaves the device offline in
+        // Muse: say so every 5 s while it does. The heap is only sampled
+        // while something waits.
+        {
+            size_t dma_free = 0;
+            bool held = (control_tx.json || uxQueueMessagesWaiting(s_result_q))
+                        && (!noise_tx_has_dma_headroom(&dma_free)
+                            || !noise_tx_has_contiguous_dma_headroom());
+            int64_t now = esp_timer_get_time();
+            if (!held) {
+                dma_held_since_us = 0;
+            } else if (!dma_held_since_us) {
+                dma_held_since_us = now;
+                dma_held_warned_us = now;
+            } else if (now - dma_held_warned_us >= 5000000) {
+                dma_held_warned_us = now;
+                ESP_LOGW(TAG, "%s held for %d s: DMA-capable RAM is short (%u bytes free; sending needs %u)",
+                         !control_tx.json ? "a command result"
+                         : control_tx.is_registration ? "link.register"
+                         : control_tx.is_heartbeat ? "link.heartbeat" : "a control message",
+                         (int)((now - dma_held_since_us) / 1000000), (unsigned)dma_free,
+                         (unsigned)NOISE_TX_DMA_RESERVE_BYTES);
+            }
+        }
 
 #if CONFIG_HOMEHUB_DAEMON_REQUESTS
         {
@@ -2437,8 +2579,10 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // Retry opening the tunnel stream if it went down while control is up
         // (e.g. transient backend 503). Rate-limited internally. Only after the
         // initial post-register open, so we never race registration.
-        if (tunnel_opened) {
-            noise_tunnel_maybe_reopen(&tun_emit);
+        if (tunnel_opened && !noise_tunnel_maybe_reopen(&tun_emit)) {
+            end_reason = "tunnel reopen failed";
+            error = true;
+            break;
         }
 
         // TX: drain the tunnel batch queue (multiplexed on this session).
@@ -2447,6 +2591,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             did = true;
             last_activity_us = esp_timer_get_time();
         } else if (tun_sent < 0) {
+            end_reason = "tunnel TX failed or stalled";
             error = true;
             break;
         }
@@ -2457,6 +2602,19 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // internally, so it's safe to call every loop iteration.
         if (tunnel_opened) {
             noise_tunnel_tick(&tun_emit);
+            // If nothing at all has arrived since the oldest unanswered tunnel
+            // ping, not even the pong to the WebSocket ping sent after it, the
+            // connection itself is dead (typically a WAN drop leaving TCP
+            // half-open). Reopening the tunnel on it can't work, so reconnect
+            // now instead of waiting out RX_IDLE_TIMEOUT_MS.
+            const uint64_t unanswered_ping_us = noise_tunnel_take_unanswered_timeout();
+            if (unanswered_ping_us && last_rx_us < unanswered_ping_us) {
+                ESP_LOGW(TAG, "tunnel keepalive unanswered and nothing received since; reconnecting");
+                end_reason = "no response from VM (tunnel keepalive)";
+                went_silent = true;
+                error = true;
+                break;
+            }
         }
 
         // A seal failure permanently poisons Noise, including failures from
@@ -2464,6 +2622,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // WS pings can still succeed and otherwise keep a dead session alive.
         if (!session.isEstablished()) {
             ESP_LOGW(TAG, "Noise session no longer established; reconnecting");
+            end_reason = "Noise session broke";
             error = true;
             break;
         }
@@ -2472,16 +2631,37 @@ static session_result_t run_session(stack_monitor_t *stack) {
         // directions see traffic and middlebox idle timers (which drop the
         // idle server→device path otherwise) stay reset. This keeps the whole
         // WebSocket transport alive; Noise session health is checked above.
-        if (!did) {
-            uint64_t idle_us = esp_timer_get_time() - last_activity_us;
-            if (idle_us >= static_cast<uint64_t>(KEEPALIVE_INTERVAL_MS) * 1000) {
+        // Ping when we've sent nothing for the interval, or when nothing has
+        // come back for it even while we keep sending (pong proves the path).
+        {
+            const uint64_t now_us = esp_timer_get_time();
+            const uint64_t interval_us = static_cast<uint64_t>(KEEPALIVE_INTERVAL_MS) * 1000;
+            const uint64_t rx_idle_us = now_us - last_rx_us;
+            if (rx_idle_us >= static_cast<uint64_t>(RX_IDLE_TIMEOUT_MS) * 1000) {
+                ESP_LOGW(TAG, "nothing received for %llus; reconnecting",
+                         (unsigned long long)(rx_idle_us / 1000000));
+                end_reason = "no response from VM";
+                went_silent = true;
+                error = true;
+                break;
+            }
+            bool tx_idle = !did && now_us - last_activity_us >= interval_us;
+            bool rx_idle = rx_idle_us >= interval_us && now_us - last_ws_ping_us >= interval_us;
+            // A tunnel ping unanswered with nothing received since: ping once
+            // more, so a live connection answers before the tunnel keepalive
+            // timeout above decides between a tunnel reopen and a reconnect.
+            const uint64_t tun_ping_us = tunnel_opened ? noise_tunnel_unanswered_ping_us() : 0;
+            bool tun_probe = tun_ping_us && now_us - tun_ping_us >= TUN_PING_PROBE_US
+                             && last_rx_us < tun_ping_us && last_ws_ping_us < tun_ping_us;
+            if (tx_idle || rx_idle || tun_probe) {
                 if (!ws_send_ping(tls)) {
                     ESP_LOGW(TAG, "keepalive ping failed");
+                    end_reason = "WebSocket ping failed";
                     error = true;
                     break;
                 }
                 ESP_LOGD(TAG, "keepalive ping sent");
-                last_activity_us = esp_timer_get_time();
+                last_activity_us = last_ws_ping_us = now_us;
                 did = true;
             }
         }
@@ -2499,6 +2679,14 @@ static session_result_t run_session(stack_monitor_t *stack) {
     noise_tunnel_on_session_down();
     ESP_LOGI(TAG, "session ending (rx idle %llus at teardown)",
              (unsigned long long)((esp_timer_get_time() - last_rx_us) / 1000000));
+    s_session_down_us = esp_timer_get_time();
+    link_events_record(LINK_EVENT_SESSION_DOWN, "%s after %us up, rx idle %us",
+                       end_reason,
+                       (unsigned)((s_session_down_us - session_up_us) / 1000000),
+                       (unsigned)((s_session_down_us - last_rx_us) / 1000000));
+    // Silence alone can't say which hop failed; check the internet while the
+    // reconnect runs.
+    if (went_silent) link_probe_on_stall();
     notify_status("ws_disconnected");
     // Clean exit (s_running went false) — no backoff needed.
     if (!error) result = SESSION_OK;
@@ -2517,6 +2705,7 @@ cleanup:
 #if CONFIG_HOMEHUB_FAST_GCM
     fast_gcm_forget_all();   // this session's TLS and Noise keys
 #endif
+    if (!session_up_us) note_attempt_failed(end_reason);
     return result;
 }
 
@@ -2572,6 +2761,12 @@ extern "C" void noise_ctrl_set_command_cb(noise_ctrl_command_cb cb) {
 
 extern "C" void noise_ctrl_set_power_save(bool on) {
     s_power_save = on;
+}
+
+extern "C" void noise_ctrl_set_node_id(const char *node_id) {
+    if (!node_id || !*node_id || strncmp(s_node_id, node_id, sizeof(s_node_id)) == 0) return;
+    // Changes only when setup stores new credentials; a registration follows.
+    snprintf(s_node_id, sizeof(s_node_id), "%s", node_id);
 }
 
 extern "C" void noise_ctrl_set_host(const char *host) {

@@ -36,9 +36,13 @@
 #include "muse_state.h"
 #include "muse_text.h"
 #include "muse_voice.h"
+#include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
+#endif
+#if CONFIG_MUSE_APP_VIEW
+#include "muse_app_view.h"
 #endif
 
 static const char *TAG = "muse_menu";
@@ -70,6 +74,9 @@ typedef enum {
     ITEM_SPEAKER,
     ITEM_BRIGHTNESS,
     ITEM_MIC,
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    ITEM_WAKE,
+#endif
     ITEM_SLEEP,
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     ITEM_TEXT,
@@ -78,6 +85,10 @@ typedef enum {
     ITEM_WIFI,
 #if CONFIG_MUSE_VIDEO
     ITEM_CAMERA,
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    ITEM_APPS_ON,
+    ITEM_APPS,
 #endif
     ITEM_INFO,
     ITEM_BATTERY,
@@ -93,6 +104,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_SPEAKER] = "Speaker",
     [ITEM_BRIGHTNESS] = "Brightness",
     [ITEM_MIC] = "Mic gain",
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    [ITEM_WAKE] = "Wake word",
+#endif
     [ITEM_SLEEP] = "Auto-sleep",
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Text size",
@@ -101,6 +115,10 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
     [ITEM_WIFI] = "Wi-Fi",
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Phone camera",
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    [ITEM_APPS_ON] = "Run apps",
+    [ITEM_APPS] = "Apps",
 #endif
     [ITEM_INFO] = "Status",
     [ITEM_BATTERY] = "Battery",
@@ -116,6 +134,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_SPEAKER] = "Toggle",
     [ITEM_BRIGHTNESS] = "Change",
     [ITEM_MIC] = "Change",
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    [ITEM_WAKE] = "Toggle",
+#endif
     [ITEM_SLEEP] = "Change",
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     [ITEM_TEXT] = "Change",
@@ -124,6 +145,10 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_WIFI] = "Toggle",
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Open",
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    [ITEM_APPS_ON] = "Toggle",
+    [ITEM_APPS] = "Open",
 #endif
     [ITEM_INFO] = "Open",
     [ITEM_BATTERY] = "Open",
@@ -281,6 +306,11 @@ static void value_text(int item, char *buf, size_t n)
     case ITEM_MIC:
         snprintf(buf, n, "%d dB", muse_settings_mic_gain());
         break;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    case ITEM_WAKE:
+        strlcpy(buf, muse_wakeword_enabled() ? "On" : "Off", n);
+        break;
+#endif
     case ITEM_SLEEP:
         strlcpy(buf, sleep_name(muse_settings_sleep_s()), n);
         break;
@@ -299,6 +329,11 @@ static void value_text(int item, char *buf, size_t n)
 #if CONFIG_MUSE_VIDEO
     case ITEM_CAMERA:
         strlcpy(buf, muse_video_has_client() ? "Ready" : "No phone", n);
+        break;
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    case ITEM_APPS_ON:
+        strlcpy(buf, muse_settings_apps_on() ? "On" : "Off", n);
         break;
 #endif
     case ITEM_BATTERY:
@@ -490,6 +525,11 @@ static void activate(int item, int direction)
     case ITEM_MIC:
         muse_settings_set_mic_gain(value_step(GAIN_STEPS, COUNT(GAIN_STEPS), muse_settings_mic_gain(), direction));
         break;
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+    case ITEM_WAKE:
+        muse_wakeword_set_enabled(!muse_wakeword_enabled());
+        break;
+#endif
     case ITEM_SLEEP:
         muse_settings_set_sleep_s(value_step(SLEEP_STEPS, COUNT(SLEEP_STEPS), muse_settings_sleep_s(), direction));
         break;
@@ -508,6 +548,18 @@ static void activate(int item, int direction)
     case ITEM_CAMERA:
         muse_menu_close();
         muse_video_open();
+        return;
+#endif
+#if CONFIG_MUSE_APP_VIEW
+    case ITEM_APPS_ON:   /* restarts the gadget */
+        muse_settings_set_apps_on(!muse_settings_apps_on());
+        break;
+    case ITEM_APPS:   /* the apps' launcher (muse_app_view.h) */
+        if (!muse_settings_apps_on()) {
+            break;
+        }
+        muse_menu_close();
+        muse_app_view_home();
         return;
 #endif
     case ITEM_INFO:

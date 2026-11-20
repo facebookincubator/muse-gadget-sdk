@@ -27,6 +27,7 @@ if(CONFIG_MUSE_ENABLED)
         "muse_board.c"
         "muse_console.c"
         "muse_state.c"
+        "muse_options.c"
         "muse_battery.c"
         "muse_audio.c"
         "muse_pmu.c"
@@ -38,19 +39,32 @@ if(CONFIG_MUSE_ENABLED)
         "muse_lang.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_WAKEWORD_ENABLE)
+        # Wake word tap and task; without it, muse_wakeword_glue.h's inline stubs.
+        list(APPEND srcs "muse_wakeword_glue.c")
+    endif()
+    if(CONFIG_MUSE_BOARD_SENSECAP_WATCHER OR CONFIG_MUSE_LATEST_REPLY)
+        list(APPEND srcs "muse_review.c")
+    endif()
+    if(CONFIG_MUSE_LATEST_REPLY)
+        list(APPEND srcs "muse_latest_reply.c")
+    endif()
     if(CONFIG_MUSE_UI_FREEINK)
         # E-paper: FreeInk draws the face, Settings and the keyboard.
         list(APPEND srcs "eink/muse_eink_ui.cpp" "eink/muse_eink_settings.cpp" "eink/muse_eink_fonts.cpp")
         # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
         list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
     else()
-        list(APPEND srcs "muse_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
+        list(APPEND srcs "muse_ui.c" "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
     endif()
     if(CONFIG_MUSE_HATCH)
-        list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
+        list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
         if(CONFIG_MUSE_REALTIME_VOICE)
             list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
+            if(CONFIG_MUSE_VOICE_SOFTWARE_AEC)
+                list(APPEND srcs "muse_aec.c")
+            endif()
         endif()
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
@@ -69,6 +83,11 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "fonts/muse_font_vi_12.c" "fonts/muse_font_vi_14.c"
                          "fonts/muse_font_vi_20.c" "fonts/muse_font_vi_28.c")
     endif()
+    if(CONFIG_MUSE_UI_LANG_PT_BR)
+        # Montserrat's Portuguese letters: menu, pairing card, settings pages
+        list(APPEND srcs "fonts/muse_font_pt_12.c" "fonts/muse_font_pt_14.c" "fonts/muse_font_pt_16.c"
+                         "fonts/muse_font_pt_20.c" "fonts/muse_font_pt_28.c")
+    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.
@@ -86,6 +105,7 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_ostb_echoear_2st.c")
     elseif(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
         list(APPEND srcs "boards/board_reterminal_sticky.c")
+        list(APPEND srcs "boards/board_reterminal_sticky_eink.cpp")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_216)
         list(APPEND srcs "boards/board_waveshare_s3_216.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_206)
@@ -100,14 +120,21 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_waveshare_s3_143.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_146)
         list(APPEND srcs "boards/board_waveshare_s3_146.c" "boards/muse_lcd_bands.c")
+    elseif(CONFIG_MUSE_BOARD_LILYGO_S3_AMOLED_175)
+        list(APPEND srcs "boards/board_lilygo_s3_amoled_175.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_ESP_MOSAICO)
         list(APPEND srcs "boards/board_esp_mosaico.c" "boards/muse_lcd_bands.c")
+        if(CONFIG_MUSE_MOSAICO_CAMERA)
+            list(APPEND srcs "boards/mosaico_camera.c")
+        endif()
     elseif(CONFIG_MUSE_BOARD_DFROBOT_UNIHIKER_K10)
         list(APPEND srcs "boards/board_dfrobot_unihiker_k10.c")
     elseif(CONFIG_MUSE_BOARD_AIPI)
         list(APPEND srcs "boards/board_aipi.c")
     elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX)
         list(APPEND srcs "boards/board_atk_dnesp32s3_box.c")
+    elseif(CONFIG_MUSE_BOARD_ATK_DNESP32S3_BOX2)
+        list(APPEND srcs "boards/board_atk_dnesp32s3_box2.c")
     elseif(CONFIG_MUSE_BOARD_ESPRESSIF_BOX_3)
         list(APPEND srcs "boards/board_espressif_box_3.c" "boards/box_3_microphone.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_18)
@@ -117,20 +144,26 @@ if(CONFIG_MUSE_ENABLED)
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_206)
         list(APPEND srcs "boards/board_waveshare_c6_206.c")
     elseif(CONFIG_MUSE_BOARD_SENSECAP_WATCHER)
-        list(APPEND srcs "boards/board_sensecap_watcher.c" "boards/muse_lcd_bands.c" "muse_review.c")
+        list(APPEND srcs "boards/board_sensecap_watcher.c" "boards/muse_lcd_bands.c")
         if(CONFIG_MUSE_WATCHER_CAMERA)
             list(APPEND srcs "boards/watcher_camera.c")
         endif()
     elseif(CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV)
         list(APPEND srcs "boards/board_m5stack_cardputer_adv.c")
+    elseif(CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
+        list(APPEND srcs "boards/board_m5stack_atoms3.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKS3)
         list(APPEND srcs "boards/board_m5stack_sticks3.c")
     elseif(CONFIG_MUSE_BOARD_CROWPANEL_ADVANCE_43)
         list(APPEND srcs "boards/board_crowpanel_advance_43.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_STICKC_PLUS2)
         list(APPEND srcs "boards/board_m5stack_stickc_plus2.c")
-    elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
+    elseif(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
+        if(CONFIG_CAPABILITIES_REGISTRY)
+            # BMI270 registry/lifecycle adapter; vendor driver is a gated managed dependency.
+            list(APPEND srcs "boards/bmi270_device.c" "boards/imu_events.c")
+        endif()
     elseif(CONFIG_MUSE_BOARD_SEEED_XIAO_S3_147)
         list(APPEND srcs "boards/board_seeed_xiao_s3_147.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3)
@@ -181,11 +214,20 @@ if(CONFIG_MUSE_ENABLED)
             list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
         endif()
     endif()
+    if(CONFIG_CAPABILITIES_REGISTRY)
+        list(APPEND srcs "board_capabilities.c")    # the battery as a device for apps (components/capabilities_registry)
+    endif()
+    if(CONFIG_MUSE_APP_VIEW)
+        list(APPEND srcs "muse_app_view.c")   # the screen an app draws on (components/muse_apps)
+    endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
     if(CONFIG_MUSE_POWER_TEST)
         list(APPEND srcs "muse_power_test.c")
-        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI)
+        if(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
+            list(APPEND srcs "boards/board_reterminal_sticky_power_test.c" "boards/sticky_power_test_display.cpp")
+        endif()
+        if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_216 OR CONFIG_MUSE_BOARD_AIPI OR CONFIG_MUSE_BOARD_ESP_MOSAICO)
             list(APPEND srcs "boards/board_power_test_generic.c")
         endif()
     endif()
@@ -193,6 +235,8 @@ elseif(CONFIG_HOMEHUB_VOICE)
     # The Voice PE board uses just the Hatch voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
     list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
+    # The shared session handles option events even without a touchscreen.
+    list(APPEND srcs "muse_options.c" "muse_options_json.c")
     list(APPEND embed "test_reply.mp3")
     if(CONFIG_MUSE_REALTIME_VOICE)
         list(APPEND srcs "muse_voice_call.cpp" "muse_voice_call_core.c")
@@ -201,8 +245,8 @@ endif()
 
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
-    bt esp-tls mbedtls esp_app_format esp_http_client
-    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8
+    bt esp-tls mbedtls esp_app_format esp_http_client network_proxy
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 muse_mirror capabilities_registry
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt efuse
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
@@ -213,6 +257,12 @@ list(APPEND muse_priv_requires camera)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND muse_priv_requires esp_driver_jpeg)
 endif()
+# The Mosaico camera's JPEG encoder and PPA; Kconfig is not loaded yet when
+# requirements expand.
+if(IDF_TARGET STREQUAL "esp32s31")
+    list(APPEND muse_priv_requires esp_driver_jpeg esp_driver_ppa)
+endif()
+list(APPEND muse_priv_requires muse_wakeword)   # registers empty unless MUSE_WAKEWORD_ENABLE
 
 idf_component_register(
     SRCS ${srcs}

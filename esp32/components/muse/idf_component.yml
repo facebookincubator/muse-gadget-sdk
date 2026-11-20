@@ -16,6 +16,11 @@ dependencies:
   idf:
     version: ">=5.5"
   espressif/cjson: "~1.7"
+  # Optional software echo cancellation on ESP32-S3 voice boards.
+  espressif/esp-sr:
+    version: "==2.5.2"
+    rules:
+      - if: "$CONFIG{MUSE_VOICE_AEC_SR} == \"y\""
   # Video over Wi-Fi announces itself with it (muse_video_wifi.c).
   espressif/mdns:
     version: "^1.8"
@@ -37,6 +42,21 @@ dependencies:
     version: 2c047df7792cedece1191503793f18f5d8f1c695
     rules:
       - if: "$CONFIG{MUSE_FREEINK_DEVICE} != \"\""
+  # Only fetched/linked for the StopWatch's enabled capability registry.
+  # 0.4.1 includes an ESP-IDF 6.0 / ESP32-S3 prebuilt driver and Base firmware.
+  espressif/bmi270_sensor:
+    version: "==0.4.1"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
+  # The prebuilt driver calls i2c_bus directly; pin its reviewed ABI too.
+  espressif/i2c_bus:
+    version: "==1.5.2"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
+  espressif/cmake_utilities:
+    version: "==0.5.3"
+    rules:
+      - if: '$CONFIG{MUSE_BMI270_DRIVER} == "y"'
   espressif/esp_codec_dev:
     version: "~1.5"
     public: true
@@ -45,7 +65,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"dfrobot_unihiker_k10\", \"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_18\", \"waveshare_s3_216\", \"waveshare_s3_206\", \"waveshare_s3_185b\", \"waveshare_s3_185c\", \"waveshare_s3_143\", \"waveshare_s3_146\", \"aipi\", \"atk_dnesp32s3_box\", \"m5stack_cardputer_adv\", \"sensecap_watcher\", \"m5stack_sticks3\", \"crowpanel_advance_43\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"spotpear_esp32_ai_128\", \"esp_mosaico\", \"waveshare_p4_lcd35\", \"deotaland_rorolee\", \"waveshare_s3_lcd19\", \"waveshare_s3_143c\", \"viewe_smartring_plus\", \"waveshare_s3_lcd_35\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"dfrobot_unihiker_k10\", \"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_18\", \"waveshare_s3_216\", \"waveshare_s3_206\", \"waveshare_s3_185b\", \"waveshare_s3_185c\", \"waveshare_s3_143\", \"waveshare_s3_146\", \"lilygo_s3_amoled_175\", \"aipi\", \"atk_dnesp32s3_box\", \"atk_dnesp32s3_box2\", \"m5stack_cardputer_adv\", \"m5stack_atoms3\", \"sensecap_watcher\", \"m5stack_sticks3\", \"crowpanel_advance_43\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"m5stack_triviapod\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"spotpear_esp32_ai_128\", \"esp_mosaico\", \"waveshare_p4_lcd35\", \"deotaland_rorolee\", \"waveshare_s3_lcd19\", \"waveshare_s3_143c\", \"viewe_smartring_plus\", \"waveshare_s3_lcd_35\"]"
   espressif/esp_lcd_ili9341:
     version: "^2.1.0"
     rules:
@@ -101,11 +121,15 @@ dependencies:
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"m5stack_stopwatch\", \"esp_mosaico\", \"waveshare_s3_143\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"m5stack_stopwatch\", \"m5stack_triviapod\", \"esp_mosaico\", \"waveshare_s3_143\", \"lilygo_s3_amoled_175\"]"
   espressif/esp_lcd_touch_ft5x06:
     version: "^1.0.6"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} == \"waveshare_s3_143\""
+  waveshare/esp_lcd_touch_cst9217:
+    version: "^1.0.4"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"lilygo_s3_amoled_175\""
   espressif/esp_lcd_touch_cst9220:
     version: "^0.1"
     rules:
@@ -140,6 +164,11 @@ dependencies:
     version: "^2.0.0"
     rules:
       - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_lcd128\", \"spotpear_esp32_ai_128\"]"
+  espressif/esp_lcd_gc9107:
+    version: "^2.0.0"
+    override_path: "../esp_lcd_gc9107"
+    rules:
+      - if: "$CONFIG{MUSE_BOARD_ID} == \"m5stack_atoms3\""
   waveshare/esp32_p4_wifi6_touch_lcd_3_5:
     version: "2.0.2"
     rules:
@@ -153,7 +182,7 @@ dependencies:
   espressif/esp_video:
     version: "~2.5.0"
     rules:
-      - if: '$CONFIG{MUSE_BOARD_ID} == "waveshare_p4_lcd35"'
+      - if: '$CONFIG{MUSE_BOARD_ID} in ["waveshare_p4_lcd35", "esp_mosaico"]'
   # The 1.9's panel is an SH8601 (its touch controller, a CST816S, is above).
   # This board drives esp_lcd itself rather than through a vendor BSP.
   # The 1.43C's panel uses it too.

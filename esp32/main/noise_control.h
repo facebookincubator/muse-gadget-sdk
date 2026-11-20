@@ -70,6 +70,10 @@ void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb);
 // Override the Noise host. NULL or empty restores the compiled default.
 void noise_ctrl_set_host(const char *host);
 
+// The node id link.register sends from the next registration on: setup gives
+// a device set up by earlier firmware its new id without a restart.
+void noise_ctrl_set_node_id(const char *node_id);
+
 // Off (the default), the session checks for traffic every tick. On, once it
 // has been quiet POWER_SAVE_QUIET_MS, every POWER_SAVE_POLL_MS instead, so the
 // CPU can sleep between (Muse with its screen off); traffic goes back to every
@@ -95,6 +99,12 @@ bool noise_ctrl_is_running(void);
 void noise_ctrl_send_command_result(
     noise_ctrl_session_generation_t session_generation,
     const char *request_id, cJSON *result);
+
+// Builds the device.health payload object; the caller owns it. Also embedded in
+// bug.report so a filed bug carries the connectivity history. The bug.report
+// copy holds the full history but leaves out the SSID, like the rest of the
+// report's explicit fields; device.health holds only the recent events.
+cJSON *noise_ctrl_device_health_json(bool for_bug_report);
 
 // ---- Extra daemon requests on this session (CONFIG_HOMEHUB_DAEMON_REQUESTS) ----
 //

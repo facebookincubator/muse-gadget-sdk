@@ -25,6 +25,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#if CONFIG_MUSE_APP_VIEW
+#include "esp_system.h"
+#endif
 
 #include "muse_link.h"
 
@@ -61,6 +64,9 @@ static struct {
 static SemaphoreHandle_t s_lock;
 /* StopWatch samples this at the next press, never during an active call. */
 static atomic_bool s_voice_notes;
+#if CONFIG_MUSE_APP_VIEW
+static bool s_apps_on;
+#endif
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 
@@ -125,7 +131,7 @@ esp_err_t muse_settings_init(void)
         s.speaker_on = b;
     }
     load_u8("mic_gain", &s.mic_gain);
-#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH && CONFIG_MUSE_REALTIME_VOICE
+#if CONFIG_MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CONFIG_MUSE_REALTIME_VOICE
     if (nvs_get_u8(s_nvs, "voice_notes", &b) == ESP_OK) {
         atomic_store(&s_voice_notes, b != 0);
     }
@@ -139,6 +145,11 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "ble_on", &b) == ESP_OK) {
         s.ble_on = b;
     }
+#if CONFIG_MUSE_APP_VIEW
+    if (nvs_get_u8(s_nvs, "apps_on", &b) == ESP_OK) {
+        s_apps_on = b;
+    }
+#endif
     load_str("ssid", s.ssid, sizeof(s.ssid));
     load_str("pass", s.pass, sizeof(s.pass));
     load_str("host", s.host, sizeof(s.host));
@@ -176,6 +187,17 @@ void muse_settings_set_voice_notes(bool on)
     save_u8("voice_notes", on);
     notify(MUSE_SETTING_VOICE_NOTES);
 }
+
+#if CONFIG_MUSE_APP_VIEW
+bool muse_settings_apps_on(void) { return s_apps_on; }
+
+void muse_settings_set_apps_on(bool on)
+{
+    s_apps_on = on;
+    save_u8("apps_on", on);
+    esp_restart();   /* Muse learns of the app commands, or that there are none, as it reconnects */
+}
+#endif
 
 /* Home Link owns the saved networks (this is the first); the local copy is only a fallback. */
 void muse_settings_wifi(char ssid[MUSE_SSID_MAX + 1], char pass[MUSE_PASS_MAX + 1])
@@ -323,3 +345,29 @@ esp_err_t muse_settings_set_hatch_token(const char *token, bool append)
     }
     return err;
 }
+
+#if CONFIG_MUSE_WAKEWORD_ENABLE
+/* The wake word opt-in, kept apart (and last) so builds without the feature
+ * compile this file exactly as before. Read from NVS on first use, which is
+ * muse_wakeword_init() after muse_settings_init(). Default off: listening is
+ * an explicit opt-in. */
+static bool s_wakeword_on, s_wakeword_loaded;
+
+bool muse_settings_wakeword_on(void)
+{
+    if (!s_wakeword_loaded) {
+        uint8_t b = 0;
+        s_wakeword_on = nvs_get_u8(s_nvs, "ww_on", &b) == ESP_OK && b;
+        s_wakeword_loaded = true;
+    }
+    return s_wakeword_on;
+}
+
+void muse_settings_set_wakeword_on(bool on)
+{
+    s_wakeword_on = on;
+    s_wakeword_loaded = true;
+    save_u8("ww_on", on);
+    notify(MUSE_SETTING_WAKEWORD);
+}
+#endif

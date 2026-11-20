@@ -16,6 +16,22 @@
 set(GADGET_CONFIG_REGEN_HINT
     "Generated sdkconfig values override newer defaults; regenerate the active isolated profile configuration.")
 
+string(LENGTH "${CONFIG_MUSE_DEVICE_MODEL_ID}" model_id_len)
+if(NOT CONFIG_MUSE_DEVICE_MODEL_ID MATCHES "^[a-z0-9-]+$" OR model_id_len GREATER 64)
+    message(FATAL_ERROR
+        "CONFIG_MUSE_DEVICE_MODEL_ID \"${CONFIG_MUSE_DEVICE_MODEL_ID}\" must be 1 to 64 lowercase letters, digits and hyphens.")
+endif()
+# Printable ASCII without " or \, so link.register's JSON never escapes it
+# and its size test can count the name at its maximum.
+string(LENGTH "${CONFIG_MUSE_DEVICE_MODEL_NAME}" model_name_len)
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\"" model_name_quote)
+string(FIND "${CONFIG_MUSE_DEVICE_MODEL_NAME}" "\\" model_name_backslash)
+if(model_name_len GREATER 128 OR NOT CONFIG_MUSE_DEVICE_MODEL_NAME MATCHES "^[ -~]+$" OR
+   NOT model_name_quote EQUAL -1 OR NOT model_name_backslash EQUAL -1)
+    message(FATAL_ERROR
+        "CONFIG_MUSE_DEVICE_MODEL_NAME must be 1 to 128 printable ASCII characters, without \" or \\.")
+endif()
+
 if(NOT CONFIG_CJSON_NESTING_LIMIT EQUAL 16)
     message(FATAL_ERROR
         "ESP32 Device SDK requires cJSON nesting limit 16. ${GADGET_CONFIG_REGEN_HINT}")

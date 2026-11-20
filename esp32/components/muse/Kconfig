@@ -14,6 +14,15 @@
 
 menu "Muse"
 
+    config MUSE_LATEST_REPLY
+        bool "Latest reply screen"
+        depends on MUSE_BOARD_WAVESHARE_S3_175C && SPIRAM && MUSE_HATCH
+        default y
+        help
+            Swipe right from Main to reread the latest received answer.
+            Keeps up to 32 KiB in PSRAM until reboot; receiver message slots
+            use 256 KiB. No conversation text is written to flash.
+
     choice MUSE_BOARD
         prompt "Board with the full UI"
         default MUSE_BOARD_NONE
@@ -71,6 +80,10 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-LCD-1.46"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_LILYGO_S3_AMOLED_175
+            bool "LilyGO T-Display-S3 AMOLED 1.75 (H741-01; no audio)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_ESP_MOSAICO
             bool "Espressif ESP-Mosaico (ESP32-S31)"
             depends on IDF_TARGET_ESP32S31
@@ -85,6 +98,10 @@ menu "Muse"
 
         config MUSE_BOARD_ATK_DNESP32S3_BOX
             bool "ALIENTEK ATK-DNESP32S3-BOX V1.1 (320x240 LCD, ES8311, three keys, no touch)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ATK_DNESP32S3_BOX2
+            bool "ALIENTEK ATK-DNESP32S3-BOX2 (320x240 LCD, ES8389, four keys, battery, no touch)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_ESPRESSIF_BOX_3
@@ -111,6 +128,10 @@ menu "Muse"
             bool "M5Stack Cardputer ADV (ESP32-S3, keyboard, no PSRAM)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_M5STACK_ATOMS3
+            bool "M5Stack AtomS3 + Atomic Voice Base (ESP32-S3, no PSRAM)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_M5STACK_STICKS3
             bool "M5Stack StickS3 (ESP32-S3, two buttons, no touch)"
             depends on IDF_TARGET_ESP32S3
@@ -125,6 +146,10 @@ menu "Muse"
 
         config MUSE_BOARD_M5STACK_STOPWATCH
             bool "M5Stack StopWatch (ESP32-S3, round touch AMOLED)"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_M5STACK_TRIVIAPOD
+            bool "M5Stack TriviaPOD (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
         config MUSE_BOARD_SEEED_XIAO_S3_147
@@ -186,7 +211,22 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD_35
             bool "Waveshare ESP32-S3-Touch-LCD-3.5 (ESP32-S3, 480x320 touch LCD, ES8311 speaker and mic)"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_VIRTUAL_DISPLAY
+            bool "Virtual display, seen only through the cable mirror (any ESP32-S3 with PSRAM)"
+            depends on IDF_TARGET_ESP32S3
+            help
+                No panel, touch, keys or codec: the UI draws into PSRAM and
+                tools/muse/mirror.py shows it and gives it touch, keys and
+                sound. Size and shape: Muse mirror menu (components/muse_mirror).
     endchoice
+
+    config MUSE_BOARD_M5STACK_STOPWATCH_FAMILY
+        bool
+        default y if MUSE_BOARD_M5STACK_STOPWATCH || MUSE_BOARD_M5STACK_TRIVIAPOD
+        help
+            The StopWatch and the TriviaPOD: one board file
+            (board_m5stack_stopwatch.c) and the StopWatch's controls.
 
     config MUSE_ENABLED
         bool
@@ -208,10 +248,12 @@ menu "Muse"
         default "waveshare_s3_143c" if MUSE_BOARD_WAVESHARE_S3_143C
         default "waveshare_s3_143" if MUSE_BOARD_WAVESHARE_S3_143
         default "waveshare_s3_146" if MUSE_BOARD_WAVESHARE_S3_146
+        default "lilygo_s3_amoled_175" if MUSE_BOARD_LILYGO_S3_AMOLED_175
         default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "dfrobot_unihiker_k10" if MUSE_BOARD_DFROBOT_UNIHIKER_K10
         default "aipi" if MUSE_BOARD_AIPI
         default "atk_dnesp32s3_box" if MUSE_BOARD_ATK_DNESP32S3_BOX
+        default "atk_dnesp32s3_box2" if MUSE_BOARD_ATK_DNESP32S3_BOX2
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
         default "waveshare_s3_18" if MUSE_BOARD_WAVESHARE_S3_18
@@ -221,7 +263,9 @@ menu "Muse"
         default "crowpanel_advance_43" if MUSE_BOARD_CROWPANEL_ADVANCE_43
         default "m5stack_stickc_plus2" if MUSE_BOARD_M5STACK_STICKC_PLUS2
         default "m5stack_cardputer_adv" if MUSE_BOARD_M5STACK_CARDPUTER_ADV
+        default "m5stack_atoms3" if MUSE_BOARD_M5STACK_ATOMS3
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
+        default "m5stack_triviapod" if MUSE_BOARD_M5STACK_TRIVIAPOD
         default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_cores3lite" if MUSE_BOARD_M5STACK_CORES3LITE
@@ -239,6 +283,7 @@ menu "Muse"
         default "waveshare_s3_lcd19" if MUSE_BOARD_WAVESHARE_S3_LCD19
         default "spotpear_esp32_ai_128" if MUSE_BOARD_SPOTPEAR_ESP32_AI_128
         default "waveshare_s3_lcd_35" if MUSE_BOARD_WAVESHARE_S3_LCD_35
+        default "virtual_display" if MUSE_BOARD_VIRTUAL_DISPLAY
         default "none"
 
     # E-paper boards draw Muse with FreeInk (components/muse/eink/) instead
@@ -281,7 +326,7 @@ menu "Muse"
         bool "Isolated board BSP power-characterization firmware"
         # Boards implementing boards/muse_power_test_board.h; extend this list
         # only after the new board's diagnostic hooks and matrix pass tests.
-        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        depends on (MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_AIPI || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_ESP_MOSAICO) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
         default n
         help
             DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
@@ -312,6 +357,19 @@ menu "Muse"
             through the ISP and the P4's JPEG encoder compresses one frame
             per capture. devices/sdkconfig.muse-waveshare-p4-lcd35-camera
             turns it on with the sensor's settings.
+
+    config MUSE_MOSAICO_CAMERA
+        bool "ESP-Mosaico Camera Module capture"
+        depends on MUSE_BOARD_ESP_MOSAICO && SPIRAM
+        default n
+        help
+            Enable the camera.capture Home Link command on the Camera Module
+            in the board's left expansion slot (an OV3640 or SC101IOT on
+            DVP): esp_video runs the sensor, the PPA turns the frame upright
+            and the S31's JPEG encoder compresses it. On an SC101IOT the
+            module's flash fires when the sensor's auto exposure value is
+            high. devices/sdkconfig.muse-esp-mosaico-camera turns it on with
+            the sensors' settings.
 
     config MUSE_CJK_FONT
         bool "Show Chinese, Japanese and Korean in captions"
@@ -359,7 +417,7 @@ menu "Muse"
             language you speak to it, and the serial console stays in
             English for the tools that read it. The button menu and the
             pairing card are translated; the touch boards' settings pages
-            aren't yet.
+            are in Brazilian Portuguese only.
 
         config MUSE_UI_LANG_EN
             bool "English"
@@ -367,6 +425,13 @@ menu "Muse"
         config MUSE_UI_LANG_VI
             bool "Vietnamese"
             select MUSE_LATIN_FONT
+
+        config MUSE_UI_LANG_PT_BR
+            bool "Brazilian Portuguese"
+            select MUSE_LATIN_FONT
+            help
+                Also translates the touch boards' settings pages and the
+                latest-reply page.
     endchoice
 
     choice MUSE_JC3248W535_MIC
@@ -453,6 +518,17 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_REPLY_NOTIFY
+        bool "Flash the screen and ping when a reply arrives"
+        depends on MUSE_HATCH && !MUSE_UI_FREEINK
+        default n
+        help
+            When Muse's reply to a voice note arrives, the screen wakes and
+            flashes twice, and with the speaker on and the volume above zero
+            a short two-note ping plays first. For boards without a vibration
+            motor (the SenseCAP Watcher), so a reply is noticed with the
+            device out of hand.
+
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"
         depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM
@@ -525,7 +601,37 @@ if MUSE_REALTIME_VOICE
             talk over Muse. Otherwise, and on other boards, the mic is shut
             while Muse is audibly talking and for a moment after.
 
+    config MUSE_VOICE_SOFTWARE_AEC
+        bool "Software echo cancellation for hands-free voice interruption"
+        depends on IDF_TARGET_ESP32S3 && MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        select MUSE_STATIC_BUFFERS_IN_PSRAM
+        default n
+        help
+            Use Espressif's full-duplex echo canceller to keep the mic
+            available while Muse speaks. Requires a board with enough
+            internal RAM and PSRAM, plus a calibrated speaker reference
+            delay. If initialization fails, calls remain half-duplex.
+
+    config MUSE_VOICE_AEC_REF_DELAY_CHUNKS
+        int "Speaker-to-mic reference delay in 20 ms chunks"
+        depends on MUSE_VOICE_SOFTWARE_AEC
+        range 1 10
+        default 2
+        help
+            Set per board after measuring the delay between a speaker write
+            and its echo in the microphone. The Waveshare 2.06 watch measured
+            about 50 ms, so two chunks place the reference within the AEC
+            filter's remaining adjustment range. Other boards need a bench
+            measurement before enabling this feature.
+
 endif
+
+    # Always defined, so idf_component.yml can key esp-sr on it in every build
+    # (a bool whose dependencies are unmet isn't written to sdkconfig).
+    config MUSE_VOICE_AEC_SR
+        string
+        default "y" if MUSE_VOICE_SOFTWARE_AEC
+        default "n"
 
     config MUSE_HATCH_COMPACT_BUFFERS
         bool "Smaller voice session buffers, for 2 MB of PSRAM"
@@ -539,6 +645,24 @@ endif
             128 KB of speech, 2 s of mic backlog and 1 s of decoded audio
             (about 220 KB), which still covers a push-to-talk turn. Board
             overlays with 2 MB of PSRAM turn it on.
+
+    config CAPABILITIES_REGISTRY
+        bool
+        help
+            The device registry (components/capabilities_registry) and the drivers that
+            describe the gadget's sensors and outputs to it: the battery, and
+            whatever the board file registers (motors, IMUs). Only WebAssembly
+            apps read it so far, and they select it; without it none of this
+            is built.
+
+    config MUSE_APP_VIEW
+        bool
+        help
+            The screen an app runs on (muse_app_view.c): a full-screen LVGL
+            root over the face that the app's objects go under, with touch,
+            gestures and the buttons by role. The power key, a voice call or
+            the video view closes it. WebAssembly apps select it
+            (components/muse_apps).
 
     config MUSE_VIDEO
         bool "Video streaming from a phone to the display"
@@ -567,6 +691,14 @@ endif
             MUSE_VIDEO_WIFI_PORT and announces itself over mDNS as
             _musevideo._tcp, so the phone finds it on the same network.
             protocols/VIDEO.md has the wire format.
+
+    # Always defined for component-manager rules, even when the registry bool
+    # is omitted from sdkconfig. Only the StopWatch family (the StopWatch and
+    # the TriviaPOD, one board file) uses this driver.
+    config MUSE_BMI270_DRIVER
+        string
+        default "y" if MUSE_BOARD_M5STACK_STOPWATCH_FAMILY && CAPABILITIES_REGISTRY
+        default "n"
 
     # Always defined, so idf_component.yml can key mDNS on it in every build
     # (a bool whose dependencies are unmet isn't written to sdkconfig).

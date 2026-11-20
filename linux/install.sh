@@ -17,9 +17,11 @@
 #
 #   curl -fsSL <url>/install.sh | bash
 #   bash install.sh [--from SOURCE] [--run-as USER] [--sdk-token TOKEN] [--yes] [--no-pair]
+#                   [--proxy URL [--no-proxy HOSTS]]
 #   bash install.sh --uninstall [--purge]
 #
-# Installs system packages, a pinned uv, and musegadget into /opt/musegadget;
+# Installs system packages (bringing ca-certificates up to date), a pinned and
+# checksum-verified uv, and musegadget into /opt/musegadget;
 # sets BlueZ's GATT MTU for the Android app; installs and starts the
 # musegadget service; then opens Bluetooth pairing for the Muse app.
 
@@ -32,6 +34,9 @@ UNIT="/etc/systemd/system/musegadget.service"
 STATE_DIR="/var/lib/musegadget"
 BLUEZ_CONF="/etc/bluetooth/main.conf"
 BLUEZ_DROPIN="/etc/systemd/system/bluetooth.service.d/zz-musegadget.conf"
+PROXY_DIR="/etc/systemd/system/musegadget.service.d"
+PROXY_DROPIN="$PROXY_DIR/proxy.conf"
+PROXY_ENV="$PROXY_DIR/proxy.env"
 DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#subdirectory=linux"
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
@@ -54,6 +59,12 @@ Usage: install.sh [options]
                     only by root, in $STATE_DIR/sdk_token.
   --yes             Don't ask for confirmation.
   --no-pair         Install without opening Bluetooth pairing.
+  --proxy URL       Reach the internet through this HTTP proxy, given as
+                    http://[user:password@]host:port. This installer uses it,
+                    and the service keeps using it; later runs reuse it.
+                    --proxy none removes it.
+  --no-proxy HOSTS  With --proxy: hosts to reach directly, comma-separated,
+                    as in no_proxy.
   --uninstall       Remove musegadget. Keeps the device identity and pairing
                     in $STATE_DIR unless --purge is also given.
   -h, --help        Show this help.
@@ -70,9 +81,96 @@ ask() {
     case "$answer" in ""|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
-as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
+# sudo drops the caller's environment, so with a proxy every root command
+# gets it explicitly: the package manager, curl, uv, git and musegadget pair.
+# It goes through the environment, not the command line, which other accounts
+# can read (ps, sudo's log) and the URL can hold a password.
+as_root() {
+    if [ -z "${PROXY:-}" ]; then
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
+        return
+    fi
+    (
+        keep=http_proxy,https_proxy
+        export http_proxy="$PROXY" https_proxy="$PROXY"
+        if [ -n "${NO_PROXY_HOSTS:-}" ]; then export no_proxy="$NO_PROXY_HOSTS"; keep+=,no_proxy; fi
+        if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo --preserve-env="$keep" "$@"; fi
+    )
+}
 
 systemd_running() { [ -d /run/systemd/system ]; }
+
+# --- Proxy -------------------------------------------------------------------
+
+# Values go into systemd's EnvironmentFile= and onto command lines unquoted,
+# so refuse anything that would need quoting there.
+plain_value() {
+    [ -n "$1" ] || return 1
+    case "$1" in *[[:space:]]*) return 1 ;; esac
+    case "$1" in *[\"\'\\$\`]*) return 1 ;; esac
+}
+
+# HTTP CONNECT is the one kind of proxy that urllib, websockets and the setup
+# probe all support. websockets refuses a path, query or fragment, and its
+# error, which the service logs, shows the whole URL with any password. The
+# port is required: without one, urllib uses 443 and websockets 80.
+valid_proxy() {
+    local rest="${1#http://}" port
+    case "$1" in http://?*) ;; *) return 1 ;; esac
+    rest="${rest%/}"
+    case "$rest" in ""|*/*|*\?*|*\#*) return 1 ;; esac
+    port="${rest##*:}"
+    case "$port" in "$rest"|""|*[!0-9]*) return 1 ;; esac
+    plain_value "$1"
+}
+
+# The proxy URL without credentials, for messages.
+proxy_shown() { local rest="${1#http://}"; printf 'http://%s' "${rest##*@}"; }
+
+# A later run without --proxy keeps using the saved proxy.
+load_saved_proxy() {
+    local saved line
+    if [ -n "$PROXY" ] || [ "$REMOVE_PROXY" = 1 ] || ! as_root test -f "$PROXY_ENV"; then
+        return 0
+    fi
+    saved="$(as_root cat -- "$PROXY_ENV")" || die "couldn't read the saved proxy in $PROXY_ENV."
+    while IFS= read -r line; do
+        case "$line" in
+            https_proxy=*) PROXY="${line#https_proxy=}" ;;
+            no_proxy=*) NO_PROXY_HOSTS="${line#no_proxy=}" ;;
+        esac
+    done <<<"$saved"
+    valid_proxy "$PROXY" ||
+        die "the saved proxy in $PROXY_ENV is not valid. Rerun with --proxy URL, or --proxy none."
+    say "Using the saved proxy $(proxy_shown "$PROXY")"
+}
+
+remove_proxy() {
+    as_root rm -f -- "$PROXY_DROPIN" "$PROXY_ENV"
+    as_root rmdir -- "$PROXY_DIR" 2>/dev/null || true
+}
+
+# The service reads the proxy from a drop-in, so reinstalling the unit keeps
+# it. The URL can hold a password, and Environment= values are readable by
+# every account (systemctl show), so the drop-in points at a root-only
+# EnvironmentFile instead.
+save_proxy() {
+    if [ "$REMOVE_PROXY" = 1 ]; then
+        if as_root test -e "$PROXY_ENV" || as_root test -e "$PROXY_DROPIN"; then
+            remove_proxy
+            say "Removed the saved proxy; musegadget connects directly."
+        fi
+        return 0
+    fi
+    [ -n "$PROXY" ] || return 0
+    as_root install -d -o 0 -g 0 -m 0755 "$PROXY_DIR"
+    { printf 'https_proxy=%s\n' "$PROXY"
+      if [ -n "$NO_PROXY_HOSTS" ]; then printf 'no_proxy=%s\n' "$NO_PROXY_HOSTS"; fi
+    } | as_root install -o 0 -g 0 -m 0600 /dev/stdin "$PROXY_ENV"
+    printf '# Written by the musegadget installer (--proxy).\n[Service]\nEnvironmentFile=%s\n' "$PROXY_ENV" |
+        as_root install -o 0 -g 0 -m 0644 /dev/stdin "$PROXY_DROPIN"
+    say "The service will use the proxy $(proxy_shown "$PROXY") ($PROXY_DROPIN)"
+}
 
 # --- Checks ------------------------------------------------------------------
 
@@ -180,14 +278,135 @@ install_packages() {
     fi
 }
 
-install_uv() {
-    if [ -x "$PREFIX/bin/uv" ] && [ "$("$PREFIX/bin/uv" --version | awk '{print $2}')" = "$UV_VERSION" ]; then
+# musegadget uses the system trust store, and ca-certificates updates are how
+# distros stop trusting root CAs, so bring that one package up to date.
+update_ca_certificates() {
+    local updated=0
+    if [ "$DISTRO_FAMILY" = fedora ]; then
+        as_root dnf upgrade -y -q ca-certificates >/dev/null 2>&1 && updated=1
+    elif [ "$DISTRO_FAMILY" = debian ]; then
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 &&
+            as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
+                ca-certificates >/dev/null 2>&1 && updated=1
+    else
+        # Upgrading one package without the rest is a partial upgrade on Arch.
+        say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
         return
     fi
-    say "Installing uv $UV_VERSION"
-    as_root mkdir -p "$PREFIX/bin"
-    curl -fsSL "https://astral.sh/uv/$UV_VERSION/install.sh" |
-        as_root env UV_INSTALL_DIR="$PREFIX/bin" UV_NO_MODIFY_PATH=1 sh -s -- --quiet
+    if [ "$updated" = 1 ]; then
+        say "ca-certificates is up to date."
+    else
+        warn "couldn't update ca-certificates; continuing with the installed version."
+    fi
+}
+
+# Root runs what is under $PREFIX, so no other account may be able to change
+# any of it.
+
+# True if $1 is a real directory (not a symlink), owned by root and not
+# writable by group or others.
+root_only_dir() {
+    local uid mode kind
+    read -r uid mode kind <<<"$(as_root env LC_ALL=C stat -c '%u %a %F' -- "$1" 2>/dev/null)"
+    [ "$kind" = directory ] && [ "$uid" = 0 ] && (( (8#$mode & 8#022) == 0 ))
+}
+
+# Prints the first path under $1 that an account other than root could change.
+# uv makes the venv's .lock writable by everyone on purpose; it only holds a
+# lock, and nothing runs or reads it.
+first_unsafe_path() {
+    as_root find "$1" ! -type l ! -path "$VENV/.lock" \( ! -uid 0 -o -perm /022 \) -print -quit
+}
+
+prepare_prefix() {
+    local dir
+    for dir in "$(dirname "$PREFIX")" "$PREFIX" "$PREFIX/bin"; do
+        if as_root test -e "$dir" || as_root test -L "$dir"; then
+            root_only_dir "$dir" ||
+                die "$dir must be a directory that only root can change. Fix its owner and mode, or remove $PREFIX with 'bash install.sh --uninstall', then run this installer again."
+        else
+            as_root install -d -o 0 -g 0 -m 0755 "$dir"
+        fi
+    done
+    # Left by an earlier run that was stopped part way.
+    as_root rm -rf -- "$PREFIX"/.uv.* "$PREFIX"/.venv.*
+}
+
+# Fails if anything under $PREFIX is writable by another account.
+check_prefix() {
+    local unsafe
+    unsafe="$(first_unsafe_path "$PREFIX")"
+    [ -z "$unsafe" ] || die "$unsafe can be changed by an account other than root. Run 'bash install.sh --uninstall', then this installer again."
+}
+
+uv_target() {
+    case "$ARCH" in
+        amd64|x86_64) echo x86_64-unknown-linux-gnu ;;
+        arm64|aarch64) echo aarch64-unknown-linux-gnu ;;
+        armhf)
+            # A Pi Zero or Pi 1 is ARMv6; newer boards run ARMv7 code.
+            case "$(uname -m)" in
+                armv6*) echo arm-unknown-linux-musleabihf ;;
+                *) echo armv7-unknown-linux-gnueabihf ;;
+            esac ;;
+        *) die "no uv build for $ARCH." ;;
+    esac
+}
+
+# SHA-256 of uv's release archive for each target, and of the uv binary in it.
+uv_release() {
+    case "$1" in
+        x86_64-unknown-linux-gnu)
+            UV_ARCHIVE_SHA256=9ec303873e00deed44d1b2b52b85ab7aa55d849588d7242298748390eaea07ef
+            UV_BINARY_SHA256=83f28650272b5543e939debbc7a5578d087952399fd945e9267b1db0ccc27d33 ;;
+        aarch64-unknown-linux-gnu)
+            UV_ARCHIVE_SHA256=35cbad89f226a06cd8b295f946e7083e15cd6fa058e09c2e02bb388be39a8fe4
+            UV_BINARY_SHA256=b5a863358779ca7f74488b9fb53c88a18851985858944807f198879383d0de49 ;;
+        armv7-unknown-linux-gnueabihf)
+            UV_ARCHIVE_SHA256=0390a683afc68c10c3cef45d80678015c6d097260a612ab6bca006ec68f75918
+            UV_BINARY_SHA256=a2e16a8866ee99e14e0935a6fbc002504ba0eeea858d86fbd29774e80e7c1bf4 ;;
+        arm-unknown-linux-musleabihf)
+            UV_ARCHIVE_SHA256=0ac0dc5e822e8acc9bcd53d3854ebbeef80c806d5722ee8666b8fa49582c8ff3
+            UV_BINARY_SHA256=9fde3996869c31d753441ee2e7d7cb2cb2b78dd2a7e3e1661970a40c722763fc ;;
+        *) die "no uv build for $1." ;;
+    esac
+}
+
+sha256_of() { as_root sha256sum -- "$1" | awk '{print $1}'; }
+
+remove_uv_tmp() { if [ -n "${UV_TMP:-}" ]; then as_root rm -rf -- "$UV_TMP"; UV_TMP=""; fi; }
+
+# Installs the pinned uv as a new root-owned file. An existing uv is never
+# run: it is copied into a directory only root can read, and the copy is kept
+# only if it is exactly the pinned binary. Otherwise uv comes from its GitHub
+# release, checked before it is unpacked.
+install_uv() {
+    local target bin="$PREFIX/bin/uv"
+    target="$(uv_target)"
+    uv_release "$target"
+    # Not under $TMPDIR, which another account may own.
+    UV_TMP="$(as_root mktemp -d "$PREFIX/.uv.XXXXXX")"
+    trap remove_uv_tmp EXIT
+    if as_root test -f "$bin" && ! as_root test -L "$bin"; then
+        as_root cp -- "$bin" "$UV_TMP/uv" || true
+    fi
+    # uvx came with the old installer; nothing here uses it.
+    as_root rm -rf -- "$bin" "$PREFIX/bin/uvx"
+    if ! as_root test -f "$UV_TMP/uv" || [ "$(sha256_of "$UV_TMP/uv")" != "$UV_BINARY_SHA256" ]; then
+        say "Installing uv $UV_VERSION"
+        as_root rm -f -- "$UV_TMP/uv"
+        as_root curl -fsSL --proto '=https' --tlsv1.2 -o "$UV_TMP/uv.tar.gz" \
+            "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-$target.tar.gz" ||
+            die "couldn't download uv $UV_VERSION."
+        [ "$(sha256_of "$UV_TMP/uv.tar.gz")" = "$UV_ARCHIVE_SHA256" ] ||
+            die "the uv $UV_VERSION download doesn't match its checksum."
+        as_root tar -xzf "$UV_TMP/uv.tar.gz" -C "$UV_TMP" --no-same-owner --no-same-permissions \
+            --strip-components 1 "uv-$target/uv"
+        [ "$(sha256_of "$UV_TMP/uv")" = "$UV_BINARY_SHA256" ] ||
+            die "uv $UV_VERSION doesn't match its checksum."
+    fi
+    as_root install -o 0 -g 0 -m 0755 "$UV_TMP/uv" "$bin"
+    remove_uv_tmp
 }
 
 enable_bluez() {
@@ -197,29 +416,73 @@ enable_bluez() {
     fi
 }
 
+# Root's uv ignores uv.toml and pyproject.toml settings, which another account
+# could have written in or above the current directory, and copies files
+# rather than linking them to its cache.
+run_uv() { as_root env UV_NO_CONFIG=1 UV_LINK_MODE=copy "$PREFIX/bin/uv" "$@"; }
+
+data_dir() {
+    "$1/bin/python" -I -c 'import musegadget, os; print(os.path.join(os.path.dirname(musegadget.__file__), "data"))'
+}
+
 install_musegadget() {
-    local uv="$PREFIX/bin/uv"
+    # A new venv each time, so nothing left in an earlier one runs as root.
+    # It's built beside the old one, which keeps working if this fails.
     # The system interpreter is required: dbus and gi come from apt and are
     # built for it.
-    if [ ! -x "$VENV/bin/python" ]; then
-        say "Creating $VENV"
-        as_root "$uv" venv --quiet --python /usr/bin/python3 --system-site-packages "$VENV"
-    fi
+    local new
+    say "Creating $VENV"
+    new="$(as_root mktemp -d "$PREFIX/.venv.XXXXXX")"
+    as_root chmod 0755 "$new"
+    run_uv venv --quiet --relocatable --allow-existing --python /usr/bin/python3 \
+        --system-site-packages "$new"
     say "Installing musegadget from $SOURCE"
-    as_root "$uv" pip install --quiet --python "$VENV/bin/python" --no-deps --reinstall "$SOURCE"
-    local data
-    data="$("$VENV/bin/python" -c 'import musegadget, os; print(os.path.join(os.path.dirname(musegadget.__file__), "data"))')"
-    as_root "$uv" pip install --quiet --python "$VENV/bin/python" --require-hashes \
-        -r "$data/requirements.lock"
+    run_uv pip install --quiet --python "$new/bin/python" --no-deps --reinstall "$SOURCE"
+    run_uv pip install --quiet --python "$new/bin/python" --require-hashes \
+        -r "$(data_dir "$new")/requirements.lock"
+    as_root rm -rf -- "$VENV"
+    as_root mv -T -- "$new" "$VENV"
     as_root ln -sf "$VENV/bin/musegadget" /usr/local/bin/musegadget
-    DATA_DIR="$data"
+    DATA_DIR="$(data_dir "$VENV")"
+}
+
+# musegadget won't connect while the trust store can't be read or still has a
+# compromised root CA, so stop before installing a service that can't start.
+# A retired root CA only gets a warning.
+check_trust_store() {
+    local out problem
+    # As the service runs it: as root, without this shell's SSL_CERT_* settings
+    # (and, with -I, without importing from the current directory).
+    # Prints the problem, then the warning, one line each (empty for none).
+    out="$(as_root env -u SSL_CERT_FILE -u SSL_CERT_DIR -u SSL_CERT_URI "$VENV/bin/python" -I \
+        -c 'from musegadget import tls; print(tls.trust_store_problem() or ""); print(tls.trust_store_warning() or "")')" ||
+        die "couldn't check the system trust store."
+    problem="${out%%$'\n'*}"
+    if [ -z "$problem" ]; then
+        warn_retired_roots "${out#$'\n'}"
+        return
+    fi
+    # An earlier install's service would keep restarting the new code, which refuses to run.
+    if systemd_running && [ -e "$UNIT" ]; then
+        as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
+    fi
+    die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
+}
+
+warn_retired_roots() {  # $1 = tls.trust_store_warning(), or empty
+    [ -n "$1" ] || return 0
+    if [ "$DISTRO_FAMILY" = debian ]; then
+        warn "$1. musegadget still connects. To stop trusting a retired root, put '!' in front of its line in /etc/ca-certificates.conf (mozilla/emSign_Root_CA_-_C1.crt or mozilla/emSign_ECC_Root_CA_-_C3.crt), then run 'sudo update-ca-certificates'."
+    else
+        warn "$1. musegadget still connects. To stop trusting a retired root, deselect it in the system trust store (see \"Root CAs\" in the musegadget README)."
+    fi
 }
 
 configure_bluez() {
     # The Muse Android app writes (MTU - 3)-byte packets and fails above 512,
     # so keep the negotiated MTU at 256, as the ESP32 firmware does.
     local result
-    result="$(as_root python3 - "$BLUEZ_CONF" <<'EOF'
+    result="$(as_root python3 -I - "$BLUEZ_CONF" <<'EOF'
 import re, shutil, sys
 path = sys.argv[1]
 try:
@@ -261,7 +524,7 @@ disable_bluez_battery() {
     systemd_running || return 0
     local unit_text result
     unit_text="$(systemctl cat bluetooth.service 2>/dev/null || true)"
-    result="$(as_root python3 - "$BLUEZ_DROPIN" "$unit_text" <<'EOF'
+    result="$(as_root python3 -I - "$BLUEZ_DROPIN" "$unit_text" <<'EOF'
 import os, re, sys
 path, unit_text = sys.argv[1], sys.argv[2]
 # The last non-empty ExecStart= across the unit and its drop-ins is the one
@@ -354,12 +617,12 @@ Pair with your Muse:
   3. When asked for Wi-Fi, pick the network shown; no password is needed.
 
 EOF
-    as_root /usr/local/bin/musegadget pair || warn "not paired. Run 'sudo musegadget pair' to try again."
+    as_root "$VENV/bin/musegadget" pair || warn "not paired. Run 'sudo musegadget pair' to try again."
 }
 
 summary() {
     echo
-    as_root /usr/local/bin/musegadget info
+    as_root "$VENV/bin/musegadget" info
     cat <<EOF
 
 Service:   sudo systemctl status musegadget
@@ -376,6 +639,7 @@ uninstall() {
         as_root systemctl disable --now musegadget.service >/dev/null 2>&1 || true
     fi
     as_root rm -f "$UNIT" /usr/local/bin/musegadget
+    remove_proxy
     if systemd_running; then as_root systemctl daemon-reload; fi
     as_root rm -rf "$PREFIX"
     if [ "$PURGE" = 1 ]; then
@@ -398,7 +662,10 @@ uninstall() {
 }
 
 main() {
-    SOURCE="$DEFAULT_SOURCE" RUN_AS="" SDK_TOKEN="" ASSUME_YES=0 NO_PAIR=0 UNINSTALL=0 PURGE=0
+    SOURCE="$DEFAULT_SOURCE" RUN_AS="" SDK_TOKEN="" ASSUME_YES=0 NO_PAIR=0 UNINSTALL=0 PURGE=0 UV_TMP=""
+    PROXY="" NO_PROXY_HOSTS="" REMOVE_PROXY=0
+    # Nothing the installer creates should be writable by group or others.
+    umask 022
     while [ $# -gt 0 ]; do
         case "$1" in
             --from) SOURCE="${2:?--from needs a value}"; shift 2 ;;
@@ -408,16 +675,31 @@ main() {
             --no-pair) NO_PAIR=1; shift ;;
             --uninstall) UNINSTALL=1; shift ;;
             --purge) PURGE=1; shift ;;
+            --proxy) PROXY="${2:?--proxy needs a value}"; shift 2 ;;
+            --no-proxy) NO_PROXY_HOSTS="${2:?--no-proxy needs a value}"; shift 2 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; die "unknown option: $1" ;;
         esac
     done
+    if [ "$PROXY" = none ]; then
+        PROXY="" REMOVE_PROXY=1
+        [ -z "$NO_PROXY_HOSTS" ] || die "--no-proxy goes with a proxy, not --proxy none."
+    elif [ -n "$PROXY" ]; then
+        valid_proxy "$PROXY" ||
+            die "--proxy needs an http:// URL with a port and without spaces or quotes, such as http://proxy.example:3128."
+    elif [ -n "$NO_PROXY_HOSTS" ]; then
+        die "--no-proxy goes with --proxy."
+    fi
+    if [ -n "$NO_PROXY_HOSTS" ] && ! plain_value "$NO_PROXY_HOSTS"; then
+        die "--no-proxy needs a comma-separated host list without spaces or quotes."
+    fi
     if [ "$(id -u)" -ne 0 ]; then
         command -v sudo >/dev/null || die "run this as root, or install sudo."
         sudo true || die "this installer needs sudo."
     fi
     if [ "$UNINSTALL" = 1 ]; then uninstall; return; fi
     if [ -d "$SOURCE" ]; then SOURCE="$(cd "$SOURCE" && pwd)"; fi
+    load_saved_proxy
 
     check_system
     prompt_sdk_token
@@ -426,15 +708,21 @@ main() {
     fi
     choose_account
     install_packages
+    update_ca_certificates
     enable_bluez
+    prepare_prefix
     install_uv
     install_musegadget
+    check_prefix
+    check_trust_store
     configure_bluez
     save_sdk_token
+    save_proxy
     install_service
     pair
     summary
 }
 
 # Everything runs from main, so a truncated download never runs a partial script.
-main "$@"
+# Sourcing this file (as the tests do) only defines the functions.
+if ! (return 0 2>/dev/null); then main "$@"; fi

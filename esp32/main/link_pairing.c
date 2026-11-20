@@ -75,6 +75,7 @@ static pairing_state_t s_state = PAIRING_IDLE;
 static uint32_t s_generation;
 static uint32_t s_crypto_generation;
 static bool s_confirmation_armed;
+static int64_t s_armed_us;   // when the prompt was armed: only a press after it confirms
 static bool s_initialized;
 static pairing_signer_t s_signer = PAIRING_SIGNER_UNRESOLVED;
 
@@ -150,6 +151,7 @@ static void clear_session_locked(void) {
     s_tx_counter = 0;
     s_state = PAIRING_IDLE;
     s_confirmation_armed = false;
+    s_armed_us = 0;
 }
 
 static void advance_generation_locked(void) {
@@ -943,16 +945,17 @@ bool link_pairing_arm_confirmation(uint32_t generation) {
               && s_state == PAIRING_CONFIRM_REQUIRED;
     if (ok) {
         s_confirmation_armed = true;
-        s_deadline_us = esp_timer_get_time() + PAIRING_CONFIRM_TIMEOUT_US;
+        s_armed_us = esp_timer_get_time();
+        s_deadline_us = s_armed_us + PAIRING_CONFIRM_TIMEOUT_US;
     }
     lock_give();
     return ok;
 }
 
-uint32_t link_pairing_confirm_active_session(void) {
+uint32_t link_pairing_confirm_active_session(int64_t pressed_after_us) {
     lock_take();
     bool ok = !expired_locked() && s_state == PAIRING_CONFIRM_REQUIRED
-              && s_confirmation_armed;
+              && s_confirmation_armed && pressed_after_us >= s_armed_us;
     if (ok) {
         advance_generation_locked();
         s_state = PAIRING_READY;
