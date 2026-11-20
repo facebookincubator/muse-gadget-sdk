@@ -246,6 +246,14 @@ static void audio_test(void)
     assert(!muse_motion_quiet() && speaker_on);
     expect_silence = false;
     assert(muse_audio_write(pcm, 24) == ESP_OK);
+    /* Picked up from face-down and held at a 45-degree viewing angle. */
+    sample = down;
+    for (int t = 1300; t <= 2000; t += 100) muse_motion_tick(t);
+    assert(muse_motion_quiet());
+    sample = (muse_motion_sample_t){707, 0, 707};
+    for (int t = 2100; t <= 2300; t += 100) muse_motion_tick(t);
+    assert(!muse_motion_quiet());
+    assert(muse_audio_write(pcm, 24) == ESP_OK);
     mirror_only_test = true;
     expect_silence = true;
     assert(muse_audio_write(pcm, 24) == ESP_OK);

@@ -159,6 +159,9 @@ bool muse_motion_update(muse_motion_core_t *s, muse_motion_sample_t raw, uint32_
     if (a.z >= (s->pose == MUSE_POSE_UP ? 650 : 800)) p = MUSE_POSE_UP;
     else if (a.z <= (s->pose == MUSE_POSE_DOWN ? -650 : -800)) p = MUSE_POSE_DOWN;
     else if (a.z > -550 && a.z < 550) p = MUSE_POSE_UPRIGHT;
+    /* Turning away from face-down ends quiet at once, even at a viewing
+     * angle between the poses; settling into a new pose still dwells. */
+    if (s->pose == MUSE_POSE_DOWN && p != MUSE_POSE_DOWN) s->pose = MUSE_POSE_UNKNOWN;
     if (p == MUSE_POSE_UNKNOWN || p != s->candidate) {
         s->candidate = p;
         s->since_ms = now;
