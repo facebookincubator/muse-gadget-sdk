@@ -595,6 +595,9 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- [`main/epd_it8951.c`](main/epd_it8951.c), the reTerminal E1003 IT8951
+  driver with command framing and one-bit mode adapted from Seeed_GFX2, is
+  MIT and retains the source's copyright and license notice.
 - The ST7789 tuning table in
   [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
   from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
