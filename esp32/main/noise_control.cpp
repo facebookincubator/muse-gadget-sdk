@@ -2194,6 +2194,18 @@ static void idle_wait(esp_tls_t *tls, uint64_t last_busy_us) {
     lwip_select(fd + 1, &rd, nullptr, nullptr, &tv);
 }
 
+// Link's control stream ends (end_body on its Response or a BodyChunk) only
+// when the VM closes this device's control channel. The device is then no
+// longer registered, and nothing else would notice: WebSocket pongs keep the
+// connection looking alive. End the session so it reconnects and registers
+// again.
+static bool control_stream_ended(const DecodedServiceFrame &frame) {
+    if (frame.stream_id != CTRL_STREAM_ID) return false;
+    if (frame.kind == ServiceFrameKind::BodyChunk) return frame.body_chunk.end_body;
+    if (frame.kind == ServiceFrameKind::Response) return frame.response.end_body;
+    return false;
+}
+
 // Connectivity history: failed attempts between sessions are summarized in
 // the next session_up rather than recorded one by one. noise_ctrl_task-owned.
 static uint32_t s_failed_attempts = 0;
@@ -2262,9 +2274,13 @@ static session_result_t run_session(stack_monitor_t *stack) {
     pending_json_body control_tx;
     identity_fetch identity = {};
 
-    // 1. TLS connect
-    esp_tls_t *tls = esp_tls_init();
+    // 1. TLS connect. One copy of the host for the whole handshake: setup can
+    // rewrite s_noise_host from another task (noise_ctrl_set_host()), and a
+    // kept session must be filed under the host it was made with.
+    char *tls_host = strdup(s_noise_host);
+    esp_tls_t *tls = tls_host ? esp_tls_init() : nullptr;
     if (!tls) {
+        free(tls_host);
         ESP_LOGE(TAG, "esp_tls_init failed");
         note_attempt_failed("TLS init failed");
         return SESSION_FAILED;
@@ -2273,15 +2289,16 @@ static session_result_t run_session(stack_monitor_t *stack) {
     cfg.crt_bundle_attach = esp_crt_bundle_attach;   // a fallback full handshake verifies as always
     cfg.timeout_ms = 15000;
 #if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
-    tls_resume_offer(&s_tls_resume, s_noise_host, &cfg);
+    tls_resume_offer(&s_tls_resume, tls_host, &cfg);
 #endif
     int64_t tls_t0 = esp_timer_get_time();
 
-    int r = network_proxy_tls_connect(s_noise_host, static_cast<int>(strlen(s_noise_host)),
+    int r = network_proxy_tls_connect(tls_host, static_cast<int>(strlen(tls_host)),
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
         esp_tls_conn_destroy(tls);
+        free(tls_host);
 #if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
         tls_resume_forget(&s_tls_resume);   // never retry with a session that may be what failed
 #endif
@@ -2292,10 +2309,11 @@ static session_result_t run_session(stack_monitor_t *stack) {
         bool offered = false;
 #if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
         offered = cfg.client_session != nullptr;
-        tls_resume_keep(&s_tls_resume, s_noise_host, tls);
+        tls_resume_keep(&s_tls_resume, tls_host, tls);
 #endif
-        ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s) in %lld ms%s", s_noise_host, NOISE_PORT, s_vm_id,
+        ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s) in %lld ms%s", tls_host, NOISE_PORT, s_vm_id,
                  (long long)((esp_timer_get_time() - tls_t0) / 1000), offered ? ", last session offered" : "");
+        free(tls_host);
     }
     // Send each write at once. With Nagle's algorithm on, a small write (a
     // tunnel batch holding a lone handshake packet or a short reply) waited
@@ -2599,7 +2617,17 @@ static session_result_t run_session(stack_monitor_t *stack) {
                                 error = true;
                                 break;
                             }
+                        } else if (frame.stream_id == CTRL_STREAM_ID) {
+                            // A Response's inline body carries messages too.
+                            process_inbound_body_chunk(frame.response.body,
+                                                       session_generation);
                         }
+                    }
+                    if (control_stream_ended(frame)) {
+                        ESP_LOGW(TAG, "server ended /link-control");
+                        end_reason = "server ended control stream";
+                        error = true;
+                        break;
                     }
                 }
             } else if (n == 0) {
