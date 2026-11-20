@@ -118,6 +118,7 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "PHONE SETUP: %s", "Cài qua ĐT: %s" },
     { "PHONE SETUP OFF", "Đã tắt cài đặt qua điện thoại" },
     { "RESETTING...", "Đang đặt lại..." },
+    { "RESTARTING...", "Đang khởi động lại..." },
 };
 
 /* The button menu (muse_menu.c) and the pairing card (muse_ui.c): sentence
@@ -303,6 +304,7 @@ static const muse_lang_entry_t MESSAGES[] = {
     { "PHONE SETUP: %s", "CONFIG. CELULAR: %s" },
     { "PHONE SETUP OFF", "CONFIG. PELO CELULAR DESLIGADA" },
     { "RESETTING...", "REDEFININDO..." },
+    { "RESTARTING...", "REINICIANDO..." },
 };
 
 /* The button menu (muse_menu.c), the pairing card (muse_ui.c), the latest
@@ -524,6 +526,7 @@ static const muse_lang_entry_t MENU[] = {
     { "POWER", "ENERGIA" },
     { "Power Muse off completely?", "Desligar o Muse por completo?" },
     { LV_SYMBOL_POWER "  Power off", LV_SYMBOL_POWER "  Desligar" },
+    { LV_SYMBOL_REFRESH "  Restart", LV_SYMBOL_REFRESH "  Reiniciar" },
     { "Tap the screen to turn it back on.", "Toque na tela para religar." },
     { "Press the %s button to turn it back on. To just turn the screen off, press the %s button.", "Aperte o botão %s para religar. Para só apagar a tela, aperte o botão %s." },
     { "Press the %s button to turn it back on.", "Aperte o botão %s para religar." },

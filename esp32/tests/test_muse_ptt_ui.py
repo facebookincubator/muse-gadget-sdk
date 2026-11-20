@@ -31,7 +31,7 @@ LINK_GC = ['-Wl,-dead_strip'] if sys.platform == 'darwin' else ['-Wl,--gc-sectio
 # Builds with the wake word compiled in (boards with PSRAM, as the option needs).
 WAKEWORD_BUILDS = {(1, 1), (0, 1), (1, 0), (3, 0)}
 FAKE_HEADERS = [
-    'esp_attr.h', 'esp_err.h', 'esp_heap_caps.h', 'esp_log.h', 'esp_timer.h',
+    'esp_attr.h', 'esp_err.h', 'esp_heap_caps.h', 'esp_log.h', 'esp_system.h', 'esp_timer.h',
     'esp_codec_dev.h', 'lvgl.h', 'driver/gpio.h', 'nvs.h', 'nvs_flash.h',
     'freertos/FreeRTOS.h', 'freertos/task.h', 'freertos/queue.h',
     'freertos/idf_additions.h', 'freertos/semphr.h',

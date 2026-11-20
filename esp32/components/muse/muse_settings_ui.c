@@ -1680,12 +1680,21 @@ static void on_power_off(lv_event_t *e)
     muse_input_request_power_off();
 }
 
+static void on_restart(lv_event_t *e)
+{
+    (void)e;
+    show(s_home);
+    muse_ui_show_face();
+    muse_input_request_restart();
+}
+
 static void build_power_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_power = page(tile, "POWER", true, &list);
     note(list, "Power Muse off completely?");
     button(list, LV_SYMBOL_POWER "  Power off", COLOR_DANGER, on_power_off, NULL);
+    button(list, LV_SYMBOL_REFRESH "  Restart", COLOR_TEXT, on_restart, NULL);
     button(list, "Cancel", COLOR_TEXT, on_back, NULL);
     char text[128];
     const char *power = muse_board->power_button ? muse_board->power_button : muse_board->talk_button;
