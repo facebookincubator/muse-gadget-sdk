@@ -213,6 +213,31 @@ static bool drop_rssi_floor(uint8_t reason) {
 }
 #endif
 
+// wifi_mgr_connect() pins the strongest BSSID from the last scan, and
+// reconnects after an association reuse that config. Once that AP is gone
+// (a mesh node unplugged, a new router), look for the network on every
+// channel instead of retrying the vanished BSSID forever.
+static bool unpin_bssid(uint8_t reason) {
+    if (reason != WIFI_REASON_NO_AP_FOUND
+        && reason != WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY
+        && reason != WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD
+        && reason != WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD) {
+        return false;
+    }
+    wifi_config_t wc;
+    if (esp_wifi_get_config(WIFI_IF_STA, &wc) != ESP_OK || !wc.sta.bssid_set) {
+        return false;
+    }
+    wc.sta.bssid_set = false;
+    memset(wc.sta.bssid, 0, sizeof(wc.sta.bssid));
+    wc.sta.channel = 0;
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK) return false;
+    ESP_LOGI(TAG, "pinned AP not found; scanning every channel for the network");
+    return true;
+}
+
 static void event_handler(void *arg, esp_event_base_t base,
                           int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -255,6 +280,7 @@ static void event_handler(void *arg, esp_event_base_t base,
         } else if (s_keep_connected) {
             // Post-association drop. Reconnect forever with exponential backoff.
             ESP_LOGW(TAG, "wifi disconnected post-association, scheduling reconnect");
+            if (event) unpin_bssid(event->reason);
             schedule_reconnect();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
