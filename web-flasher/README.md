@@ -1,6 +1,6 @@
 # Web flasher
 
-The flasher has moved to [gadgets.muse.ai/flash](https://gadgets.muse.ai/flash), which fills in
+The flasher has moved to [gadgets.muse.ai/install](https://gadgets.muse.ai/install), which fills in
 the maker's SDK token from their Muse account. This page sends visitors there, carrying
 `?board=<id>`; open it with `?classic` to stay here.
 
