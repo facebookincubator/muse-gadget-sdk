@@ -182,7 +182,15 @@ class PhotoNoteWiring(unittest.TestCase):
         })
         note = (MUSE / 'muse_photo_note.c').read_text()
         self.assertIn('#if CONFIG_MUSE_WATCHER_CAMERA\n#include "boards/watcher_camera.h"\n'
-                      '#define capture_base64 watcher_camera_capture\n#endif', note)
+                      '#define capture_base64 watcher_camera_capture\n'
+                      '#define capture_done watcher_camera_preview_close\n#endif', note)
+        # The live view gives its frame and closes at once, before the next
+        # frame could cover the note's screen.
+        camera = (MUSE / 'boards/watcher_camera.c').read_text()
+        close = camera[camera.index('void watcher_camera_preview_close(void)'):]
+        close = close[:close.index('\n}\n')]
+        self.assertLess(close.index('s_preview_active = false;'), close.index('camera_stream_stop();'))
+        self.assertLess(close.index('camera_stream_stop();'), close.index('muse_ui_image_hide();'))
 
 
 if __name__ == '__main__':

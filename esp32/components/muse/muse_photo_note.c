@@ -31,11 +31,14 @@
 #include "muse_settings.h"
 #include "sdkconfig.h"
 
-/* The board's capture, as for camera.capture: a malloc'd base64 JPEG. A board
- * with another camera adds its own here and to the Kconfig option. */
+/* The board's capture, as for camera.capture: a malloc'd base64 JPEG. Then
+ * capture_done(): on the Watcher, a live view that was open gave its frame and
+ * closes, so its frames don't cover the note's screen. A board with another
+ * camera adds its own here and to the Kconfig option. */
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
 #define capture_base64 watcher_camera_capture
+#define capture_done watcher_camera_preview_close
 #endif
 
 static const char *TAG = "muse_photo";
@@ -56,6 +59,7 @@ static void capture_task(void *arg)
     char *photo = NULL;
     const char *error = NULL;
     bool ok = capture_base64(&photo, &error);
+    capture_done();
     int taking = PHOTO_TAKING;
     if (atomic_compare_exchange_strong(&s_state, &taking, ok ? PHOTO_TAKEN : PHOTO_FAILED)) {
         if (!ok) {

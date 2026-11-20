@@ -47,7 +47,8 @@ bool muse_chat_attach_jpeg(char *jpeg_base64, size_t len, uint32_t note)
 }
 
 static bool capture_ok = true;
-static int captures;
+static int captures, closes;
+void watcher_camera_preview_close(void) { CHECK(closes == captures - 1); closes++; }
 bool watcher_camera_capture(char **jpeg_base64, const char **error)
 {
     captures++;
@@ -170,6 +171,7 @@ int main(int argc, char **argv)
     } else {
         CHECK(!"unknown scenario");
     }
+    CHECK(closes == captures);   /* the live view, if open, closes after each capture */
     puts("ok");
     return 0;
 }
