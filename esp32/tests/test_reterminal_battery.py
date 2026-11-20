@@ -183,7 +183,7 @@ class ReterminalBatteryTest(unittest.TestCase):
         init = app.index("    reterminal_battery_init();")
         init_block = app[app.rfind("#if", 0, init):app.index("#endif", init)+6]
         source = include_block + "\nvoid app_run(void) {\n" + init_block + "\n}\n"
-        for panel in ("UC8179", "SPECTRA6"):
+        for panel in ("UC8179", "SPECTRA6", "IT8951"):
             result = subprocess.run([*self.cc, *self.flags,
                 "-DCONFIG_HOMEHUB_RETERMINAL_SHT4X=0",
                 "-DCONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_" + panel + "=1",
@@ -226,7 +226,8 @@ int main() {
 #if CONFIG_MUSE_ENABLED
         assert(reads==0 && pct->valueint==77 && mv->valueint==4000);
         assert(cJSON_IsTrue(charging) && cJSON_IsTrue(usb));
-#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || \
+    CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
         assert(reads==1);
         if(ok) {assert(pct->valueint==60 && mv->valueint==3800);}
         else {assert(cJSON_IsNull(pct) && cJSON_IsNull(mv));}
@@ -244,6 +245,7 @@ int main() {
         cxx = shlex.split(os.environ.get("CXX", "c++"))
         for config in ("CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179",
                        "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6",
+                       "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951",
                        "CONFIG_MUSE_ENABLED", "OTHER_BOARD"):
             with self.subTest(config=config):
                 result = subprocess.run([*cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror",
