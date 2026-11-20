@@ -936,6 +936,59 @@ to the 8 MB layout in [`partitions_muse_8mb.csv`](../partitions_muse_8mb.csv).
 [`AGENTS.md`](../AGENTS.md) covers flashing, monitoring, and what to do when a
 build picks up stale settings.
 
+## Waveshare ESP32-S3-Touch-AMOLED-1.75C motion controls
+
+The 1.75C overlay includes `CONFIG_MUSE_MOTION_GESTURES`. In Settings >
+Auto-sleep, **Lift to wake** and **Face-down quiet** are separate, saved
+opt-ins, both off initially. Lift to wake detects a tilt toward a viewing
+position from rest, confirmed by two fresh samples at least 40 ms apart
+(polling can add latency). It also works from a face-up resting pose;
+there is no required face-down or upright step. It wakes the screen without
+starting a recording. Tilting back toward a face-up resting position cancels
+the pending pickup. Normalized, filtered gravity supplies tilt direction;
+two samples of an upward starting impulse also wake a readable device.
+That upward motion's braking phase is not treated as a new put-down.
+Single-sample impacts do not establish an upward start. Replayed physical
+pickup, landing and repickup cycles cover the reported missed/late-wake cases.
+A downward starting impulse suppresses wake through landing. It re-arms after
+600 ms of stable acceleration and rebases to that resting orientation;
+contact or continued movement restarts that settling window.
+Face-down quiet temporarily silences playback after a settled face-down pose;
+turning it back restores the saved speaker preference. It does not cancel a
+call, recording or reply, or disconnect the microphone.
+
+The driver reuses the BSP's I2C bus and the QMI8658 at 0x6b, using the
+accelerometer at low-power 21 Hz with the gyroscope disabled. Sampling is
+20 Hz with Lift to wake enabled, including while asleep; quiet-only uses
+10 Hz awake and 4 Hz asleep. The higher polling rate favors responsiveness
+over standby battery life. This is not interrupt-only wake and does not work
+after Settings > Power off. An I2C
+failure or a second without fresh samples disables gestures and clears the
+temporary mute. Turn both controls off and back on to retry.
+
+The USB console command `>motion` reports activity, pose, screen sleep, wake
+count, pickup-to-detection time (`detect_ms`, excluding panel wake) and
+acceleration in milli-g. `>motion.lift=1` and `>motion.quiet=1` enable the saved settings;
+use `0` to disable them (these setup commands also work over BLE).
+The expected reading is about +1000 mg Z face up and -1000 mg face
+down. The register reference is the vendor's
+[SensorLib driver](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75C/blob/9b295b1/examples/arduino/libraries/SensorLib/src/SensorQMI8658.hpp).
+
+Validation: ESP-IDF 6.0.3 builds with the feature on and off, and 212 related
+host tests, including sanitized classifier, runtime, I2C driver and playback
+checks. On one physical 1.75C, flashing preserved pairing and Link reconnected;
+sensor activation/deactivation worked, and Lift to wake remained enabled
+after reflashing. A live pickup woke the screen with 51 ms of detector
+confirmation (excluding panel wake); the user confirmed the response felt
+prompt. Recorded physical pickup/put-down traces pass replay tests. In a
+subsequent live full-cycle trial, the screen stayed asleep during lowering
+and table contact, then woke promptly on the next pickup; its detector
+reported 51 ms confirmation. Repeated physical face-down/face-up transitions
+muted and resumed a local test clip while preserving the saved speaker and
+volume settings. Battery impact and longer-term false-trigger rates have
+not been measured.
+Other Waveshare models do not enable these controls.
+
 ## Waveshare ESP32-S3-Touch-AMOLED-1.43C
 
 Waveshare's small 1.43-inch round AMOLED puck on the ESP32-S3-PICO-1-N8R8
