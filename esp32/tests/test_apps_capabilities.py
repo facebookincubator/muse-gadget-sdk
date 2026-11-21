@@ -245,7 +245,7 @@ int main(void) {
             self.assertEqual(json.loads(out.read_text()), json.loads(API_TEXT))
         self.assertEqual(calls, ['app.api=0', 'app.api=1', 'app.api=2'])
         self.assertEqual(set(result['payload']), {'api', 'parts', 'bytes', 'functions', 'written'})
-        self.assertEqual(result['payload']['functions'], 80)
+        self.assertEqual(result['payload']['functions'], len(json.loads(API_TEXT)['functions']))
 
     def test_usb_tool_rejects_malformed_api_without_writing(self):
         tool = self.load_usb_tool()

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# The apps API, version 1.1 (draft)
+# The apps API, version 1.2 (draft)
 
 `api.json` defines the API WebAssembly apps get on a gadget: every function
 with its arguments and WAMR signature, the events, the constants, the LVGL
