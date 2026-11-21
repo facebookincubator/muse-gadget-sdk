@@ -621,6 +621,10 @@ their upstream licenses:
   [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
   from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
   [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
+- The ST77916 initialization sequence in
+  [`components/muse/boards/waveshare_s3_185c/st77916_init_185c.h`](components/muse/boards/waveshare_s3_185c/st77916_init_185c.h),
+  from 78/xiaozhi-esp32's Waveshare ESP32-S3-Touch-LCD-1.85C board, is MIT.
+  See [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
 - The JD9853A initialization sequence in
   [`components/muse/boards/board_seeed_xiao_s3_147.c`](components/muse/boards/board_seeed_xiao_s3_147.c),
   adapted from Seeed-Studio/Seeed_GFX2, is MIT. See
