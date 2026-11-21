@@ -19,7 +19,7 @@
 #include "led_status.h"
 
 // Runs the UI (components/muse) on top of Home Link: Link owns Wi-Fi, BLE,
-// setup credentials and the Hatch account; the UI is the avatar, voice and
+// setup credentials and the Muse account; the UI is the avatar, voice and
 // settings. Only built with CONFIG_MUSE_ENABLED.
 
 // Before app_run(): registers Muse's BLE service and Link operations.

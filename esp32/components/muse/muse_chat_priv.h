@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-/* Token saved (the VM ID is optional) or Link paired to a Hatch account. */
+/* Token saved (the VM ID is optional) or Link paired to a Muse account. */
 bool muse_hatch_configured(void);
 /* Session task -> status shown in settings and over BLE. */
 void muse_hatch_report(muse_hatch_state_t state, const char *detail);

@@ -144,7 +144,7 @@ int noise_tunnel_pump_tx(const noise_tunnel_emit_t *emit);
 // reconnects) if no inbound frame — pong or data — has arrived within the
 // keepalive timeout. This detects
 // the half-open case where the WS/Noise transport is alive but the VM-side
-// backend behind raw.sock has gone away. No-op if the tunnel is down.
+// tunnel backend has gone away. No-op if the tunnel is down.
 void noise_tunnel_tick(const noise_tunnel_emit_t *emit);
 
 // Send time of the oldest keepalive ping with no inbound tunnel frame since, or

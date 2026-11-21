@@ -555,6 +555,8 @@ Users never see the name Hatch.
   - the `hatch_refresh:` auth prefix
   - pairing labels and ids such as `hatch-link-pairing-v5`, the `hatch_link`
     model and the `hatch-link:` device id, and the test vectors
+  - the `hatch-web` app id, the `hatch.voice.*` voice-call event types and the
+    `HATCH` media endpoint type
 
 ## Before you hand back work
 

@@ -20,8 +20,8 @@ menu "ESP32 Device SDK"
         help
             The product name shown in boot banners, log messages, and
             diagnostic text. Does not affect protocol identifiers or
-            backend strings. Internal builds override this to match
-            the shipping product name.
+            backend strings. A product built on this SDK can override this
+            with its own name.
 
     config MUSE_DEVICE_MODEL_ID
         string "Device model id"
@@ -67,8 +67,8 @@ menu "ESP32 Device SDK"
         help
             Print a prominent warning during each build while
             CONFIG_GADGET_SDK_TOKEN is empty. The build still succeeds.
-            Internal builds that intentionally ship without an SDK token
-            turn this off.
+            Builds that intentionally ship without an SDK token turn this
+            off.
 
     config HOMEHUB_WIFI_MIN_MODEM
         bool "Wi-Fi minimum modem power saving at startup"
@@ -125,7 +125,8 @@ menu "ESP32 Device SDK"
             requests are skipped without downloading, even when force is
             requested.
             Optional OTA parameters in Wi-Fi setup are ignored so provisioning
-            can finish normally. Internal builds enable this explicitly.
+            can finish normally. Builds that ship updates enable this
+            explicitly.
 
     config HOMEHUB_SUPPORT_BUG_REPORT
         bool "Enable private support bug reporting"
@@ -409,8 +410,7 @@ menu "ESP32 Device SDK"
         help
             Appended to HOMEHUB_BLE_NAME_PREFIX. Bench boards set one, such as
             "-Disp", so they are easy to tell apart while keeping the build's
-            prefix: MuseGadget-Disp in the open-source build, HomeLink-Disp in
-            the internal one.
+            prefix: MuseGadget-Disp with the default prefix.
 
     config HOMEHUB_BUTTON_GPIO
         int "Active-low setup/reset button GPIO"

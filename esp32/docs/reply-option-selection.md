@@ -88,11 +88,11 @@ assume a choice made on the gadget locks the corresponding buttons on the phone.
 | 1.75C application build, ESP-IDF 6.0.3 | Passed; signed binary `0x221000` bytes in a `0x400000`-byte app slot |
 | Connected physical 1.75C | Received Red/Green/Blue widget; selected Green through the USB selection API; rejected a second selection; played/displayed the following reply; a verification chat returned `Green` |
 | Lunch-question regression on the 1.75C | Temporary serial instrumentation confirmed `What do you want for lunch?` decoded from a live transcript-only canonical row; selected Salad through USB and a verification chat returned `Salad`. Simulator checks verify the label refresh |
-| Physical finger selection | Pulkit tested selecting an option by finger on the 1.75C and confirmed it works |
+| Physical finger selection | Selecting an option by finger on the 1.75C was tested separately and works |
 | Server selected-state persistence | HTTP 403; local selection remains locked, with no automatic chat retry |
 
-Touch dispatch was exercised in the simulator, and Pulkit separately confirmed
-physical finger selection on the 1.75C. Automated physical-device selection
+Touch dispatch was exercised in the simulator, and physical finger selection
+on the 1.75C was confirmed separately. Automated physical-device selection
 testing used a local build including the separately proposed swipe-volume
 feature and the same model request through USB. Simulator captures are not
 device screenshots.

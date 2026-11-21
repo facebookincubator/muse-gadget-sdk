@@ -86,9 +86,9 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 #define TUN_REOPEN_INTERVAL_US (5 * 1000 * 1000)
 
 // Tunnel-stream keepalive. The WebSocket ping/pong keepalive in noise_control
-// only proves the device↔ingress-rev-proxy transport is alive; it says nothing
-// about the VM-side tunnel backend behind raw.sock. That backend
-// can go away — e.g. a service restart/redeploy — while ingress-rev-proxy keeps
+// only proves the device↔ingress-proxy transport is alive; it says nothing
+// about the VM-side tunnel backend. That backend
+// can go away — e.g. a service restart/redeploy — while the ingress proxy keeps
 // the multiplexed Noise stream open, leaving the tunnel HALF-OPEN: the WS is
 // healthy so we get no stream reset, but no packets flow and we never reconnect.
 //

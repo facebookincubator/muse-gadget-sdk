@@ -418,7 +418,7 @@ static int op_wifi_scan_results(muse_wifi_ap_t *out, int max, uint32_t *gen) {
     return n;
 }
 
-// ---- BLE, Hatch, setup -------------------------------------------------------
+// ---- BLE, Muse, setup --------------------------------------------------------
 
 static void op_ble_apply(void) {
     keeper_kick(KEEP_BLE);

@@ -99,7 +99,7 @@ def test_silent_work_survives_idle_and_old_settlement_cannot_clear_new_work(monk
                                              "response_message_id": message}))
 
             await started("root-a", "input-a")
-            clock[0] += 60  # silent Companion work, longer than the default 45s idle
+            clock[0] += 60  # silent asynchronous work, longer than the default 45s idle
             await quiet_for(vm, 0.15)
             assert not task.done()
             await started("root-b", "input-b")
