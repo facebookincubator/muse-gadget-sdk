@@ -42,6 +42,7 @@ class TextInputTests(unittest.TestCase):
             p = Path(tmp)
             (p / 'text_ui.inc').write_text(ui)
             (p / 'esp_err.h').write_text('typedef int esp_err_t;\n')
+            (p / 'sdkconfig.h').write_text('/* Optional firmware features are disabled in this harness. */\n')
             (p / 'lv_conf.h').write_text('''#pragma once
 #define LV_USE_OS LV_OS_NONE
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB

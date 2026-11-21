@@ -1,5 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 // SPDX-License-Identifier: Apache-2.0
+#include "muse_theme_lvgl.h"
 #include "muse_options_ui.h"
 #include "muse_options.h"
 #include "muse_state.h"
@@ -67,7 +68,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text)
     lv_obj_set_width(obj, lv_pct(100));
     lv_label_set_long_mode(obj, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_font(obj, s_font, 0);
-    lv_obj_set_style_text_color(obj, lv_color_hex(0xf0edf8), 0);
+    muse_theme_set_style_text_color(obj, lv_color_hex(0xf0edf8), 0);
     return obj;
 }
 
@@ -94,7 +95,7 @@ void muse_options_ui_start(int width, int height, bool round, const lv_font_t *f
     s_overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_overlay);
     lv_obj_set_size(s_overlay, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(s_overlay, lv_color_black(), 0);
+    muse_theme_set_style_bg_color(s_overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_overlay, LV_OPA_70, 0);
     lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(s_overlay, outside_clicked, LV_EVENT_CLICKED, NULL);
@@ -114,9 +115,9 @@ void muse_options_ui_start(int width, int height, bool round, const lv_font_t *f
     }
     lv_obj_set_size(s_panel, panel_w, panel_h);
     lv_obj_center(s_panel);
-    lv_obj_set_style_bg_color(s_panel, lv_color_hex(0x1a1530), 0);
+    muse_theme_set_style_bg_color(s_panel, lv_color_hex(0x1a1530), 0);
     lv_obj_set_style_border_width(s_panel, 1, 0);
-    lv_obj_set_style_border_color(s_panel, lv_color_hex(0x8c6ed4), 0);
+    muse_theme_set_style_border_color(s_panel, lv_color_hex(0x8c6ed4), 0);
     lv_obj_set_style_radius(s_panel, 18, 0);
     lv_obj_set_style_shadow_width(s_panel, 0, 0);
     lv_obj_set_style_outline_width(s_panel, 0, 0);
@@ -148,7 +149,7 @@ void muse_options_ui_tick(bool available)
                 lv_obj_set_width(button, lv_pct(100));
                 lv_obj_set_height(button, LV_SIZE_CONTENT);
                 lv_obj_set_style_min_height(button, 44, 0);
-                lv_obj_set_style_bg_color(button, lv_color_hex(i == s_view->selected ? 0x67508e : 0x302642), 0);
+                muse_theme_set_style_bg_color(button, lv_color_hex(i == s_view->selected ? 0x67508e : 0x302642), 0);
                 label(button, s_view->labels[i]);
                 lv_obj_add_event_cb(button, select_option, LV_EVENT_ALL, (void *)(intptr_t)i);
                 if (s_view->status != MUSE_OPTIONS_READY) lv_obj_add_state(button, LV_STATE_DISABLED);
