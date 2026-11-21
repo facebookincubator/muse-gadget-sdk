@@ -1337,7 +1337,7 @@ static void build_ble_page(lv_obj_t *tile)
     s_ble_sw = switch_row(list, "Phone setup", muse_settings_ble_on(), on_ble_sw);
     s_ble_status = note(list, "");
     button(list, "Forget paired phones", COLOR_DANGER, on_ble_forget, NULL);
-    note(list, "When on, Muse is visible to phones nearby. Open tools/ble_setup.html in Chrome, connect, and enter the code Muse shows to pair.");
+    note(list, "When on, Muse is visible to phones nearby. Open tools/muse/ble_setup.html in Chrome, connect, and enter the code Muse shows to pair.");
 }
 
 static void tick_ble(void)

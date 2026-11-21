@@ -1087,7 +1087,7 @@ static void page_ble(Column &c)
     switch_row(c, "Phone setup", s_ble_on, ACT_BLE_SW);
     note(c, s_ble_status);
     button(c, "Forget paired phones", ACT_BLE_FORGET);
-    note(c, "When on, Muse is visible to phones nearby. Open tools/ble_setup.html in Chrome, "
+    note(c, "When on, Muse is visible to phones nearby. Open tools/muse/ble_setup.html in Chrome, "
             "connect, and enter the code Muse shows to pair.");
 }
 
