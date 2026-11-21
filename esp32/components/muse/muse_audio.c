@@ -33,6 +33,7 @@
 #include "muse_mem.h"
 #include "muse_mirror_audio.h"
 #include "muse_settings.h"
+#include "muse_motion.h"
 
 static const char *TAG = "muse_audio";
 
@@ -430,8 +431,8 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
     }
     /* Speaker off still plays silence at the same pace, so captions timed to
      * the audio scroll as if it were heard. */
-    bool mute = mirror_only || !muse_settings_speaker_on();
     while (frames) {
+        bool mute = mirror_only || !muse_settings_speaker_on() || muse_motion_quiet();
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
         for (size_t i = 0; i < n; i++) {
             s_out_stereo[2 * i] = mute ? 0 : mono[i];

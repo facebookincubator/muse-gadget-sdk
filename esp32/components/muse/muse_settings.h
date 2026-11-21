@@ -71,6 +71,12 @@ bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
 int muse_settings_mic_gain(void);       /* dB, 0..MUSE_MIC_GAIN_MAX */
 int muse_settings_brightness(void);     /* 10..100 */
 int muse_settings_sleep_s(void);        /* 0 = never */
+#if CONFIG_MUSE_MOTION_GESTURES
+bool muse_settings_lift_wake(void);
+bool muse_settings_face_down_quiet(void);
+void muse_settings_set_lift_wake(bool on);
+void muse_settings_set_face_down_quiet(bool on);
+#endif
 /* The size of reply text on screen, from Extra small to Extra large. Until
  * it's chosen, the screen's own default (muse_settings_set_text_size_default). */
 enum { MUSE_TEXT_XSMALL, MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE, MUSE_TEXT_XLARGE, MUSE_TEXT_SIZES };

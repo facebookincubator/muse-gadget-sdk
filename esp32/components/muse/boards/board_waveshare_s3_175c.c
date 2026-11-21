@@ -40,6 +40,14 @@
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#if CONFIG_MUSE_MOTION_GESTURES
+#include "qmi8658_motion.h"
+
+static esp_err_t motion_enable(bool enable)
+{
+    return muse_qmi8658_enable(bsp_i2c_get_handle(), enable);
+}
+#endif
 
 static const char *TAG = "board";
 
@@ -297,6 +305,10 @@ static const muse_board_t s_board = {
     .wait_buttons = wait_buttons,   /* the 1.75's PWR is on the PMU, so it's polled */
 #endif
     .read_power = muse_pmu_read_power,
+#if CONFIG_MUSE_MOTION_GESTURES
+    .motion_enable = motion_enable,
+    .motion_read = muse_qmi8658_read,
+#endif
     .power_off = muse_pmu_power_off,
 };
 
