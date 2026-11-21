@@ -2201,10 +2201,15 @@ int32_t gadget_ui_roller_select(wasm_exec_env_t env, int32_t obj, int32_t select
 {
     (void)env;
     slot_t *s = obj_arg(obj);
-    if (!s) return GADGET_ERR_HANDLE;
-    if (s->type != GADGET_W_ROLLER) return GADGET_ERR_UNSUPPORTED;
-    if (selected < 0 || (uint32_t)selected >= lv_roller_get_option_count(s->obj) ||
-        animate < 0 || animate > 1) return GADGET_ERR_ARG;
+    if (!s) {
+        return GADGET_ERR_HANDLE;
+    }
+    if (s->type != GADGET_W_ROLLER) {
+        return GADGET_ERR_UNSUPPORTED;
+    }
+    if (selected < 0 || (uint32_t)selected >= lv_roller_get_option_count(s->obj) || animate < 0 || animate > 1) {
+        return GADGET_ERR_ARG;
+    }
     lv_roller_set_selected(s->obj, (uint32_t)selected, animate ? LV_ANIM_ON : LV_ANIM_OFF);
     return 0;
 }
