@@ -12,7 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The phone camera over Wi-Fi, for any board with the full UI whose panel
-
 # Optional personal-avatar images. Load after the full-UI board overlay.
 CONFIG_MUSE_AVATAR_SYNC=y

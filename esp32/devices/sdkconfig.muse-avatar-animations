@@ -12,7 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The phone camera over Wi-Fi, for any board with the full UI whose panel
-
 # Experimental phone-avatar clips on ESP32-S3. Load after avatar-sync.
 CONFIG_MUSE_AVATAR_ANIMATIONS=y
