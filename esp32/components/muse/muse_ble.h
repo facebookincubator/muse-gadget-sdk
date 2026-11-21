@@ -34,7 +34,7 @@
  *   STATUS (read/notify) JSON snapshot; notifies a short result after each CMD
  *
  * Both require an encrypted, MITM-protected link: the phone pairs with the
- * 6-digit passkey Muse shows on screen. See tools/ble_setup.html.
+ * 6-digit passkey Muse shows on screen. See tools/muse/ble_setup.html.
  */
 
 typedef enum {

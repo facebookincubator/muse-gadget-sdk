@@ -80,7 +80,7 @@ static unsigned poll_buttons(void)
 
 /* Pins and codec addresses recovered from original BoxAudioCodec constructor.
  * Stereo bus pattern reused from Muse BOX-3/StickS3 drivers.
- * ponytail: two-mic stereo capture; add the original four-slot TDM reference
+ * For now: two-mic stereo capture; add the original four-slot TDM reference
  * path if live capture requires it or acoustic echo cancellation is added.
  */
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)

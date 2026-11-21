@@ -26,7 +26,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 ## Workflow
 
 1. For Cast media, volume and status, use the [Google Cast skill](../gadget-google-cast/SKILL.md), including receiver capabilities and result checks.
-2. For Remote v2, use the confirmed service and the client's documented pairing/control connection setup over HomeLink TCP. Do not treat an open control port as a paired session.
+2. For Remote v2, use the confirmed service and the client's documented pairing/control connection setup over Home Link TCP. Do not treat an open control port as a paired session.
 3. If necessary, start normal user-approved pairing, complete the displayed code challenge and retain the client certificate/private key. Pairing and control are separate connections.
 4. After authenticated connection, send the requested documented remote key or app link using the compatible client. Use supported power/volume behavior only when exposed by this device.
 5. Observe available state and ask for visual confirmation where navigation has no reliable programmatic read-back.

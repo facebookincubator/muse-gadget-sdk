@@ -20,7 +20,7 @@ Use this skill when the confirmed Roborock-app-compatible vacuum supports the lo
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing local key and device identity supplied securely, plus the model information needed by the compatible client.
-- A local-only python-roborock channel or equivalent encrypted implementation routed through HomeLink. Disable or omit cloud bootstrap/fallback paths.
+- A local-only python-roborock channel or equivalent encrypted implementation routed through Home Link. Disable or omit cloud bootstrap/fallback paths.
 - Permission for the requested robot movement and a safe, prepared cleaning area.
 
 ## Workflow

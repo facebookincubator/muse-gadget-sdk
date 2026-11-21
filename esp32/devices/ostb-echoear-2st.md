@@ -138,7 +138,7 @@ simulator built with warnings treated as errors and passed its headless CTest.
 The focused host test exercises touch packet bounds, press/release/lost-touch
 callbacks, rapid taps, and pairing confirmation without recording.
 
-The final port was tested on the measured unit at `066f9a1`: it pairs with
+The final port was tested on the measured unit: it pairs with
 the Muse app (touch to confirm), touch lines up with the screen, recording
 and playback work, it sleeps and wakes on touch, and it reconnects. The
 home-network tunnel, image delivery and OTA are configured but weren't

@@ -14,7 +14,7 @@
 
 # Muse: the voice companion UI that runs beside Home Link on boards with a
 # display (CONFIG_MUSE_BOARD_*). Link-only builds register an empty component,
-# except the Voice PE, which borrows the Hatch voice session.
+# except the Voice PE, which borrows the Muse voice session.
 #
 # Requirements are resolved before Kconfig is known, so everything any board
 # needs is listed unconditionally. Managed components (LVGL, codecs, BSPs) come
@@ -258,7 +258,7 @@ if(CONFIG_MUSE_ENABLED)
         endif()
     endif()
 elseif(CONFIG_HOMEHUB_VOICE)
-    # The Voice PE board uses just the Hatch voice session; the project's main/
+    # The Voice PE board uses just the Muse voice session; the project's main/
     # voice_muse_chat.c stands in for the Muse settings, Wi-Fi and Link hooks.
     list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_chat_text.c" "muse_text.c")
     # The shared session handles option events even without a touchscreen.

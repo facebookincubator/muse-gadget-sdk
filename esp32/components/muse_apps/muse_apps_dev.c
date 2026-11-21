@@ -45,7 +45,7 @@ static const char *TAG = "muse_apps_dev";
 #define WARM_DEVS 4          /* streaming devices dev_read started without dev_open */
 #define WARM_HZ 25           /* and the rate they run at */
 
-/* gadget_reading_t, as components/muse_apps/sdk/api/gadget.h has it. */
+/* gadget_reading_t, as components/muse_apps/sdk/gadget.h has it. */
 typedef struct {
     int32_t t_ms;
     int32_t count;

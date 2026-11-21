@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # Waveshare ESP32-S3-Touch-LCD-1.85B
 
 The 1.85B uses an ESP32-S3 with 16 MB flash and 8 MB octal PSRAM, a round
@@ -75,7 +91,7 @@ On two 1.85B units, the initial board port boots with 16 MB flash and 8 MB
 PSRAM, selects panel revision 2 (`00 02 7f 7f`), registers display/touch and
 initializes both audio codecs. The shared Muse runtime reaches ready-to-pair
 without a panic or reboot loop. Recording/playback, pairing, OTA and
-power-off/wake have not yet been exercised for this contribution.
+power-off/wake have not yet been exercised.
 
 Battery-reader host tests cover valid endpoints, signed current, relaxation,
 missing batteries, uninitialized/config-update states, invalid data, every

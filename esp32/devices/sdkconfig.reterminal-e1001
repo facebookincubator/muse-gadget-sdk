@@ -33,7 +33,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # shows a status screen.
 CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179=y
 # Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
-# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
+# MuseGadget-Disp with the default prefix.
 CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
 # The green button on top, active low. The two white ones (GPIO4 and 5) are
 # not used.

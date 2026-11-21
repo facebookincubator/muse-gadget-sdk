@@ -20,7 +20,7 @@ Use this skill when the exact Wi-Fi RoboVac model and firmware are confirmed to 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing local key, device ID and a model-appropriate command/datapoint map supplied securely.
-- A compatible local eufy/TinyTuya client using HomeLink's TCP transport, as described in the [Tuya skill](../gadget-tuya-wifi-devices/SKILL.md).
+- A compatible local eufy/TinyTuya client using Home Link's TCP transport, as described in the [Tuya skill](../gadget-tuya-wifi-devices/SKILL.md).
 - A ready robot and user permission for the intended cleaning or docking action.
 
 ## Workflow

@@ -20,7 +20,7 @@
 #endif
 
 /* ESP-IDF's libc and macOS supply strlcpy/strlcat; glibc versions commonly used by
- * devservers do not. Map production calls to the simulator implementation on
+ * Linux hosts do not. Map production calls to the simulator implementation on
  * hosts that need it. macOS keeps its fortified libc macro and native symbol. */
 #include_next <string.h>
 

@@ -19,7 +19,7 @@
  * AMOLED (CO5300 or SH8601, the BSP detects which) with touch, one ES8311 for
  * speaker and mic, AXP2101 PMU. BOOT (GPIO9) talks; PWR (on the PMU) is the
  * power button, which also turns the board back on.
- * No PSRAM for Hatch's own TLS session or MP3, so voice notes go over Home
+ * No PSRAM for Muse's own TLS session or MP3, so voice notes go over Home
  * Link's session and replies come back as text (muse_chat_link.c).
  */
 #include "bsp/esp-bsp.h"

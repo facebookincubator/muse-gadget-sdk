@@ -14,7 +14,7 @@
 
 # FoloToy AI Passport: ESP32-C3 (single core, 400 KB SRAM), 8 MB embedded
 # flash in DIO mode, no PSRAM. Load last, after sdkconfig.muse. As on the
-# Waveshare C6 there is no Hatch session: voice notes go over Link's session
+# Waveshare C6 there is no voice session: voice notes go over Link's session
 # and replies show as text. The C3 has ~110 KB less SRAM than the C6, so
 # Link's TLS, Wi-Fi and BLE buffers are trimmed at least as hard.
 CONFIG_IDF_TARGET="esp32c3"

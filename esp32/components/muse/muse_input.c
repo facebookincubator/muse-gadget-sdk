@@ -1135,7 +1135,7 @@ static bool console_command(char *line, bool whole)
  * "power.reset" starts it over, "nap" sleeps and leaves Wi-Fi at once (as
  * two minutes asleep on battery would; 'w' rejoins), "face=" shows a face
  * (see set_face), "wake" prints the wake word state, "wake.on" and "wake.off"
- * toggle listening, and "chat=" sends a typed message to Hatch (see chat_line
+ * toggle listening, and "chat=" sends a typed message to Muse (see chat_line
  * and tools/muse/chat.py).
  */
 static void serial_task(void *arg)

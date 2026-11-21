@@ -73,7 +73,7 @@ void muse_wifi_power(muse_wifi_power_t level);
  * access point would otherwise hold each packet for the next beacon, up to
  * 100 ms). Calls nest; false releases one. */
 void muse_wifi_keep_awake(bool on);
-/* Leaves Wi-Fi, dropping Link's session and Hatch's, until called with false,
+/* Leaves Wi-Fi, dropping Link's session and Muse's, until called with false,
  * which rejoins at once. */
 void muse_wifi_nap(bool nap);
 

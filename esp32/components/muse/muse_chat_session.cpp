@@ -28,7 +28,7 @@
  *      assistant messages, each delta.message_start / text_append / message_done.
  *   3. Each finished message is shown at reading pace (see start_tts to
  *      speak it with a TTS API of your own; Muse doesn't speak gadget replies).
- * A turn has no explicit end event; like Sidekick, it settles once every
+ * A turn has no explicit end event; it settles once every
  * message is done and nothing has arrived for a few seconds.
  *
  * Everything network-side runs on one task. The voice task talks to it through
@@ -108,7 +108,7 @@ static const char *TAG = "muse_chat_session";
 
 #define MIC_RATE 16000
 #define DICT_RATE 24000
-#define DICT_CHUNK_BYTES 8192              /* ~170 ms at 24 kHz, as hatch-test sends */
+#define DICT_CHUNK_BYTES 8192              /* ~170 ms at 24 kHz */
 #define SCRATCH (64 * 1024)                /* inbound frames reassemble up to this */
 #define NDJSON_LINE_MAX (16 * 1024)               /* one NDJSON line / the chat ack */
 #define SUB_LINE_MAX (256 * 1024)          /* an event line grows its buffer up to this */
@@ -413,7 +413,7 @@ static void emit(muse_hatch_ev_t type, const char *text)
     xQueueSend(s_events, &ev, wait);
 }
 
-/* ---- TLS / WebSocket (from hatch-link's noise_control.cpp) ---- */
+/* ---- TLS / WebSocket (from Link's main/noise_control.cpp) ---- */
 
 static bool write_all(esp_tls_t *tls, const void *buf, size_t len)
 {
@@ -588,7 +588,7 @@ static ssize_t ws_recv(esp_tls_t *tls, uint8_t *buf, size_t cap, bool wait)
     return (ssize_t)plen;
 }
 
-/* Query escaping as hatch-link's noise_upgrade.h: keeps RFC 3986 unreserved plus !~*'(). */
+/* Query escaping as Link's main/noise_upgrade.h: keeps RFC 3986 unreserved plus !~*'(). */
 static void query_escape(const char *in, char *out, size_t cap)
 {
     static const char *hex = "0123456789ABCDEF";
@@ -872,7 +872,7 @@ static bool resolve_vm(char *err, size_t err_cap)
     char want[MUSE_VM_MAX + 1];
     muse_settings_hatch_vm(want);
     if (!muse_settings_hatch_token_len()) {
-        /* No token of our own: use Link's Hatch account. */
+        /* No token of our own: use Link's Muse account. */
         if (muse_link_hatch_vm(want, s_vm.vm_id, sizeof(s_vm.vm_id), s_vm.vm_name, sizeof(s_vm.vm_name),
                                &s_vm.vm_token)) {
             ESP_LOGI(TAG, "VM %s (%s) via Link", s_vm.vm_id, s_vm.vm_name);

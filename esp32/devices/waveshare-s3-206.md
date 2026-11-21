@@ -50,7 +50,7 @@ tools/muse/board.sh flash s3-206        # finds the port by its USB serial numbe
 ```
 
 Set `CONFIG_GADGET_SDK_TOKEN` in `build-muse-waveshare-s3-206/sdkconfig`
-before building (see `AGENTS.md`). The build uses `devices/sdkconfig.muse` and
+before building (see `../AGENTS.md`). The build uses `devices/sdkconfig.muse` and
 `devices/sdkconfig.muse-waveshare-s3-206` with `partitions_muse.csv`. The
 console and flashing both go through the chip's own USB port.
 

@@ -8,6 +8,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# AIPI Lite power-test image (CONFIG_MUSE_POWER_TEST, docs/power/README.md).
 # DIAGNOSTIC ONLY. Load after sdkconfig.muse-aipi.
 CONFIG_MUSE_POWER_TEST=y
 CONFIG_PM_ENABLE=y

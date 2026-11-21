@@ -45,7 +45,7 @@ extern "C" {
 /*
  * What Muse needs from the hardware. Each file in boards/ fills one of these in
  * and returns it from muse_board_get(). Everything above this line (UI, voice
- * loop, settings, Hatch) is shared; Wi-Fi and BLE belong to Home Link.
+ * loop, settings, Muse chat) is shared; Wi-Fi and BLE belong to Home Link.
  */
 
 /* Button edges reported by poll_buttons(). */

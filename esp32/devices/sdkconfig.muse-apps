@@ -31,7 +31,7 @@ CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
 CONFIG_WAMR_ENABLE_MULTI_MODULE=n
 CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
 
-# The apps' fonts (FONT_ in apps/gadget.h): 14 to 28 px are the UI's already;
+# The apps' fonts (FONT_ in sdk/gadget.h): 14 to 28 px are the UI's already;
 # 48 px for big numbers.
 CONFIG_LV_FONT_MONTSERRAT_48=y
 

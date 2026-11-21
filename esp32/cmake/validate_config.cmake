@@ -94,7 +94,7 @@ if((CONFIG_ESP_TLS_INSECURE OR CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY) AND
 endif()
 
 # A token from gadgets.muse.ai is mgst_ plus 43 canonical base64url characters.
-# Manufacturer builds pair with fleet attestation instead, and internal builds
+# Manufacturer builds pair with fleet attestation instead, and builds that ship
 # without a token disable CONFIG_GADGET_SDK_TOKEN_WARN.
 if("${CONFIG_GADGET_SDK_TOKEN}" STREQUAL "")
     if(CONFIG_GADGET_SDK_TOKEN_WARN AND NOT CONFIG_HOMEHUB_PAIRING_EFUSE_AUTH)

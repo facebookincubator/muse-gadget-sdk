@@ -1,6 +1,6 @@
 ---
 name: gadget-linux-wakeword
-description: Install and verify the optional Hey Muse wake word for a Linux Muse gadget: build the native detector library from the SDK checkout, check it locally, and bring up wake-word voice calls only when asked.
+description: Install and verify the optional Hey Muse wake word for a Linux Muse gadget — build the native detector library from the SDK checkout, check it locally, and bring up wake-word voice calls only when asked.
 ---
 
 # Linux Hey Muse wake-word setup

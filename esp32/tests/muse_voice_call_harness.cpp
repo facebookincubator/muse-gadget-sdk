@@ -2142,7 +2142,7 @@ static void ptt_stale_completion(void)
     line(id, ev_done("mapper-new"));
     poll();
     assert(ptt_status().reply_done);
-    /* Astra's case: an older submission settles while the current reply
+    /* A review case: an older submission settles while the current reply
      * (no response.created seen for either) plays. */
     muse_voice_call_set_talking(true);
     poll();

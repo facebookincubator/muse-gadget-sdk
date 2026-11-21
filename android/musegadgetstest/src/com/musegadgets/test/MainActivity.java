@@ -100,7 +100,7 @@ public final class MainActivity extends Activity
     private int aheadPct = 250;   /* --ei ahead: live budget, % of a frame */
     private int behindPct = 100;  /* --ei behind: live phone-side queue before skipping, % of a frame */
 
-    /* Live camera: keep about one and a half frames ahead of the device's decoder. */
+    /* Live camera: keep about two and a half frames ahead of the device's decoder. */
     private void setLiveBudget() {
         long frame = kbps * 1000L / 8 / Math.max(1, curFps);
         link.liveAhead = live && !isClip() ? Math.max(1600, frame * aheadPct / 100) : 0;

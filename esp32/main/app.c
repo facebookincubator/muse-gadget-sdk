@@ -2616,7 +2616,7 @@ bool app_wifi_nap(void) {
 #endif  // CONFIG_MUSE_ENABLED
 
 #if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_VOICE
-// Muse's and the voice board's own Hatch session reach the VM with these.
+// Muse's and the voice board's own voice sessions reach the VM with these.
 typedef struct {
     const char *want_vm;
     char *vm_id;

@@ -46,7 +46,7 @@ If no suitable source is available, explain the hosting requirement.
 1. Read the device skill's model, firmware and operating-state limits, then
    select its current discovered Cast endpoint. A group is a distinct target;
    confirm that the user intended playback or volume changes for all members.
-2. Use a documented Cast v2 client such as PyChromecast with HomeLink's shared
+2. Use a documented Cast v2 client such as PyChromecast with Home Link's shared
    network access. Supply the selected endpoint instead of running a separate
    network scan. Keep the protocol session and heartbeat alive.
 3. Read receiver status first: volume, mute, running application and available

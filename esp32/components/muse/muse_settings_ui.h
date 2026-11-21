@@ -21,7 +21,7 @@
 #include "lvgl.h"
 
 /*
- * The settings tile (swipe left from Muse): Wi-Fi, Hatch, Bluetooth, Sound,
+ * The settings tile (swipe left from Muse): Wi-Fi, Muse, Bluetooth, Sound,
  * Sleep and Power pages. Runs entirely in the LVGL task; hardware state is
  * polled from the owning modules.
  */

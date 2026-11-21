@@ -47,8 +47,8 @@ generated from it (`api/README.md` has the design):
 An app imports only these, from module `gadget`, and exports `on_start()`,
 and if it needs them `on_event(type, a, b)`, `on_frame(now_ms)` and
 `on_stop(reason)`. Its manifest, `GADGET_MANIFEST("{...}")`, names it and
-lists what it requires and uses: the permissions `chat.read`, `chat.send` and
-`files.home`, and devices. Calls that need the VM return at once and finish
+lists what it requires and uses: the permissions `chat.read`, `chat.send`,
+`files.home` and `files.gadget`, and devices. Calls that need the VM return at once and finish
 with `EV_DONE`. Each app gets a memory budget of up to 2 MB (less on a board
 short of PSRAM; `device.guide` says) and about 0.7 s of instructions per
 callback.

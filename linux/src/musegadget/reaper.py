@@ -14,8 +14,8 @@
 
 """Reaping adopted orphans when the service runs as PID 1.
 
-In the container deployment the service's entrypoint ends in
-``exec musegadget run``, so the daemon *is* PID 1. When a process's
+In a container whose entrypoint ends in
+``exec musegadget run``, the daemon *is* PID 1. When a process's
 parent exits first, the kernel reparents the orphan to PID 1, and only
 PID 1 can reap it. The daemon spawns plenty of helpers (shells, browser
 subprocesses) whose grandchildren can be orphaned this way; with nobody

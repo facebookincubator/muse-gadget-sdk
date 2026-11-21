@@ -20,7 +20,7 @@ Use this skill when the camera already runs a confirmed compatible yi-hack fork 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Already-installed compatible firmware and its existing HTTP/RTSP credentials.
-- A credential-aware HTTP or RTSP client using HomeLink. RTSP media must support interleaved TCP.
+- A credential-aware HTTP or RTSP client using Home Link. RTSP media must support interleaved TCP.
 - User permission for the particular camera and requested image/view/recording.
 
 ## Workflow

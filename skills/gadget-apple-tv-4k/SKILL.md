@@ -19,7 +19,7 @@ Use this skill when discovery and device information identify an Apple TV 4K wit
 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
-- A compatible pyatv client using HomeLink TCP transport and current discovered service data.
+- A compatible pyatv client using Home Link TCP transport and current discovered service data.
 - Normal user-approved on-screen PIN pairing for each required protocol, typically Companion and/or AirPlay. Store the resulting credentials securely and retain session encryption.
 - A person able to read a pairing PIN when needed. Do not print credential storage or loosen the TV's access settings as a workaround.
 

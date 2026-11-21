@@ -21,7 +21,7 @@
 /*
  * Muse account API: finds the VM a device token
  * can reach and the per-VM credential for its Noise connection. Ported from
- * hatch-link's vm_api.c.
+ * Link's main/vm_api.c.
  */
 
 #define MUSE_HATCH_API_AUTH -2     /* token rejected (401/403) */

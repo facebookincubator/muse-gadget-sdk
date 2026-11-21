@@ -24,7 +24,7 @@ Read and follow the Home Link networking and safety rules in `~/docs/devices/hom
 
 ## Workflow
 
-1. Configure python-kasa for the known SMART device/transport and exact discovered endpoint; use HomeLink network routing instead of the library's broadcast discovery.
+1. Configure python-kasa for the known SMART device/transport and exact discovered endpoint; use Home Link network routing instead of the library's broadcast discovery.
 2. Authenticate and update device state. Read supported features before invoking a capability; keep raw feature dumps private because they can include setup codes.
 3. Use `turn_on`/`turn_off` for requested relay changes. LED and auto-off features are separate operations; change them only when explicitly requested and exposed by this device.
 4. Read the energy module/features for actual power and totals, preserving their reported units. Availability differs across firmware.

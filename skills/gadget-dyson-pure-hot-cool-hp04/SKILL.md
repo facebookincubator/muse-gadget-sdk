@@ -20,7 +20,7 @@ Use this skill when the confirmed device is a Dyson Pure Hot+Cool HP04 and compa
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing device serial, product type and local MQTT password/credential in approved secret storage.
-- A model-compatible libdyson client using HomeLink's TCP connection. Initialize it with the supplied local values rather than invoking account/cloud discovery.
+- A model-compatible libdyson client using Home Link's TCP connection. Initialize it with the supplied local values rather than invoking account/cloud discovery.
 - User permission for changes, especially heating mode or temperature.
 
 ## Workflow

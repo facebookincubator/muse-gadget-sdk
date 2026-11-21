@@ -303,10 +303,10 @@ final class ClipStreamer {
             srcY = up ? new byte[side * side] : null;
             srcC = up ? new byte[(side / 2) * (side / 2)] : null;
             /* Black only in the 4x4 blocks wholly outside the circle plus
-             * MASK_MARGIN pixels (as tools/clipenc's jpanel.py and the
-             * camera): an edge on the transform grid costs fewer bits than
-             * the exact circle, and the margin keeps a gadget's bilinear
-             * upscale from pulling the black into the circle's edge. */
+             * MASK_MARGIN pixels, as the camera does: an edge on the
+             * transform grid costs fewer bits than the exact circle, and the
+             * margin keeps a gadget's bilinear upscale from pulling the black
+             * into the circle's edge. */
             double c = s / 2.0, r2 = (c + CameraStreamer.MASK_MARGIN) * (c + CameraStreamer.MASK_MARGIN);
             int bw = (s + 3) / 4;
             boolean[] blkIn = new boolean[bw * bw];
