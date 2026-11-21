@@ -28,7 +28,7 @@ My gadget only runs apps once I've turned on Run apps in its Settings (or its
 menu): until then it doesn't offer you the app commands. If you don't see
 `app.run`, ask me to turn it on.
 
-This is the gadget apps API, version 1.1. `gadget.h`, at the end of this
+This is the gadget apps API, version 1.2. `gadget.h`, at the end of this
 guide, declares every function, event and constant, with what each does; read
 it before writing an app. Where this guide and the gadget disagree, the
 gadget is right: `device.guide` says what it has.
@@ -213,7 +213,7 @@ Every app starts with one line naming itself:
 GADGET_MANIFEST("{\"api\":\"1.0\",\"name\":\"plant\",\"title\":\"Plant\",\"icon\":\"leaf\",\"color\":\"green\",\"requires\":[\"soil_moisture\"],\"uses\":[\"chat.send\",\"battery\"]}");
 ```
 
-- `api`: `"1.1"` (or `"1.0"` for apps that use no 1.1 calls). `name`: the app's folder name. `title`: for people, in the
+- `api`: `"1.2"` (older apps can retain `"1.1"` or `"1.0"`). `name`: the app's folder name. `title`: for people, in the
   launcher. `icon` and `color`: its look in the launcher (Design, below).
 - `requires`: features and devices the app can't work without; the gadget
   refuses to run it without them. Features: `touch`, `round`, `rect`,
@@ -591,7 +591,7 @@ As C defines, for an app:
 <!-- BEGIN gadget.h -->
 ```c
 /*
- * gadget.h: the Muse gadget apps API, version 1.1 (draft).
+ * gadget.h: the Muse gadget apps API, version 1.2 (draft).
  *
  * Generated from components/muse_apps/sdk/api/api.json by components/muse_apps/sdk/api/gen_api.py. Don't edit it:
  * change api.json and run gen_api.py.
@@ -617,7 +617,7 @@ As C defines, for an app:
 #include <stdint.h>
 
 #define GADGET_API_MAJOR 1
-#define GADGET_API_MINOR 1
+#define GADGET_API_MINOR 2
 
 #ifdef __wasm__
 #define GADGET_IMPORT(name) __attribute__((import_module("gadget"), import_name(#name)))
@@ -1452,6 +1452,14 @@ GADGET_IMPORT(ui_grid_cell) int32_t ui_grid_cell(int32_t obj, int32_t col, int32
  * Scrolls an object's content.
  */
 GADGET_IMPORT(ui_scroll_to) int32_t ui_scroll_to(int32_t obj, int32_t x, int32_t y, int32_t animate);
+
+/*
+ * Selects a roller option, optionally scrolling to it. P_ANIM_DURATION sets
+ * the animation duration. P_SELECTED reports the target immediately. Setting
+ * P_SELECTED directly remains instantaneous. selected: Option index, from
+ * zero.
+ */
+GADGET_IMPORT(ui_roller_select) int32_t ui_roller_select(int32_t obj, int32_t selected, int32_t animate);
 
 /*
  * Scrolls its parents until the object is visible: the newest message in a
