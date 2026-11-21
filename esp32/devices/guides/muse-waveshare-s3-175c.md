@@ -15,8 +15,9 @@ limitations under the License.
 -->
 # Waveshare ESP32-S3-Touch-AMOLED-1.75C
 
-A round touch AMOLED gadget with a microphone, speaker and battery. It shows Muse's avatar; people talk to Muse from it with voice
-notes, and replies show on screen and play aloud with the speaker on.
+A round touch AMOLED gadget with a microphone, speaker and battery. It shows
+Muse's avatar; people talk to Muse from it with voice notes, and replies show
+on screen and play aloud with the speaker on.
 
 ## What it can do
 

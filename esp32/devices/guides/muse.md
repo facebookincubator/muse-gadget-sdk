@@ -24,9 +24,8 @@ through the commands it lists.
 
 - On boards with a microphone, people talk to Muse from it: holding the talk
   button (or the on-screen microphone on touch-only boards) records a voice
-  note, sent on release. On
-  boards set to toggle recording, one press starts the note and the next
-  sends it. Replies show on the screen.
+  note, sent on release. On boards set to toggle recording, one press starts
+  the note and the next sends it. Replies show on the screen.
 - If it lists `display.*` commands, Muse can show images on its screen. An
   image replaces the usual screen until `display.show_animation` or a press
   on the device; bring it back when the user is done.
