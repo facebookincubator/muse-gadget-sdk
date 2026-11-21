@@ -70,10 +70,25 @@ that the physical gadget lacks a screen or sensors.
 |---|---|
 | `examples/hello.c` (1.3 KB built) | A greeting, a spinner and a seconds count; a tap or a button changes the colour. The starting point `MUSE.md` gives Muse |
 | `examples/stopwatch.c` (5 KB) | A big label in a ring that fills each minute; a tap or the talk button starts and stops it, the second button (or one on screen) takes laps and resets. It blinks while paused, and laps slide in |
-| `examples/timer.c` | A foreground countdown with scrolling hour/minute/second wheels, Start, a remaining-time display and pause/resume, AUX wheel reset and a finished screen. Close cancels the countdown |
+| `examples/timer.c` | A foreground countdown with hour/minute/second wheels and large fixed-width digits. Tap to pause/resume; double-tap to finish. AUX resets, Back exits, and tapping the finished screen restores the selected duration |
 | `examples/chat.c` (6 KB) | Muse's chat in bubbles in a scrolling column, the reply growing as Muse writes it, and what Muse is doing at the top. The talk button still talks to Muse (with touch or a second button to close it); the second button asks it for a joke |
 | `examples/dashboard.c` (3 KB) | The battery, a motion chart from the accelerometer, a soil probe if there is one, Muse's latest reply, and a count kept between runs |
 | `examples/canvas_effects.c` | Canvas cards with rounded borders, gradients and shadows, reusing a shared style |
+
+### Timer
+
+Build `examples/timer.c` with `build.py` and install it with
+`tools/muse/app.py --install-file timer.wasm`; use firmware with apps API 1.2
+and enable Run apps in Settings. Open Timer from Apps, scroll the hours,
+minutes and seconds, then press Start. Zero duration keeps Start disabled.
+
+The yellow ring breathes while counting down. Tap anywhere to pause or resume;
+double-tap to show the same red-ring “Time's up” screen as reaching zero.
+Tap that screen to return to the previous duration, ready to start again.
+The primary/AUX button resets to the picker; on the picker it scrolls the wheels
+to zero while Start stays disabled. The secondary/Power button exits immediately,
+and the picker has a Back arrow. Exiting cancels the timer: it runs only in the
+foreground, with no sound or Muse VM timer integration.
 
 ## Build and run
 
