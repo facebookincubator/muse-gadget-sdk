@@ -168,6 +168,8 @@ static void finish(void)
     tap_valid = 0;
     sys_timer_stop(CLOCK_TIMER);
     show_seconds(0);
+    ui_set(time_text, P_HIDDEN, 1);
+    ui_align(heading, ALIGN_CENTER, 0, 0);
     ui_set_text(heading, P_TEXT, "Time's up");
     ui_set(heading, P_TRANSFORM_SCALE, 150);
     ui_set(heading, P_HIDDEN, 0);
@@ -196,6 +198,9 @@ static void countdown_tap(void)
         remaining_ms -= now - started_ms;
         phase = PAUSED;
         sys_timer_stop(CLOCK_TIMER);
+        int32_t w = sys_info(INFO_SCREEN_WIDTH), h = sys_info(INFO_SCREEN_HEIGHT);
+        int32_t side = w < h ? w : h;
+        ui_align(heading, ALIGN_CENTER, 0, -side * 21 / 100);
         ui_set_text(heading, P_TEXT, "Paused");
         ui_set(heading, P_TRANSFORM_SCALE, 100);
         ui_set(heading, P_HIDDEN, 0);
@@ -263,6 +268,8 @@ GADGET_EXPORT(on_start) void on_start(void)
     ui_style(ring, PART_KNOB, P_BG_OPA, 0);
     ui_style(ring, PART_KNOB, P_PAD_ALL, 0);
     heading = label(UI_ROOT, FONT_28, 0xFFFFFF, -side * 21 / 100);
+    ui_set(heading, P_TRANSFORM_PIVOT_X, PCT(50));
+    ui_set(heading, P_TRANSFORM_PIVOT_Y, PCT(50));
     time_text = label(UI_ROOT, font, TEXT, 0);
     ui_set(time_text, P_TRANSFORM_PIVOT_X, PCT(50));
     ui_set(time_text, P_TRANSFORM_PIVOT_Y, PCT(50));

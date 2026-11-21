@@ -161,6 +161,7 @@ int main(void)
     assert(phase == PAUSED && remaining_ms == 8800 && !timer_on);
     clock_ms = 1300; countdown_tap();
     assert(phase == FINISHED && !strcmp(texts[heading], "Time's up"));
+    assert(props[time_text][P_HIDDEN] && props[heading][P_Y] == 0);
     clock_ms = 1701; countdown_tap();
     assert(phase == SETTING && props[wheels[2]][P_SELECTED] == 10);
     on_event(EV_BUTTON, BUTTON_PRIMARY, BTN_DOWN);
