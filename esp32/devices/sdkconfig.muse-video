@@ -16,7 +16,7 @@
 # driver has draw_frame (the Waveshare S3 1.75C and 1.75, the StopWatch, the
 # ESP-Mosaico), loaded after its own overlay:
 #   MUSE_VIDEO=1 tools/muse/board.sh build|flash <board>
-# protocols/VIDEO.md has the design and the numbers.
+# ../protocols/VIDEO.md has the design and the numbers.
 CONFIG_MUSE_VIDEO=y
 CONFIG_MUSE_VIDEO_WIFI=y
 

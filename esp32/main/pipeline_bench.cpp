@@ -17,7 +17,7 @@
 // On-device benchmark of the tunnel data path and BLE coexistence
 // (CONFIG_HOMEHUB_PIPELINE_BENCH). Runs instead of the gadget app and prints
 // one "BENCH <name> key=value ..." line per measurement. See
-// tools/coexist/bench/README.md for the host side.
+// tools/coexist/README.md (Bench) for the host side.
 
 #include "sdkconfig.h"
 

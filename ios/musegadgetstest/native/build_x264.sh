@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Builds LIB_DIR/libmgx264.a (the software H.264 encoder, X264.swift): libx264
+# Builds LIB_DIR/libmgx264.a (the software H.264 encoder, X264 in Encoders.swift): libx264
 # from your checkout (X264_SRC, https://code.videolan.org/videolan/x264) with
 # android/musegadgetstest/jni/x264_mvcheap.py's mv-cheap (unless MV_CHEAP=0), for
 # iPhone (arm64, NEON), and native/mgx264.c, in one static library.
