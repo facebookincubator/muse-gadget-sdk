@@ -930,6 +930,13 @@ idf.py -B build-muse-aipi -DIDF_TARGET=esp32s3 \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-aipi" build
 ```
 
+For the optional My Muse avatar source (full-UI boards with PSRAM), add
+[`devices/sdkconfig.muse-avatar-sync`](sdkconfig.muse-avatar-sync) after the
+board's overlays, then
+[`devices/sdkconfig.muse-avatar-animations`](sdkconfig.muse-avatar-animations)
+for its experimental phone clips (ESP32-S3 only). See
+[avatar sources](../docs/avatar-sources.md).
+
 To flash, add `-p PORT flash` with the same arguments. Boards with the full UI need 16 MB
 of flash or more, except the StickS3, StickC Plus2, Cardputer ADV, AtomS3, AI Passport and Waveshare 1.43C, whose overlays switch
 to the 8 MB layout in [`partitions_muse_8mb.csv`](../partitions_muse_8mb.csv).
