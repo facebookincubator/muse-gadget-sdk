@@ -2210,6 +2210,13 @@ int32_t gadget_ui_roller_select(wasm_exec_env_t env, int32_t obj, int32_t select
     if (selected < 0 || (uint32_t)selected >= lv_roller_get_option_count(s->obj) || animate < 0 || animate > 1) {
         return GADGET_ERR_ARG;
     }
+    /* LVGL reads an infinite roller's index on the page it shows and moves it
+     * back to the middle page only when an animation ends, so another select
+     * before then can land on the wrong option. Settle the current one first. */
+    const roller_t *r = s->ext;
+    if (r && r->infinite) {
+        lv_roller_set_selected(s->obj, lv_roller_get_selected(s->obj), LV_ANIM_OFF);
+    }
     lv_roller_set_selected(s->obj, (uint32_t)selected, animate ? LV_ANIM_ON : LV_ANIM_OFF);
     return 0;
 }
