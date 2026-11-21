@@ -86,6 +86,41 @@ metadata; neither is sent without a station address. A new station address
 aborts the session's TCP connection, so the next session registers the new
 one.
 
+## `device.discover`'s vendor source
+
+`"vendor"` joins the other sources (in `sources`, and in the default of all
+of them). For 6 s after the other sources it listens, sending each vendor's
+read-only discovery packet at the start and again 1.5 s in:
+
+| `protocol` | Sends | Fields |
+|---|---|---|
+| `kasa` | XOR `get_sysinfo`, broadcast to 9999 | `model`, `name`, `mac` |
+| `tplink` | TP-Link discovery, broadcast to 20002 | `model`, `type`, `mac`, `encryption` |
+| `govee` | `scan` to 239.255.255.250:4001, answered on 4002 | `model` (SKU), `id` |
+| `miio` | hello, broadcast to 54321 | `id` (device id) |
+| `wiz` | `getPilot`, broadcast to 38899 | `mac` |
+| `lifx` | GetService, broadcast to 56700 | `mac` |
+| `yeelight` | M-SEARCH to 239.255.255.250:1982 | `model`, `id`, `name` |
+| `cs2` | CS2/PPPP LAN search, broadcast to 32108 | `id_prefix` |
+| `tuya` | nothing: hears broadcasts on 6666, 6667 and 7000 | on 6666: `id`, `model` (product key), `version` |
+| `bambu` | nothing: hears broadcasts on 2021 | `model`, `name` |
+
+Each observation is `{"source": "vendor", "protocol", "ip", "port", ...fields}`,
+once per device and protocol; `port` is the device's port for the protocol
+(the one a heard broadcast went to). Up to 128 observations, inside the
+result's 256 KiB budget. Tuya's 6667 and 7000 broadcasts are encrypted and
+reported by port alone. An answer counts only when it carries its protocol's
+fields (Tuya's encrypted broadcasts: its frame), so other traffic on these
+ports is ignored. Kasa's location, the miIO token field, a camera's serial
+and check code and TP-Link's owner hash are never reported.
+
+While it listens the vendor source holds UDP 4002, 6666, 6667, 7000 and 2021.
+A relay port the VM opens meanwhile from one of those ports gets another port,
+and one already open on them keeps that protocol out of the scan, which then
+reports itself truncated (as it does when any of its listeners can't open).
+The mDNS source shares 5353 the same way: with a relay port there, the scan's
+mDNS queries go from another port and it still hears unicast answers.
+
 ## Not here
 
 IPv6 and Matter: lwIP has no NAT66.

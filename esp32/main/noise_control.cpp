@@ -1500,7 +1500,7 @@ static char *build_register_json(void) {
                 , nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
-                "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
+                "Scan local network for devices (ARP, mDNS, SSDP, WSD, SNMP, NetBIOS, vendor)",
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "device.discover"), "timeout_ms", 90000);
