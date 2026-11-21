@@ -21,6 +21,7 @@ enum { SETTING, COUNTING, PAUSED, FINISHED };
 static int32_t phase;
 static int32_t picker, wheels[3], action, action_text, heading, time_text, detail, close_button;
 static int32_t ring, reset_hint;
+static int32_t time_cells[8], time_length, digit_width, colon_width, digit_height;
 static uint32_t selected_s, started_ms, remaining_ms, last_tap_ms, finished_ms, input_started_ms;
 static int32_t resetting, tap_valid, touch_down, touch_moved, touch_x, touch_y;
 #define RESET_TIMER 2
@@ -67,12 +68,40 @@ static uint32_t picker_seconds(void)
     return (uint32_t)(h * 3600 + m * 60 + s);
 }
 
+/* Use equal-width digit cells with a single scale for the whole run. The
+ * proportional system font must not move the colons or resize on 41 -> 40. */
+static void layout_time(uint32_t seconds)
+{
+    time_length = seconds >= 3600 ? 8 : 5;
+    int32_t total = 0;
+    for (int32_t i = 0; i < 8; i++) {
+        ui_set(time_cells[i], P_HIDDEN, i >= time_length);
+        if (i >= time_length) continue;
+        int32_t colon = i == time_length - 3 || (time_length == 8 && i == 2);
+        int32_t width = colon ? colon_width : digit_width;
+        ui_set(time_cells[i], P_WIDTH, width);
+        ui_align(time_cells[i], ALIGN_LEFT_MID, total, 0);
+        total += width;
+    }
+    ui_set(time_text, P_WIDTH, total);
+    ui_set(time_text, P_HEIGHT, digit_height);
+    int32_t w = sys_info(INFO_SCREEN_WIDTH), h = sys_info(INFO_SCREEN_HEIGHT);
+    int32_t side = w < h ? w : h;
+    if (total > 0 && digit_height > 0) {
+        int32_t scale = side * 84 / total;
+        int32_t height_scale = side * 32 / digit_height;
+        if (scale > height_scale) scale = height_scale;
+        ui_set(time_text, P_TRANSFORM_SCALE, scale);
+    }
+}
+
 static void show_seconds(uint32_t seconds)
 {
     if ((int32_t)seconds == shown_s) return;
     shown_s = (int32_t)seconds;
     char text[9], *p = text;
-    if (seconds >= 3600) {
+    /* Keep hours visible below one hour if the timer started with hours. */
+    if (time_length == 8) {
         p = put_two(p, seconds / 3600);
         *p++ = ':';
     }
@@ -80,18 +109,9 @@ static void show_seconds(uint32_t seconds)
     *p++ = ':';
     p = put_two(p, seconds % 60);
     *p = '\0';
-    ui_set_text(time_text, P_TEXT, text);
-    /* Fill the screen width, including the longer hours format, while leaving
-     * room for the outer ring and the paused / finished heading. Layout sizes
-     * are untransformed, so each update fits without accumulating scale. */
-    int32_t w = sys_info(INFO_SCREEN_WIDTH), h = sys_info(INFO_SCREEN_HEIGHT);
-    int32_t side = w < h ? w : h;
-    int32_t tw = ui_get(time_text, P_WIDTH), th = ui_get(time_text, P_HEIGHT);
-    if (tw > 0 && th > 0) {
-        int32_t scale = side * 84 / tw;
-        int32_t height_scale = side * 32 / th;
-        if (scale > height_scale) scale = height_scale;
-        ui_set(time_text, P_TRANSFORM_SCALE, scale);
+    for (int32_t i = 0; i < time_length; i++) {
+        char cell[] = { text[i], '\0' };
+        ui_set_text(time_cells[i], P_TEXT, cell);
     }
 }
 
@@ -148,6 +168,7 @@ static void start_countdown(void)
         return;
     }
     phase = COUNTING;
+    layout_time(seconds);
     shown_s = -1;
     ui_set(picker, P_HIDDEN, 1);
     ui_set(time_text, P_HIDDEN, 0);
@@ -270,7 +291,31 @@ GADGET_EXPORT(on_start) void on_start(void)
     heading = label(UI_ROOT, FONT_28, 0xFFFFFF, -side * 21 / 100);
     ui_set(heading, P_TRANSFORM_PIVOT_X, PCT(50));
     ui_set(heading, P_TRANSFORM_PIVOT_Y, PCT(50));
-    time_text = label(UI_ROOT, font, TEXT, 0);
+    time_text = ui_create(W_OBJ, UI_ROOT);
+    ui_set(time_text, P_BG_OPA, OPA_TRANSP);
+    ui_set(time_text, P_BORDER_WIDTH, 0);
+    ui_set(time_text, P_PAD_ALL, 0);
+    ui_set(time_text, P_SCROLLABLE, 0);
+    ui_set(time_text, P_CLICKABLE, 0);
+    ui_align(time_text, ALIGN_CENTER, 0, 0);
+    for (int32_t i = 0; i < 8; i++) {
+        time_cells[i] = label(time_text, font, TEXT, 0);
+        ui_set(time_cells[i], P_TEXT_ALIGN, TEXT_ALIGN_CENTER);
+        ui_set(time_cells[i], P_LONG_MODE, LONG_CLIP);
+        ui_set(time_cells[i], P_CLICKABLE, 0);
+        ui_set(time_cells[i], P_SCROLLABLE, 0);
+    }
+    digit_width = 0;
+    for (char digit = '0'; digit <= '9'; digit++) {
+        char sample[] = { digit, '\0' };
+        ui_set_text(time_cells[0], P_TEXT, sample);
+        int32_t width = ui_get(time_cells[0], P_WIDTH);
+        if (width > digit_width) digit_width = width;
+    }
+    ui_set_text(time_cells[0], P_TEXT, ":");
+    colon_width = ui_get(time_cells[0], P_WIDTH);
+    digit_height = ui_get(time_cells[0], P_HEIGHT);
+    layout_time(0);
     ui_set(time_text, P_TRANSFORM_PIVOT_X, PCT(50));
     ui_set(time_text, P_TRANSFORM_PIVOT_Y, PCT(50));
     detail = label(UI_ROOT, FONT_14, DIM, side * 23 / 100);

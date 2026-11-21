@@ -39,7 +39,19 @@ int32_t ui_set(int32_t obj, int32_t property, int32_t value)
     props[obj][property] = value;
     return 0;
 }
-int32_t ui_get(int32_t obj, int32_t property) { return props[obj][property]; }
+int32_t ui_get(int32_t obj, int32_t property)
+{
+    if (kinds[obj] == W_LABEL && !props[obj][property]) {
+        /* Deliberately proportional metrics expose accidental per-tick fitting. */
+        if (property == P_HEIGHT) return 48;
+        if (property == P_WIDTH) {
+            int width = 0;
+            for (const char *p = texts[obj]; *p; p++) width += *p == '1' ? 17 : *p == ':' ? 10 : 30;
+            return width;
+        }
+    }
+    return props[obj][property];
+}
 int32_t ui_set_text(int32_t obj, int32_t property, const char *text)
 {
     assert(property == P_TEXT || property == P_OPTIONS);
@@ -70,6 +82,14 @@ int32_t ui_set_parent(int32_t obj, int32_t parent) { parents[obj] = parent; retu
 
 /* Exercise the complete app callbacks and formatting, not a model of them. */
 #include "../components/muse_apps/sdk/examples/timer.c"
+
+static const char *clock_text(void)
+{
+    static char text[9];
+    for (int i = 0; i < time_length; i++) text[i] = texts[time_cells[i]][0];
+    text[time_length] = '\0';
+    return text;
+}
 
 static void fresh(void)
 {
@@ -110,21 +130,21 @@ int main(void)
     assert(!props[action][P_DISABLED]);
     click();
     assert(awake && timer_on && props[picker][P_HIDDEN]);
-    assert(!strcmp(texts[time_text], "01:01"));
+    assert(!strcmp(clock_text(), "01:01"));
     click();   /* A queued second click must not restart the countdown. */
     assert(timer_starts == 1);
     tick(999);
-    assert(!strcmp(texts[time_text], "01:01"));
+    assert(!strcmp(clock_text(), "01:01"));
     tick(1000);
-    assert(!strcmp(texts[time_text], "01:00"));
+    assert(!strcmp(clock_text(), "01:00"));
     pick(23, 59, 59);   /* A stale picker event cannot change the duration. */
     tick(60001);
-    assert(!strcmp(texts[time_text], "00:01"));
+    assert(!strcmp(clock_text(), "00:01"));
     tick(61000);
     assert(!timer_on && awake && !strcmp(texts[heading], "Time's up"));
-    assert(!strcmp(texts[time_text], "00:00"));
+    assert(!strcmp(clock_text(), "00:00"));
     tick(90000);
-    assert(!timer_on && !strcmp(texts[time_text], "00:00"));
+    assert(!timer_on && !strcmp(clock_text(), "00:00"));
     on_event(EV_TOUCH_DOWN, 100, 100);
     on_event(EV_TOUCH_UP, 100, 100);
     assert(!awake && !props[picker][P_HIDDEN] && !props[action][P_DISABLED]);
@@ -137,16 +157,38 @@ int main(void)
     for (unsigned i = 0; i < 2; i++) {
         fresh(); pick(0, 0, 2); clock_ms = starts[i]; click();
         tick(starts[i] + 1999);
-        assert(timer_on && !strcmp(texts[time_text], "00:01"));
+        assert(timer_on && !strcmp(clock_text(), "00:01"));
         tick(starts[i] + 2000);
-        assert(!timer_on && !strcmp(texts[time_text], "00:00"));
+        assert(!timer_on && !strcmp(clock_text(), "00:00"));
     }
 
     fresh(); pick(23, 59, 59); click();
-    assert(!strcmp(texts[time_text], "23:59:59"));
+    assert(!strcmp(clock_text(), "23:59:59"));
     clock_ms = 86399000u;   /* A late wake catches up, independent of UI ticks. */
     on_event(EV_SCREEN, 1, 0);
     assert(!timer_on && !strcmp(texts[heading], "Time's up"));
+
+    fresh(); pick(0, 0, 41); click();
+    int32_t fixed_scale = props[time_text][P_TRANSFORM_SCALE];
+    int32_t fixed_width = props[time_text][P_WIDTH];
+    int32_t cell_x[8];
+    for (int i = 0; i < 8; i++) cell_x[i] = props[time_cells[i]][P_X];
+    for (uint32_t seconds = 41; seconds > 0; seconds--) {
+        tick((41 - seconds) * 1000);
+        assert(props[time_text][P_TRANSFORM_SCALE] == fixed_scale);
+        assert(props[time_text][P_WIDTH] == fixed_width);
+        for (int i = 0; i < 5; i++) {
+            assert(props[time_cells[i]][P_X] == cell_x[i]);
+            assert(props[time_cells[i]][P_WIDTH] == (i == 2 ? colon_width : digit_width));
+        }
+    }
+    fresh(); pick(1, 0, 1); click();
+    fixed_scale = props[time_text][P_TRANSFORM_SCALE];
+    fixed_width = props[time_text][P_WIDTH];
+    tick(2000);
+    assert(!strcmp(clock_text(), "00:59:59"));
+    assert(time_length == 8 && props[time_text][P_WIDTH] == fixed_width);
+    assert(props[time_text][P_TRANSFORM_SCALE] == fixed_scale);
 
     fresh(); pick(0, 0, 3); fail_timer = 1; click();
     assert(!props[picker][P_HIDDEN] && !timer_on && !awake);
