@@ -37,7 +37,7 @@ example to check that the header's imports match the signatures. Then run
 `python3 components/muse_apps/sdk/muse_brief.py`: `components/muse_apps/sdk/MUSE.md`, the guide Muse gets, carries
 `gadget.h` whole.
 
-The firmware serves 1.1 (`components/muse_apps`, built with `MUSE_APPS=1`;
+The firmware serves 1.2 (`components/muse_apps`, built with `MUSE_APPS=1`;
 [component instructions](../../AGENTS.md)). It replaced API version 0,
 whose immediate-mode canvas and raw VM requests are gone.
 

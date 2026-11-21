@@ -1,5 +1,5 @@
 /*
- * muse_apps_api.h: the firmware's side of the apps API 1.1.
+ * muse_apps_api.h: the firmware's side of the apps API 1.2.
  * Generated from components/muse_apps/sdk/api/api.json by gen_api.py. Don't edit it.
  *
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -20,7 +20,7 @@
 #pragma once
 
 #define MUSE_APPS_API_MAJOR 1
-#define MUSE_APPS_API_MINOR 1
+#define MUSE_APPS_API_MINOR 2
 
 /* Every import: GADGET_FN(name, WAMR signature, permission or NULL). */
 #define MUSE_APPS_FUNCTIONS(GADGET_FN) \
@@ -49,6 +49,7 @@
     GADGET_FN(ui_grid, "(i$$)i", NULL) \
     GADGET_FN(ui_grid_cell, "(iiiii)i", NULL) \
     GADGET_FN(ui_scroll_to, "(iiii)i", NULL) \
+    GADGET_FN(ui_roller_select, "(iii)i", NULL) \
     GADGET_FN(ui_scroll_to_view, "(ii)i", NULL) \
     GADGET_FN(ui_navigation, "(i)i", NULL) \
     GADGET_FN(ui_text_width, "(i$)i", NULL) \
@@ -552,6 +553,7 @@ int32_t gadget_ui_set_parent(wasm_exec_env_t env, int32_t obj, int32_t parent);
 int32_t gadget_ui_grid(wasm_exec_env_t env, int32_t obj, const char *columns, const char *rows);
 int32_t gadget_ui_grid_cell(wasm_exec_env_t env, int32_t obj, int32_t col, int32_t col_span, int32_t row, int32_t row_span);
 int32_t gadget_ui_scroll_to(wasm_exec_env_t env, int32_t obj, int32_t x, int32_t y, int32_t animate);
+int32_t gadget_ui_roller_select(wasm_exec_env_t env, int32_t obj, int32_t selected, int32_t animate);
 int32_t gadget_ui_scroll_to_view(wasm_exec_env_t env, int32_t obj, int32_t animate);
 int32_t gadget_ui_navigation(wasm_exec_env_t env, int32_t on);
 int32_t gadget_ui_text_width(wasm_exec_env_t env, int32_t font, const char *text);
@@ -637,6 +639,7 @@ __attribute__((weak)) int32_t gadget_ui_set_parent(wasm_exec_env_t env, int32_t 
 __attribute__((weak)) int32_t gadget_ui_grid(wasm_exec_env_t env, int32_t obj, const char *columns, const char *rows) { (void)env; (void)obj; (void)columns; (void)rows; return -8; }
 __attribute__((weak)) int32_t gadget_ui_grid_cell(wasm_exec_env_t env, int32_t obj, int32_t col, int32_t col_span, int32_t row, int32_t row_span) { (void)env; (void)obj; (void)col; (void)col_span; (void)row; (void)row_span; return -8; }
 __attribute__((weak)) int32_t gadget_ui_scroll_to(wasm_exec_env_t env, int32_t obj, int32_t x, int32_t y, int32_t animate) { (void)env; (void)obj; (void)x; (void)y; (void)animate; return -8; }
+__attribute__((weak)) int32_t gadget_ui_roller_select(wasm_exec_env_t env, int32_t obj, int32_t selected, int32_t animate) { (void)env; (void)obj; (void)selected; (void)animate; return -8; }
 __attribute__((weak)) int32_t gadget_ui_scroll_to_view(wasm_exec_env_t env, int32_t obj, int32_t animate) { (void)env; (void)obj; (void)animate; return -8; }
 __attribute__((weak)) int32_t gadget_ui_navigation(wasm_exec_env_t env, int32_t on) { (void)env; (void)on; return -8; }
 __attribute__((weak)) int32_t gadget_ui_text_width(wasm_exec_env_t env, int32_t font, const char *text) { (void)env; (void)font; (void)text; return -8; }
