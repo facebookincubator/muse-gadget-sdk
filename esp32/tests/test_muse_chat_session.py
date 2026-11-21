@@ -1195,3 +1195,120 @@ int main(int argc, char **argv) {
 
     def test_control_frames_over_125_bytes_fail_the_connection_without_a_pong(self):
         self.run_case(1)
+
+
+class ChatSessionStart(unittest.TestCase):
+    """The production muse_hatch_start() with allocations that can fail."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (ROOT / 'components/muse/muse_chat_session.cpp').read_text()
+        constants = source[source.index('#define MIC_RATE'):source.index('/* ---- Voice task')]
+        kinds = source.index('enum kind_t')
+        kinds = source[kinds:source.index('\n', kinds) + 1]
+        streams = source[source.index('struct stream_t {'):source.index('/* ---- The current turn')]
+        start = source.index('extern "C" void muse_hatch_start(void)')
+        start = source[start:source.index('\n}\n', start) + 3]
+        code = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#define CONFIG_MUSE_LATEST_REPLY 0
+#define CONFIG_MUSE_REALTIME_VOICE 0
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+#define pdPASS 1
+#define MINIMP3_MAX_SAMPLES_PER_FRAME (1152 * 2)
+#define MUSE_HATCH_NOTE_TAIL "\"}]}"
+static const char *TAG = "test", *last_error;
+#define ESP_LOGE(tag, fmt, ...) ((void)(tag), last_error = (fmt))
+typedef void *QueueHandle_t;
+typedef void *StreamBufferHandle_t;
+struct cmd_t { int unused; };
+struct ev_t { int unused; };
+struct cJSON_Hooks { void *(*malloc_fn)(size_t); void (*free_fn)(void *); };
+static void cJSON_InitHooks(cJSON_Hooks *) {}
+''' + constants + kinds + streams + r'''
+static QueueHandle_t s_cmds, s_events;
+static StreamBufferHandle_t s_in, s_out;
+static struct { uint8_t *chunk, *mp3, *note; char *texts; int tts_msg; } s_turn;
+static int16_t *s_pcm, *s_pcm16;
+/* Stream line buffers are the only NDJSON_LINE_MAX allocations here. */
+static int fail_line = -1, line_allocs, lines_live, tasks, task_result = pdPASS;
+static void *psram_alloc(size_t n) {
+    if (n != NDJSON_LINE_MAX) return malloc(n);
+    if (line_allocs++ == fail_line) return nullptr;
+    lines_live++;
+    return malloc(n);
+}
+static void *json_alloc(size_t n) { return malloc(n); }
+static void heap_caps_free(void *p) { if (p) lines_live--; free(p); }   /* only line buffers are freed */
+static char handles[8];
+static int next_handle;
+static QueueHandle_t xQueueCreateWithCaps(int, size_t, int) { return &handles[next_handle++]; }
+static QueueHandle_t xQueueCreate(int, size_t) { return &handles[next_handle++]; }
+static StreamBufferHandle_t xStreamBufferCreateWithCaps(size_t, size_t, int) { return &handles[next_handle++]; }
+static void hatch_task(void *) {}
+static int xTaskCreatePinnedToCoreWithCaps(void (*fn)(void *), const char *, int, void *, int, void *, int, int) {
+    assert(fn == hatch_task);
+    tasks++;
+    return task_result;
+}
+''' + start + r'''
+static void started() {
+    muse_hatch_start();
+    assert(tasks == 1 && !last_error && line_allocs == MAX_STREAMS && lines_live == MAX_STREAMS);
+    for (const auto &s : s_streams) assert(s.line && s.cap == NDJSON_LINE_MAX);
+}
+static void failed() {
+    muse_hatch_start();
+    assert(last_error && strstr(last_error, "start failed") && lines_live == 0);
+    for (const auto &s : s_streams) assert(!s.line);
+}
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    int c = atoi(argv[1]);
+    if (c == 0) {
+        started();
+    } else if (c <= MAX_STREAMS) {
+        fail_line = c - 1;   /* that stream's line buffer */
+        failed();
+        assert(tasks == 0);
+    } else if (c == MAX_STREAMS + 1) {
+        task_result = 0;
+        failed();
+        assert(tasks == 1);
+    } else {
+        return 2;
+    }
+    return 0;
+}
+'''
+        (out / 'start.cpp').write_text(code)
+        result = subprocess.run(
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', '-Wall', '-Wextra', '-Werror',
+             '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
+             str(out / 'start.cpp'), '-o', str(out / 'start')],
+            capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'start'
+
+    def run_case(self, case):
+        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_start_with_every_buffer_starts_the_task(self):
+        self.run_case(0)
+
+    def test_a_missing_stream_line_buffer_fails_the_start_and_frees_the_others(self):
+        for case in range(1, 7):
+            with self.subTest(stream=case - 1):
+                self.run_case(case)
+
+    def test_a_failed_task_start_frees_the_stream_line_buffers(self):
+        self.run_case(7)
