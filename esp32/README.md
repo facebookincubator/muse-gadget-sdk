@@ -405,7 +405,7 @@ To let Muse run a small app of its own on a board's screen,
 build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a
 WebAssembly app on its VM, and the board's `app.run` command loads it and runs
 it in place of the face, with LVGL widgets, the buttons and touch, the chat
-and the board's sensors (apps API 1.1, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
+and the board's sensors (apps API 1.2, [`components/muse_apps/sdk/api/`](components/muse_apps/sdk/api/README.md)).
 `app.install` keeps an app on the board, for its launcher (Apps, in Settings).
 [`components/muse_apps/sdk/README.md`](components/muse_apps/sdk/README.md) shows how to write one and how to ask Muse
 for one, and [`AGENTS.md`](AGENTS.md#webassembly-apps) how it works.

@@ -43,7 +43,7 @@ menu "Muse apps"
             permissions), read files and keep state on the VM, and use the
             gadget's devices (components/capabilities_registry). app.status, app.logs and
             device.guide tell Muse how an app is doing and what the board has.
-            The API is apps API 1.1: components/muse_apps/sdk/api/api.json,
+            The API is apps API 1.2: components/muse_apps/sdk/api/api.json,
             from which sdk/gadget.h and sdk/api/REFERENCE.md are generated. The
             console's ">app" lines drive it over USB serial
             (tools/muse/app.py). Each app has a 2 MB PSRAM budget, and a
