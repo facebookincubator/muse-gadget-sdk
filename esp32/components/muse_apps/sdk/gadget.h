@@ -1,5 +1,5 @@
 /*
- * gadget.h: the Muse gadget apps API, version 1.1 (draft).
+ * gadget.h: the Muse gadget apps API, version 1.2 (draft).
  *
  * Generated from components/muse_apps/sdk/api/api.json by components/muse_apps/sdk/api/gen_api.py. Don't edit it:
  * change api.json and run gen_api.py.
@@ -25,7 +25,7 @@
 #include <stdint.h>
 
 #define GADGET_API_MAJOR 1
-#define GADGET_API_MINOR 1
+#define GADGET_API_MINOR 2
 
 #ifdef __wasm__
 #define GADGET_IMPORT(name) __attribute__((import_module("gadget"), import_name(#name)))
@@ -860,6 +860,14 @@ GADGET_IMPORT(ui_grid_cell) int32_t ui_grid_cell(int32_t obj, int32_t col, int32
  * Scrolls an object's content.
  */
 GADGET_IMPORT(ui_scroll_to) int32_t ui_scroll_to(int32_t obj, int32_t x, int32_t y, int32_t animate);
+
+/*
+ * Selects a roller option, optionally scrolling to it. P_ANIM_DURATION sets
+ * the animation duration. P_SELECTED reports the target immediately. Setting
+ * P_SELECTED directly remains instantaneous. selected: Option index, from
+ * zero.
+ */
+GADGET_IMPORT(ui_roller_select) int32_t ui_roller_select(int32_t obj, int32_t selected, int32_t animate);
 
 /*
  * Scrolls its parents until the object is visible: the newest message in a

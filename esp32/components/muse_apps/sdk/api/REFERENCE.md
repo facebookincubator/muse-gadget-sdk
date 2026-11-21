@@ -1,4 +1,4 @@
-# Muse gadget apps API 1.1 (draft)
+# Muse gadget apps API 1.2 (draft)
 
 <!-- Generated from api.json by gen_api.py. Don't edit: change api.json. -->
 
@@ -369,6 +369,18 @@ int32_t ui_scroll_to(int32_t obj, int32_t x, int32_t y, int32_t animate);
 Scrolls an object's content.
 - Errors: `ERR_HANDLE`
 - WAMR signature: `(iiii)i`
+
+#### `ui_roller_select`
+
+```c
+int32_t ui_roller_select(int32_t obj, int32_t selected, int32_t animate);
+```
+
+Selects a roller option, optionally scrolling to it. P_ANIM_DURATION sets the animation duration. P_SELECTED reports the target immediately. Setting P_SELECTED directly remains instantaneous.
+
+- `selected`: Option index, from zero.
+- Errors: `ERR_HANDLE`, `ERR_ARG`, `ERR_UNSUPPORTED`
+- WAMR signature: `(iii)i`
 
 #### `ui_scroll_to_view`
 

@@ -107,7 +107,7 @@ this component behind those guards too.
 
 ## API source and generated files
 
-API 1.1 is defined by [sdk/api/api.json](sdk/api/api.json). Its
+API 1.2 is defined by [sdk/api/api.json](sdk/api/api.json). Its
 [change rules](sdk/api/README.md) require stable ids and constant values;
 additions are minor versions, removals or incompatible changes are major.
 
@@ -141,7 +141,7 @@ exceeds the 192 KB accepted as one typed message (currently about 98 KB).
 
 An app imports only from `gadget`, exports `on_start`, and optionally
 `on_event`, `on_frame` and `on_stop`. The `gadget.manifest` custom section
-(`GADGET_MANIFEST()` in `sdk/gadget.h`) gives `api` ("1.0" or "1.1"), `name`
+(`GADGET_MANIFEST()` in `sdk/gadget.h`) gives `api` ("1.0", "1.1" or "1.2"), `name`
 (the folder name), `title`, `requires` and `uses`. Permissions are
 `chat.read`, `chat.send`, `files.home` and `files.gadget`. Device names in
 `requires`/`uses` control which devices the app can find; unmet requirements
@@ -149,7 +149,7 @@ refuse the app. Without a manifest an app has no permissions or devices.
 
 Apps live on the VM in `~/workspace/gadgets/apps/<name>/`; state goes in
 `~/workspace/gadgets/devices/<gadget>/state/<app>/`, which only the gadget
-writes. SDK examples live in `sdk/examples/`: hello, stopwatch, chat,
+writes. SDK examples live in `sdk/examples/`: hello, stopwatch, timer, chat,
 dashboard and canvas effects.
 `sdk/build.py` uses wasi-sdk or Zig's clang (`pip install ziglang`), checking
 imports and signatures against `api.capabilities.json`, exports and the manifest.
