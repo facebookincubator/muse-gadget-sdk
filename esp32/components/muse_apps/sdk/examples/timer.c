@@ -20,10 +20,10 @@ GADGET_MANIFEST("{\"api\":\"1.2\",\"name\":\"timer\",\"title\":\"Timer\",\"icon\
 enum { SETTING, COUNTING, PAUSED, FINISHED };
 static int32_t phase;
 static int32_t picker, wheels[3], action, action_text, heading, time_text, detail, close_button;
-static int32_t ring, reset_hint;
+static int32_t ring, reset_hint, tap_surface;
 static int32_t time_cells[8], time_length, digit_width, colon_width, digit_height;
 static uint32_t selected_s, started_ms, remaining_ms, last_tap_ms, finished_ms, input_started_ms;
-static int32_t resetting, tap_valid, touch_down, touch_moved, touch_x, touch_y;
+static int32_t resetting, tap_valid;
 #define RESET_TIMER 2
 #define DOUBLE_TAP_MS 300
 
@@ -126,6 +126,8 @@ static void set_picker(void)
     ui_set(wheels[1], P_SELECTED, (int32_t)(selected_s / 60 % 60));
     ui_set(wheels[2], P_SELECTED, (int32_t)(selected_s % 60));
     ui_set(picker, P_HIDDEN, 0);
+    ui_set(tap_surface, P_HIDDEN, 1);
+    ui_set(close_button, P_HIDDEN, 0);
     ui_set(time_text, P_HIDDEN, 1);
     ui_set(action, P_HIDDEN, 0);
     ui_set(action, P_DISABLED, !selected_s);
@@ -171,6 +173,8 @@ static void start_countdown(void)
     layout_time(seconds);
     shown_s = -1;
     ui_set(picker, P_HIDDEN, 1);
+    ui_set(tap_surface, P_HIDDEN, 0);
+    ui_set(close_button, P_HIDDEN, 1);
     ui_set(time_text, P_HIDDEN, 0);
     ui_set(action, P_HIDDEN, 1);
     ui_set(heading, P_HIDDEN, 1);
@@ -267,7 +271,7 @@ GADGET_EXPORT(on_start) void on_start(void)
     int32_t side = w < h ? w : h;
     int32_t font = side >= 360 ? FONT_48 : FONT_28;
     selected_s = 0;
-    resetting = tap_valid = touch_down = touch_moved = 0;
+    resetting = tap_valid = 0;
     shown_s = -1;
     sys_frame_rate(0);   /* Native roller animations and the clock need no frames. */
     ui_set(UI_ROOT, P_BG_COLOR, BG);
@@ -400,6 +404,19 @@ GADGET_EXPORT(on_start) void on_start(void)
     cv_line(reset_hint, 16, 16, 22, 16, 2, TEXT);
     cv_line(reset_hint, 5, 5, 5, 12, 2, TEXT);
     cv_line(reset_hint, 5, 5, 12, 5, 2, TEXT);
+    /* One stable input target above every countdown label and the ring.
+     * Let LVGL recognize clicks; a small finger drift is not an app-level drag. */
+    tap_surface = ui_create(W_OBJ, UI_ROOT);
+    ui_set(tap_surface, P_WIDTH, w);
+    ui_set(tap_surface, P_HEIGHT, h);
+    ui_set(tap_surface, P_BG_OPA, OPA_TRANSP);
+    ui_set(tap_surface, P_BORDER_WIDTH, 0);
+    ui_set(tap_surface, P_RADIUS, 0);
+    ui_set(tap_surface, P_PAD_ALL, 0);
+    ui_set(tap_surface, P_SCROLLABLE, 0);
+    ui_set(tap_surface, P_CLICKABLE, 1);
+    ui_align(tap_surface, ALIGN_CENTER, 0, 0);
+    ui_on(tap_surface, UI_CLICKED);
     set_picker();
 }
 
@@ -422,16 +439,9 @@ GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
     } else if (type == EV_BUTTON && b == BTN_DOWN) {
         if (a == BUTTON_SECONDARY || a == BUTTON_BACK) request_control(1);
         else if (a == BUTTON_PRIMARY) request_control(0);
-    } else if (type == EV_TOUCH_DOWN) {
-        touch_down = 1; touch_moved = 0; touch_x = a; touch_y = b;
-    } else if (type == EV_TOUCH_MOVE && touch_down) {
-        if (a - touch_x > 12 || touch_x - a > 12 || b - touch_y > 12 || touch_y - b > 12) touch_moved = 1;
-    } else if (type == EV_TOUCH_UP) {
-        int tap = touch_down && !touch_moved;
-        touch_down = 0;
-        if (tap) countdown_tap();
     } else if (type == EV_UI) {
-        if (a == close_button && b == UI_CLICKED) request_control(1);
+        if (a == tap_surface && b == UI_CLICKED) countdown_tap();
+        else if (a == close_button && b == UI_CLICKED && phase == SETTING) request_control(1);
         else if (a == action && b == UI_CLICKED) {
             if (phase == SETTING && !resetting) start_countdown();
         } else if (phase == SETTING && !resetting && (b == UI_VALUE_CHANGED || b == UI_SCROLL_END)) {

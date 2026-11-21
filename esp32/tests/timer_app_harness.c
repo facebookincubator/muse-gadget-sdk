@@ -110,6 +110,7 @@ static void pick(int h, int m, int s)
 }
 
 static void click(void) { on_event(EV_UI, action, UI_CLICKED); }
+static void tap(void) { on_event(EV_UI, tap_surface, UI_CLICKED); }
 static void tick(uint32_t now) { clock_ms = now; on_event(EV_TIMER, CLOCK_TIMER, 0); }
 
 int main(void)
@@ -145,9 +146,9 @@ int main(void)
     assert(!strcmp(clock_text(), "00:00"));
     tick(90000);
     assert(!timer_on && !strcmp(clock_text(), "00:00"));
-    on_event(EV_TOUCH_DOWN, 100, 100);
-    on_event(EV_TOUCH_UP, 100, 100);
+    tap();
     assert(!awake && !props[picker][P_HIDDEN] && !props[action][P_DISABLED]);
+    assert(props[tap_surface][P_HIDDEN] && !props[close_button][P_HIDDEN]);
     assert(!strcmp(texts[action_text], "Start"));
     assert(props[wheels[0]][P_SELECTED] == 0 && props[wheels[1]][P_SELECTED] == 1 &&
            props[wheels[2]][P_SELECTED] == 1);
@@ -195,6 +196,8 @@ int main(void)
     fail_timer = 0; click();
     assert(timer_on && awake);
     on_event(EV_UI, close_button, UI_CLICKED);
+    assert(!exited); /* The picker Back button cannot act during a countdown. */
+    on_event(EV_BUTTON, BUTTON_SECONDARY, BTN_DOWN);
     assert(exited);
     on_stop(STOP_EXIT);
     assert(!timer_on && !awake);
@@ -221,12 +224,17 @@ int main(void)
     on_event(EV_UI, reset_hint, UI_CLICKED);
     assert(picker_seconds() == 5); /* Header icon is an indicator only. */
     click(); clock_ms = 500;
-    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_MOVE, 130, 100); on_event(EV_TOUCH_UP, 130, 100);
+    assert(props[tap_surface][P_WIDTH] == 466 && props[tap_surface][P_HEIGHT] == 466);
+    assert(props[tap_surface][P_CLICKABLE] && !props[tap_surface][P_SCROLLABLE]);
+    assert(!props[tap_surface][P_HIDDEN] && props[close_button][P_HIDDEN]);
+    /* A native click generates one action, not one for each press/release. */
+    on_event(EV_UI, tap_surface, UI_PRESSED);
+    on_event(EV_UI, tap_surface, UI_RELEASED);
     assert(phase == COUNTING);
-    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    tap();
     assert(phase == PAUSED && props[ring][P_OPA] == 60);
     clock_ms = 600;
-    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    tap();
     assert(phase == FINISHED && props[ring][P_OPA] == 255 && props[ring][P_ARC_COLOR] == 0xFF3030);
     countdown_tap(); assert(phase == FINISHED); /* No instant dismissal from the finishing gesture. */
     fresh(); pick(0, 0, 5); click();
@@ -245,7 +253,7 @@ int main(void)
     click(); tick(clock_ms + 5000);
     assert(phase == FINISHED && props[action][P_HIDDEN]);
     clock_ms += 500;
-    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    tap();
     assert(phase == SETTING && !props[action][P_HIDDEN] && picker_seconds() == 5);
     puts("timer app: picker, countdown boundaries, delayed ticks, wrap and cleanup passed");
     return 0;
