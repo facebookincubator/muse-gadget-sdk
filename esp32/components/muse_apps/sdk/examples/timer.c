@@ -20,7 +20,7 @@ GADGET_MANIFEST("{\"api\":\"1.2\",\"name\":\"timer\",\"title\":\"Timer\",\"icon\
 enum { SETTING, COUNTING, PAUSED, FINISHED };
 static int32_t phase;
 static int32_t picker, wheels[3], action, action_text, heading, time_text, detail, close_button;
-static int32_t ring, reset_hint, confirm_panel, confirm_text, confirm_yes, confirm_no, confirm_kind;
+static int32_t ring, reset_hint;
 static uint32_t selected_s, started_ms, remaining_ms, last_tap_ms, finished_ms, input_started_ms;
 static int32_t resetting, tap_valid, touch_down, touch_moved, touch_x, touch_y;
 #define RESET_TIMER 2
@@ -139,8 +139,7 @@ static void start_countdown(void)
     shown_s = -1;
     ui_set(picker, P_HIDDEN, 1);
     ui_set(time_text, P_HIDDEN, 0);
-    ui_set(action, P_HIDDEN, 0);
-    ui_set_text(action_text, P_TEXT, "Pause");
+    ui_set(action, P_HIDDEN, 1);
     ui_set(heading, P_HIDDEN, 1);
     ui_set(reset_hint, P_HIDDEN, 1);
     ring_state(COUNTING);
@@ -152,8 +151,6 @@ static void start_countdown(void)
 
 static void finish(void)
 {
-    confirm_kind = 0;
-    ui_set(confirm_panel, P_HIDDEN, 1);
     phase = FINISHED;
     finished_ms = (uint32_t)sys_millis();
     tap_valid = 0;
@@ -162,9 +159,7 @@ static void finish(void)
     ui_set_text(heading, P_TEXT, "Time's up");
     ui_set(heading, P_TRANSFORM_SCALE, 150);
     ui_set(heading, P_HIDDEN, 0);
-    ui_set_text(action_text, P_TEXT, "Set again");
-    ui_set(action, P_DISABLED, 0);
-    ui_set(action, P_HIDDEN, 0);
+    ui_set(action, P_HIDDEN, 1);
     ring_state(FINISHED);
 }
 
@@ -189,7 +184,6 @@ static void countdown_tap(void)
         remaining_ms -= now - started_ms;
         phase = PAUSED;
         sys_timer_stop(CLOCK_TIMER);
-        ui_set_text(action_text, P_TEXT, "Resume");
         ui_set_text(heading, P_TEXT, "Paused");
         ui_set(heading, P_TRANSFORM_SCALE, 100);
         ui_set(heading, P_HIDDEN, 0);
@@ -198,7 +192,6 @@ static void countdown_tap(void)
         if (sys_timer(CLOCK_TIMER, 100, 1) < 0) return;
         started_ms = now;
         phase = COUNTING;
-        ui_set_text(action_text, P_TEXT, "Pause");
         ui_set(heading, P_HIDDEN, 1);
         ring_state(COUNTING);
     }
@@ -236,7 +229,7 @@ GADGET_EXPORT(on_start) void on_start(void)
     int32_t side = w < h ? w : h;
     int32_t font = side >= 360 ? FONT_48 : FONT_28;
     selected_s = 0;
-    resetting = tap_valid = touch_down = touch_moved = confirm_kind = 0;
+    resetting = tap_valid = touch_down = touch_moved = 0;
     shown_s = -1;
     sys_frame_rate(0);   /* Native roller animations and the clock need no frames. */
     ui_set(UI_ROOT, P_BG_COLOR, BG);
@@ -341,59 +334,18 @@ GADGET_EXPORT(on_start) void on_start(void)
     cv_line(reset_hint, 16, 16, 22, 16, 2, TEXT);
     cv_line(reset_hint, 5, 5, 5, 12, 2, TEXT);
     cv_line(reset_hint, 5, 5, 12, 5, 2, TEXT);
-    confirm_panel = ui_create(W_OBJ, UI_ROOT);
-    ui_set(confirm_panel, P_WIDTH, side * 82 / 100);
-    ui_set(confirm_panel, P_HEIGHT, 210);
-    ui_set(confirm_panel, P_BG_COLOR, SURFACE);
-    ui_set(confirm_panel, P_BORDER_WIDTH, 0);
-    ui_set(confirm_panel, P_RADIUS, 20);
-    ui_set(confirm_panel, P_SCROLLABLE, 0);
-    ui_align(confirm_panel, ALIGN_CENTER, 0, 0);
-    confirm_text = label(confirm_panel, FONT_20, TEXT, -40);
-    confirm_yes = ui_create(W_BUTTON, confirm_panel);
-    confirm_no = ui_create(W_BUTTON, confirm_panel);
-    int buttons[] = { confirm_no, confirm_yes };
-    const char *names[] = { "Keep", "Confirm" };
-    for (int i = 0; i < 2; i++) {
-        ui_set(buttons[i], P_WIDTH, 128);
-        ui_set(buttons[i], P_HEIGHT, 60);
-        ui_set(buttons[i], P_BG_COLOR, i ? ACCENT : MUTED);
-        ui_align(buttons[i], ALIGN_CENTER, i ? 76 : -76, 40);
-        int text = label(buttons[i], FONT_20, i ? BG : TEXT, 0);
-        ui_set_text(text, P_TEXT, names[i]);
-        ui_on(buttons[i], UI_CLICKED);
-    }
-    ui_set(confirm_panel, P_HIDDEN, 1);
     set_picker();
 }
 
 static void request_control(int exit)
 {
-    if (phase == COUNTING || phase == PAUSED) {
-        confirm_kind = exit ? 1 : 2;
-        tap_valid = 0;
-        ui_set_text(confirm_text, P_TEXT, exit ? "Exit and cancel timer?" : "Reset timer?");
-        ui_set(confirm_panel, P_HIDDEN, 0);
-    } else if (exit) sys_exit();
+    if (exit) sys_exit();
     else if (phase == SETTING) reset_picker();
     else set_picker();
 }
 
 GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
 {
-    if (confirm_kind && type == EV_UI) {
-        if (b == UI_CLICKED && (a == confirm_yes || a == confirm_no)) {
-            int kind = confirm_kind;
-            confirm_kind = 0;
-            ui_set(confirm_panel, P_HIDDEN, 1);
-            if (a == confirm_yes) {
-                if (kind == 1) sys_exit();
-                else set_picker();
-            }
-        }
-        return;
-    }
-    if (confirm_kind && (type == EV_BUTTON || type == EV_TOUCH_DOWN || type == EV_TOUCH_UP || type == EV_TOUCH_MOVE)) return;
     if (type == EV_TIMER && a == CLOCK_TIMER) update_countdown();
     else if (type == EV_TIMER && a == RESET_TIMER) {
         resetting = 0;
@@ -416,7 +368,6 @@ GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
         if (a == close_button && b == UI_CLICKED) request_control(1);
         else if (a == action && b == UI_CLICKED) {
             if (phase == SETTING && !resetting) start_countdown();
-            else countdown_tap();
         } else if (phase == SETTING && !resetting && (b == UI_VALUE_CHANGED || b == UI_SCROLL_END)) {
             for (int i = 0; i < 3; i++) if (a == wheels[i]) ui_set(action, P_DISABLED, !picker_seconds());
         }

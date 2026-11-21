@@ -125,7 +125,8 @@ int main(void)
     assert(!strcmp(texts[time_text], "00:00"));
     tick(90000);
     assert(!timer_on && !strcmp(texts[time_text], "00:00"));
-    click();
+    on_event(EV_TOUCH_DOWN, 100, 100);
+    on_event(EV_TOUCH_UP, 100, 100);
     assert(!awake && !props[picker][P_HIDDEN] && !props[action][P_DISABLED]);
     assert(!strcmp(texts[action_text], "Start"));
     assert(props[wheels[0]][P_SELECTED] == 0 && props[wheels[1]][P_SELECTED] == 1 &&
@@ -152,8 +153,6 @@ int main(void)
     fail_timer = 0; click();
     assert(timer_on && awake);
     on_event(EV_UI, close_button, UI_CLICKED);
-    assert(!exited && confirm_kind == 1);
-    on_event(EV_UI, confirm_yes, UI_CLICKED);
     assert(exited);
     on_stop(STOP_EXIT);
     assert(!timer_on && !awake);
@@ -188,13 +187,23 @@ int main(void)
     assert(phase == FINISHED && props[ring][P_OPA] == 255 && props[ring][P_ARC_COLOR] == 0xFF3030);
     countdown_tap(); assert(phase == FINISHED); /* No instant dismissal from the finishing gesture. */
     fresh(); pick(0, 0, 5); click();
+    assert(props[action][P_HIDDEN]);
     on_event(EV_BUTTON, BUTTON_SECONDARY, BTN_DOWN);
-    assert(confirm_kind == 1 && !exited);
-    on_event(EV_UI, confirm_no, UI_CLICKED); assert(!confirm_kind && phase == COUNTING && !exited);
+    assert(exited); /* No exit confirmation. */
+    fresh(); pick(0, 0, 5); click();
+    assert(props[action][P_HIDDEN]);
+    clock_ms = 600; countdown_tap();
+    assert(phase == PAUSED && props[action][P_HIDDEN]);
+    click(); /* Events from the hidden Start button do not resume or finish. */
+    assert(phase == PAUSED);
     on_event(EV_BUTTON, BUTTON_PRIMARY, BTN_DOWN);
-    assert(confirm_kind == 2);
-    on_event(EV_UI, confirm_yes, UI_CLICKED);
     assert(phase == SETTING && picker_seconds() == 5 && !timer_on);
+    assert(!props[action][P_HIDDEN] && !props[action][P_DISABLED]);
+    click(); tick(clock_ms + 5000);
+    assert(phase == FINISHED && props[action][P_HIDDEN]);
+    clock_ms += 500;
+    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    assert(phase == SETTING && !props[action][P_HIDDEN] && picker_seconds() == 5);
     puts("timer app: picker, countdown boundaries, delayed ticks, wrap and cleanup passed");
     return 0;
 }
