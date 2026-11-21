@@ -26,7 +26,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 host=$(ls "$NDK/toolchains/llvm/prebuilt")
 tc="$NDK/toolchains/llvm/prebuilt/$host/bin"
 api=26
-work=${WORK:-/tmp/mgvpx-build}
+# A private scratch directory, removed on exit. WORK names one to use and
+# keep instead.
+if [ -n "${WORK:-}" ]; then
+    work=$WORK
+else
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mgvpx-build.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    trap 'exit 1' HUP INT TERM
+fi
 rm -rf "$work/src" "$work/build" && mkdir -p "$work/build"
 cp -R "$VPX_SRC" "$work/src"
 python3 "$here/libvpx_mg.py" "$work/src"

@@ -23,7 +23,15 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 : "${VPX_SRC:?set VPX_SRC to a libvpx checkout}"
 out=${LIB_DIR:-$here/../lib}
-work=${WORK:-/tmp/mgvpx-ios}
+# A private scratch directory, removed on exit. WORK names one to use and
+# keep instead.
+if [ -n "${WORK:-}" ]; then
+    work=$WORK
+else
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mgvpx-ios.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    trap 'exit 1' HUP INT TERM
+fi
 rm -rf "$work/src" "$work/build" && mkdir -p "$work/build" "$out"
 cp -R "$VPX_SRC" "$work/src"
 python3 "$here/../../../android/musegadgetstest/jni/libvpx_mg.py" "$work/src"
