@@ -2260,6 +2260,16 @@ static void tls_resume_keep(tls_resume_t *t, const char *host, esp_tls_t *tls) {
     ESP_LOGI(TAG, "TLS session kept for resumption: %d B of internal RAM",
              (int)before - (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
+
+// After a failed connect. One that never reached TLS (DNS, the TCP connect or
+// a proxy failed, as while Wi-Fi is down) is still in ESP_TLS_INIT and says
+// nothing about the session: keep it, so the reconnect still resumes. Once TLS
+// began (a handshake or verification error, or a server refusing the offered
+// session), the session may be what failed: never retry with it.
+static void tls_resume_failed(tls_resume_t *t, esp_tls_t *tls) {
+    esp_tls_conn_state_t state = ESP_TLS_FAIL;
+    if (esp_tls_get_conn_state(tls, &state) != ESP_OK || state != ESP_TLS_INIT) tls_resume_forget(t);
+}
 #endif
 
 static session_result_t run_session(stack_monitor_t *stack) {
@@ -2297,11 +2307,11 @@ static session_result_t run_session(stack_monitor_t *stack) {
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        tls_resume_failed(&s_tls_resume, tls);
+#endif
         esp_tls_conn_destroy(tls);
         free(tls_host);
-#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
-        tls_resume_forget(&s_tls_resume);   // never retry with a session that may be what failed
-#endif
         note_attempt_failed("TLS connect failed");
         return SESSION_FAILED;
     }
