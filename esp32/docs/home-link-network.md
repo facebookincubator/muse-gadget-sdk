@@ -39,6 +39,18 @@ one source port per peer. Mappings aren't tied to the
 session: one that's still alive when the session ends (TCP's last 30 minutes)
 carries on for the next session's VM until it expires.
 
+ESP-IDF's NAPT rewrites a packet to the station before lwIP checks that its
+TCP, UDP or ICMP header is there, so the device drops a packet to the station
+whose header isn't whole before NAPT sees it, a fragment included (a trailing
+fragment shorter than the header too). It also drops a packet from the LAN
+addressed to the tunnel's subnet (10.42.0.0/24; the station's own address
+passes even on a LAN that overlaps it), which lwIP would otherwise route to
+the VM with whatever source it claims; replies to the VM's own flows arrive
+addressed to the station and still pass. Both checks are
+compiled into lwIP on ESP-IDF v6.0.x; on another version the build warns, and
+NAPT keeps idle UDP for lwIP's 2 s, since a live mapping is what lets a short
+packet reach the rewrite.
+
 ## Broadcast and multicast
 
 The VM sends UDP to 255.255.255.255, to the LAN's broadcast address (such as

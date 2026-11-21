@@ -25,10 +25,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TunnelRelayTest(unittest.TestCase):
-    def test_packet_sorting(self):
+    def test_packet_sorting_and_napt_input_check(self):
         relay = (ROOT / "main/tunnel_relay.c").read_text()
+        guard = (ROOT / "main/lwip_hooks/tunnel_napt_guard.h").read_text()
         with tempfile.TemporaryDirectory() as name:
             out = Path(name)
+            (out / "napt_guard.inc").write_text(
+                function_source(guard, "static inline bool tunnel_napt_input_short(") + "\n"
+                + function_source(guard, "static inline bool tunnel_napt_input_inside("))
             start = relay.index("typedef enum {")
             (out / "relay_classify.inc").write_text(
                 relay[start:relay.index("// Sorts one IPv4 packet", start)]

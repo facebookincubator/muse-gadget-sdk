@@ -911,9 +911,13 @@ For app authoring and the guide to send Muse, see
   the VM side builds on). NAPT's idle UDP time is
   `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S`, which `main/CMakeLists.txt` compiles
   into ESP-IDF's lwIP, along with a 64-entry ARP table for `device.discover`
-  (1,296 bytes of internal RAM). Both rely on lwIP's own defaults, so they're
-  checked on ESP-IDF v6.0.x only: on another version the build warns and lwIP
-  keeps its 2 s and 10 entries.
+  (1,296 bytes of internal RAM) and an input hook
+  (`main/lwip_hooks/tunnel_napt_guard.h`) that drops packets too short for
+  NAPT's rewrite and packets from the LAN for the tunnel's subnet. They rely
+  on lwIP's own defaults and the hook's place before NAPT, so they're checked
+  on ESP-IDF v6.0.x only, and the longer UDP time comes only with the hook: on
+  another version the build warns and lwIP keeps its 2 s, its 10 entries and
+  no check.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
