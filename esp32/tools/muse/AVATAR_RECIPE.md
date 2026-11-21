@@ -34,7 +34,8 @@ back to the default avatar, run `python3 tools/muse/avatar.py --restore default`
 
 ## The quick way
 
-Plug in the board (the S3 or AIPI Lite), then run:
+Plug in the board (one with the full UI that chats over USB: `CHAT_BOARDS` in
+`avatar.py` lists them), then run:
 
 ```sh
 cd esp32

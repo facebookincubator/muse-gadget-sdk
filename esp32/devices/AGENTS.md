@@ -292,7 +292,7 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 
 - For light and status-screen boards, add a case to `tools/board.sh` with
   `TARGET`, the overlay appended to `DEFAULTS`, and the `PORTS` globs for its
-  USB. Add a line to the usage comment, and widen the `sed -n '16,31p'` range
+  USB. Add a line to the usage comment, and widen the `sed -n` range
   in `usage()` by the lines you added.
 - In `devices/README.md`, add a row to Supported devices, a column to
   Features, and a row to Build. Link only to reference and store pages you
