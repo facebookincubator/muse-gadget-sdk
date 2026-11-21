@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Experiment overlay (load after sdkconfig.defaults): Wi-Fi features this STA-only firmware never uses
-# (it sets WIFI_MODE_STA and joins WPA2/WPA3-Personal networks only).
+# Experiment overlay (load after sdkconfig.defaults): Wi-Fi features this
+# STA-only firmware never uses (it sets WIFI_MODE_STA and joins
+# WPA2/WPA3-Personal networks only).
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
