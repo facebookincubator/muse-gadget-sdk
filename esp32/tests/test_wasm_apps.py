@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APPS = ROOT / "components/muse_apps/sdk"
 COMPONENT = ROOT / "components/muse_apps"
 EXAMPLES = ["components/muse_apps/sdk/examples/hello.c", "components/muse_apps/sdk/examples/stopwatch.c", "components/muse_apps/sdk/examples/chat.c", "components/muse_apps/sdk/examples/dashboard.c",
-            "components/muse_apps/sdk/examples/canvas_effects.c"]
+            "components/muse_apps/sdk/examples/canvas_effects.c", "components/muse_apps/sdk/examples/timer.c"]
 COMMANDS = ["app.install", "app.list", "app.remove", "app.run", "app.stop", "app.status", "app.logs", "app.api",
             "files.put", "files.list", "files.remove"]
 
@@ -99,7 +99,7 @@ class WasmAppsTest(unittest.TestCase):
         self.assertIn("[component instructions](../../AGENTS.md)", read("components/muse_apps/sdk/api/README.md"))
 
     def test_examples_are_grouped_and_guide_hello_is_standalone(self):
-        for name in ("hello.c", "stopwatch.c", "chat.c", "dashboard.c", "canvas_effects.c"):
+        for name in ("hello.c", "stopwatch.c", "timer.c", "chat.c", "dashboard.c", "canvas_effects.c"):
             self.assertTrue((APPS / "examples" / name).is_file(), name)
             self.assertFalse((APPS / name).exists(), name)
         self.assertFalse((APPS / "api" / "examples").exists())

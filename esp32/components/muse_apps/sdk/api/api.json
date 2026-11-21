@@ -2,7 +2,7 @@
   "schema": 1,
   "title": "Muse gadget apps API",
   "module": "gadget",
-  "version": [1, 1],
+  "version": [1, 2],
   "status": "draft",
   "lvgl": "9.6",
   "doc": "What a WebAssembly app on a Muse gadget can call, the events it gets and the constants it uses. The firmware embeds its machine-readable projection and serves it in parts with app.api; gen_api.py makes the C header apps include, the reference, and the firmware's import table from it.",
@@ -533,6 +533,18 @@
       "ret": ["result", ""],
       "errors": ["HANDLE"],
       "doc": "Scrolls an object's content."
+    },
+    {
+      "name": "ui_roller_select",
+      "group": "ui",
+      "args": [
+        ["obj", "handle", ""],
+        ["selected", "int", "Option index, from zero."],
+        ["animate", "bool", ""]
+      ],
+      "ret": ["result", ""],
+      "errors": ["HANDLE", "ARG", "UNSUPPORTED"],
+      "doc": "Selects a roller option, optionally scrolling to it. P_ANIM_DURATION sets the animation duration. P_SELECTED reports the target immediately. Setting P_SELECTED directly remains instantaneous."
     },
     {
       "name": "ui_scroll_to_view",
