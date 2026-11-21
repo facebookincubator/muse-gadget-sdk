@@ -19,7 +19,7 @@ Use this skill when a confirmed LG webOS display exposes its local SSAP WebSocke
 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
-- An already-configured display and a compatible SSAP client such as bscpylgtv using HomeLink TCP/WebSocket access.
+- An already-configured display and a compatible SSAP client such as bscpylgtv using Home Link TCP/WebSocket access.
 - Normal on-screen approval for the client registration when needed; store the returned client key securely and reuse it.
 - User permission for the requested input, app, audio, notification or remote operation.
 

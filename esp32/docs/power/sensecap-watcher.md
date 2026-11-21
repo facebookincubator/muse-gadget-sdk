@@ -174,7 +174,7 @@ idf.py -B build-muse-watcher-power-test -DIDF_TARGET=esp32s3 \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test" build
 ```
 
-The diagnostic image has no need for account credentials, pairing, or a SDK
+The diagnostic image has no need for account credentials, pairing, or an SDK
 token. It bypasses the normal application. Keep Secure Boot, flash encryption,
 and pairing eFuse writes disabled. Preserve existing NVS and factory backups.
 For a first-ever Muse flash, follow `devices/README.md` to back up the factory

@@ -20,7 +20,7 @@ Use this skill when the home already has a Zigbee2MQTT installation and an autho
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing broker address, discovered/confirmed TCP listener, TLS trust and broker credentials where required.
-- The base topic and a compatible MQTT client such as Paho using HomeLink's TCP transport.
+- The base topic and a compatible MQTT client such as Paho using Home Link's TCP transport.
 - Permission for the specific child device and action; broker access is not permission to change every device.
 
 ## Workflow

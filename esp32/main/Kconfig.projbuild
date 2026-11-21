@@ -218,7 +218,7 @@ menu "ESP32 Device SDK"
             a time. Measured on the C5 DevKitC-1 with BLE advertising, tunnel
             throughput rose from about 2.1 to 4.1 Mbit/s each way, and a
             connected central's reads kept working. Scanning still takes its
-            share. Main/ble_coex.h describes it; validated on the C5 only.
+            share. See main/ble_coex.h; validated on the C5 only.
 
     config HOMEHUB_BLE_COEX_WIFI_FIRST_CONNECTED
         bool "Also while a BLE peer is connected"

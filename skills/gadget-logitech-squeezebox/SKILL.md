@@ -20,7 +20,7 @@ Use this skill when a Squeezebox-compatible player is already connected to a rea
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An existing configured Lyrion server, any required HTTP authentication, and a player already connected to it.
-- A JSON-RPC HTTP client routed through HomeLink. No new server or SlimProto implementation is needed.
+- A JSON-RPC HTTP client routed through Home Link. No new server or SlimProto implementation is needed.
 - An existing library item or media source reachable and usable by that server/player, with any necessary entitlements.
 
 ## Workflow
@@ -50,7 +50,7 @@ Follow pagination when the response reports more players. Use the returned playe
 ## Limits
 
 - No new server deployment, direct SlimProto implementation or automatic access to cloud media services.
-- HomeLink is not a media server; agent-local files are not automatically reachable by Lyrion or the player.
+- Home Link is not a media server; agent-local files are not automatically reachable by Lyrion or the player.
 
 ## Sources
 

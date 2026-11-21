@@ -1,6 +1,6 @@
 ---
 name: gadget-nanoleaf
-description: Control Nanoleaf Light Panels Shapes Canvas Lines Elements and Skylight power brightness hue saturation and color temperature through Muse Home Link after pairing by holding the controller power button and storing the returned token and does not cover effects events layout cloud account features firmware updates or device removal
+description: Control Nanoleaf Light Panels, Shapes, Canvas, Lines, Elements and Skylight power, brightness, hue, saturation and color temperature through Muse Home Link after pairing by holding the controller power button and storing the returned token, and does not cover effects, events, layout, cloud account features, firmware updates or device removal
 ---
 
 # Nanoleaf Panels and Shapes

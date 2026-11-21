@@ -77,7 +77,7 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 // server-side noise-transport dispatcher and the ingress bridge both drop
 // zero-length body frames, so an empty ping never reaches the VM backend.
 // One byte is unambiguous vs a real packet batch, whose inner framing is
-// [u16-LE len][pkt]... (always >= 2 bytes). Must match the VM constant
+// [u16-LE len][pkt]... (always >= 2 bytes). Must match
 // the remote tunnel service's keepalive sentinel.
 #define TUN_KEEPALIVE_SENTINEL 0x00
 

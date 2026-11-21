@@ -1,6 +1,6 @@
 ---
 name: gadget-sony-bravia-tvs
-description: Control Sony Bravia TVs to read power and volume and playing content and to set power and volume and mute and switch inputs and launch apps through Muse Home Link when the TV is on a trusted local network with IP Control enabled and a Pre-Shared Key available in user only approved storage and do not use this skill for Cast media or firmware updates or service menu settings or control over the open internet
+description: Control Sony Bravia TVs to read power and volume and playing content and to set power and volume and mute and switch inputs and launch apps through Muse Home Link when the TV is on a trusted local network with IP Control enabled and a Pre-Shared Key available in user-only approved storage and do not use this skill for Cast media or firmware updates or service menu settings or control over the open internet
 ---
 
 # Sony Bravia TVs

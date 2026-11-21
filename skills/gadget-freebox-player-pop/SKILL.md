@@ -20,7 +20,7 @@ Use this skill when the confirmed Freebox Player Pop currently exposes a Cast re
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The player is already set up and the requested interface is enabled and available.
-- For Remote v2, a compatible `androidtvremote2` client routed through HomeLink, a persistent client certificate/private key, and the user's normal on-screen pairing code.
+- For Remote v2, a compatible `androidtvremote2` client routed through Home Link, a persistent client certificate/private key, and the user's normal on-screen pairing code.
 - For Cast playback, a suitable existing media source reachable by the receiver.
 
 ## Workflow

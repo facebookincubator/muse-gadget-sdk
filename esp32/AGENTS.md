@@ -24,7 +24,7 @@ How to build this firmware and flash it onto your own ESP32 board. See
 The ESP32 Device SDK: the ESP-IDF firmware (`muse-gadget`) powering Muse
 Home Link. It pairs with a phone over BLE, joins Wi-Fi, and holds an encrypted
 Noise session to a VM, with an optional home-network tunnel. `main/main.c` is the entry
-point and `main/app.c` holds most of the logic. `components/muse` adds a
+point and `main/app.c` holds most of the logic. `components/muse` adds an
 avatar/voice/settings UI on boards with a display.
 
 ## Prerequisites
