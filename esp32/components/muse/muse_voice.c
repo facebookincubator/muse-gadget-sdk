@@ -39,6 +39,7 @@
 #include "muse_photo_note.h"
 #endif
 #include "muse_settings.h"
+#include "muse_motion.h"
 #include "muse_state.h"
 #include "muse_wakeword_glue.h"
 #include "muse_wifi.h"
@@ -1625,8 +1626,8 @@ static void run_call(bool ptt, size_t waking_chunks)
             /* Advance the reference even when a mic read fails; otherwise
              * each missed chunk shifts speaker echo out of alignment. */
             size_t clean_n = muse_aec_feed(aec, aec_mic ? s_chunk : silence,
-                          n && muse_settings_speaker_on() ? out : silence,
-                          muse_settings_speaker_on() ? n : 0);
+                          n && muse_settings_speaker_on() && !muse_motion_quiet() ? out : silence,
+                          muse_settings_speaker_on() && !muse_motion_quiet() ? n : 0);
             if (clean_n && aec_mic) {
                 int16_t *clean = muse_aec_output(aec);
                 /* Below the near-end speech floor, a residual during

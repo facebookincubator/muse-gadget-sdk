@@ -1577,6 +1577,18 @@ static void on_sleep_now(lv_event_t *e)
     muse_state_set_asleep(true);
 }
 
+#if CONFIG_MUSE_MOTION_GESTURES
+static void on_lift_sw(lv_event_t *e)
+{
+    muse_settings_set_lift_wake(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+static void on_face_quiet_sw(lv_event_t *e)
+{
+    muse_settings_set_face_down_quiet(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+#endif
+
 static void build_sleep_page(lv_obj_t *tile)
 {
     lv_obj_t *list;
@@ -1590,6 +1602,13 @@ static void build_sleep_page(lv_obj_t *tile)
     }
     button(list, LV_SYMBOL_EYE_CLOSE "  Sleep now", COLOR_ACCENT, on_sleep_now, NULL);
     note(list, "Tap the screen or press either button to wake.");
+#if CONFIG_MUSE_MOTION_GESTURES
+    switch_row(list, "Lift to wake", muse_settings_lift_wake(), on_lift_sw);
+    switch_row(list, "Face-down quiet", muse_settings_face_down_quiet(), on_face_quiet_sw);
+    note(list, "Lift to wake: lift and tilt the screen toward you. "
+               "Face-down quiet silences playback until you turn it back. "
+               "Motion controls use extra battery and cannot wake a powered-off device.");
+#endif
 }
 
 static const char *sleep_name(int secs)

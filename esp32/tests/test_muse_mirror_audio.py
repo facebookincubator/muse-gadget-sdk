@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
         self.assertLess(read.index('s_hpf_y1 = y;'), read.index('muse_mirror_audio_capture'))
         self.assertEqual(write.count('muse_mirror_audio_playback(mono, frames)'), 1)
         self.assertLess(write.index('muse_mirror_audio_playback'), write.index('muse_board->mic_init'))
-        self.assertIn('bool mute = mirror_only || !muse_settings_speaker_on();', write)
+        self.assertIn('bool mute = mirror_only || !muse_settings_speaker_on() || muse_motion_quiet();', write)
 
     def test_without_the_mirror_the_calls_are_empty(self):
         header = (MIRROR / 'muse_mirror_audio.h').read_text()

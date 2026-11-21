@@ -265,6 +265,17 @@ menu "Muse"
             The StopWatch and the TriviaPOD: one board file
             (board_m5stack_stopwatch.c) and the StopWatch's controls.
 
+    config MUSE_MOTION_GESTURES
+        bool "Lift to wake and face-down quiet (1.75C)"
+        depends on MUSE_BOARD_WAVESHARE_S3_175C
+        default n
+        help
+            Adds opt-in motion controls to Settings > Auto-sleep. Both start
+            off. Uses the QMI8658 accelerometer at low-power 21 Hz with the
+            gyroscope disabled. Lift wake polls at 20 Hz; quiet-only uses
+            10 Hz awake and 4 Hz asleep. Battery use increases. Does not
+            wake from a full power-off.
+
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE
