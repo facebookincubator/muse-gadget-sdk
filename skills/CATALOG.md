@@ -1,6 +1,6 @@
 # Skill Catalog
 
-61 active skills: 59 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
+62 active skills: 60 device/family skills, one shared Google Cast skill, and one Linux wake-word setup skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Gadget setup
@@ -82,6 +82,7 @@ Use the matching device skill for model compatibility, setup, safety and support
 
 - [NUT UPS](gadget-nut-ups/SKILL.md) — read-only UPS and battery status from a Network UPS Tools upsd server, using upsc on a Linux gadget.
 - [UniFi Network consoles](gadget-unifi-network-consoles/SKILL.md) — local inventory and status.
+- [UPnP internet gateways](gadget-upnp-internet-gateways/SKILL.md) — read-only WAN link status, connection uptime and traffic counters from a router with UPnP turned on.
 - [Wyze RTSP cameras](gadget-wyze-rtsp-cameras/SKILL.md) — viewing/capture with compatible legacy firmware already installed.
 - [yi-hack cameras](gadget-yi-hack-cameras/SKILL.md) — snapshots/TCP streams with compatible firmware already installed.
 
