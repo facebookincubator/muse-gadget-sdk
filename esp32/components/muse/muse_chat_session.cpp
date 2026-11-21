@@ -562,6 +562,12 @@ static ssize_t ws_recv(esp_tls_t *tls, uint8_t *buf, size_t cap, bool wait)
         ESP_LOGE(TAG, "WS frame too large: %llu", (unsigned long long)plen);
         return -1;
     }
+    /* RFC 6455 §5.5: control frames carry at most 125 bytes, and a pong's
+     * 7-bit length couldn't echo more. Fail the connection, as Link does. */
+    if (opcode >= 0x8 && plen > 125) {
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)plen);
+        return -1;
+    }
     if (!read_all(tls, buf, plen)) {
         return -1;
     }
@@ -2871,9 +2877,11 @@ extern "C" void muse_hatch_start(void)
 #endif
     s_pcm = static_cast<int16_t *>(psram_alloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t)));
     s_pcm16 = static_cast<int16_t *>(psram_alloc((MINIMP3_MAX_SAMPLES_PER_FRAME + 8) * sizeof(int16_t)));
+    bool lines = true;
     for (auto &s : s_streams) {
         s.line = static_cast<char *>(psram_alloc(NDJSON_LINE_MAX));
         s.cap = NDJSON_LINE_MAX;
+        if (!s.line) lines = false;
     }
     s_turn.tts_msg = -1;
 #if CONFIG_MUSE_REALTIME_VOICE
@@ -2881,9 +2889,14 @@ extern "C" void muse_hatch_start(void)
 #endif
     /* Stack in PSRAM: TLS, Noise and the MP3 decoder (~16 KB of scratch) all run here. */
     if (!s_cmds || !s_events || !s_in || !s_out || !s_turn.chunk || !s_turn.mp3 || (VOICE_NOTE && !s_turn.note) || !s_pcm || !s_pcm16 ||
+        !lines ||
         xTaskCreatePinnedToCoreWithCaps(hatch_task, "muse_chat", 48 * 1024, nullptr, 5, nullptr, 0,
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         ESP_LOGE(TAG, "start failed");
+        for (auto &s : s_streams) {   /* only the task uses these */
+            heap_caps_free(s.line);
+            s.line = nullptr;
+        }
     }
 }
 

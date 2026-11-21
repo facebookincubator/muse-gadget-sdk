@@ -1063,3 +1063,252 @@ int main(int argc, char **argv) {
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class ChatSessionWebSocket(unittest.TestCase):
+    """The production ws_recv against a scripted TLS stream."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (ROOT / 'components/muse/muse_chat_session.cpp').read_text()
+        io = source[source.index('static bool write_all('):source.index('static bool ws_send_binary(')]
+        recv = source[source.index('static ssize_t ws_recv('):source.index('/* Query escaping')]
+        code = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <sys/types.h>
+typedef struct esp_tls esp_tls_t;
+#define ESP_TLS_ERR_SSL_WANT_READ (-0x6900)
+#define ESP_TLS_ERR_SSL_WANT_WRITE (-0x6880)
+#define IO_TIMEOUT_US (15 * 1000000LL)
+static const char *TAG = "test", *last_error;
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGE(tag, fmt, ...) ((void)(tag), last_error = (fmt))
+static int64_t clock_us;
+static int64_t now_us() { return clock_us; }
+static void vTaskDelay(int) { clock_us += 1000000; }
+static uint8_t in[2048], sent[2048];
+static size_t in_len, in_pos, sent_len;
+static ssize_t esp_tls_conn_read(esp_tls_t *, void *buf, size_t len) {
+    if (in_pos == in_len) return ESP_TLS_ERR_SSL_WANT_READ;
+    size_t n = in_len - in_pos < len ? in_len - in_pos : len;
+    memcpy(buf, in + in_pos, n);
+    in_pos += n;
+    return (ssize_t)n;
+}
+static ssize_t esp_tls_conn_write(esp_tls_t *, const void *buf, size_t len) {
+    assert(sent_len + len <= sizeof(sent));
+    memcpy(sent + sent_len, buf, len);
+    sent_len += len;
+    return (ssize_t)len;
+}
+''' + io + recv + r'''
+static void reset() { in_len = in_pos = sent_len = 0; last_error = nullptr; clock_us = 0; }
+static void push(uint8_t b) { assert(in_len < sizeof(in)); in[in_len++] = b; }
+/* A server frame with the shortest length form; masked if asked. */
+static void frame(uint8_t opcode, const uint8_t *payload, size_t len, bool masked = false) {
+    static const uint8_t key[4] = { 0x37, 0xfa, 0x21, 0x3d };
+    push(0x80 | opcode);
+    uint8_t m = masked ? 0x80 : 0;
+    if (len < 126) {
+        push(m | len);
+    } else if (len <= 0xffff) {
+        push(m | 126); push(len >> 8); push(len & 0xff);
+    } else {
+        push(m | 127);
+        for (int i = 7; i >= 0; i--) push((uint64_t)len >> (8 * i));
+    }
+    if (masked) for (int i = 0; i < 4; i++) push(key[i]);
+    for (size_t i = 0; i < len; i++) push(payload[i] ^ (masked ? key[i & 3] : 0));
+}
+static uint8_t payload[1024];
+static void pings_get_exact_pongs() {
+    for (size_t i = 0; i < sizeof(payload); i++) payload[i] = (uint8_t)(i * 7 + 1);
+    static const uint8_t after[] = { 'a', 'f', 't', 'e', 'r' };
+    for (size_t len : { 0, 1, 124, 125 }) {
+        for (bool masked : { false, true }) {
+            reset();
+            frame(0x9, payload, len, masked);
+            frame(0x2, after, sizeof(after), masked);
+            uint8_t buf[256];
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == -3);
+            assert(sent_len == 6 + len);
+            const uint8_t pong[6] = { 0x8A, (uint8_t)(0x80 | len), 0, 0, 0, 0 };
+            assert(!memcmp(sent, pong, 6) && !memcmp(sent + 6, payload, len));
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == (ssize_t)sizeof(after));
+            assert(!memcmp(buf, after, sizeof(after)) && in_pos == in_len && !last_error);
+        }
+    }
+}
+static void long_control_frames_fail() {
+    for (size_t i = 0; i < sizeof(payload); i++) payload[i] = (uint8_t)(i * 7 + 1);
+    for (uint8_t opcode : { 0x9, 0xA, 0x8 }) {
+        for (size_t len : { 126, 200, 1000 }) {
+            reset();
+            frame(opcode, payload, len);
+            frame(0x2, payload, 5);
+            uint8_t buf[1024];
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == -1);
+            assert(sent_len == 0 && last_error && strstr(last_error, "control frame"));
+        }
+    }
+    /* Data frames of the same sizes still arrive whole. */
+    for (size_t len : { 126, 200, 1000 }) {
+        reset();
+        frame(0x2, payload, len, true);
+        uint8_t buf[1024];
+        assert(ws_recv(nullptr, buf, sizeof(buf), true) == (ssize_t)len);
+        assert(!memcmp(buf, payload, len) && sent_len == 0 && in_pos == in_len && !last_error);
+    }
+}
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    switch (atoi(argv[1])) {
+    case 0: pings_get_exact_pongs(); return 0;
+    case 1: long_control_frames_fail(); return 0;
+    default: return 2;
+    }
+}
+'''
+        (out / 'ws.cpp').write_text(code)
+        result = subprocess.run(
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', '-Wall', '-Wextra', '-Werror',
+             '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
+             str(out / 'ws.cpp'), '-o', str(out / 'ws')],
+            capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'ws'
+
+    def run_case(self, case):
+        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pings_up_to_125_bytes_get_an_exact_pong_and_the_stream_stays_in_step(self):
+        self.run_case(0)
+
+    def test_control_frames_over_125_bytes_fail_the_connection_without_a_pong(self):
+        self.run_case(1)
+
+
+class ChatSessionStart(unittest.TestCase):
+    """The production muse_hatch_start() with allocations that can fail."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (ROOT / 'components/muse/muse_chat_session.cpp').read_text()
+        constants = source[source.index('#define MIC_RATE'):source.index('/* ---- Voice task')]
+        kinds = source.index('enum kind_t')
+        kinds = source[kinds:source.index('\n', kinds) + 1]
+        streams = source[source.index('struct stream_t {'):source.index('/* ---- The current turn')]
+        start = source.index('extern "C" void muse_hatch_start(void)')
+        start = source[start:source.index('\n}\n', start) + 3]
+        code = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#define CONFIG_MUSE_LATEST_REPLY 0
+#define CONFIG_MUSE_REALTIME_VOICE 0
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+#define pdPASS 1
+#define MINIMP3_MAX_SAMPLES_PER_FRAME (1152 * 2)
+#define MUSE_HATCH_NOTE_TAIL "\"}]}"
+static const char *TAG = "test", *last_error;
+#define ESP_LOGE(tag, fmt, ...) ((void)(tag), last_error = (fmt))
+typedef void *QueueHandle_t;
+typedef void *StreamBufferHandle_t;
+struct cmd_t { int unused; };
+struct ev_t { int unused; };
+struct cJSON_Hooks { void *(*malloc_fn)(size_t); void (*free_fn)(void *); };
+static void cJSON_InitHooks(cJSON_Hooks *) {}
+''' + constants + kinds + streams + r'''
+static QueueHandle_t s_cmds, s_events;
+static StreamBufferHandle_t s_in, s_out;
+static struct { uint8_t *chunk, *mp3, *note; char *texts; int tts_msg; } s_turn;
+static int16_t *s_pcm, *s_pcm16;
+/* Stream line buffers are the only NDJSON_LINE_MAX allocations here. */
+static int fail_line = -1, line_allocs, lines_live, tasks, task_result = pdPASS;
+static void *psram_alloc(size_t n) {
+    if (n != NDJSON_LINE_MAX) return malloc(n);
+    if (line_allocs++ == fail_line) return nullptr;
+    lines_live++;
+    return malloc(n);
+}
+static void *json_alloc(size_t n) { return malloc(n); }
+static void heap_caps_free(void *p) { if (p) lines_live--; free(p); }   /* only line buffers are freed */
+static char handles[8];
+static int next_handle;
+static QueueHandle_t xQueueCreateWithCaps(int, size_t, int) { return &handles[next_handle++]; }
+static QueueHandle_t xQueueCreate(int, size_t) { return &handles[next_handle++]; }
+static StreamBufferHandle_t xStreamBufferCreateWithCaps(size_t, size_t, int) { return &handles[next_handle++]; }
+static void hatch_task(void *) {}
+static int xTaskCreatePinnedToCoreWithCaps(void (*fn)(void *), const char *, int, void *, int, void *, int, int) {
+    assert(fn == hatch_task);
+    tasks++;
+    return task_result;
+}
+''' + start + r'''
+static void started() {
+    muse_hatch_start();
+    assert(tasks == 1 && !last_error && line_allocs == MAX_STREAMS && lines_live == MAX_STREAMS);
+    for (const auto &s : s_streams) assert(s.line && s.cap == NDJSON_LINE_MAX);
+}
+static void failed() {
+    muse_hatch_start();
+    assert(last_error && strstr(last_error, "start failed") && lines_live == 0);
+    for (const auto &s : s_streams) assert(!s.line);
+}
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    int c = atoi(argv[1]);
+    if (c == 0) {
+        started();
+    } else if (c <= MAX_STREAMS) {
+        fail_line = c - 1;   /* that stream's line buffer */
+        failed();
+        assert(tasks == 0);
+    } else if (c == MAX_STREAMS + 1) {
+        task_result = 0;
+        failed();
+        assert(tasks == 1);
+    } else {
+        return 2;
+    }
+    return 0;
+}
+'''
+        (out / 'start.cpp').write_text(code)
+        result = subprocess.run(
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', '-Wall', '-Wextra', '-Werror',
+             '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
+             str(out / 'start.cpp'), '-o', str(out / 'start')],
+            capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'start'
+
+    def run_case(self, case):
+        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_start_with_every_buffer_starts_the_task(self):
+        self.run_case(0)
+
+    def test_a_missing_stream_line_buffer_fails_the_start_and_frees_the_others(self):
+        for case in range(1, 7):
+            with self.subTest(stream=case - 1):
+                self.run_case(case)
+
+    def test_a_failed_task_start_frees_the_stream_line_buffers(self):
+        self.run_case(7)
