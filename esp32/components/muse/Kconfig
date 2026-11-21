@@ -14,6 +14,15 @@
 
 menu "Muse"
 
+    config MUSE_UI_THEME
+        bool "Light and dark appearance"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Adds Automatic, Dark and Light appearance choices to Settings.
+            Automatic uses an optional content-background hint and otherwise
+            keeps the existing dark appearance. No avatar feature is needed.
+
     config MUSE_AVATAR_SYNC
         bool "Sync the paired Muse avatar (experimental)"
         depends on MUSE_ENABLED && SPIRAM && !MUSE_UI_FREEINK

@@ -23,6 +23,7 @@ production key is accessed. This does not validate ESP32 hardware signing.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -118,11 +119,19 @@ class LinkPairingHandshakeTest(unittest.TestCase):
                     command.extend([
                         str(ROOT / "tests/link_pairing_handshake_harness.c"),
                         str(ROOT / "main/pairing_transcript.c"),
-                        str(ROOT / "main/pairing_signer_policy.c"), *cjson_source(cjson),
+                        str(ROOT / "main/pairing_signer_policy.c"), str(ROOT / "main/token_fp.c"),
+                        *cjson_source(cjson),
                         *library_args, "-o", str(executable),
                     ])
                     run(command, temp)
-                    self.assertIn("PASS actual pairing:", run([str(executable)], temp))
+                    out = run([str(executable)], temp)
+                    self.assertIn("PASS actual pairing:", out)
+                    # token_fp_text(): the length and a SHA-256 prefix, none of the
+                    # token's characters.
+                    fake = "mgst_FAKEfakeFAKEfake0123456789abcdefghijklmnopq"
+                    want = f"48 chars, sha256 {hashlib.sha256(fake.encode()).hexdigest()[:8]}"
+                    self.assertIn(f"FP {want}\n", out)
+                    self.assertNotIn(fake[5:], out)
 
 
 if __name__ == "__main__":

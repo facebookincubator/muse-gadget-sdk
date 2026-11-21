@@ -1,0 +1,33 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Noise core"
+
+    config NOISE_CORE_X25519_HACL
+        bool "X25519 from HACL* instead of PSA's generic curve code"
+        default n
+        help
+            Noise's X25519 (key pairs and DH) runs on HACL* Curve25519, the
+            formally verified, constant-time implementation mbedTLS ships as
+            its Everest driver (tf-psa-crypto/drivers/everest), compiled from
+            ESP-IDF's own copy in its 32-bit build and called directly instead
+            of through PSA's generic Montgomery-curve code. Same results byte
+            for byte (RFC 7748 and cacophony's Noise_XX vector,
+            tests/test_noise_core.py); no protocol change.
+
+            The Everest paths are private to ESP-IDF: on an ESP-IDF other
+            than v6.0.x, or one missing any of its files, the build warns
+            and Noise keeps PSA's X25519.
+
+endmenu

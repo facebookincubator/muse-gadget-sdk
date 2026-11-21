@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "muse_theme_lvgl.h"
 #include "muse_menu.h"
 
 #include <stdio.h>
@@ -207,7 +208,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
     text = muse_lang_menu(text);
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_style_text_font(l, font == s_fine ? muse_lang_label_font(text, font) : font, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
+    muse_theme_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_text(l, text);
     return l;
 }
@@ -461,7 +462,7 @@ static void show(view_t view)
     lv_obj_set_flag(s_page_box, LV_OBJ_FLAG_HIDDEN, view == VIEW_LIST);
     lv_obj_scroll_to_y(s_page_box, 0, LV_ANIM_OFF);
     bool danger = view == VIEW_POWER || view == VIEW_RESET;
-    lv_obj_set_style_text_color(s_hint_select, lv_color_hex(danger ? COLOR_DANGER : COLOR_TEXT), 0);
+    muse_theme_set_style_text_color(s_hint_select, lv_color_hex(danger ? COLOR_DANGER : COLOR_TEXT), 0);
 
     switch (view) {
     case VIEW_STATUS:
@@ -701,7 +702,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
     lv_obj_set_size(s_root, w, h);
-    lv_obj_set_style_bg_color(s_root, lv_color_black(), 0);
+    muse_theme_set_style_bg_color(s_root, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);
@@ -724,7 +725,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         lv_obj_set_size(r, lv_pct(100), s_row_h);
         lv_obj_set_style_pad_hor(r, small ? 3 : 10, 0);
         lv_obj_set_style_radius(r, small ? 3 : 8, 0);
-        lv_obj_set_style_bg_color(r, lv_color_hex(COLOR_SELECTED), 0);
+        muse_theme_set_style_bg_color(r, lv_color_hex(COLOR_SELECTED), 0);
         lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
         uint32_t color = i == ITEM_POWER ? COLOR_DANGER : COLOR_TEXT;
         lv_obj_align(label(r, font, color, ITEM_NAMES[i]), LV_ALIGN_LEFT_MID, 0, 0);
@@ -750,7 +751,7 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
     lv_obj_t *rule = lv_obj_create(s_root);
     lv_obj_remove_style_all(rule);
     lv_obj_set_size(rule, w, 1);
-    lv_obj_set_style_bg_color(rule, lv_color_hex(COLOR_RULE), 0);
+    muse_theme_set_style_bg_color(rule, lv_color_hex(COLOR_RULE), 0);
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
     lv_obj_align(rule, LV_ALIGN_BOTTOM_MID, 0, -hint_h);
     int select = bar_slot(talk);

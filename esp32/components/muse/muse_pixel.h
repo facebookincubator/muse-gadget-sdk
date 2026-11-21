@@ -62,3 +62,6 @@ void muse_pixel_set_size(int px);
  * image never has to exist in RAM.
  */
 void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1);
+
+/* Optional theme hook. The bundled renderer recolors only its backdrop. */
+void muse_pixel_set_background(uint32_t rgb);

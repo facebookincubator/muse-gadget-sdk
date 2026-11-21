@@ -219,16 +219,31 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         start_timeout = _function_body(app, "static BaseType_t start_confirm_timeout(")
         self.assertIn("s_confirm_generation == generation", start_timeout)
         self.assertIn("link_pairing_session_is_current(session_generation)", start_timeout)
-        for signature, timeout in (
-            ("static void confirm_timeout_task(", "PAIRING_CONFIRM_WINDOW_MS"),
-            ("static void confirmed_idle_timeout_task(void *arg) {", "PAIRING_CONFIRMED_IDLE_TIMEOUT_MS"),
-        ):
+        # One-shot esp_timers, not tasks that sleep the windows out; the
+        # window is chosen at start.
+        self.assertIn("PAIRING_CONFIRM_WINDOW_MS : PAIRING_CONFIRMED_IDLE_TIMEOUT_MS", start_timeout)
+        self.assertIn("esp_timer_start_once(s_confirm_timer", start_timeout)
+        self.assertNotIn("TaskCreate", start_timeout)
+        for signature in ("static void confirm_timeout_task(void *arg) {",
+                          "static void confirmed_idle_timeout_task(void *arg) {"):
             handler = _function_body(app, signature)
-            self.assertIn(timeout, handler)
+            self.assertIn("s_confirm_generation == generation", handler)
             self.assertIn("link_pairing_session_is_current(session_generation)", handler)
             self.assertIn("ble_server_disconnect_pairing_session(session_generation)", handler)
             self.assertNotIn("link_pairing_reset()", handler)
             self.assertNotIn("ble_server_stop_advertising(true)", handler)
+        # The esp_timer callback only hands the timeout to its task (the send
+        # blocks), and leaves a timeout re-armed while it waited alone.
+        fire = _function_body(app, "static void confirm_timer_fire(void *arg) {")
+        self.assertIn("esp_timer_is_active(s_confirm_timer) ? CONFIRM_TO_NONE", fire)
+        self.assertIn("helper_task_create(confirm_timeout_task,", fire)
+        self.assertIn("helper_task_create(confirmed_idle_timeout_task,", fire)
+        self.assertNotIn("ble_server_send", fire)
+        self.assertNotIn("vTaskDelay", fire)
+        # Without memory for the task, the session still ends.
+        self.assertIn("ble_server_disconnect_pairing_session(session_generation)", fire)
+        advance = _function_body(app, "static uint32_t advance_confirm_generation_locked(void) {")
+        self.assertIn("esp_timer_stop(s_confirm_timer)", advance)
         disconnect = _function_body(ble, "static void disconnect_pairing_session_event(")
         self.assertLess(disconnect.index("link_pairing_reset_session(generation)"),
                         disconnect.index("ble_server_stop_advertising(true)"))

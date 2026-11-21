@@ -27,6 +27,7 @@ set(GADGET_SRCS
     "wifi_mgr.c"
     "wifi_known.c"
     "identity.c"
+    "token_fp.c"
     "sdk_token_console.c"
     "config_store.c"
     "vm_api.c"

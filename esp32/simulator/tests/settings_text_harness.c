@@ -16,6 +16,11 @@ const muse_board_t *muse_board = &test_board;
 static char saved_ssid[MUSE_SSID_MAX + 1], saved_pass[MUSE_PASS_MAX + 1];
 static unsigned saves;
 static int volume_setting = 70;
+#if CONFIG_MUSE_UI_THEME
+static muse_theme_mode_t theme_setting;
+muse_theme_mode_t muse_settings_theme(void) {return theme_setting;}
+esp_err_t muse_settings_set_theme(muse_theme_mode_t mode) {theme_setting=mode;return ESP_OK;}
+#endif
 #if CONFIG_MUSE_AVATAR_SYNC
 static muse_avatar_source_t avatar_source;
 static const char *avatar_status_text = "Built-in";
@@ -66,6 +71,25 @@ void muse_settings_set_text_size(int v) { (void)v; abort(); }
 bool muse_settings_speaker_on(void) { return true; }
 int muse_settings_volume(void) { return volume_setting; }
 bool muse_settings_wifi_on(void) { abort(); }
+void muse_wifi_status(muse_wifi_status_t *out) { *out = (muse_wifi_status_t){.state=MUSE_WIFI_OFF}; }
+void muse_ble_status(muse_ble_status_t *out) { *out = (muse_ble_status_t){.state=MUSE_BLE_OFF}; }
+void muse_hatch_status(muse_hatch_status_t *out) { *out = (muse_hatch_status_t){0}; }
+const char *muse_hatch_state_name(muse_hatch_state_t state) { (void)state; return "Offline"; }
+bool muse_link_hatch_linked(void) { return false; }
+const char *muse_link_sdk_token(void) { return NULL; }
+bool muse_link_sdk_token_changed(void) { return false; }
+muse_link_state_t muse_link_state(void) { return MUSE_LINK_UNPAIRED; }
+const char *muse_link_state_name(muse_link_state_t state) { (void)state; return "Unpaired"; }
+size_t muse_settings_hatch_token_len(void) { return 0; }
+muse_power_t muse_state_power(void) { return (muse_power_t){.battery_pct=-1}; }
+void muse_battery_read(muse_battery_t *out) { *out = (muse_battery_t){0}; }
+bool muse_battery_drain(const muse_battery_t *b, int *rate, int *hours) { (void)b; (void)rate; (void)hours; return false; }
+const esp_app_desc_t *esp_app_get_description(void) { static const esp_app_desc_t desc = {.version="test"}; return &desc; }
+void muse_wifi_apply(void) { abort(); }
+void muse_wifi_forget(const char *ssid) { (void)ssid; abort(); }
+int muse_wifi_saved(muse_wifi_saved_t *out, int max) { (void)out; (void)max; abort(); }
+int muse_wifi_scan_results(muse_wifi_ap_t *out, int max, uint32_t *gen) { (void)out; (void)max; (void)gen; abort(); }
+bool muse_wifi_scanning(void) { abort(); }
 void muse_state_set_asleep(bool v) { (void)v; abort(); }
 void muse_ui_preview_brightness(int v) { (void)v; abort(); }
 void muse_ui_show_face(void) { abort(); }
@@ -468,6 +492,26 @@ int main(int argc, char **argv)
         on_wifi_other(NULL);
         check_entry();
     }
+#if CONFIG_MUSE_UI_THEME
+    if (!strcmp(scenario,"theme")) {
+        /* The preceding default case opened a real SSID entry field. */
+        lv_textarea_set_text(s_text_ta,"Unfinished network name");
+        lv_obj_t *entry=s_text_ta;bool password=lv_textarea_get_password_mode(entry);
+        muse_theme_request_mode(MUSE_THEME_LIGHT);muse_theme_lvgl_tick();
+        assert(s_text_ta==entry && !strcmp(lv_textarea_get_text(entry),"Unfinished network name"));
+        assert(lv_textarea_get_password_mode(entry)==password);
+        assert((lv_color_to_u32(lv_obj_get_style_bg_color(s_text,0))&0xffffff)==0xffffff);
+        muse_theme_request_mode(MUSE_THEME_DARK);muse_theme_lvgl_tick();
+        assert(s_text_ta==entry && !strcmp(lv_textarea_get_text(entry),"Unfinished network name"));
+        close_text();
+        build_appearance(s_tile);show(s_appearance);tick_appearance();
+        assert(!strcmp(lv_label_get_text(s_appearance_mode),"Dark"));
+        on_appearance(NULL);muse_theme_lvgl_tick();tick_appearance();
+        assert(!strcmp(lv_label_get_text(s_appearance_mode),"Light"));
+        on_appearance(NULL);muse_theme_lvgl_tick();tick_appearance();
+        assert(!strcmp(lv_label_get_text(s_appearance_mode),"Automatic"));
+    }
+#endif
     lv_timer_handler();
     lv_display_delete(display);
     lv_deinit();

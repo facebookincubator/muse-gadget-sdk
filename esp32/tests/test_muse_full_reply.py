@@ -163,6 +163,7 @@ static void lv_obj_set_style_text_font(lv_obj_t *o, const lv_font_t *f, int s) {
 static void lv_obj_set_style_text_line_space(lv_obj_t *o, int v, int s) { (void)s; o->line_space = v; }
 static void lv_obj_set_style_pad_hor(lv_obj_t *o, int v, int s) { (void)s; o->pad_hor = v; }
 static void lv_obj_set_style_pad_ver(lv_obj_t *o, int v, int s) { (void)s; o->pad_ver = v; }
+#define muse_theme_set_style_bg_color lv_obj_set_style_bg_color
 static void lv_obj_set_style_bg_color(lv_obj_t *o, int c, int s) { (void)o; (void)c; (void)s; }
 static void lv_obj_set_style_bg_opa(lv_obj_t *o, int v, int s) { (void)s; o->opa = v; }
 static void lv_label_set_long_mode(lv_obj_t *o, int m) { o->long_mode = m; }

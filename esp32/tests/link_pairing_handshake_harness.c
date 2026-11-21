@@ -375,8 +375,22 @@ static void pairing_confirmed_carries_sdk_token(void) {
     reboot(0);
 }
 
+/* What logs may say about a token: none, or its length and a SHA-256 prefix,
+ * never any of its characters (token_fp.h). The Python side checks the hash. */
+#define FAKE_SDK_TOKEN "mgst_FAKEfakeFAKEfake0123456789abcdefghijklmnopq"
+static void token_fingerprints_show_no_characters(void) {
+    char fp[TOKEN_FP_TEXT_LEN];
+    assert(strcmp(token_fp_text(NULL, fp), "none") == 0);
+    assert(strcmp(token_fp_text("", fp), "none") == 0);
+    assert(strcmp(token_fp_text("abc", fp), "3 chars, sha256 ba7816bf") == 0);
+    token_fp_text(FAKE_SDK_TOKEN, fp);
+    assert(strncmp(fp, "48 chars, sha256 ", 17) == 0 && strlen(fp) == 25 && !strstr(fp, "mgst"));
+    printf("FP %s\n", fp);
+}
+
 int main(void) {
     assert(psa_crypto_init()==PSA_SUCCESS);
+    token_fingerprints_show_no_characters();
     reboot(0);
     reject_auth_selection(true);
     cJSON *invalid = hello(5, PAIRING_COMMUNITY_AUTH);

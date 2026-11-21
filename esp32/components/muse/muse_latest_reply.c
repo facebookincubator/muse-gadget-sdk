@@ -15,6 +15,7 @@
  */
 
 #include "muse_latest_reply.h"
+#include "muse_theme_lvgl.h"
 
 #include <string.h>
 #if LV_USE_SNAPSHOT
@@ -140,7 +141,7 @@ static void new_reply_cb(lv_event_t *event)
     lv_obj_set_width(s_label, 308);
     lv_label_set_long_mode(s_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(s_label, s_font_for(s_display), 0);
-    lv_obj_set_style_text_color(s_label, lv_color_hex(0xd8d2ff), 0);
+    muse_theme_set_style_text_color(s_label, lv_color_hex(0xd8d2ff), 0);
     lv_obj_set_style_text_line_space(s_label, 6, 0);
     lv_obj_set_style_text_align(s_label, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_remove_flag(s_label, LV_OBJ_FLAG_CLICKABLE);
@@ -167,14 +168,14 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
 {
     s_font_for = font_for;
     s_tile = lv_tileview_add_tile(tileview, 0, 0, LV_DIR_RIGHT);
-    lv_obj_set_style_bg_color(s_tile, lv_color_black(), 0);
+    muse_theme_set_style_bg_color(s_tile, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_tile, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(s_tile, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *title = lv_label_create(s_tile);
     lv_label_set_text(title, muse_lang_menu("LATEST REPLY"));
     lv_obj_set_style_text_font(title, muse_lang_label_font(lv_label_get_text(title), &lv_font_unscii_16), 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x8b84a8), 0);
+    muse_theme_set_style_text_color(title, lv_color_hex(0x8b84a8), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 55);
 
     s_scroll = lv_obj_create(s_tile);
@@ -185,7 +186,7 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     lv_obj_set_scrollbar_mode(s_scroll, LV_SCROLLBAR_MODE_ACTIVE);
     lv_obj_remove_flag(s_scroll, LV_OBJ_FLAG_SCROLL_ELASTIC);
     lv_obj_set_style_pad_all(s_scroll, 4, 0);
-    lv_obj_set_style_bg_color(s_scroll, lv_color_hex(0x8b84a8), LV_PART_SCROLLBAR);
+    muse_theme_set_style_bg_color(s_scroll, lv_color_hex(0x8b84a8), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(s_scroll, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_width(s_scroll, 2, LV_PART_SCROLLBAR);
 
@@ -193,7 +194,7 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     lv_obj_set_width(s_label, 308);
     lv_label_set_long_mode(s_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(s_label, s_font_for(muse_lang_menu("No reply yet")), 0);
-    lv_obj_set_style_text_color(s_label, lv_color_hex(0xd8d2ff), 0);
+    muse_theme_set_style_text_color(s_label, lv_color_hex(0xd8d2ff), 0);
     lv_obj_set_style_text_line_space(s_label, 6, 0);
     lv_obj_set_style_text_align(s_label, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_text(s_label, muse_lang_menu("No reply yet"));
@@ -203,7 +204,7 @@ void muse_latest_reply_build(lv_obj_t *tileview, muse_latest_reply_font_t font_f
     s_new = lv_button_create(s_tile);
     lv_obj_set_size(s_new, 190, 42);
     lv_obj_align(s_new, LV_ALIGN_TOP_MID, 0, 372);
-    lv_obj_set_style_bg_color(s_new, lv_color_hex(0xa77dff), 0);
+    muse_theme_set_style_bg_color(s_new, lv_color_hex(0xa77dff), 0);
     lv_obj_set_style_radius(s_new, 21, 0);
     lv_obj_set_style_shadow_width(s_new, 0, 0);
     lv_obj_t *new_label = lv_label_create(s_new);

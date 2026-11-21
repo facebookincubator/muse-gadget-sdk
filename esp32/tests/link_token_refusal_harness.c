@@ -289,6 +289,11 @@ static const char *s_setup_stage = "idle";
 
 #include "app_token_paths.inc"
 
+#if !MUSE_BUILD
+// The heartbeat's Wi-Fi rejoin has its own test (test_link_wifi_rejoin.py).
+static void link_keep_wifi(void) {}
+#endif
+
 // One heartbeat of app_run()'s loop: its deferred resets and, on Link
 // builds, the paired-but-disconnected retry, verbatim.
 static void app_tick(void) {

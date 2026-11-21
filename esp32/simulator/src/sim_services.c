@@ -278,3 +278,9 @@ void sim_services_set_call(bool on)
 {
     s_in_call = on;
 }
+
+#if CONFIG_MUSE_UI_THEME
+static muse_theme_mode_t s_ui_theme;
+muse_theme_mode_t muse_settings_theme(void) {return s_ui_theme;}
+esp_err_t muse_settings_set_theme(muse_theme_mode_t mode) {s_ui_theme=mode;return ESP_OK;}
+#endif
