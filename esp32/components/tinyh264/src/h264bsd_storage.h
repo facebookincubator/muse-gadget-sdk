@@ -132,6 +132,7 @@ typedef struct storage
     /* OPT: the largest picture a sequence parameter set may describe
      * (h264bsdSetMaxSize), in macroblocks; 0: no limit but the overall one */
     u32 maxWidthMbs, maxHeightMbs;
+    u32 maxRefFrames; /* optional caller limit; zero preserves streaming defaults */
 
     /* last valid NAL unit header is stored here */
     nalUnit_t prevNalUnit[1];

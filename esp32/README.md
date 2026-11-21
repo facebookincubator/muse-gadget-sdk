@@ -245,6 +245,10 @@ It works on boards with the full UI, using their existing console commands.
 
 ## Boards
 
+The experimental [My Muse avatar source](docs/avatar-sources.md) can sync the
+paired Muse's current still image on supported LVGL/PSRAM builds. It is off by
+default and adds a runtime choice between Built-in and My Muse in Settings.
+
 On LVGL touch-screen boards with speaker audio, drag up or down on the main
 avatar or its background to raise or lower volume. A temporary percentage
 appears above a vertical filled bar while dragging; lifting your finger saves
@@ -657,6 +661,11 @@ their upstream licenses:
   copyright, with Google's patent grant. See
   [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
   [`PATENTS`](components/libvpx_vp8/PATENTS).
+- libwebp v1.6.0's WebP decoder, built in with the opt-in avatar sync
+  (`CONFIG_MUSE_AVATAR_SYNC`) from a pinned archive fetched at build time
+  ([`cmake/avatar_webp.cmake`](cmake/avatar_webp.cmake)), is BSD-3-Clause
+  under Google's copyright, with Google's patent grant. See
+  [`licenses/libwebp.txt`](licenses/libwebp.txt).
 - [`components/muse_wakeword/models/hey_muse.pte`](components/muse_wakeword/models),
   the opt-in wake word model, was trained for this SDK on public-domain, CC0
   and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)

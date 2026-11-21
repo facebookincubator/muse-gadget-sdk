@@ -53,6 +53,8 @@ muse_vdec_t *muse_vdec_open(uint8_t codec, int max_w, int max_h);
  * a VP8 keyframe): pictures it handed out before may be freed by
  * muse_vdec_decode, so wait for their readers first. */
 bool muse_vdec_may_realloc(const muse_vdec_t *d, const uint8_t *buf, uint32_t len);
+/* Optional H.264 reference-frame limit; no effect on VP8. Set before decode. */
+void muse_vdec_limit_refs(muse_vdec_t *d, unsigned max_refs);
 void muse_vdec_close(muse_vdec_t *d);
 bool muse_vdec_has(uint8_t codec);
 void muse_vdec_set_progress(muse_vdec_t *d, muse_vdec_progress_t cb, void *ctx);

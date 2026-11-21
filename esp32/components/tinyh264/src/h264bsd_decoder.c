@@ -654,6 +654,11 @@ void h264bsdFree(storage_t *pStorage)
 }
 
 /* OPT: see h264bsd_decoder.h */
+void h264bsdSetMaxReferences(storage_t *pStorage, u32 maxRefs)
+{
+    pStorage->maxRefFrames = maxRefs;
+}
+
 void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs)
 {
     pStorage->maxWidthMbs = maxWidthMbs;

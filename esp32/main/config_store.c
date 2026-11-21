@@ -163,6 +163,9 @@ bool config_clear_pairing(void) {
         "username",
         "pair_sdk_hint",
         "node_id",   // goes with the tokens it names
+#if CONFIG_MUSE_AVATAR_SYNC
+        "avatar_vm",
+#endif
     };
     return clear_and_verify(keys, sizeof(keys) / sizeof(keys[0]));
 }
@@ -186,6 +189,9 @@ bool config_clear_setup(void) {
         "username",
         "pair_sdk_hint",
         "node_id",
+#if CONFIG_MUSE_AVATAR_SYNC
+        "avatar_vm",
+#endif
         "ssid",
         "password",
         "wifi_channel",

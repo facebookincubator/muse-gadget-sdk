@@ -90,6 +90,10 @@ set(GADGET_REQUIRES
     esp_driver_pcnt
 )
 
+if(CONFIG_MUSE_AVATAR_SYNC)
+    list(APPEND GADGET_SRCS "avatar_sync.c")
+endif()
+
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h; so does a 16x16 LED matrix, which
 # the board supplies as an esp_lcd panel.
@@ -185,4 +189,15 @@ if(CONFIG_HOMEHUB_BLE_COEX)
         "-Wl,--wrap=coex_schm_status_bit_clear"
         "-Wl,-u,__wrap_coex_schm_status_bit_set"
         "-Wl,-u,__wrap_coex_schm_status_bit_clear")
+endif()
+
+if(CONFIG_MUSE_AVATAR_SYNC)
+    target_sources(${COMPONENT_LIB} PRIVATE "avatar_webp.c" "avatar_identity.c" "avatar_cache.c" "avatar_files.c" "avatar_request.c")
+    if(CONFIG_MUSE_AVATAR_ANIMATIONS)
+        target_sources(${COMPONENT_LIB} PRIVATE "avatar_clip_refs.c" "avatar_motion_console.c")
+    endif()
+    include("${CMAKE_CURRENT_LIST_DIR}/../cmake/avatar_webp.cmake")
+    muse_avatar_add_webp(${COMPONENT_LIB})
+    idf_component_get_property(avatar_littlefs joltwallet__littlefs COMPONENT_LIB)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE ${avatar_littlefs})
 endif()

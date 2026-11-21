@@ -91,6 +91,11 @@ void noise_ctrl_disconnect(void);
 bool noise_ctrl_reconnect(const char *network_ssid);
 
 bool noise_ctrl_is_connected(void);
+#if CONFIG_MUSE_AVATAR_SYNC
+// Copy the VM bound to this session; never returns its token. May be unknown
+// before the first connection after boot.
+bool noise_ctrl_copy_vm_id(char *out, size_t capacity);
+#endif
 
 // From noise_ctrl_connect() until noise_ctrl_disconnect(), connected or not:
 // the session reconnects by itself meanwhile.

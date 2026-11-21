@@ -78,6 +78,9 @@ static atomic_uint s_theme;
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 static int s_text_default = MUSE_TEXT_SMALL;
+#if CONFIG_MUSE_AVATAR_SYNC
+static atomic_uint s_avatar_source;
+#endif
 
 #define LOCKED(body) do { xSemaphoreTake(s_lock, portMAX_DELAY); body; xSemaphoreGive(s_lock); } while (0)
 
@@ -158,6 +161,11 @@ esp_err_t muse_settings_init(void)
     b=MUSE_THEME_AUTO;load_u8("ui_theme_v1",&b);
     atomic_store(&s_theme,b<=MUSE_THEME_LIGHT?b:MUSE_THEME_AUTO);
 #endif
+#if CONFIG_MUSE_AVATAR_SYNC
+    b = MUSE_AVATAR_BUILTIN;
+    load_u8("avatar_src_v1", &b);
+    atomic_store(&s_avatar_source, b == MUSE_AVATAR_PERSONAL ? b : MUSE_AVATAR_BUILTIN);
+#endif
     load_u8("volume", &s.volume);
     if (nvs_get_u8(s_nvs, "speaker", &b) == ESP_OK) {
         s.speaker_on = b;
@@ -220,6 +228,31 @@ esp_err_t muse_settings_set_theme(muse_theme_mode_t mode) {
         }
     });
     return error;
+}
+#endif
+
+#if CONFIG_MUSE_AVATAR_SYNC
+muse_avatar_source_t muse_settings_avatar_source(void) {
+    return (muse_avatar_source_t)atomic_load(&s_avatar_source);
+}
+
+esp_err_t muse_settings_set_avatar_source(muse_avatar_source_t source) {
+    if (source != MUSE_AVATAR_BUILTIN && source != MUSE_AVATAR_PERSONAL) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = ESP_OK;
+    LOCKED({
+        if (atomic_load(&s_avatar_source) != (unsigned)source) {
+            err = nvs_set_u8(s_nvs, "avatar_src_v1", source);
+            if (err == ESP_OK) err = nvs_commit(s_nvs);
+            if (err == ESP_OK) atomic_store(&s_avatar_source, source);
+            else {
+                /* An unrelated setting must not later commit the source
+                 * whose failed save was rolled back in RAM. */
+                nvs_set_u8(s_nvs, "avatar_src_v1", (uint8_t)atomic_load(&s_avatar_source));
+            }
+        }
+    });
+    if (err == ESP_OK) notify(MUSE_SETTING_AVATAR);
+    return err;
 }
 #endif
 

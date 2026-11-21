@@ -75,6 +75,8 @@ void h264bsdSetProgress(storage_t *pStorage,
 /* OPT: refuse sequence parameter sets for pictures wider or taller than
  * this (macroblocks), before anything is allocated for them: a stream can't
  * ask for more memory than its caller planned. Call after h264bsdInit. */
+/* Zero keeps the default. Set before the first parameter set. */
+void h264bsdSetMaxReferences(storage_t *pStorage, u32 maxRefs);
 void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs);
 
 storage_t* h264bsdAlloc();

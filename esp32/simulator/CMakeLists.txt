@@ -249,6 +249,31 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_theme_ui COMMAND muse_theme_ui_test)
     set_tests_properties(muse_theme_ui PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1" TIMEOUT 30)
+    add_executable(muse_avatar_ui_test tests/avatar_ui_harness.c ${caption_sources}
+        "${MUSE_COMPONENT_DIR}/muse_avatar_render.c")
+    target_include_directories(muse_avatar_ui_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_avatar_ui_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_avatar_ui_test PRIVATE ${caption_compile_options})
+    target_compile_definitions(muse_avatar_ui_test PRIVATE CONFIG_MUSE_AVATAR_SYNC=1)
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_avatar_ui_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_avatar_ui COMMAND muse_avatar_ui_test)
+    set_tests_properties(muse_avatar_ui PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1" TIMEOUT 30)
+    add_executable(muse_avatar_motion_ui_test tests/avatar_motion_ui_harness.c ${caption_sources}
+        "${MUSE_COMPONENT_DIR}/muse_avatar_render.c")
+    target_include_directories(muse_avatar_motion_ui_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_avatar_motion_ui_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_avatar_motion_ui_test PRIVATE ${caption_compile_options})
+    target_compile_definitions(muse_avatar_motion_ui_test PRIVATE CONFIG_MUSE_AVATAR_SYNC=1 CONFIG_MUSE_AVATAR_ANIMATIONS=1)
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_avatar_motion_ui_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_avatar_motion_ui COMMAND muse_avatar_motion_ui_test)
+    set_tests_properties(muse_avatar_motion_ui PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1" TIMEOUT 30)
+
     add_executable(muse_volume_swipe_test tests/volume_swipe_harness.c ${caption_sources})
     target_include_directories(muse_volume_swipe_test PRIVATE ${caption_includes})
     target_link_libraries(muse_volume_swipe_test PRIVATE ${caption_libraries})
@@ -349,6 +374,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_theme_navigation COMMAND muse_settings_theme_test 466 466 1 1.75 theme-navigation)
     set_tests_properties(muse_settings_theme_navigation PROPERTIES ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}" TIMEOUT 30)
     set_tests_properties(muse_settings_theme_466 muse_settings_theme_240 PROPERTIES ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}" TIMEOUT 30)
+
     add_test(NAME muse_settings_volume_sync COMMAND muse_settings_text_test 466 466 1 1.75 volume)
     target_compile_options(muse_settings_text_test PRIVATE -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections)
     target_link_libraries(muse_settings_text_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
@@ -366,6 +392,19 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
         target_compile_options(muse_settings_text_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(muse_settings_text_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     endif()
+    get_target_property(avatar_settings_sources muse_settings_text_test SOURCES)
+    add_executable(muse_settings_avatar_test ${avatar_settings_sources})
+    foreach(prop INCLUDE_DIRECTORIES LINK_LIBRARIES COMPILE_OPTIONS LINK_OPTIONS COMPILE_DEFINITIONS)
+        get_target_property(value muse_settings_text_test ${prop})
+        if(value)
+            set_property(TARGET muse_settings_avatar_test PROPERTY ${prop} "${value}")
+        endif()
+    endforeach()
+    target_compile_definitions(muse_settings_avatar_test PRIVATE CONFIG_MUSE_AVATAR_SYNC=1)
+    add_test(NAME muse_settings_avatar_466 COMMAND muse_settings_avatar_test 466 466 1 1.75 avatar)
+    add_test(NAME muse_settings_avatar_240 COMMAND muse_settings_avatar_test 240 240 1 1.28 avatar)
+    set_tests_properties(muse_settings_avatar_466 muse_settings_avatar_240 PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;ASAN_OPTIONS=detect_leaks=0:halt_on_error=1")
     foreach(scenario other secure saved back)
         add_test(NAME muse_settings_xiao_${scenario}
                  COMMAND muse_settings_text_test 172 320 0 1.47 ${scenario})
@@ -432,6 +471,8 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     get_property(settings_tests DIRECTORY PROPERTY TESTS)
     list(FILTER settings_tests INCLUDE REGEX "^muse_settings_")
     set_tests_properties(${settings_tests} PROPERTIES ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}" TIMEOUT 30)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/avatar_theme_tests.cmake")
+
 endif()
 
 message(STATUS "Muse simulator LVGL target: ${MUSE_SIM_LVGL_TARGET}")

@@ -66,7 +66,7 @@ def nal(kind, b):
     return b"\x00\x00\x00\x01" + bytes([kind]) + b.rbsp()
 
 
-def sps(width_mbs, height_mbs, sps_id=0):
+def sps(width_mbs, height_mbs, sps_id=0, num_ref_frames=1):
     """A baseline-profile sequence parameter set for width x height macroblocks."""
     b = Bits()
     b.u(8, 66)   # profile_idc: baseline
@@ -75,7 +75,7 @@ def sps(width_mbs, height_mbs, sps_id=0):
     b.ue(sps_id)  # seq_parameter_set_id
     b.ue(0)      # log2_max_frame_num_minus4
     b.ue(2)      # pic_order_cnt_type
-    b.ue(1)      # num_ref_frames
+    b.ue(num_ref_frames)  # num_ref_frames
     b.u(1, 0)    # gaps_in_frame_num_value_allowed_flag
     b.ue(width_mbs - 1)
     b.ue(height_mbs - 1)

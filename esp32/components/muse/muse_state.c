@@ -283,7 +283,11 @@ bool muse_state_asleep(void)
 
 void muse_state_wait_awake(uint32_t timeout_ms)
 {
-    xEventGroupWaitBits(s_wake, AWAKE_BIT | NUDGE_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    xEventGroupWaitBits(s_wake, AWAKE_BIT | NUDGE_BIT, pdFALSE, pdFALSE,
+#if CONFIG_MUSE_AVATAR_SYNC
+                       timeout_ms == UINT32_MAX ? portMAX_DELAY :
+#endif
+                       pdMS_TO_TICKS(timeout_ms));
     xEventGroupClearBits(s_wake, NUDGE_BIT);
 }
 

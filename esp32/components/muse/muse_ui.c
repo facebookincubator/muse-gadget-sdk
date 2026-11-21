@@ -52,6 +52,16 @@
 #include "muse_mirror.h"
 #endif
 #include "muse_pixel.h"
+#if CONFIG_MUSE_AVATAR_SYNC
+#include "muse_avatar.h"
+#if CONFIG_MUSE_UI_THEME
+#include "muse_avatar_theme.h"
+#include "muse_theme_lvgl.h"
+#endif
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+#include "muse_avatar_motion.h"
+#endif
+#endif
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
 #include "muse_state.h"
@@ -320,6 +330,15 @@ static const char *const MODE_NAMES[MUSE_MODE_COUNT] = {
 static lv_image_dsc_t s_muse_src;
 static lv_draw_buf_t *s_strips[STRIPS];
 static bool s_strip_busy[STRIPS];
+#if CONFIG_MUSE_AVATAR_SYNC
+static const muse_avatar_image_t *s_strip_images[STRIPS];
+static muse_avatar_transform_t s_strip_transform[STRIPS];
+static uint16_t s_strip_background[STRIPS];
+static muse_avatar_transform_t s_avatar_transform={1000,1000,0,MUSE_AVATAR_BILINEAR};
+static float s_avatar_reaction_start=-10.0f,s_avatar_last_happy;
+static uint32_t s_avatar_revision;
+static bool s_avatar_visible;
+#endif
 static uint16_t *s_cells;       /* each cell's colour as last invalidated */
 static uint16_t *s_cell_row;    /* one screen row of Muse */
 static bool s_cells_valid;
@@ -341,6 +360,21 @@ static lv_result_t muse_dec_open(lv_image_decoder_t *dec, lv_image_decoder_dsc_t
     for (int i = 0; i < STRIPS; i++) {
         if (!s_strip_busy[i]) {
             s_strip_busy[i] = true;
+#if CONFIG_MUSE_AVATAR_SYNC
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+            s_strip_images[i] = muse_avatar_motion_acquire();
+            if (!s_strip_images[i])
+#endif
+                s_strip_images[i] = muse_avatar_acquire();
+            s_strip_transform[i] = s_avatar_transform;
+            s_strip_background[i] = 0;
+#if CONFIG_MUSE_UI_THEME
+            /* Keep the image's own backdrop steady while its character bops,
+             * including when the user explicitly selected the other UI mode. */
+            uint32_t hint=muse_theme_hint();
+            s_strip_background[i] = muse_theme_rgb565(hint&0x1000000u?hint:muse_theme_background());
+#endif
+#endif
             dsc->user_data = s_strips[i];
             return LV_RESULT_OK;   /* the rest of the work is in get_area */
         }
@@ -362,7 +396,19 @@ static lv_result_t muse_dec_get_area(lv_image_decoder_t *dec, lv_image_decoder_d
     if (!buf) {
         return LV_RESULT_INVALID;
     }
-    muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
+#if CONFIG_MUSE_AVATAR_SYNC
+    bool personal = false;
+    for (int i = 0; i < STRIPS; i++) {
+        if (s_strips[i] == dsc->user_data && s_strip_images[i]) {
+            personal = muse_avatar_blit_transform(&s_strip_images[i]->data,dsc->header.w,
+                                        &s_strip_transform[i],s_strip_background[i],(uint16_t *)buf->data,
+                                        buf->header.stride / sizeof(uint16_t),full->x1,full->x2,y1,y2);
+            break;
+        }
+    }
+    if (!personal)
+#endif
+        muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
     area->x1 = full->x1;
     area->x2 = full->x2;
     area->y1 = y1;
@@ -376,6 +422,10 @@ static void muse_dec_close(lv_image_decoder_t *dec, lv_image_decoder_dsc_t *dsc)
     (void)dec;
     for (int i = 0; i < STRIPS; i++) {
         if (s_strips[i] == dsc->user_data) {
+#if CONFIG_MUSE_AVATAR_SYNC
+            muse_avatar_release(s_strip_images[i]);
+            s_strip_images[i] = NULL;
+#endif
             s_strip_busy[i] = false;   /* kept for the next open */
         }
     }
@@ -599,7 +649,12 @@ static void build_button_icons(lv_obj_t *face)
 static void on_canvas_clicked(lv_event_t *e)
 {
     (void)e;
-    if (!s_volume_swipe.claimed) muse_state_make_happy();
+    if (!s_volume_swipe.claimed) {
+        muse_state_make_happy();
+#if CONFIG_MUSE_AVATAR_SYNC
+        s_avatar_reaction_start=(float)esp_timer_get_time()/1e6f;
+#endif
+    }
 }
 
 static const lv_font_t *font_pick(const lv_font_t *full, const lv_font_t *compact)
@@ -2552,6 +2607,9 @@ __attribute__((weak)) void muse_pixel_set_background(uint32_t rgb) {(void)rgb;}
 
 static void frame_tick(lv_timer_t *timer)
 {
+#if CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
+    muse_avatar_theme_tick();
+#endif
 #if CONFIG_MUSE_UI_THEME
     if (muse_theme_lvgl_tick()) {
         muse_pixel_set_background(muse_theme_background());
@@ -2655,7 +2713,53 @@ static void frame_tick(lv_timer_t *timer)
         .happy = muse_state_happiness(),
         .working = muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING ? 1.0f : 0,
     };
-    if (!muse_board->epaper || mode != s_last_epaper_pose) {
+    bool render_builtin = true;
+#if CONFIG_MUSE_AVATAR_SYNC
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+    muse_avatar_motion_tick(&pose);
+    const muse_avatar_image_t *personal = muse_avatar_motion_acquire();
+    if (!personal) personal = muse_avatar_acquire();
+#else
+    const muse_avatar_image_t *personal = muse_avatar_acquire();
+#endif
+    if (personal) {
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+        /* End the procedural speaking state when personal idle resumes, so
+         * the next fallback turn starts its normal mouth/hand controller. */
+        if (!s_avatar_visible) muse_pixel_render(&pose);
+        if (personal->release) muse_avatar_motion_seen(personal->revision);
+#endif
+        if(pose.happy>s_avatar_last_happy+0.1f)s_avatar_reaction_start=now;
+        s_avatar_last_happy=pose.happy;
+        float age=now-s_avatar_reaction_start,bounce=0;
+        if(age>=0 && age<0.85f)bounce=fabsf(sinf(age*7.3919827f))*(1.0f-age/0.85f);
+        int voice=pose.mode==MUSE_MODE_SPEAKING?(int)(pose.level*15):0;
+        muse_avatar_filter_t filter=MUSE_AVATAR_BILINEAR;
+        bool video_frame=false;
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+        if(personal->release) {filter=MUSE_AVATAR_FAST_SMOOTH;video_frame=true;}
+#endif
+        int breath=!video_frame && pose.mode==MUSE_MODE_IDLE?(int)((sinf(now*1.9634954f)+1.0f)*6):0;
+        muse_avatar_transform_t transform={1000-(int)(bounce*30)-voice,1000-(int)(bounce*100)-voice-breath,-(int)(bounce*5),filter};
+        if(transform.zoom_y<900)transform.zoom_y=900;
+        if (!s_avatar_visible || personal->revision != s_avatar_revision ||
+            s_canvas_px*transform.zoom_x/1000!=s_canvas_px*s_avatar_transform.zoom_x/1000 ||
+            s_canvas_px*transform.zoom_y/1000!=s_canvas_px*s_avatar_transform.zoom_y/1000 ||
+            transform.offset_y!=s_avatar_transform.offset_y || transform.filter!=s_avatar_transform.filter) {
+            s_avatar_transform=transform;
+            s_avatar_revision = personal->revision;
+            lv_obj_invalidate(s_canvas);
+        }
+        s_avatar_visible = true;
+        render_builtin = false;
+        muse_avatar_release(personal);
+    } else if (s_avatar_visible) {
+        s_avatar_visible = false;
+        s_cells_valid = false;
+        lv_obj_invalidate(s_canvas);
+    }
+#endif
+    if (render_builtin && (!muse_board->epaper || mode != s_last_epaper_pose)) {
         muse_pixel_render(&pose);
         invalidate_muse();
         s_last_epaper_pose = mode;
