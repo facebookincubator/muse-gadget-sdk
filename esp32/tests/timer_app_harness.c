@@ -215,6 +215,8 @@ int main(void)
     assert(props[action][P_DISABLED]);
     on_event(EV_TIMER, RESET_TIMER, 0);
     assert(!resetting && props[wheels[2]][P_SELECTED] == 0);
+    for (int i = 0; i < 3; i++) /* Scrolling settles as quickly as before the reset. */
+        assert(props[wheels[i]][P_ANIM_DURATION] == WHEEL_ANIM_MS && !props[wheels[i]][P_DISABLED]);
     fresh(); pick(0, 0, 5); click(); clock_ms = 1000; countdown_tap();
     clock_ms = 10000; countdown_tap(); /* Time paused does not consume duration. */
     assert(phase == COUNTING && remaining_ms == 4000);

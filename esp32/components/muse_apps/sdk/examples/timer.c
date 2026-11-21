@@ -26,6 +26,7 @@ static uint32_t selected_s, started_ms, remaining_ms, last_tap_ms, finished_ms, 
 static int32_t resetting, tap_valid;
 #define RESET_TIMER 2
 #define DOUBLE_TAP_MS 300
+#define WHEEL_ANIM_MS 160
 
 static void ring_state(int32_t state)
 {
@@ -252,7 +253,10 @@ static void reset_picker(void)
     }
     if (sys_timer(RESET_TIMER, 550, 0) < 0) {
         resetting = 0;
-        for (int i = 0; i < 3; i++) ui_set(wheels[i], P_DISABLED, 0);
+        for (int i = 0; i < 3; i++) {
+            ui_set(wheels[i], P_ANIM_DURATION, WHEEL_ANIM_MS);
+            ui_set(wheels[i], P_DISABLED, 0);
+        }
     }
 }
 
@@ -363,7 +367,7 @@ GADGET_EXPORT(on_start) void on_start(void)
         ui_set(roller, P_TEXT_COLOR, MUTED);
         ui_set(roller, P_TEXT_ALIGN, TEXT_ALIGN_CENTER);
         ui_set(roller, P_TEXT_LINE_SPACE, side >= 360 ? 12 : 6);
-        ui_set(roller, P_ANIM_DURATION, 160);
+        ui_set(roller, P_ANIM_DURATION, WHEEL_ANIM_MS);
         ui_style(roller, PART_SELECTED, P_BG_OPA, OPA_TRANSP);
         ui_style(roller, PART_SELECTED, P_TEXT_COLOR, TEXT);
         ui_style(roller, PART_SELECTED, P_TEXT_FONT, font);
@@ -434,6 +438,7 @@ GADGET_EXPORT(on_event) void on_event(int32_t type, int32_t a, int32_t b)
         resetting = 0;
         for (int i = 0; i < 3; i++) {
             ui_set(wheels[i], P_SELECTED, 0);
+            ui_set(wheels[i], P_ANIM_DURATION, WHEEL_ANIM_MS);
             ui_set(wheels[i], P_DISABLED, 0);
         }
     } else if (type == EV_BUTTON && b == BTN_DOWN) {
