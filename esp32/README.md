@@ -617,6 +617,11 @@ their upstream licenses:
 - [`main/epd_it8951.c`](main/epd_it8951.c), the reTerminal E1003 IT8951
   driver with command framing and one-bit mode adapted from Seeed_GFX2, is
   MIT and retains the source's copyright and license notice.
+- The SSD1681 initialization sequence and waveform LUT in
+  [`main/epd_ssd1681.c`](main/epd_ssd1681.c), the Waveshare 1.54" V2
+  e-paper driver, are from Waveshare's XiaoZhi V2 source for the board
+  (78/xiaozhi-esp32 with Waveshare's board), which is MIT. See
+  [`devices/licenses/xiaozhi-esp32.txt`](devices/licenses/xiaozhi-esp32.txt).
 - The ST7789 tuning table in
   [`components/muse/boards/board_atk_dnesp32s3_box2.c`](components/muse/boards/board_atk_dnesp32s3_box2.c),
   from 78/xiaozhi-esp32's ATK-DNESP32S3-BOX2 board, is MIT. See
@@ -633,6 +638,10 @@ their upstream licenses:
   [`components/muse/boards/board_m5stack_atoms3.c`](components/muse/boards/board_m5stack_atoms3.c),
   from M5GFX's `Panel_GC9107` (LovyanGFX), is FreeBSD. See
   [`devices/licenses/LovyanGFX.txt`](devices/licenses/LovyanGFX.txt).
+- The AXS15231B initialization sequence in
+  [`components/muse/boards/board_guition_jc3248w535.c`](components/muse/boards/board_guition_jc3248w535.c),
+  Arduino_GFX 1.4.9's `axs15231b_init_operations`, is BSD-2-Clause. See
+  [`devices/licenses/Arduino_GFX.txt`](devices/licenses/Arduino_GFX.txt).
 - [`components/esp_lcd_gc9107`](components/esp_lcd_gc9107), Espressif's GC9107
   panel driver 2.0.0 from the ESP Component Registry with one change to build
   on ESP-IDF 6, is Apache-2.0 under Espressif's copyright. See
@@ -643,6 +652,10 @@ their upstream licenses:
 - [`components/muse/boards/waveshare_s3_185b_init.h`](components/muse/boards/waveshare_s3_185b_init.h),
   the Waveshare 1.85B panel initialization tables from Waveshare's BSP, is
   Apache-2.0, as its header says.
+- The CO5300 initialization sequence in
+  [`components/muse/boards/board_esp_mosaico.c`](components/muse/boards/board_esp_mosaico.c),
+  the vendor init from Espressif's ESP-Mosaico BSP, is Apache-2.0 under
+  Espressif's copyright, as the file's header says.
 - [`components/muse/fonts/`](components/muse/fonts/), the caption and
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
