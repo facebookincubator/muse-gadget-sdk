@@ -24,9 +24,9 @@ typedef struct {
 } avatar_request_ops_t;
 typedef struct { uint8_t *body; size_t len; int status; bool overflow; } avatar_response_t;
 
-/* open returning zero must not retain/call its callback. Otherwise exactly
- * one terminal callback releases transport ownership, even after cancel.
- * The caller can stop waiting without keeping its stack/context alive. */
+/* open returning zero must not retain/call its callback. The waiter owns the
+ * buffer: a stop, the 10 s deadline or a negative status cancels the stream and
+ * frees it at once, and later frames are dropped. At most 4 at a time. */
 avatar_response_t *avatar_request_get(const char *path, const char *const *headers,
                                      size_t cap, uintptr_t generation, const avatar_request_ops_t *ops);
 /* Diagnostic/export callers need explicit HTTP statuses (for example 416 at

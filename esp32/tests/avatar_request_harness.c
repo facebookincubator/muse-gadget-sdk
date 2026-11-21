@@ -13,16 +13,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-enum { NORMAL, INLINE, REFUSED, OVERFLOW, RESET, CANCEL, TIMEOUT, ALLOC_FAIL, STOPPED, RANGE_EOF };
+enum { NORMAL, INLINE, REFUSED, OVERFLOW, RESET, NEGATIVE, CANCEL, TIMEOUT, ALLOC_FAIL, STOPPED, RANGE_EOF };
 static int mode, tick, live, opens, cancels;
 static int64_t clock_us;
 static bool stop_now;
-static avatar_request_cb callback;
-static void *callback_ctx;
+static avatar_request_cb callback,stale;
+static void *callback_ctx,*stale_ctx;
 static void finish(int status,const char *text,bool end) {
     avatar_request_cb cb=callback;void *ctx=callback_ctx;
     assert(cb);
-    if(end||status<0) {callback=NULL;callback_ctx=NULL;}
+    /* Like the transport, only the end of the stream drops it. */
+    if(end) {callback=NULL;callback_ctx=NULL;}
     cb(ctx,status,(const uint8_t *)text,text?strlen(text):0,end);
 }
 static int64_t open_request(const char *verb,const char *path,const char *const *headers,
@@ -41,8 +42,10 @@ static int64_t now(void) {return clock_us;}
 static bool stop(uintptr_t gen) {assert(gen==7);return stop_now;}
 static void yield(void) {
     tick++;clock_us+=20000;
+    if(stale) {avatar_request_cb cb=stale;stale=NULL;cb(stale_ctx,200,(const uint8_t *)"zz",2,true);}
     if(mode==TIMEOUT) {clock_us+=11000000;return;}
-    if(mode==RESET) {finish(-1,NULL,false);return;}
+    if(mode==RESET) {finish(-1,NULL,true);return;}
+    if(mode==NEGATIVE) {finish(-5,"ab",false);return;}
     if(mode==OVERFLOW) {finish(200,"too many bytes",true);return;}
     if(tick==1) {finish(200,"ab",false);if(mode==CANCEL)stop_now=true;}
     else finish(0,"cd",true);
@@ -64,10 +67,11 @@ int main(void) {
             assert(live==1);avatar_request_release(r);
         } else {
             assert(!r);
-            if(scenario==CANCEL||scenario==TIMEOUT) {
-                assert(live==1&&cancels==1&&callback);
-                /* Cancellation returns before transport relinquishes ctx. */
-                finish(scenario==CANCEL?-1:200,scenario==CANCEL?NULL:"cd",true);
+            if(scenario==CANCEL||scenario==TIMEOUT||scenario==NEGATIVE) {
+                /* Freed at once; the transport may still deliver a frame
+                 * before it gets to the cancel, which must be dropped. */
+                assert(!live&&cancels==1&&callback);
+                finish(scenario==CANCEL?-1:0,scenario==CANCEL?NULL:"cd",true);
             }
         }
         assert(!live&&!callback);
@@ -81,5 +85,12 @@ int main(void) {
     avatar_response_t *eof=avatar_request_get_status("/identity",NULL,4,7,&ops);
     assert(eof && eof->status==416 && !eof->len);avatar_request_release(eof);
     reset(RANGE_EOF);assert(!request() && !live);
-    puts("avatar requests: chunked/inline completion, refusal, overflow, reset, delayed cancellation, timeout, allocation failure passed");
+    /* A late frame of a cancelled request can't reach the next one. */
+    reset(CANCEL);assert(!request() && !live);
+    stale=callback;stale_ctx=callback_ctx;callback=NULL;callback_ctx=NULL;
+    reset(NORMAL);
+    avatar_response_t *next=request();
+    assert(!stale&&next&&next->len==4&&!memcmp(next->body,"abcd",4));avatar_request_release(next);
+    assert(!live&&!callback);
+    puts("avatar requests: chunked/inline completion, refusal, overflow, reset, negative status, cancellation, timeout, late frames, allocation failure passed");
 }

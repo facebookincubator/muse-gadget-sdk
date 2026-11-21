@@ -118,24 +118,9 @@ static bool s_image_saved;
 #define CACHE_META "/files/.muse-avatar-v1/metadata.dat"
 #define CACHE_META_TMP "/files/.muse-avatar-v1/metadata.tmp"
 static void worker_kick(void);
-typedef struct {
-    TaskHandle_t task;
-    char *body;
-    size_t len;
-    int status;
-    bool overflow;
-} probe_t;
-
-static void probe_reply(void *ctx, int status, const uint8_t *data, size_t len, bool end) {
-    probe_t *p = ctx;
-    if (status) p->status = status;
-    if (len > IDENTITY_MAX - p->len) p->overflow = true;
-    if (!p->overflow && len) {
-        memcpy(p->body + p->len, data, len);
-        p->len += len;
-    }
-    if (end || status < 0) xTaskNotifyGive(p->task);
-}
+static void *request_alloc(size_t n);
+static void request_yield(void);
+static bool probe_stop(uintptr_t unused) { (void)unused; return false; }
 
 /* Only keys and types cross USB. Never print identity string values. */
 static cJSON *schema(const cJSON *v, int depth) {
@@ -157,23 +142,18 @@ static cJSON *schema(const cJSON *v, int depth) {
 
 static void probe_task(void *arg) {
     (void)arg;
-    probe_t p = {.task = xTaskGetCurrentTaskHandle()};
-    p.body = heap_caps_malloc(IDENTITY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    int64_t id = p.body ? noise_ctrl_req_open("GET", "/identity", NULL, true, probe_reply, &p) : 0;
-    if (id && !ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(15000))) {
-        noise_ctrl_req_cancel(id);
-        /* The session still owns ctx until its terminal callback. */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        p.status = -1;
-    }
-    cJSON *root = id && p.status == 200 && !p.overflow ? cJSON_ParseWithLength(p.body, p.len) : NULL;
+    /* Bounded by the request's 10 s deadline; a timeout frees the buffer. */
+    const avatar_request_ops_t ops = {noise_ctrl_req_open, noise_ctrl_req_cancel, request_alloc,
+                                      heap_caps_free, esp_timer_get_time, request_yield, probe_stop};
+    avatar_response_t *r = avatar_request_get("/identity", NULL, IDENTITY_MAX, 0, &ops);
+    cJSON *root = r && r->status == 200 ? cJSON_ParseWithLength((const char *)r->body, r->len) : NULL;
     cJSON *shape = root ? schema(root, 0) : NULL;
     char *json = shape ? cJSON_PrintUnformatted(shape) : NULL;
     printf("@avatar_schema %s\n", json ? json : "{\"error\":\"identity_unavailable\"}");
     cJSON_free(json);
     cJSON_Delete(shape);
     cJSON_Delete(root);
-    heap_caps_free(p.body);
+    avatar_request_release(r);
     atomic_store(&s_probe_busy, false);
     vTaskDeleteWithCaps(NULL);
 }
