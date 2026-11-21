@@ -196,6 +196,8 @@ CONFIG_LWIP_TCP_WND_DEFAULT=16384
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 CONFIG_LWIP_IP_FORWARD=y
 CONFIG_LWIP_IPV4_NAPT=y
+# net.forward's TCP forwards are NAPT port maps.
+CONFIG_LWIP_IPV4_NAPT_PORTMAP=y
 # device.discover's vendor window holds 6 sockets at once beside the session's;
 # a socket slot is a few dozen bytes of static RAM.
 CONFIG_LWIP_MAX_SOCKETS=16

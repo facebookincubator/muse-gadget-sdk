@@ -146,7 +146,8 @@ class DeviceDescriptionTest(unittest.TestCase):
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
-            "static cJSON *string_param(", "static cJSON *row_params(", "static void add_command(",
+            "static cJSON *string_param(", "static cJSON *integer_param(", "static cJSON *row_params(",
+            "static void add_command(",
             "static void add_register_metadata_string(", "static char *build_register_json(",
         ))
         # Print however large it gets, so the test reports the real size.
@@ -197,15 +198,22 @@ int main(void) {{
         return output.splitlines()
 
     def test_register_describes_the_device(self) -> None:
+        model = ['-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"']
         params = json.loads(self.registrations([
-            "-DCONFIG_HOMEHUB_TUNNEL=1",
-            '-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"',
+            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", *model,
         ])[0])["params"]
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
         # The VM keeps only string metadata values.
         self.assertEqual(params["metadata"]["lan_ipv4"], "255.255.255.255")
         self.assertEqual(params["metadata"]["lan_prefix"], "32")
+        forward = params["commands_v2"]["net.forward"]
+        self.assertEqual(set(forward["required"]), {"proto", "port", "ttl_s"})
+        self.assertEqual(set(forward["optional"]), {"to_port"})
+        # Turned off, the tunnel stays and net.forward isn't offered.
+        commands = json.loads(self.registrations(["-DCONFIG_HOMEHUB_TUNNEL=1", *model])[0])["params"]["commands_v2"]
+        self.assertIn("device.discover", commands)
+        self.assertNotIn("net.forward", commands)
         self.assertEqual(params["commands_v2"]["device.guide"],
                          {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
 
@@ -231,7 +239,7 @@ int main(void) {{
         model_id, model_name = "z" * 64, "~" * 128
         self.assertTrue(VALID_MODEL_NAME.fullmatch(model_name))
         common = [
-            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
+            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
             f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"',
         ]
         for profile, options in profiles.items():
@@ -256,7 +264,7 @@ int main(void) {{
         kconfig = (ROOT / "components/muse_apps/Kconfig").read_text()
         self.assertIn("depends on !HOMEHUB_BLE_COMMANDS", kconfig)
         model_id, model_name = "z" * 64, "~" * 128
-        common = ["-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_LED_BACKEND_MUSE=1",
+        common = ["-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", "-DCONFIG_HOMEHUB_LED_BACKEND_MUSE=1",
                   "-DCONFIG_HOMEHUB_DISPLAY_COMMANDS=1",
                   f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"']
         for profile, options in {"full UI, apps": ["CONFIG_MUSE_WATCHER_CAMERA"],

@@ -15,8 +15,9 @@
  */
 
 // The tunnel relay's packet sorting and which LAN senders reach the VM
-// (tunnel_relay.c), and the check that keeps short packets from NAPT
-// (lwip_hooks/tunnel_napt_guard.h), extracted by test_tunnel_relay.py.
+// (tunnel_relay.c), the check that keeps short packets from NAPT
+// (lwip_hooks/tunnel_napt_guard.h) and net.forward's parameter checks (app.c),
+// extracted by test_tunnel_relay.py.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include "cJSON.h"
 
 #include "relay_classify.inc"
 
@@ -35,7 +37,39 @@ static struct netif *netif_list;
 #define netif_ip4_addr(n) (&(n)->ip)
 #define netif_ip4_netmask(n) (&(n)->mask)
 #define ip4_addr_get_u32(a) ((a)->addr)
+// ...and of its NAPT port map: the TCP forwards' ports.
+typedef uint16_t u16_t;
+typedef uint32_t u32_t;
+#define IP_PROTO_TCP 6
+static u16_t mapped_tcp;
+static uint8_t ip_portmap_get(uint8_t proto, u16_t mport, u32_t *maddr, u32_t *daddr,
+                              u16_t *dport) {
+    if (proto != IP_PROTO_TCP || !mapped_tcp || mport != mapped_tcp) return 0;
+    *maddr = 0; *daddr = 0; *dport = mport;
+    return 1;
+}
 #include "napt_guard.inc"
+
+// ---- net.forward's parameters ----
+static int forwards;
+static bool last_tcp;
+static unsigned last_port, last_to_port, last_ttl;
+static int tunnel_relay_forward(bool tcp, uint16_t port, uint16_t to_port,
+                                uint32_t ttl_s, const char **error) {
+    forwards++;
+    last_tcp = tcp; last_port = port; last_to_port = to_port; last_ttl = ttl_s;
+    if (port == 7) { *error = "port is in use on the device"; return -1; }
+    return (int)ttl_s;
+}
+static cJSON *command_error(const char *code, const char *message) {
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "ok", false);
+    cJSON *error = cJSON_AddObjectToObject(result, "error");
+    cJSON_AddStringToObject(error, "code", code);
+    cJSON_AddStringToObject(error, "message", message);
+    return result;
+}
+#include "net_forward.inc"
 
 static uint32_t ip(const char *s) { return inet_addr(s); }
 
@@ -229,10 +263,108 @@ static void check_napt_guard(void) {
     assert(tunnel_napt_input_short(p, (uint16_t)ipv4(p, 6, 20, 30, "10.42.0.20"), ip("10.42.0.20")));
 }
 
+// A whole TCP (or UDP) packet from src to dst:dport.
+static const uint8_t *to_port(uint8_t *p, uint8_t proto, const char *src, const char *dst,
+                              uint16_t dport) {
+    ipv4(p, proto, 20, 40, dst);
+    uint32_t s = ip(src);
+    memcpy(p + 12, &s, 4);
+    p[22] = (uint8_t)(dport >> 8); p[23] = (uint8_t)dport;
+    return p;
+}
+
+static void check_tcp_forward_sources(void) {
+    uint8_t p[80];
+    struct netif tun = { NULL, { ip("10.42.0.1") }, { ip("255.255.255.0") }, 1 };
+    struct netif lan = { &tun, { ip("192.168.4.62") }, { ip("255.255.252.0") }, 0 };
+    netif_list = &lan;
+    mapped_tcp = 8123;
+    // A TCP forward takes hosts on the station's subnet...
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 6, "192.168.4.20", "192.168.4.62", 8123)));
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 6, "192.168.7.200", "192.168.4.62", 8123)));
+    // ...and no one else: another subnet, the internet, the station itself, a
+    // spoofed tunnel address.
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "192.168.10.5", "192.168.4.62", 8123)));
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "8.8.8.8", "192.168.4.62", 8123)));
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "192.168.4.62", "192.168.4.62", 8123)));
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "10.42.0.2", "192.168.4.62", 8123)));
+    // Anything but TCP to a forwarded port on the station is left to NAPT: a
+    // reply to the VM's own connection, UDP, another address, the tunnel side.
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 6, "8.8.8.8", "192.168.4.62", 50000)));
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 17, "8.8.8.8", "192.168.4.62", 8123)));
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 6, "8.8.8.8", "192.168.4.63", 8123)));
+    assert(!tunnel_napt_input_foreign(&tun, to_port(p, 6, "10.42.0.2", "10.42.0.1", 8123)));
+    // On a LAN that overlaps the tunnel, its hosts still count, the tunnel's
+    // addresses don't.
+    lan.ip.addr = ip("10.42.0.20"); lan.mask.addr = ip("255.255.0.0");
+    assert(!tunnel_napt_input_foreign(&lan, to_port(p, 6, "10.42.5.5", "10.42.0.20", 8123)));
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "10.42.0.2", "10.42.0.20", 8123)));
+    // Without a LAN address, no source counts.
+    lan.mask.addr = 0;
+    assert(tunnel_napt_input_foreign(&lan, to_port(p, 6, "10.42.5.5", "10.42.0.20", 8123)));
+    mapped_tcp = 0;
+}
+
+static cJSON *forward(const char *json) {
+    cJSON *params = cJSON_Parse(json);
+    cJSON *result = net_forward_command(params);
+    cJSON_Delete(params);
+    return result;
+}
+
+static bool ok(cJSON *r) { return cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")); }
+
+static void refused(const char *json) {
+    int before = forwards;
+    cJSON *r = forward(json);
+    assert(!ok(r) && forwards == before);
+    cJSON_Delete(r);
+}
+
+static void check_forward_params(void) {
+    cJSON *r = forward("{\"proto\":\"tcp\",\"port\":8123,\"ttl_s\":600}");
+    assert(ok(r) && last_tcp && last_port == 8123 && last_to_port == 8123 && last_ttl == 600);
+    cJSON *payload = cJSON_GetObjectItem(r, "payload");
+    assert(!strcmp(cJSON_GetObjectItem(payload, "proto")->valuestring, "tcp"));
+    assert(cJSON_GetObjectItem(payload, "port")->valueint == 8123);
+    assert(cJSON_GetObjectItem(payload, "to_port")->valueint == 8123);
+    assert(cJSON_GetObjectItem(payload, "expires_in_s")->valueint == 600);
+    cJSON_Delete(r);
+    r = forward("{\"proto\":\"udp\",\"port\":4002,\"to_port\":40002,\"ttl_s\":0}");
+    assert(ok(r) && !last_tcp && last_to_port == 40002 && last_ttl == 0);
+    assert(cJSON_GetObjectItem(cJSON_GetObjectItem(r, "payload"), "expires_in_s")->valueint == 0);
+    cJSON_Delete(r);
+    r = forward("{\"proto\":\"udp\",\"port\":7,\"ttl_s\":60}");
+    assert(!ok(r));
+    assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(r, "error"), "message")->valuestring,
+                   "port is in use on the device"));
+    cJSON_Delete(r);
+    refused("{\"port\":80,\"ttl_s\":60}");
+    refused("{\"proto\":\"icmp\",\"port\":80,\"ttl_s\":60}");
+    refused("{\"proto\":17,\"port\":80,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":0,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":49152,\"ttl_s\":60}");   /* the device's own ports */
+    refused("{\"proto\":\"tcp\",\"port\":65536,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":80.5,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":\"80\",\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":80,\"to_port\":0,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":80,\"to_port\":null,\"ttl_s\":60}");
+    refused("{\"proto\":\"tcp\",\"port\":80}");
+    refused("{\"proto\":\"tcp\",\"port\":80,\"ttl_s\":3601}");
+    refused("{\"proto\":\"tcp\",\"port\":80,\"ttl_s\":-1}");
+    refused("{\"proto\":\"tcp\",\"port\":1e300,\"ttl_s\":60}");
+    cJSON *none = net_forward_command(NULL);
+    assert(!ok(none));
+    cJSON_Delete(none);
+}
+
 int main(void) {
     check_classify();
     check_senders();
     check_napt_guard();
-    puts("PASS relay: packet sorting, source check, malformed headers, LAN senders, short packets and the tunnel's subnet kept from the LAN");
+    check_tcp_forward_sources();
+    check_forward_params();
+    puts("PASS relay: packet sorting, source check, malformed headers, LAN senders, short packets and the tunnel's subnet kept from the LAN, TCP forwards for the home network only; net.forward parameters");
     return 0;
 }

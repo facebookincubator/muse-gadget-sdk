@@ -905,15 +905,17 @@ For app authoring and the guide to send Muse, see
   takes about 19 KB of internal RAM (8-bit GHASH tables and the PSRAM staging
   buffer; see its Kconfig help). Turn it off to compare against IDF's;
   `tests/test_ghash32.py` checks the tables and its failure handling.
-- The tunnel relays broadcast and multicast UDP between the VM and the LAN
-  and reports the station's address in `link.register`
-  (`main/tunnel_relay.c`, `docs/home-link-network.md`, which is the behavior
-  the VM side builds on). NAPT's idle UDP time is
+- The tunnel relays broadcast and multicast UDP between the VM and the LAN,
+  takes the VM's `net.forward` (`CONFIG_HOMEHUB_NET_FORWARD`, default on) and
+  reports the station's address in `link.register` (`main/tunnel_relay.c`,
+  `docs/home-link-network.md`, which is the behavior the VM side builds on).
+  NAPT's idle UDP time is
   `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S`, which `main/CMakeLists.txt` compiles
   into ESP-IDF's lwIP, along with a 64-entry ARP table for `device.discover`
   (1,296 bytes of internal RAM) and an input hook
   (`main/lwip_hooks/tunnel_napt_guard.h`) that drops packets too short for
-  NAPT's rewrite and packets from the LAN for the tunnel's subnet. They rely
+  NAPT's rewrite, packets from the LAN for the tunnel's subnet, and TCP for a
+  TCP forward from outside the station's subnet. They rely
   on lwIP's own defaults and the hook's place before NAPT, so they're checked
   on ESP-IDF v6.0.x only, and the longer UDP time comes only with the hook: on
   another version the build warns and lwIP keeps its 2 s, its 10 entries and

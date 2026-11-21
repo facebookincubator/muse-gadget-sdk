@@ -68,6 +68,7 @@
 #include "led_status.h"
 #include "button.h"
 #include "tunnel_netif.h"
+#include "tunnel_relay.h"
 #include "net_discovery.h"
 #include "ota.h"
 #include "link_pairing.h"
@@ -2027,6 +2028,61 @@ static cJSON *bug_report_command(
 }
 #endif
 
+#if CONFIG_HOMEHUB_NET_FORWARD
+// An integer parameter from lo to hi.
+static bool int_param(cJSON *params, const char *key, int lo, int hi, int *out) {
+    cJSON *item = params ? cJSON_GetObjectItem(params, key) : NULL;
+    if (!cJSON_IsNumber(item) || !(item->valuedouble >= lo && item->valuedouble <= hi)
+        || item->valuedouble != (double)(int)item->valuedouble) {
+        return false;
+    }
+    *out = (int)item->valuedouble;
+    return true;
+}
+
+// net.forward (docs/home-link-network.md): a LAN port of this device to a VM
+// port, for ttl_s seconds.
+static cJSON *net_forward_command(cJSON *params) {
+    cJSON *proto = params ? cJSON_GetObjectItem(params, "proto") : NULL;
+    const char *name = cJSON_IsString(proto) ? proto->valuestring : NULL;
+    if (!name || (strcmp(name, "udp") != 0 && strcmp(name, "tcp") != 0)) {
+        return command_error("invalid_params", "proto must be \"udp\" or \"tcp\"");
+    }
+    int port, to_port, ttl_s;
+    if (!int_param(params, "port", 1, 49151, &port)) {
+        return command_error("invalid_params", "port must be an integer from 1 to 49151");
+    }
+    to_port = port;
+    if (cJSON_GetObjectItem(params, "to_port")
+        && !int_param(params, "to_port", 1, 65535, &to_port)) {
+        return command_error("invalid_params", "to_port must be an integer from 1 to 65535");
+    }
+    if (!int_param(params, "ttl_s", 0, 3600, &ttl_s)) {
+        return command_error("invalid_params", "ttl_s must be an integer from 0 to 3600");
+    }
+    // The whole result first: a forward is never left open behind a failure.
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+    cJSON *left = payload ? cJSON_AddNumberToObject(payload, "expires_in_s", 0) : NULL;
+    if (!cJSON_AddBoolToObject(result, "ok", true) || !left
+        || !cJSON_AddStringToObject(payload, "proto", name)
+        || !cJSON_AddNumberToObject(payload, "port", port)
+        || !cJSON_AddNumberToObject(payload, "to_port", to_port)) {
+        cJSON_Delete(result);
+        return command_error("out_of_memory", "failed to build the result");
+    }
+    const char *error = "failed";
+    int seconds = tunnel_relay_forward(name[0] == 't', (uint16_t)port, (uint16_t)to_port,
+                                       (uint32_t)ttl_s, &error);
+    if (seconds < 0) {
+        cJSON_Delete(result);
+        return command_error("forward_failed", error);
+    }
+    cJSON_SetNumberValue(left, seconds);
+    return result;
+}
+#endif
+
 #if CONFIG_HOMEHUB_BLE_COMMANDS
 // ---- BLE commands' hooks (main/ble_commands.c) ----
 
@@ -2160,6 +2216,11 @@ static cJSON *on_ws_command(
 #if CONFIG_HOMEHUB_SUPPORT_BUG_REPORT
     if (strcmp(command, "bug.report") == 0) {
         return bug_report_command(request_id, session_generation);
+    }
+#endif
+#if CONFIG_HOMEHUB_NET_FORWARD
+    if (strcmp(command, "net.forward") == 0) {
+        return net_forward_command(params);
     }
 #endif
 #if CONFIG_HOMEHUB_TUNNEL

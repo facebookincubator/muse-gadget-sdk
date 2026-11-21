@@ -1397,6 +1397,14 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
+#if CONFIG_HOMEHUB_NET_FORWARD
+static cJSON *integer_param(void) {
+    cJSON *param = cJSON_CreateObject();
+    cJSON_AddStringToObject(param, "type", "integer");
+    return param;
+}
+#endif
+
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
 // The optional `row` of display.draw_url and display.draw_file.
 static cJSON *row_params(void) {
@@ -1473,8 +1481,9 @@ static char *build_register_json(void) {
                                  CONFIG_MUSE_DEVICE_MODEL_NAME);
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 #if CONFIG_HOMEHUB_TUNNEL
-    // The LAN the tunnel reaches. A new station address aborts this session's
-    // TCP connection; the next session sends it.
+    // The LAN the tunnel reaches, where LAN devices find a net.forward port. A
+    // new station address aborts this session's TCP connection; the next
+    // session sends it.
     char lan_ip[16], lan_prefix[4];
     int prefix = 0;
     if (tunnel_relay_lan_address(lan_ip, sizeof(lan_ip), &prefix)) {
@@ -1504,6 +1513,19 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "device.discover"), "timeout_ms", 90000);
+#if CONFIG_HOMEHUB_NET_FORWARD
+    // Terse: the VM's tunnel code calls it, and link.register has 8 KB in all
+    // (docs/home-link-network.md has the rest).
+    cJSON *forward_required = cJSON_CreateObject();
+    cJSON_AddItemToObject(forward_required, "proto", string_param(nullptr));
+    cJSON_AddItemToObject(forward_required, "port", integer_param());
+    cJSON_AddItemToObject(forward_required, "ttl_s", integer_param());
+    cJSON *forward_optional = cJSON_CreateObject();
+    cJSON_AddItemToObject(forward_optional, "to_port", integer_param());
+    add_command(commands, "net.forward",
+                "LAN port to VM to_port (default port) for ttl_s s, 0 closes; udp|tcp",
+                forward_required, forward_optional);
+#endif
 #endif
 
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
