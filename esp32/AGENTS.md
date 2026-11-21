@@ -905,6 +905,14 @@ For app authoring and the guide to send Muse, see
   takes about 19 KB of internal RAM (8-bit GHASH tables and the PSRAM staging
   buffer; see its Kconfig help). Turn it off to compare against IDF's;
   `tests/test_ghash32.py` checks the tables and its failure handling.
+- The tunnel relays broadcast and multicast UDP between the VM and the LAN
+  and reports the station's address in `link.register`
+  (`main/tunnel_relay.c`, `docs/home-link-network.md`, which is the behavior
+  the VM side builds on). NAPT's idle UDP time is
+  `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S`, which `main/CMakeLists.txt` compiles
+  into ESP-IDF's lwIP. That relies on lwIP's own default, so it's checked on
+  ESP-IDF v6.0.x only: on another version the build warns and NAPT keeps
+  lwIP's 2 s.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build

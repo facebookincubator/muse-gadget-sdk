@@ -128,6 +128,7 @@ struct tx_slot {
     (NOISE_TUNNEL_TX_HEADROOM + TUN_MAX_MSG_BYTES + NOISE_TUNNEL_TX_TAILROOM)
 
 static noise_tunnel_packet_cb s_packet_cb = nullptr;
+static void (*s_open_cb)(void) = nullptr;
 static std::atomic_bool s_connected{false};
 static uint64_t s_last_open_attempt_us = 0;
 // Set when we mark the tunnel down without the server knowing (keepalive
@@ -259,6 +260,10 @@ static void ensure_pool() {
 
 // ---- Public API -------------------------------------------------------------
 
+extern "C" void noise_tunnel_set_open_cb(void (*cb)(void)) {
+    s_open_cb = cb;
+}
+
 extern "C" void noise_tunnel_set_packet_cb(noise_tunnel_packet_cb cb) {
     s_packet_cb = cb;
 }
@@ -342,6 +347,7 @@ static bool try_open_stream(const noise_tunnel_emit_t *emit) {
     uint64_t now = esp_timer_get_time();
     end_tx_stall(now, "queue dropped by reopen");
     s_rx_since_open = false;
+    if (s_open_cb) s_open_cb();
     s_connected.store(true, std::memory_order_release);
     // Arm keepalive liveness from the open: treat the successful open as the
     // first "rx" so we don't immediately time out or ping before any traffic.

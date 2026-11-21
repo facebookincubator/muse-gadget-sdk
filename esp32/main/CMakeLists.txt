@@ -42,6 +42,7 @@ set(GADGET_SRCS
     "pixel_font.c"
     "button.c"
     "tunnel_netif.c"
+    "tunnel_relay.c"
     "net_discovery.c"
     "noise_control.cpp"
     "noise_tunnel.cpp"
@@ -168,6 +169,27 @@ include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
 idf_build_get_property(gadget_project_dir PROJECT_DIR)
 muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
 target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
+
+# lwIP's NAPT keeps idle UDP mappings for IP_NAPT_TIMEOUT_MS_UDP, 2 s unless
+# defined: only ip4_napt.c reads it, and ESP-IDF has no option for it. This
+# leans on ESP-IDF's lwIP sources, so it's checked on v6.0.x only, with the
+# default still overridable in lwip_napt.h; elsewhere NAPT keeps lwIP's 2 s.
+if(CONFIG_HOMEHUB_TUNNEL)
+    set(lwip_napt_h "${IDF_PATH}/components/lwip/lwip/src/include/lwip/lwip_napt.h")
+    set(idf_ver "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}")
+    set(napt_udp_default "")
+    if(NOT idf_ver VERSION_LESS 6.0 AND idf_ver VERSION_LESS 6.1 AND EXISTS "${lwip_napt_h}")
+        file(STRINGS "${lwip_napt_h}" napt_udp_default REGEX "^#ifndef IP_NAPT_TIMEOUT_MS_UDP")
+    endif()
+    if(napt_udp_default)
+        idf_component_get_property(lwip_lib lwip COMPONENT_LIB)
+        math(EXPR napt_udp_ms "${CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S} * 1000")
+        target_compile_definitions(${lwip_lib} PRIVATE "IP_NAPT_TIMEOUT_MS_UDP=${napt_udp_ms}")
+    elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        message(WARNING "HOMEHUB_TUNNEL_UDP_IDLE_S is checked on ESP-IDF v6.0.x only "
+                        "(this is v${idf_ver}): NAPT keeps lwIP's 2 s for idle UDP")
+    endif()
+endif()
 
 # fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
 # driver calls them across archives, so the linker can redirect them).

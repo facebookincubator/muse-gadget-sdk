@@ -58,6 +58,12 @@ void noise_tunnel_abort_batch(uint8_t *buf);
 // True once the tunnel stream is open on the live Noise session.
 bool noise_tunnel_is_connected(void);
 
+// Register a callback run (from the session task) each time a tunnel stream
+// is about to go live, before any of its packets: whatever the previous
+// stream left behind can be cleared there, even when the stream was reopened
+// within one status check.
+void noise_tunnel_set_open_cb(void (*cb)(void));
+
 #ifdef __cplusplus
 }
 #endif

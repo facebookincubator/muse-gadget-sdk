@@ -163,6 +163,21 @@ menu "ESP32 Device SDK"
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
 
+    config HOMEHUB_TUNNEL_UDP_IDLE_S
+        int "Seconds an idle UDP flow keeps its NAPT mapping"
+        depends on HOMEHUB_TUNNEL
+        range 120 3600
+        default 120
+        help
+            How long lwIP's NAPT keeps a UDP mapping from the VM to the LAN
+            after its last datagram. lwIP's own default is 2 s, too short for
+            replies that come a few seconds later and for protocols that keep
+            a flow quiet between polls. Each mapping takes one of NAPT's 512
+            entries until it expires; when they're all taken, a new mapping
+            replaces the least recently used one, TCP included. Applied on
+            ESP-IDF v6.0.x, where it was checked; on another version the build
+            warns and NAPT keeps 2 s.
+
     config HOMEHUB_SETUP_TASKS_IN_PSRAM
         bool "Put the setup tasks' stacks in PSRAM"
         depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA
