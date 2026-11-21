@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
@@ -229,7 +230,9 @@ static void arp_probe(discovery_budget_t *budget, esp_netif_t *netif,
         if (first > bcast - hc) first = bcast - hc;
     }
 
-    uint32_t *seen = malloc(hc * sizeof(uint32_t));
+    // In PSRAM where there is any: 4 KB of internal RAM at the scan's peak.
+    uint32_t *seen = heap_caps_malloc(hc * sizeof(uint32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!seen) seen = malloc(hc * sizeof(uint32_t));
     if (!seen) { source->error = "out_of_memory"; return; }
 
     ESP_LOGI(TAG, "ARP sweep: %d hosts", hc);

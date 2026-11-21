@@ -98,6 +98,10 @@ static void *host_calloc(size_t n, size_t size) {
     return calloc(n, size);
 }
 static void host_free(void *p) { if (p) releases++; free(p); }
+#define MALLOC_CAP_SPIRAM (1 << 10)
+#define MALLOC_CAP_8BIT (1 << 2)
+// No PSRAM on the host: the caller falls back to malloc, as on a board without it.
+static void *heap_caps_malloc(size_t n, uint32_t caps) { (void)n; (void)caps; return NULL; }
 static void *json_malloc(size_t n) {
     if (json_fail_after == 0) { json_fail_after = -1; return NULL; }
     if (json_fail_after > 0) json_fail_after--;

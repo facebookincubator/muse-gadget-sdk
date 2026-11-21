@@ -1695,7 +1695,16 @@ static void discover_task(void *arg) {
     if (args->params) cJSON_Delete(args->params);
     free(args);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
+}
+
+// The scan's 8 KB stack in PSRAM where there is any: in internal RAM it was the
+// largest part of the scan's peak. The task writes no flash.
+static bool start_discover_task(discover_task_args_t *args) {
+    return xTaskCreateWithCaps(discover_task, "discover", 8192, args, 4, NULL,
+                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS
+        || xTaskCreateWithCaps(discover_task, "discover", 8192, args, 4, NULL,
+                               MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) == pdPASS;
 }
 #endif
 
@@ -2160,8 +2169,7 @@ static cJSON *on_ws_command(
         args->session_generation = session_generation;
         strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
         args->params = params ? cJSON_Duplicate(params, 1) : NULL;
-        if (xTaskCreate(discover_task, "discover", 8192, args, 4, NULL)
-            != pdPASS) {
+        if (!start_discover_task(args)) {
             if (args->params) cJSON_Delete(args->params);
             free(args);
             return command_error("out_of_memory", "failed to start task");
