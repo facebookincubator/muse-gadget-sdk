@@ -132,7 +132,7 @@ static int s_forget_armed = -1;
 static int64_t s_forget_armed_us;
 static char s_join_ssid[MUSE_SSID_MAX + 1];
 
-/* Hatch page. */
+/* Muse page. */
 static lv_obj_t *s_hatch_status, *s_hatch_host, *s_hatch_vm, *s_hatch_token, *s_hatch_sdk_token;
 static lv_obj_t *s_link_status, *s_link_reset_lbl;
 static int64_t s_link_reset_armed_us;
@@ -1184,7 +1184,7 @@ static void tick_wifi(void)
     }
 }
 
-/* ---------- Hatch ---------- */
+/* ---------- Muse ---------- */
 
 static void on_hatch_host_done(const char *text) { muse_settings_set_hatch_host(text); }
 static void on_hatch_vm_done(const char *text) { muse_settings_set_hatch_vm(text); }

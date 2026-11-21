@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Experiment: require PSRAM at boot (abort if it fails to initialize) so the
-# Wi-Fi driver can transmit lwIP's PSRAM pbufs by reference instead of copying
-# each frame into an internal DMA buffer, and so TCP window scaling is
-# available. sdkconfig.defaults tolerates a failed PSRAM init on first
-# power-on (C5 rev 1.2), which this gives up.
+# Experiment (load after sdkconfig.defaults): require PSRAM at boot (abort if
+# it fails to initialize) so the Wi-Fi driver can transmit lwIP's PSRAM pbufs
+# by reference instead of copying each frame into an internal DMA buffer, and
+# so TCP window scaling is available. sdkconfig.defaults tolerates a failed
+# PSRAM init on first power-on (C5 rev 1.2), which this gives up.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=n

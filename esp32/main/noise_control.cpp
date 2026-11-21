@@ -215,8 +215,8 @@ static std::atomic<bool> s_power_save{false};
 // link.register request id for the current session, and whether its reply has
 // arrived. The tunnel data-plane stream is only opened AFTER the register reply,
 // because the server authorizes /link-tunnel by checking that a device has
-// registered on this same Noise connection (see ingress-rev-proxy
-// link_tunnel_authorized_by_daemon). Opening earlier races the registration and
+// registered on this same Noise connection (checked by the server's ingress
+// proxy). Opening earlier races the registration and
 // draws a 403 that would otherwise wait out the tunnel reopen interval (~5s+).
 // Session-task-owned: written before the event loop, read/reset within it.
 static char s_register_req_id[40] = {0};
@@ -335,8 +335,8 @@ static void make_uuid(char *out, size_t n) {
 // ---- WebSocket framing (binary frames only) ---------------------------------
 
 // Minimal WS client framer. We only send binary frames (opcode 0x2) with
-// masking, and receive binary frames. The server (nginx) expects a standard
-// WS upgrade and then passes raw binary payloads to ingress-rev-proxy.
+// masking, and receive binary frames. The server expects a standard
+// WS upgrade and then passes raw binary payloads to its ingress proxy.
 
 // Send a masked binary WS frame.
 static bool ws_send_binary(esp_tls_t *tls, const uint8_t *payload, size_t len) {
@@ -433,8 +433,8 @@ extern "C" bool noise_bench_ws_send_inplace(esp_tls_t *tls, uint8_t *payload, si
 }
 #endif
 
-// Send a zero-length masked WebSocket ping (opcode 0x9). The peer (the LB /
-// ingress-rev-proxy) replies with a pong, so this generates traffic in BOTH
+// Send a zero-length masked WebSocket ping (opcode 0x9). The peer (the load
+// balancer or ingress proxy) replies with a pong, so this generates traffic in BOTH
 // directions — unlike the Noise empty-BodyChunk keepalive, which the daemon
 // does not answer, leaving the downstream (server→device) path idle and prone
 // to middlebox idle-timeout resets.
@@ -451,7 +451,7 @@ static bool ws_send_ping(esp_tls_t *tls) {
 // Read a complete WS frame. Returns payload length, or -1 on error, 0 on
 // connection close. `buf` must be large enough for the payload. Handles
 // ping/pong frames transparently. Does NOT handle fragmentation (the
-// ingress-rev-proxy controls framing and won't fragment).
+// server's ingress proxy controls framing and won't fragment).
 // Does NOT handle text frames — all Noise traffic is binary.
 static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
   int64_t deadline = esp_timer_get_time() + WS_FRAME_TIMEOUT_US;
@@ -856,18 +856,18 @@ static bool noise_handshake(esp_tls_t *tls, ClientSession &session,
     // msg3: initiator → responder.
     //
     // The payload is the server's protobuf Noise handshake message 3.
-    // The rev-proxy runs it through `classify_message3_payload`, which rejects
+    // The server's ingress proxy rejects
     // anything that is not valid protobuf encoding. Sending the bare token
     // string made it drop the session immediately AFTER the crypto handshake
     // completed, so the device saw "session established", sent link.register,
     // and got a close ~60 ms later with nothing logged daemon-side.
     //
-    // No field of that message carries a bearer token: `notary_token` is a
-    // separate credential the proxy validates against the notary, `kr` is the
-    // RV key exchange, and `shared_agent_ticket` is rejected outright on the
-    // owner handshake path. Our `vm_auth_token` authenticates through the
+    // No field of that message carries a bearer token: its fields hold other
+    // credentials and key-exchange data that the server validates separately
+    // or refuses outright on the device's handshake path.
+    // Our `vm_auth_token` authenticates through the
     // Authorization bearer header on the /v1/noise upgrade above, which is
-    // what the route's WsBearer mechanism reads. The correct owner payload is
+    // what the server's bearer check reads. The correct owner payload is
     // therefore an EMPTY NoiseHandshakeMessage3 — which encodes to zero bytes,
     // so the device needs no protobuf writer.
     ConstByteSpan auth_payload;

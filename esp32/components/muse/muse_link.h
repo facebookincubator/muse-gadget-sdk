@@ -31,8 +31,8 @@ typedef struct network_proxy_config network_proxy_config_t;
 
 /*
  * Muse runs inside Home Link, which owns the radios, the setup credentials and
- * the Hatch account. Link registers these operations at boot
- * (main/muse_glue.c); Muse's Wi-Fi status, scans, saved networks, BLE and Hatch
+ * the Muse account. Link registers these operations at boot
+ * (main/muse_glue.c); Muse's Wi-Fi status, scans, saved networks, BLE and Muse
  * VM lookups all go through them. Every call is safe from any task.
  */
 
@@ -63,7 +63,7 @@ typedef struct {
     int (*wifi_scan_results)(muse_wifi_ap_t *out, int max, uint32_t *gen);
     void (*ble_apply)(void);                      /* BLE phone setup setting changed */
     bool (*ble_started)(void);
-    bool (*hatch_linked)(void);                   /* paired to a Hatch account */
+    bool (*hatch_linked)(void);                   /* paired to a Muse account */
     const char *(*sdk_token)(void);               /* the maker's SDK token, or NULL */
     bool (*sdk_token_set)(const char *token);     /* stores it and restarts; false if invalid */
     bool (*sdk_token_changed)(void);              /* paired with another token: pair again to use this one */

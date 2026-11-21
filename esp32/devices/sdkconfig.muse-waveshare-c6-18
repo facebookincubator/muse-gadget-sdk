@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Waveshare ESP32-C6-Touch-AMOLED-1.8: single core, 16 MB flash, no PSRAM.
-# Load last, after sdkconfig.muse. Without PSRAM Muse has no Hatch session of
+# Load last, after sdkconfig.muse. Without PSRAM Muse has no voice session of
 # its own (MUSE_HATCH defaults off): voice notes go over Link's session and
 # replies show as text. Link's TLS, Wi-Fi and BLE buffers are trimmed to fit
 # internal RAM.

@@ -26,8 +26,8 @@
 # status instead of a status LED.
 CONFIG_HOMEHUB_LED_BACKEND_MUSE=y
 CONFIG_MUSE_DEVICE_GUIDE="devices/guides/muse.md"
-# These boards pair in community mode (no factory key). The Hatch app lists
-# community devices by this name, and only with hatch_link.community_devices on.
+# These boards pair in community mode (no factory key). The Muse app lists
+# community devices by this name.
 CONFIG_HOMEHUB_BLE_NAME_PREFIX="MuseGadget"
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_muse.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -71,9 +71,6 @@ CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 CONFIG_BT_CTRL_BLE_SCAN=n
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
 
-# Muse's Hatch client derives its Noise keys with HKDF.
-CONFIG_MBEDTLS_HKDF_C=y
-
 # The display, touch and audio drivers need DMA-capable internal RAM, which
 # Link's C5 tuning spends on Wi-Fi speed. Keep Wi-Fi/lwIP hot paths in flash
 # (on the S3 and C6, IRAM comes out of the same SRAM) and hold fewer resident
@@ -91,7 +88,7 @@ CONFIG_ESP_WIFI_TX_BA_WIN=16
 CONFIG_SPI_FLASH_SUPPORT_MXIC_OPI_CHIP=n
 
 # These boards carry no board-specific PHY calibration blob; use the embedded
-# default like the stock Muse firmware.
+# default.
 CONFIG_ESP_PHY_INIT_DATA_IN_PARTITION=n
 
 # TLS in software AES: hardware AES bounces PSRAM records through DMA-capable

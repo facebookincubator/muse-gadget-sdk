@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Shared setup for the standalone application and an enclosing internal project.
+# Shared setup for the standalone application and a project that includes it.
 # Include before project(); source lists and dependencies stay in the components.
 get_filename_component(GADGET_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 

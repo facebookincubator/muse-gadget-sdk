@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # Power profiling other boards and devices
 
 The SenseCAP Watcher work in this directory is one instance of a reusable
@@ -141,7 +157,8 @@ board-neutral core and board hooks:
 
 Waveshare ESP32-S3-Touch-AMOLED-1.75C, 2.16, AIPI Lite and ESP-Mosaico are ported through
 one shared backend, `boards/board_power_test_generic.c` on `muse_board_t`, with
-an overlay per board. With `"usb_powered":1` a sweep runs with USB attached, so
+an overlay per board. The reTerminal Sticky has its own backend,
+`boards/board_reterminal_sticky_power_test.c`. With `"usb_powered":1` a sweep runs with USB attached, so
 the board can be measured on its 5 V input with a POWER-Z KM003C: see
 [km003c.md](km003c.md).
 

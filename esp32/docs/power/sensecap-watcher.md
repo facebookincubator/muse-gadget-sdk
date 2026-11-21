@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # SenseCAP Watcher: USB-free PPK2 power profiling
 
 The procedure for profiling a Seeed SenseCAP Watcher's USB-free states with a
@@ -158,7 +174,7 @@ idf.py -B build-muse-watcher-power-test -DIDF_TARGET=esp32s3 \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test" build
 ```
 
-The diagnostic image has no need for account credentials, pairing, or a SDK
+The diagnostic image has no need for account credentials, pairing, or an SDK
 token. It bypasses the normal application. Keep Secure Boot, flash encryption,
 and pairing eFuse writes disabled. Preserve existing NVS and factory backups.
 For a first-ever Muse flash, follow `devices/README.md` to back up the factory
@@ -329,7 +345,7 @@ selected I2S/RGB low outputs. Ordinary reversion disables the switch and
 restores saved pad configuration; held deep outputs are configured low before
 hold release, then safely floated during fresh-boot restoration.
 
-Only the diagnostic overlay enables CPU retention/power-down support. Every
+The diagnostic overlay enables CPU retention/power-down support. Every
 state without `cpu_pd` holds one tracked CPU-domain ON reference; `cpu_pd`
 releases that reference with OFF, never AUTO (AUTO clears other owners).
 IDF v6.0.1 uses the remaining ON references to veto CPU power-down; eligibility
@@ -500,7 +516,7 @@ The report uses actual firmware intervals, a bounded pre-unplug UART clock
 sync using per-request echoed nonces (late replies are discarded), guard bands,
 and only complete, contiguous aggregate windows. The sample file's session
 header must match the armed owner, host-clock epoch, voltage, and sample rate.
-Exactly one `watcher-sweep` begin record supplies the recording's immutable
+Exactly one `power-sweep` (or legacy `watcher-sweep`) begin record supplies the recording's immutable
 host/sample anchor. Drift is measured from that boundary, including the
 producer's queued-prefix accounting where available, rather than from the
 owner's startup. Its decode-loss baseline is also snapshotted at that boundary,

@@ -103,8 +103,8 @@ Tunnel TX and TLS RX, 5 GHz (channel 40), same run per row:
 
 | Build | RSSI | Raw TCP tx/rx Mbit/s | `full_legacy` | `full_new` | TLS RX before/after |
 |---|---|---|---|---|---|
-| 16 KB windows (current defaults) | -41 | 9.7 / 11.7 | 2.36 (CPU 76%) | 3.78 (+60%) | 3.74 / 4.93 |
-| lwIP in PSRAM + 32 KB (new C5 default) | -38 | 13.1 / 16.2 | 3.61 (CPU 97%) | 4.74 (+31%) | 4.99 / 6.34 |
+| 16 KB windows (the defaults then) | -41 | 9.7 / 11.7 | 2.36 (CPU 76%) | 3.78 (+60%) | 3.74 / 4.93 |
+| lwIP in PSRAM + 32 KB (then-new C5 default) | -38 | 13.1 / 16.2 | 3.61 (CPU 97%) | 4.74 (+31%) | 4.99 / 6.34 |
 | lwIP in PSRAM + 64 KB | -41 | 13.0 / 16.4 | 3.79 (CPU 100%) | 6.31 (+66%) | 7.55 / 7.63 |
 
 Runs at RSSI near -68 dBm (the AP's mesh sometimes hands the board to a far
@@ -121,7 +121,7 @@ BLE beside Wi-Fi: scanning at 50% duty saw ~33 devices (21-27 reports/s,
 services and the Device Name read; notifications to a Mac ran at ~130 kbit/s.
 A BLE stream took ~20% off Wi-Fi throughput.
 
-Soak of the new C5 defaults (32 KiB windows, lwIP in PSRAM, fast GCM) with
+Soak of the then-new C5 defaults (32 KiB windows, lwIP in PSRAM, fast GCM) with
 BLE resident, 25 minutes, 5 GHz at -38 dBm: 79 cycles of tunnel TX beside a
 BLE scan, TLS RX, and a BLE central connect every fourth cycle. No failures
 (TX 0/79, RX 0/79, central connects 19/19), no resets. Tunnel TX 5.29 Mbit/s
@@ -168,7 +168,7 @@ Mbit/s as the LAN host measured them:
 | ... with a central connected and reading every second | 3.5-3.8 | 3.6 | 5 / 18 |
 | ... while the C5 scans continuously | 2.8-3.1 | 1.9-2.8 | 5-8 / 30-55 |
 | BLE shut down (for comparison) | 3.9-4.2 | 3.4-3.8 | 4-9 / 15-70 |
-| `BLE_COEX` + 64 KiB windows + deep RX path (new C5 defaults) | 4.1 | 4.5-4.6 | 5 / 14-37 |
+| `BLE_COEX` + 64 KiB windows + deep RX path (then-new C5 defaults) | 4.1 | 4.5-4.6 | 5 / 14-37 |
 
 - 2.4 GHz (channel 6) and 5 GHz (channel 40) behave the same: the C5 has one
   RF path for both bands.

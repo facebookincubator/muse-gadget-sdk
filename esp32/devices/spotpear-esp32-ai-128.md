@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # SpotPear ESP32-AI-1.28 v1.0 (experimental)
 
 This profile targets the old, non-legged ESP32-S3 board with a MAX98357A
@@ -49,8 +65,8 @@ Firmware binaries containing the personal token are private artifacts.
 
 As of 2026-10-30, boot, PSRAM, UI/audio initialization, iOS pairing and
 Wi-Fi setup, microphone voice-note capture, audible local speaker loopback,
-and readable Japanese replies have been verified on one unit. The upstream-based submission is built separately; its software validation is
-reported in the pull request. It has not been reflashed for this submission.
+and readable Japanese replies have been verified on one unit. The upstream
+port was built but not reflashed on that unit.
 Video, image rendering, OTA, repeated sleep/wake cycles and long-running
 use remain unverified.
 

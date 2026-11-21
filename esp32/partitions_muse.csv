@@ -15,10 +15,10 @@
 # Name,    Type, SubType, Offset,   Size,    Flags
 # Boards with the full UI (16 MB+ flash). Same geometry rules as partitions.csv: the table
 # sits at 0x10000 and the app slots are dual-OTA with rollback. Link plus the
-# UI, audio and Hatch client needs more than 2 MB per slot, and NVS also
+# UI, audio and Muse's voice session need more than 2 MB per slot, and NVS also
 # holds Muse settings and BLE bonds, so both are larger. prod_data/prod_bak
 # follow the app slots; these boards have no factory product parameters.
-# apps holds installed WebAssembly apps and files the gadget's own files
+# apps holds installed WebAssembly apps and files holds the gadget's own files
 # (images and the like, for apps to read), both LittleFS and used only by
 # CONFIG_MUSE_WASM_APPS builds, past everything else so nothing moves. They're
 # in every build's table because an update over the air keeps the table a

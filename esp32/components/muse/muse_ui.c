@@ -2098,7 +2098,7 @@ static bool update_sleep(void)
     return s_dark;
 }
 
-/* Idle's label: whether a press reaches Hatch now or waits for Wi-Fi. */
+/* Idle's label: whether a press reaches Muse now or waits for Wi-Fi. */
 static const char *idle_name(muse_wifi_state_t wifi)
 {
     static bool joined;   /* since boot: from then on, a drop is reconnecting */

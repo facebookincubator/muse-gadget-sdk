@@ -20,7 +20,7 @@ Use this skill when an exact compatible Wyze Cam v2, Cam v3 or Cam Pan v1 alread
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - An already-installed, enabled and working RTSP build with supplied stream credentials.
-- An RTSP/media client configured for interleaved TCP for both control and media, with all sockets routed through HomeLink.
+- An RTSP/media client configured for interleaved TCP for both control and media, with all sockets routed through Home Link.
 - Explicit permission for the requested view, frame or bounded recording, and approved private storage.
 
 ## Workflow

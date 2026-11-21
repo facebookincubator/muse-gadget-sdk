@@ -25,7 +25,7 @@
 // Custom L3 netif whose "wire" is the Noise data tunnel carrying IPv4 packet
 // batches. Outbound packets from lwIP are flattened and handed to
 // noise_tunnel_send_packet(). Inbound packets received over the tunnel are
-// handed in via tunnel_netif_inject_rx().
+// handed in via noise_tunnel_set_packet_cb().
 
 // One-time bring-up. Adds the netif to lwIP with the given static IPs.
 // Safe to call from any task; serializes onto the TCP/IP thread internally.

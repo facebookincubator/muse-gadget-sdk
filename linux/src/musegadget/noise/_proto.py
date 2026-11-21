@@ -28,7 +28,7 @@ LAST_RESERVED_FIELD_NUMBER = 19999
 
 
 class ProtoError(ValueError):
-    """Raised when a Hatch Noise protobuf message is malformed."""
+    """Raised when a Muse Noise protobuf message is malformed."""
 
 
 def _valid_field_number(field_number: int) -> bool:

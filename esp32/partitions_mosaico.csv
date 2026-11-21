@@ -18,7 +18,7 @@
 # esp-mosaico-utils/esp-mosaico-recovery fixes the table at 0x8000 and these
 # five partitions, with the Vibe Mode (recovery) firmware in `factory`. Holding
 # the AI button at reset boots it; it installs apps over the USB-C port
-# (mosaico.py). Applications start at 2 MB: one app slot, since Vibe Mode does
+# (Espressif's mosaico.py). Applications start at 2 MB: one app slot, since Vibe Mode does
 # the updates, then NVS and the offline-clip queue.
 otadata,   data, ota,     0x9000,   0x2000,
 phy_init,  data, phy,     0xb000,   0x1000,

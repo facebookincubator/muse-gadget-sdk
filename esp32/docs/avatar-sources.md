@@ -236,7 +236,6 @@ standard CTest run includes the avatar UI and settings tests. Follow
 [the simulator guide](../simulator/README.md) and
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for the remaining review checks.
 
-
 ## Phone animation development preview
 
 `CONFIG_MUSE_AVATAR_ANIMATIONS` is a separate, default-off build option. It
@@ -369,7 +368,6 @@ The animation cache adds `motion.dat` and its staged `motion.tmp` to the private
 avatar directory. The prior still-cache layout remains unchanged. Clear saved
 avatar also removes the animation pack. No partition changes are required.
 
-
 ### Validation and remaining release gates
 
 On the Waveshare 1.75C, the current two-clip 192-pixel CRF 20 pack is 401,067
@@ -422,12 +420,10 @@ Before treating this as a production personal-avatar replacement:
   populated Apps data. Interrupted staging files must remain harmless and
   reclaimable without deleting Apps or the previous complete pack.
 
-
 ## Optional appearance integration
 
 Avatar syncing and clip playback build independently of the optional appearance
-component. The adapter below is enabled only when that component is available;
-its combined settings tests are omitted from a standalone avatar checkout.
+option (`CONFIG_MUSE_UI_THEME`). The adapter below is enabled only when both are on.
 
 With both `CONFIG_MUSE_AVATAR_SYNC` and `CONFIG_MUSE_UI_THEME` enabled,
 Automatic appearance uses a confident background sample from the canonical

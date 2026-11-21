@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hatch Noise protocol: Noise XX handshake, framing and service envelopes."""
+"""Muse Noise protocol: Noise XX handshake, framing and service envelopes."""
 
 from .envelope import (
     ApplicationRequest,

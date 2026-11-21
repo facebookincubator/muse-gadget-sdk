@@ -20,7 +20,7 @@ Use this skill when fresh discovery identifies a Brother printer offering IPP an
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - The printer must be ready, supplied with the requested media, and authorized for the requested document.
-- Use the printer's configured authentication and TLS trust where required. Prepare documents in the agent environment, not on HomeLink.
+- Use the printer's configured authentication and TLS trust where required. Prepare documents in the agent environment, not on Home Link.
 
 ## Workflow
 

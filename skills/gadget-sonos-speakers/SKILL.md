@@ -19,7 +19,7 @@ Use this skill when fresh discovery identifies a Sonos speaker with a compatible
 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
-- A compatible SoCo client or SOAP implementation using the actual device service URLs through HomeLink.
+- A compatible SoCo client or SOAP implementation using the actual device service URLs through Home Link.
 - Permission for the requested room/group and operation; grouping can interrupt or redirect audio in other rooms.
 - For a new media item, an existing URL reachable by the speaker with the needed format and authorization. Do not upload private media or create a server implicitly.
 

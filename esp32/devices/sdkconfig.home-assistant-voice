@@ -33,8 +33,7 @@ CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING=y
 CONFIG_HOMEHUB_VOICE=y
 CONFIG_HOMEHUB_VOICE_BOARD_VOICE_PE=y
 # Advertise as <prefix>-ha-voice-XXXXXX to tell this board apart from real
-# devices: MuseGadget-ha-voice in the open-source build, HomeLink-ha-voice in the
-# internal one.
+# devices: MuseGadget-ha-voice with the default prefix.
 CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-ha-voice"
 # The centre button (pressing the dial), active low.
 CONFIG_HOMEHUB_BUTTON_GPIO=0

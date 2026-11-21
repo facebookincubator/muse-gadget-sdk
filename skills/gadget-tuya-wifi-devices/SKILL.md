@@ -22,7 +22,7 @@ Use this skill when the exact device is confirmed to support Tuya local TCP and 
 Read and follow the Home Link networking and safety rules in `~/docs/devices/home_link.md`.
 
 - Existing device ID, local key, protocol version and a trustworthy model/firmware datapoint schema, supplied securely.
-- A compatible TinyTuya client with local TCP transport routed through HomeLink.
+- A compatible TinyTuya client with local TCP transport routed through Home Link.
 - Permission for the specific actuator/load. A raw datapoint's existence does not establish its meaning or authorize writing it.
 
 ## Workflow

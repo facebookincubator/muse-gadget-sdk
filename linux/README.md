@@ -344,8 +344,8 @@ Startup needs the configured VM to be reachable.
 Operation-level server errors after readiness are advisory; they increment
 `VoiceCall.advisory_error_count` without logging the server's message or ending
 the call. Admission errors and explicit `session_dead` remain fatal. An active
-`hatch.voice.turn_started` pauses the idle timer during silent asynchronous work,
-including Companion work. Settlement must match a known submission ID and caller
+`hatch.voice.turn_started` pauses the idle timer during silent asynchronous work.
+Settlement must match a known submission ID and caller
 input item; stale or unidentified settlements cannot clear newer work. A matched
 settlement gives the idle timer a fresh window. The overall timeout always applies,
 and tracking is bounded to 64 active and 1,024 settled submissions. Settled

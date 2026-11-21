@@ -1,3 +1,19 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
 # Waveshare ESP32-S3-Touch-AMOLED-2.16
 
 This profile runs Muse's avatar, touch settings, push-to-talk, images, BLE
@@ -34,7 +50,7 @@ tools/muse/board.sh flash s3-216        # finds the port by its USB serial numbe
 ```
 
 Set `CONFIG_GADGET_SDK_TOKEN` in `build-muse-waveshare-s3-216/sdkconfig`
-before building (see `AGENTS.md`). The build uses `devices/sdkconfig.muse` and
+before building (see `../AGENTS.md`). The build uses `devices/sdkconfig.muse` and
 `devices/sdkconfig.muse-waveshare-s3-216` with the 16 MB `partitions_muse.csv`;
 the app takes about 2.1 MB of its 4 MB slot. The console and flashing both go
 through the chip's own USB port (`/dev/cu.usbmodem*`). Reflashing keeps
@@ -71,7 +87,7 @@ icon under BOOT.
   Holding KEY3 and PWR together keeps one turn going until both are released.
 - **BOOT (GPIO0):** the aux button.
 - Replies from Muse are text and show as captions; there is no spoken output
-  yet (see `README.md`, "Replies from Muse are text").
+  yet (see `../README.md`, "Replies from Muse are text").
 - The IMU, RTC and TF card are not integrated.
 - Touch is single-point only (LVGL gesture recognition is off).
 

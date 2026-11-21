@@ -12,5 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Short bench: before/after pipelines and BLE coexistence only.
+# Short bench (load after sdkconfig.bench): before/after pipelines and BLE
+# coexistence only.
 CONFIG_HOMEHUB_BENCH_QUICK=y

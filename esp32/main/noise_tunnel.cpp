@@ -77,8 +77,8 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 // server-side noise-transport dispatcher and the ingress bridge both drop
 // zero-length body frames, so an empty ping never reaches the VM backend.
 // One byte is unambiguous vs a real packet batch, whose inner framing is
-// [u16-LE len][pkt]... (always >= 2 bytes). Must match the VM constant
-// the remote tunnel service's keepalive sentinel.
+// [u16-LE len][pkt]... (always >= 2 bytes). Must match the remote tunnel
+// service's keepalive sentinel.
 #define TUN_KEEPALIVE_SENTINEL 0x00
 
 // How often to retry opening the tunnel stream while it is down but the
@@ -86,15 +86,15 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 #define TUN_REOPEN_INTERVAL_US (5 * 1000 * 1000)
 
 // Tunnel-stream keepalive. The WebSocket ping/pong keepalive in noise_control
-// only proves the device↔ingress-rev-proxy transport is alive; it says nothing
-// about the VM-side tunnel backend behind raw.sock. That backend
-// can go away — e.g. a service restart/redeploy — while ingress-rev-proxy keeps
+// only proves the device↔ingress-proxy transport is alive; it says nothing
+// about the VM-side tunnel backend. That backend can go away — e.g. a
+// service restart/redeploy — while the ingress proxy keeps
 // the multiplexed Noise stream open, leaving the tunnel HALF-OPEN: the WS is
 // healthy so we get no stream reset, but no packets flow and we never reconnect.
 //
-// To detect that, when the tunnel has been idle we send a zero-length BodyChunk
-// (a ping); the tunnel backend echoes a zero-length pong (which the bridge relays
-// as an empty batch). Any inbound tunnel frame — a pong or real data — refreshes
+// To detect that, when the tunnel has been idle we send a one-byte sentinel
+// BodyChunk (a ping); the tunnel backend echoes it as the pong (the bridge
+// relays it as a one-byte batch). Any inbound frame, pong or data, refreshes
 // liveness. If nothing arrives for TUN_KEEPALIVE_TIMEOUT_US (several missed
 // pings), we declare the tunnel dead so noise_tunnel_maybe_reopen reconnects it.
 // TUN_KEEPALIVE_TIMEOUT_US lives in noise_tunnel_internal.h: the session loop

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Name,    Type, SubType, Offset,   Size,    Flags
-# Boards with the full UI and 8 MB flash (the M5Stack StickS3 and StickC Plus2).
+# Boards with 8 MB flash (the M5Stack StickS3 and StickC Plus2, among others).
 # partitions_muse.csv's layout with the app slots cut to fit: each still has
 # room for the Muse app at twice its current size (about 2 MB).
 nvs,       data, nvs,     0x11000,  0xC000,

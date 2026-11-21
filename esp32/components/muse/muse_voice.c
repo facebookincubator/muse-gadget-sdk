@@ -78,10 +78,10 @@ static const char *TAG = "muse_voice";
 #define REST_BACKSTOP_MS 60000
 
 #if CONFIG_MUSE_HATCH
-/* A note recorded while Hatch is out of reach is saved in PSRAM, and goes once it's back. */
+/* A note recorded while Muse is out of reach is saved in PSRAM, and goes once it's back. */
 #define HOLD_NOTES 1
 #else
-#define HOLD_NOTES 0   /* no PSRAM: a press needs Hatch */
+#define HOLD_NOTES 0   /* no PSRAM: a press needs Muse */
 #endif
 #if CONFIG_MUSE_RESEND_NOTES
 /* Tried until Muse has it (muse_resend.h); the oldest makes room for a new one. */
@@ -96,7 +96,7 @@ static const char *TAG = "muse_voice";
 #define HELD_KEEP_US (30LL * 60 * 1000000)      /* muse_voice_notes_waiting() */
 #define RETRY_MIN_US (15LL * 1000000)
 #define RETRY_MAX_US (120LL * 1000000)
-#define STALL_US (30LL * 1000000)               /* Hatch took none of a note this long: give up */
+#define STALL_US (30LL * 1000000)               /* Muse took none of a note this long: give up */
 #define ACK_WAIT_US (30LL * 1000000)            /* asleep, waiting for the VM to have a note */
 #define REPLY_COMPLETE_HOLD_MS 300
 #define REPLY_COMPLETE_POLL_MS 10
@@ -241,12 +241,12 @@ static volatile size_t s_seed_frames;
 
 /*
  * The note being recorded (HOLD_NOTES), kept whole in case it can't go now.
- * Streaming, Hatch has had s_sent frames of it.
+ * Streaming, Muse has had s_sent frames of it.
  */
 static int16_t *s_rec;   /* MAX_FRAMES */
 static size_t s_rec_n, s_sent;
 static bool s_live = true;
-static bool s_tried;     /* it went to Hatch */
+static bool s_tried;     /* it went to Muse */
 
 typedef struct {
     int16_t *pcm;
@@ -410,7 +410,7 @@ static void keep(rec_stats_t *st, const int16_t *pcm, size_t n)
     }
 }
 
-/* Gives Hatch what it has room for of the note being recorded. */
+/* Gives Muse what it has room for of the note being recorded. */
 static void feed_live(void)
 {
 #if HOLD_NOTES
@@ -430,7 +430,7 @@ static void go_live(void)
     feed_live();
 }
 
-/* One chunk of speech: into the stats, and on to Hatch, by way of the kept note if there is one. */
+/* One chunk of speech: into the stats, and on to Muse, by way of the kept note if there is one. */
 static void take(rec_stats_t *st, const int16_t *pcm)
 {
     if (hands_free_off()) return;
@@ -461,7 +461,7 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  * MAX_SECS, starting with the buffered pre-roll and hold. It streams to Muse
  * as it goes if it can.
  * If not, the note is kept in s_rec to send later, and streams from partway
- * if Hatch comes within reach. Returns false if Hatch failed the turn with no
+ * if Muse comes within reach. Returns false if Muse failed the turn with no
  * kept note to fall back on (why says what failed). There is no start chirp:
  * anything played now would land on top of the first words.
  */
@@ -503,7 +503,7 @@ static bool record(bool seeded, char *why, size_t cap)
 #endif
     muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
     bool heard = false, ok = true;
-    bool gave_up = false;   /* Hatch failed this note: it's kept, and goes later */
+    bool gave_up = false;   /* Muse failed this note: it's kept, and goes later */
     char text[96];
     rec_stats_t st = { 0 };
 
@@ -629,7 +629,7 @@ static bool record(bool seeded, char *why, size_t cap)
 static void go_idle(const char *caption);
 
 /*
- * Plays Hatch's reply as it arrives, with its text as the caption. Returns
+ * Plays Muse's reply as it arrives, with its text as the caption. Returns
  * true if interrupted by a new press. *delivered: the VM has the note.
  * opening: the caption until there's a transcript or reply.
  */
@@ -814,7 +814,7 @@ static void too_short(void)
 #endif
 }
 
-/* Why a press can't go to Hatch; voice notes only go there. */
+/* Why a press can't go to Muse; voice notes only go there. */
 static const char *not_ready_reason(void)
 {
     muse_hatch_status_t st;
@@ -1076,7 +1076,7 @@ static void drop_unsendable(muse_chat_fail_t why, bool quiet)
 }
 #endif
 
-/* Saves the note just recorded to send later. `tried`: Hatch failed it, so it waits out the backoff. */
+/* Saves the note just recorded to send later. `tried`: Muse failed it, so it waits out the backoff. */
 static void hold_rec(bool tried)
 {
 #if CONFIG_MUSE_RESEND_NOTES
@@ -1113,12 +1113,12 @@ static void hold_rec(bool tried)
 
 typedef enum {
     FED,
-    FEED_FAILED,    /* the turn failed, or Hatch stopped taking audio */
+    FEED_FAILED,    /* the turn failed, or Muse stopped taking audio */
     FEED_PRESSED,   /* a press is queued: it goes first */
 } feed_t;
 
 /*
- * Gives Hatch a note from *sent on, waiting for room as it goes, then ends
+ * Gives Muse a note from *sent on, waiting for room as it goes, then ends
  * the turn. Stops for a press only if `yield`.
  */
 static feed_t feed_rest(const int16_t *pcm, size_t frames, size_t *sent, bool yield, bool wake_owned)
@@ -1291,7 +1291,7 @@ static bool send_held(bool quiet)
 #endif
 
 /*
- * Whether to send a saved note now: Hatch within reach and the backoff over.
+ * Whether to send a saved note now: Muse within reach and the backoff over.
  * Coming within reach starts the backoff over. Keeps s_waiting too.
  */
 static bool held_due(void)
@@ -1315,7 +1315,7 @@ static bool held_due(void)
 #endif
 
 /*
- * After the release: the rest of the note goes to Hatch and the reply plays,
+ * After the release: the rest of the note goes to Muse and the reply plays,
  * or if it can't go now it's saved to send later. Returns true if a press
  * interrupted the reply.
  */
@@ -1337,7 +1337,7 @@ static bool finish_note(void)
         }
         muse_audio_chirp(0);
         if (s_live && !fed) {
-            /* Hatch is behind (still connecting, say): the rest from the kept note. */
+            /* Muse is behind (still connecting, say): the rest from the kept note. */
             muse_state_set_mode(MUSE_MODE_THINKING);
             muse_state_set_caption("SENDING VOICE NOTE");
             fed = feed_rest(s_rec, s_rec_n, &s_sent, false, true) == FED;
@@ -1371,7 +1371,7 @@ static bool finish_note(void)
 }
 
 /*
- * Whether a press can record: Hatch within reach, or (HOLD_NOTES) set up
+ * Whether a press can record: Muse within reach, or (HOLD_NOTES) set up
  * with room to save the note. If not, the caption says why.
  */
 static bool can_record(void)
@@ -1904,7 +1904,7 @@ static void voice_task(void *arg)
         note_toggled(false);
         if (!ok) {
             pre_reset();
-            go_idle(why);   /* Hatch failed it while recording */
+            go_idle(why);   /* Muse failed it while recording */
             continue;
         }
         pending_down = finish_note();
