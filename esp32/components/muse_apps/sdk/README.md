@@ -25,7 +25,7 @@ sensors and other devices.
 
 ## The API
 
-Version 1.1, a draft. `api/api.json` defines it, and everything else is
+Version 1.2, a draft. `api/api.json` defines it, and everything else is
 generated from it (`api/README.md` has the design):
 
 - `gadget.h`, here: what apps include, every function, event and constant
@@ -70,7 +70,7 @@ that the physical gadget lacks a screen or sensors.
 |---|---|
 | `examples/hello.c` (1.3 KB built) | A greeting, a spinner and a seconds count; a tap or a button changes the colour. The starting point `MUSE.md` gives Muse |
 | `examples/stopwatch.c` (5 KB) | A big label in a ring that fills each minute; a tap or the talk button starts and stops it, the second button (or one on screen) takes laps and resets. It blinks while paused, and laps slide in |
-| `examples/timer.c` | A foreground countdown with scrolling hour/minute/second wheels, Start, a remaining-time display and a basic finished screen. Close cancels the countdown |
+| `examples/timer.c` | A foreground countdown with scrolling hour/minute/second wheels, Start, a remaining-time display and pause/resume, AUX wheel reset and a finished screen. Close cancels the countdown |
 | `examples/chat.c` (6 KB) | Muse's chat in bubbles in a scrolling column, the reply growing as Muse writes it, and what Muse is doing at the top. The talk button still talks to Muse (with touch or a second button to close it); the second button asks it for a joke |
 | `examples/dashboard.c` (3 KB) | The battery, a motion chart from the accelerometer, a soil probe if there is one, Muse's latest reply, and a count kept between runs |
 | `examples/canvas_effects.c` | Canvas cards with rounded borders, gradients and shadows, reusing a shared style |

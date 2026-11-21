@@ -6,8 +6,8 @@
 #include <string.h>
 #include "../components/muse_apps/sdk/gadget.h"
 
-static int32_t props[48][256], parents[48], kinds[48], next_obj;
-static char texts[48][192];
+static int32_t props[80][256], parents[80], kinds[80], next_obj;
+static char texts[80][192];
 static uint32_t clock_ms;
 static int awake, timer_on, timer_starts, fail_timer, exited;
 
@@ -15,19 +15,19 @@ int32_t sys_millis(void) { return (int32_t)clock_ms; }
 int32_t sys_info(int32_t key) { return key == INFO_SCREEN_WIDTH || key == INFO_SCREEN_HEIGHT ? 466 : 0; }
 int32_t sys_timer(int32_t id, int32_t ms, int32_t repeat)
 {
-    assert(id == 1 && ms >= 10 && repeat == 1);
+    assert((id == 1 || id == 2) && ms >= 10 && (repeat == 0 || repeat == 1));
     if (fail_timer) return ERR_BUSY;
     timer_on = 1;
     timer_starts++;
     return 0;
 }
-int32_t sys_timer_stop(int32_t id) { assert(id == 1); timer_on = 0; return 0; }
+int32_t sys_timer_stop(int32_t id) { assert(id == 1 || id == 2); if (id == 1) timer_on = 0; return 0; }
 int32_t sys_frame_rate(int32_t fps) { assert(fps == 0); return 0; }
 void sys_keep_awake(int32_t on) { awake = on; }
 void sys_exit(void) { exited = 1; }
 int32_t ui_create(int32_t kind, int32_t parent)
 {
-    assert(next_obj < 47);
+    assert(next_obj < 79);
     int32_t obj = ++next_obj;
     parents[obj] = parent;
     kinds[obj] = kind;
@@ -35,7 +35,7 @@ int32_t ui_create(int32_t kind, int32_t parent)
 }
 int32_t ui_set(int32_t obj, int32_t property, int32_t value)
 {
-    assert(obj >= 0 && obj < 48 && property > 0 && property < 256);
+    assert(obj >= 0 && obj < 80 && property > 0 && property < 256);
     props[obj][property] = value;
     return 0;
 }
@@ -54,10 +54,16 @@ int32_t ui_align(int32_t obj, int32_t align, int32_t x, int32_t y)
     props[obj][P_Y] = y;
     return 0;
 }
+int32_t ui_roller_select(int32_t obj, int32_t selected, int32_t animate) { assert(animate == 1); props[obj][P_SELECTED] = selected; return 0; }
+int32_t ui_animate(int32_t obj,int32_t prop,int32_t to,int32_t ms,int32_t ease) { (void)obj;(void)prop;(void)to;(void)ms;(void)ease;return 0; }
+int32_t ui_animate_stop(int32_t obj,int32_t prop) { (void)obj;(void)prop;return 0; }
+int32_t cv_fill(int32_t c,int32_t col) { (void)c;(void)col;return 0; }
+int32_t cv_arc(int32_t c,int32_t x,int32_t y,int32_t r,int32_t w,int32_t a,int32_t b,int32_t col) { (void)c;(void)x;(void)y;(void)r;(void)w;(void)a;(void)b;(void)col;return 0; }
+int32_t cv_line(int32_t c,int32_t x,int32_t y,int32_t x2,int32_t y2,int32_t w,int32_t col) { (void)c;(void)x;(void)y;(void)x2;(void)y2;(void)w;(void)col;return 0; }
 int32_t ui_on(int32_t obj, int32_t events) { (void)obj; (void)events; return 0; }
 int32_t ui_style(int32_t obj, int32_t selector, int32_t property, int32_t value)
 {
-    (void)obj; (void)selector; (void)property; (void)value;
+    (void)selector; props[obj][property] = value;
     return 0;
 }
 int32_t ui_set_parent(int32_t obj, int32_t parent) { parents[obj] = parent; return 0; }
@@ -115,7 +121,7 @@ int main(void)
     tick(60001);
     assert(!strcmp(texts[time_text], "00:01"));
     tick(61000);
-    assert(!timer_on && awake && !strcmp(texts[heading], "TIME'S UP"));
+    assert(!timer_on && awake && !strcmp(texts[heading], "Time's up"));
     assert(!strcmp(texts[time_text], "00:00"));
     tick(90000);
     assert(!timer_on && !strcmp(texts[time_text], "00:00"));
@@ -139,16 +145,56 @@ int main(void)
     assert(!strcmp(texts[time_text], "23:59:59"));
     clock_ms = 86399000u;   /* A late wake catches up, independent of UI ticks. */
     on_event(EV_SCREEN, 1, 0);
-    assert(!timer_on && !strcmp(texts[heading], "TIME'S UP"));
+    assert(!timer_on && !strcmp(texts[heading], "Time's up"));
 
     fresh(); pick(0, 0, 3); fail_timer = 1; click();
     assert(!props[picker][P_HIDDEN] && !timer_on && !awake);
     fail_timer = 0; click();
     assert(timer_on && awake);
     on_event(EV_UI, close_button, UI_CLICKED);
+    assert(!exited && confirm_kind == 1);
+    on_event(EV_UI, confirm_yes, UI_CLICKED);
     assert(exited);
     on_stop(STOP_EXIT);
     assert(!timer_on && !awake);
+    fresh(); pick(0, 0, 10); click();
+    clock_ms = 1200; countdown_tap();
+    assert(phase == PAUSED && remaining_ms == 8800 && !timer_on);
+    clock_ms = 1300; countdown_tap();
+    assert(phase == FINISHED && !strcmp(texts[heading], "Time's up"));
+    clock_ms = 1701; countdown_tap();
+    assert(phase == SETTING && props[wheels[2]][P_SELECTED] == 10);
+    on_event(EV_BUTTON, BUTTON_PRIMARY, BTN_DOWN);
+    assert(resetting && props[action][P_DISABLED] && props[wheels[2]][P_SELECTED] == 0);
+    pick(0, 1, 0); /* Events cannot enable Start while the reset animation runs. */
+    assert(props[action][P_DISABLED]);
+    on_event(EV_TIMER, RESET_TIMER, 0);
+    assert(!resetting && props[wheels[2]][P_SELECTED] == 0);
+    fresh(); pick(0, 0, 5); click(); clock_ms = 1000; countdown_tap();
+    clock_ms = 10000; countdown_tap(); /* Time paused does not consume duration. */
+    assert(phase == COUNTING && remaining_ms == 4000);
+    tick(13999); assert(phase == COUNTING);
+    tick(14000); assert(phase == FINISHED);
+    fresh(); pick(0, 0, 5);
+    on_event(EV_UI, reset_hint, UI_CLICKED);
+    assert(picker_seconds() == 5); /* Header icon is an indicator only. */
+    click(); clock_ms = 500;
+    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_MOVE, 130, 100); on_event(EV_TOUCH_UP, 130, 100);
+    assert(phase == COUNTING);
+    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    assert(phase == PAUSED && props[ring][P_OPA] == 60);
+    clock_ms = 600;
+    on_event(EV_TOUCH_DOWN, 100, 100); on_event(EV_TOUCH_UP, 100, 100);
+    assert(phase == FINISHED && props[ring][P_OPA] == 255 && props[ring][P_ARC_COLOR] == 0xFF3030);
+    countdown_tap(); assert(phase == FINISHED); /* No instant dismissal from the finishing gesture. */
+    fresh(); pick(0, 0, 5); click();
+    on_event(EV_BUTTON, BUTTON_SECONDARY, BTN_DOWN);
+    assert(confirm_kind == 1 && !exited);
+    on_event(EV_UI, confirm_no, UI_CLICKED); assert(!confirm_kind && phase == COUNTING && !exited);
+    on_event(EV_BUTTON, BUTTON_PRIMARY, BTN_DOWN);
+    assert(confirm_kind == 2);
+    on_event(EV_UI, confirm_yes, UI_CLICKED);
+    assert(phase == SETTING && picker_seconds() == 5 && !timer_on);
     puts("timer app: picker, countdown boundaries, delayed ticks, wrap and cleanup passed");
     return 0;
 }
