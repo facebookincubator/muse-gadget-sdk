@@ -1063,3 +1063,135 @@ int main(int argc, char **argv) {
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class ChatSessionWebSocket(unittest.TestCase):
+    """The production ws_recv against a scripted TLS stream."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        out = Path(cls.tmp.name)
+        source = (ROOT / 'components/muse/muse_chat_session.cpp').read_text()
+        io = source[source.index('static bool write_all('):source.index('static bool ws_send_binary(')]
+        recv = source[source.index('static ssize_t ws_recv('):source.index('/* Query escaping')]
+        code = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <sys/types.h>
+typedef struct esp_tls esp_tls_t;
+#define ESP_TLS_ERR_SSL_WANT_READ (-0x6900)
+#define ESP_TLS_ERR_SSL_WANT_WRITE (-0x6880)
+#define IO_TIMEOUT_US (15 * 1000000LL)
+static const char *TAG = "test", *last_error;
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGE(tag, fmt, ...) ((void)(tag), last_error = (fmt))
+static int64_t clock_us;
+static int64_t now_us() { return clock_us; }
+static void vTaskDelay(int) { clock_us += 1000000; }
+static uint8_t in[2048], sent[2048];
+static size_t in_len, in_pos, sent_len;
+static ssize_t esp_tls_conn_read(esp_tls_t *, void *buf, size_t len) {
+    if (in_pos == in_len) return ESP_TLS_ERR_SSL_WANT_READ;
+    size_t n = in_len - in_pos < len ? in_len - in_pos : len;
+    memcpy(buf, in + in_pos, n);
+    in_pos += n;
+    return (ssize_t)n;
+}
+static ssize_t esp_tls_conn_write(esp_tls_t *, const void *buf, size_t len) {
+    assert(sent_len + len <= sizeof(sent));
+    memcpy(sent + sent_len, buf, len);
+    sent_len += len;
+    return (ssize_t)len;
+}
+''' + io + recv + r'''
+static void reset() { in_len = in_pos = sent_len = 0; last_error = nullptr; clock_us = 0; }
+static void push(uint8_t b) { assert(in_len < sizeof(in)); in[in_len++] = b; }
+/* A server frame with the shortest length form; masked if asked. */
+static void frame(uint8_t opcode, const uint8_t *payload, size_t len, bool masked = false) {
+    static const uint8_t key[4] = { 0x37, 0xfa, 0x21, 0x3d };
+    push(0x80 | opcode);
+    uint8_t m = masked ? 0x80 : 0;
+    if (len < 126) {
+        push(m | len);
+    } else if (len <= 0xffff) {
+        push(m | 126); push(len >> 8); push(len & 0xff);
+    } else {
+        push(m | 127);
+        for (int i = 7; i >= 0; i--) push((uint64_t)len >> (8 * i));
+    }
+    if (masked) for (int i = 0; i < 4; i++) push(key[i]);
+    for (size_t i = 0; i < len; i++) push(payload[i] ^ (masked ? key[i & 3] : 0));
+}
+static uint8_t payload[1024];
+static void pings_get_exact_pongs() {
+    for (size_t i = 0; i < sizeof(payload); i++) payload[i] = (uint8_t)(i * 7 + 1);
+    static const uint8_t after[] = { 'a', 'f', 't', 'e', 'r' };
+    for (size_t len : { 0, 1, 124, 125 }) {
+        for (bool masked : { false, true }) {
+            reset();
+            frame(0x9, payload, len, masked);
+            frame(0x2, after, sizeof(after), masked);
+            uint8_t buf[256];
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == -3);
+            assert(sent_len == 6 + len);
+            const uint8_t pong[6] = { 0x8A, (uint8_t)(0x80 | len), 0, 0, 0, 0 };
+            assert(!memcmp(sent, pong, 6) && !memcmp(sent + 6, payload, len));
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == (ssize_t)sizeof(after));
+            assert(!memcmp(buf, after, sizeof(after)) && in_pos == in_len && !last_error);
+        }
+    }
+}
+static void long_control_frames_fail() {
+    for (size_t i = 0; i < sizeof(payload); i++) payload[i] = (uint8_t)(i * 7 + 1);
+    for (uint8_t opcode : { 0x9, 0xA, 0x8 }) {
+        for (size_t len : { 126, 200, 1000 }) {
+            reset();
+            frame(opcode, payload, len);
+            frame(0x2, payload, 5);
+            uint8_t buf[1024];
+            assert(ws_recv(nullptr, buf, sizeof(buf), true) == -1);
+            assert(sent_len == 0 && last_error && strstr(last_error, "control frame"));
+        }
+    }
+    /* Data frames of the same sizes still arrive whole. */
+    for (size_t len : { 126, 200, 1000 }) {
+        reset();
+        frame(0x2, payload, len, true);
+        uint8_t buf[1024];
+        assert(ws_recv(nullptr, buf, sizeof(buf), true) == (ssize_t)len);
+        assert(!memcmp(buf, payload, len) && sent_len == 0 && in_pos == in_len && !last_error);
+    }
+}
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    switch (atoi(argv[1])) {
+    case 0: pings_get_exact_pongs(); return 0;
+    case 1: long_control_frames_fail(); return 0;
+    default: return 2;
+    }
+}
+'''
+        (out / 'ws.cpp').write_text(code)
+        result = subprocess.run(
+            [*shlex.split(os.environ.get('CXX', 'c++')), '-std=gnu++17', '-Wall', '-Wextra', '-Werror',
+             '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
+             str(out / 'ws.cpp'), '-o', str(out / 'ws')],
+            capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        cls.binary = out / 'ws'
+
+    def run_case(self, case):
+        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pings_up_to_125_bytes_get_an_exact_pong_and_the_stream_stays_in_step(self):
+        self.run_case(0)
+
+    def test_control_frames_over_125_bytes_fail_the_connection_without_a_pong(self):
+        self.run_case(1)

@@ -562,6 +562,12 @@ static ssize_t ws_recv(esp_tls_t *tls, uint8_t *buf, size_t cap, bool wait)
         ESP_LOGE(TAG, "WS frame too large: %llu", (unsigned long long)plen);
         return -1;
     }
+    /* RFC 6455 §5.5: control frames carry at most 125 bytes, and a pong's
+     * 7-bit length couldn't echo more. Fail the connection, as Link does. */
+    if (opcode >= 0x8 && plen > 125) {
+        ESP_LOGE(TAG, "WS control frame too large: %llu", (unsigned long long)plen);
+        return -1;
+    }
     if (!read_all(tls, buf, plen)) {
         return -1;
     }
