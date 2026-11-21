@@ -14,13 +14,13 @@
 
 # Waveshare ESP32-S3-Touch-AMOLED-2.16: 16 MB flash, 8 MB octal PSRAM.
 #
-# Pin/fact sources (cite per devices/AGENTS.md, do not guess pins):
+# Pin/fact sources:
 #  - Waveshare official manual: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16
 #    (LCD QSPI CS=12 SCLK=38 D0-D3=4,5,6,7 RST=39; shared I2C SCL=14 SDA=15;
 #    touch CST9220 INT=11 RST=40; IMU INT1=17 INT2=21; RTC INT=13;
 #    I2S MCLK=42 BCLK=9 LRCK=45 SPK=8 MIC=10 PA_CTRL=46; KEY3=GPIO18;
 #    TF SPI CMD=1 CLK=2 D0=3 SDCS=41; PWR key only reaches the PMU)
-#  - Vendor repo (clone it, do not read on the web):
+#  - Vendor repo:
 #    https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
 #    Managed BSP: waveshare/esp32_s3_touch_amoled_2_16 ^2.0.1 (ESP Component Registry)
 #  - Schematic: files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.16/ESP32-S3-Touch-AMOLED-2.16-Schematic.pdf

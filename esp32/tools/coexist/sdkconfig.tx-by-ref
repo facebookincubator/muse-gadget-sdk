@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Experiment: require PSRAM at boot (abort if it fails to initialize) so the
+# Experiment (load after sdkconfig.defaults): require PSRAM at boot (abort if it fails to initialize) so the
 # Wi-Fi driver can transmit lwIP's PSRAM pbufs by reference instead of copying
 # each frame into an internal DMA buffer, and so TCP window scaling is
 # available. sdkconfig.defaults tolerates a failed PSRAM init on first

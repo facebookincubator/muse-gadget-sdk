@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Bench baseline: the networking every other chip uses (and the C5 used before
+# Bench baseline (load after sdkconfig.defaults): the networking every other chip uses (and the C5 used before
 # sdkconfig.defaults.esp32c5): lwIP and Wi-Fi heap in internal RAM, 16 KiB
 # TCP windows.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=n

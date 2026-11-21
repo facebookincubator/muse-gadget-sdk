@@ -12,5 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+# The cable mirror (components/muse_mirror, docs/mirror.md), for any board
+# with the full LVGL UI and PSRAM, loaded after its own overlay:
+#   MUSE_MIRROR=1 tools/muse/board.sh build|flash <board>
 CONFIG_MUSE_MIRROR=y

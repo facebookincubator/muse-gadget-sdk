@@ -3,7 +3,8 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-# M5Stack AtomS3 with Atomic Voice Base: ESP32-S3, 8 MB flash, no PSRAM.
+# M5Stack AtomS3 with Atomic Voice Base: ESP32-S3, 8 MB flash, no PSRAM,
+# native USB Serial/JTAG. Load last, after sdkconfig.muse.
 # Pins and panel geometry are from M5Stack M5Unified/M5GFX and the Atomic
 # Voice Base pin map; see components/muse/boards/board_m5stack_atoms3.c.
 CONFIG_IDF_TARGET="esp32s3"

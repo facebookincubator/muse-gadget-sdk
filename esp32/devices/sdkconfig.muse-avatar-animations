@@ -12,5 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Experimental phone-avatar clips on ESP32-S3. Load after avatar-sync.
+# Experimental phone-avatar clips on ESP32-S3. Load after sdkconfig.muse-avatar-sync.
 CONFIG_MUSE_AVATAR_ANIMATIONS=y
