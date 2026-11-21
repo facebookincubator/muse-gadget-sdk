@@ -1190,7 +1190,7 @@ See [seeed-respeaker-lite.md](seeed-respeaker-lite.md) for the XMOS firmware req
 
 See the [XVF3800 guide](seeed-respeaker-xvf3800.md) for the XIAO-only SKU,
 exact 16 kHz I2S-slave firmware baseline, app-led setup and controls. It has
-no Muse status LED in this milestone.
+no Muse status LED.
 
 ## VN ESP32-S3 1.83-inch NV3023
 

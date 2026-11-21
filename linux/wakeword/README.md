@@ -25,7 +25,7 @@ bash linux/wakeword/build.sh [--out DIR] [--deps DIR] [--offline]
 
 - from `esp32/components/muse_wakeword`: `ww_runner_espnn.cpp`,
   `ww_frontend.c`, `ww_detector.c`, the model, and the host stand-ins in
-  `host/` (seven small headers and ExecuTorch's platform layer, which the
+  `host/` (six small headers and ExecuTorch's platform layer, which the
   ESP-NN delegate needs off the chip until ExecuTorch builds it for Linux
   itself);
 - from three ESP Component Registry archives, the same pinned releases the

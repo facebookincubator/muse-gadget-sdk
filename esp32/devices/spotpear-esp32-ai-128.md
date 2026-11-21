@@ -49,8 +49,8 @@ Firmware binaries containing the personal token are private artifacts.
 
 As of 2026-10-30, boot, PSRAM, UI/audio initialization, iOS pairing and
 Wi-Fi setup, microphone voice-note capture, audible local speaker loopback,
-and readable Japanese replies have been verified on one unit. The upstream-based submission is built separately; its software validation is
-reported in the pull request. It has not been reflashed for this submission.
+and readable Japanese replies have been verified on one unit. The upstream
+port was built but not reflashed on that unit.
 Video, image rendering, OTA, repeated sleep/wake cycles and long-running
 use remain unverified.
 

@@ -329,7 +329,7 @@ selected I2S/RGB low outputs. Ordinary reversion disables the switch and
 restores saved pad configuration; held deep outputs are configured low before
 hold release, then safely floated during fresh-boot restoration.
 
-Only the diagnostic overlay enables CPU retention/power-down support. Every
+The diagnostic overlay enables CPU retention/power-down support. Every
 state without `cpu_pd` holds one tracked CPU-domain ON reference; `cpu_pd`
 releases that reference with OFF, never AUTO (AUTO clears other owners).
 IDF v6.0.1 uses the remaining ON references to veto CPU power-down; eligibility
@@ -500,7 +500,7 @@ The report uses actual firmware intervals, a bounded pre-unplug UART clock
 sync using per-request echoed nonces (late replies are discarded), guard bands,
 and only complete, contiguous aggregate windows. The sample file's session
 header must match the armed owner, host-clock epoch, voltage, and sample rate.
-Exactly one `watcher-sweep` begin record supplies the recording's immutable
+Exactly one `power-sweep` (or legacy `watcher-sweep`) begin record supplies the recording's immutable
 host/sample anchor. Drift is measured from that boundary, including the
 producer's queued-prefix accounting where available, rather than from the
 owner's startup. Its decode-loss baseline is also snapshotted at that boundary,

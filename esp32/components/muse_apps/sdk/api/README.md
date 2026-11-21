@@ -24,7 +24,7 @@ describes those itself (below). Everything else here is generated from it:
 
 | File | What it is |
 |---|---|
-| `../gadget.h` | The header apps include (in `apps/`, beside `build.py`) |
+| `../gadget.h` | The header apps include (in `sdk/`, beside `build.py`) |
 | `REFERENCE.md` | The reference, for people and for Muse |
 | `../../muse_apps_api.h` | The firmware's tables: imports with their signatures and permissions, widgets, properties, well-known devices |
 | `api.capabilities.json` | `api.json` without the prose (about 12 KB), for `app.api` to serve |

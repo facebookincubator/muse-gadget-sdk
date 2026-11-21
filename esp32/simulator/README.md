@@ -190,6 +190,8 @@ Supported scenario keys are:
 - `ble`: `off`, `advertising`, or `connected`; plus `passkey` and `paired`
 - `link`: `boot`, `unpaired`, `pairing`, `confirm`, `connecting`, `online`,
   `offline`, or `error`
+- `options`: the reply option picker's answers, separated by `|`
+- `image`: fill the image view with a six-digit RGB hex colour, or `hide`
 - `speaker`, `call` (preview the live-call layout), `brightness`, and `advance` in milliseconds
 
 Invalid options and scenario values return a nonzero exit status and identify

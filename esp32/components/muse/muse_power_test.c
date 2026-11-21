@@ -1055,7 +1055,7 @@ static bool s_cpu_pd_veto_held;
 static esp_err_t fw_prepare_deep(const muse_ptest_state_t *state, int64_t us)
 {
     esp_err_t e;
-    /* RTC_NOINIT is SLOW; SDK RTC-time state is FAST. On S3/IDF 6.0.1
+    /* RTC_NOINIT is SLOW; SDK RTC-time state is FAST. On S3/IDF 6.0.3
      * these domains have no PD capability, so sleep_modes.c never sets their
      * PD flags. On SDK/SoC variants exposing them, retain each once per boot. */
 #if SOC_PM_SUPPORT_RTC_SLOW_MEM_PD
@@ -1102,7 +1102,7 @@ static esp_err_t fw_apply(const muse_ptest_state_t *state)
     if (s_dryrun) { return muse_ptest_board_apply(state); } /* USB lock held; no PM changes */
     bool veto = !(state->knobs & MUSE_PTEST_CPU_PD);
     if (veto != s_cpu_pd_veto_held) {
-        /* IDF v6.0.1 sleep_modes.c uses ON refs. OFF releases ours; AUTO
+        /* IDF v6.0.3 sleep_modes.c uses ON refs. OFF releases ours; AUTO
          * would erase other owners' refs. ON vetoes RTC_SLEEP_PD_CPU even
          * with PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y. OFF still needs retention. */
         if ((e = esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, veto ? ESP_PD_OPTION_ON : ESP_PD_OPTION_OFF))) { return e; }

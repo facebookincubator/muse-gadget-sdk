@@ -29,7 +29,7 @@ pairing and control protocols, so the same app pairs either.
 
 | Module | Role |
 |---|---|
-| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `chat`, `info`, `unpair` |
+| `cli.py` | `musegadget pair`, `run`, `send-user-msg`, `chat`, `voice-call`, `info`, `unpair`, `doctor` |
 | `pair.py` | `pair()`: opens BLE setup, checks and saves the pairing, prints nothing |
 | `pairing.py` | Community pairing v5: P-256 ECDH, HKDF-SHA256, AES-256-GCM, `confirm_app` |
 | `ble_framing.py` | Chunked BLE framing (`0xFE`, index, total, payload) |
@@ -40,15 +40,18 @@ pairing and control protocols, so the same app pairs either.
 | `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
-| `voice_call.py`, `voice_audio.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio |
+| `voice_call.py`, `voice_audio.py`, `voice_gate.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio, reply-audio fencing after an interruption |
 | `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
 | `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
+| `reaper.py` | Reaps orphaned child processes when the service runs as PID 1 |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
 | `commands.py` | The owner's own commands, from `/etc/musegadget/commands.d/*.json` |
 | `device_guide.py` | `device.guide`'s spec and the Linux client's own guide |
+| `config.py` | Device state: the state directory, its JSON files and the SDK token |
+| `doctor.py`, `network.py` | `musegadget doctor`'s read-only checks, connectivity checks during setup |
 | `noise/` | Noise XX handshake, framing and service envelopes |
 | `data/` | The systemd unit, the hash-pinned `requirements.lock` and the default `guide.md`, shipped in the package |
 

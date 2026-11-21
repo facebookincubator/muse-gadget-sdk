@@ -123,7 +123,7 @@ Within this one sequence:
 - ADC controls move across the sequence. These readings do not establish a
   stable isolated divider/conversion cost.
 
-**No production power fix is claimed or enabled by this PR.** The opt-in
+**No production power fix is claimed or enabled by this sweep.** The opt-in
 harness provides the controls to verify candidates. A production change must
 pass a same-voltage/config/stimulus A/B/A comparison, repeated variability and
 wake/function checks. Changing defaults from this single, history-dependent

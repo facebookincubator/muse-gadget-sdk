@@ -50,7 +50,7 @@ in Chrome or Edge on a desktop computer.
 ESP32 and Linux gadgets pair with the Muse app on iOS and Android, via
 Settings > Devices. Turn on Developer mode there first, then look for devices
 prefixed with "MuseGadget".
-Each directory has a `README.md` to get started and an `AGENTS.md` for coding
+Each SDK directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 [`protocols/DEVICE.md`](protocols/DEVICE.md) says how a gadget describes itself
 to Muse.

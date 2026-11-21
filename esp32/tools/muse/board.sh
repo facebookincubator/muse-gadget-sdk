@@ -94,7 +94,7 @@ case $board in
 esac
 baud=${baud:-460800}
 if [ "$target" = esp32s31 ]; then
-    # The S31 isn't in v6.0.1: Espressif's ESP-Mosaico pins master at 7b9cc1ac.
+    # The S31 isn't in v6.0.3: Espressif's ESP-Mosaico pins master at 7b9cc1ac.
     IDF_EXPORT=${IDF_EXPORT_S31:-$HOME/.espressif/esp-idf-s31/export.sh}
     preview=--preview
     # Espressif's esp-mosaico-utils: ESP-Iris, which the board's Vibe Mode

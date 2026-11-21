@@ -19,7 +19,7 @@ limitations under the License.
 This Link-only profile adds push-to-talk voice notes. Hold XIAO BOOT to
 record and release to send. Replies appear as text in the Muse app unless the
 existing optional TTS integration is configured. The vendor-controlled LED
-ring is not a Muse status indicator in this milestone. Use app prompts and the
+ring is not a Muse status indicator. Use app prompts and the
 serial log for pairing and connection state.
 
 ## Hardware and XMOS firmware

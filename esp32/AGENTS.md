@@ -454,7 +454,7 @@ kind of failure it was:
 - **2**: no board, or it can't do this (or another `avatar.py` is still
   running: let it finish). If it says the board doesn't answer,
   rerun with `--board s3` or `--board aipi` (from the board's name, or ask) to
-  flash firmware that can. On the C6 boards or Watcher, follow the manual steps in
+  flash firmware that can. On the C6 boards, follow the manual steps in
   `tools/muse/AVATAR_RECIPE.md`.
 - **3**: the board isn't on Wi-Fi, or it isn't paired in the Muse app and has
   no device token, so their Muse isn't connected. Tell them, and point them to

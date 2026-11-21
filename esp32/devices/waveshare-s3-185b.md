@@ -75,7 +75,7 @@ On two 1.85B units, the initial board port boots with 16 MB flash and 8 MB
 PSRAM, selects panel revision 2 (`00 02 7f 7f`), registers display/touch and
 initializes both audio codecs. The shared Muse runtime reaches ready-to-pair
 without a panic or reboot loop. Recording/playback, pairing, OTA and
-power-off/wake have not yet been exercised for this contribution.
+power-off/wake have not yet been exercised.
 
 Battery-reader host tests cover valid endpoints, signed current, relaxation,
 missing batteries, uninitialized/config-update states, invalid data, every

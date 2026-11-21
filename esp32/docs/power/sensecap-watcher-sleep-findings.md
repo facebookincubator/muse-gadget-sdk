@@ -97,11 +97,10 @@ diagnostic, not a significance test, and there is one repeat.
    should leave the codecs either streaming or explicitly suspended, never
    just constructed or left open while idle.
 3. **CPU power-down in light sleep is the only large software lever:
-   −0.44 mA (−15%)**, repeatable within 1 µA of reference drift. Production
-   firmware disables it on the Watcher because retention takes about 8.5 KB of
-   internal RAM that Wi-Fi/BLE need. Enabling it needs a runtime RAM and
-   stability soak on production firmware first; that follow-up is outside this
-   change.
+   −0.44 mA (−15%)**, repeatable within 1 µA of reference drift. Retention
+   takes internal RAM that Wi-Fi/BLE need. Production firmware has since
+   enabled it on the Watcher (`devices/sdkconfig.muse-sensecap-watcher`),
+   paying for it with `CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM`.
 4. **Sleep GPIO isolation is counterproductive here: +0.10 mA.** Floating
    pads that the board pulls or drives cost more than holding them. Keep
    `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND`/`PM_SLP_DISABLE_GPIO` off.
@@ -121,8 +120,8 @@ diagnostic, not a significance test, and there is one repeat.
    in the post-sweep tail). This should be investigated before any production
    deep-sleep use.
 
-**No production defaults change in this PR.** CPU power-down is the clear next
-candidate (findings 3), pending the RAM soak. The codec rail itself can't be
+**This sweep changed no production defaults.** CPU power-down, the clear next
+candidate (finding 3), has since been enabled on the Watcher. The codec rail itself can't be
 switched on a stock board: the optional `EXP_AUDIO_EN` link from expander P15
 to the codec LDO enable appears unfitted (Seeed's BSP uses P15 as an input).
 

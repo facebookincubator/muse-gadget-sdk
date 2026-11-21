@@ -426,8 +426,7 @@ Before treating this as a production personal-avatar replacement:
 ## Optional appearance integration
 
 Avatar syncing and clip playback build independently of the optional appearance
-component. The adapter below is enabled only when that component is available;
-its combined settings tests are omitted from a standalone avatar checkout.
+option (`CONFIG_MUSE_UI_THEME`). The adapter below is enabled only when both are on.
 
 With both `CONFIG_MUSE_AVATAR_SYNC` and `CONFIG_MUSE_UI_THEME` enabled,
 Automatic appearance uses a confident background sample from the canonical

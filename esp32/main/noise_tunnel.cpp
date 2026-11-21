@@ -92,9 +92,9 @@ extern "C" bool noise_tx_has_contiguous_dma_headroom(void) {
 // the multiplexed Noise stream open, leaving the tunnel HALF-OPEN: the WS is
 // healthy so we get no stream reset, but no packets flow and we never reconnect.
 //
-// To detect that, when the tunnel has been idle we send a zero-length BodyChunk
-// (a ping); the tunnel backend echoes a zero-length pong (which the bridge relays
-// as an empty batch). Any inbound tunnel frame — a pong or real data — refreshes
+// To detect that, when the tunnel has been idle we send a one-byte sentinel BodyChunk
+// (a ping); the tunnel backend echoes it back as the pong (which the bridge relays
+// as a one-byte batch). Any inbound tunnel frame — a pong or real data — refreshes
 // liveness. If nothing arrives for TUN_KEEPALIVE_TIMEOUT_US (several missed
 // pings), we declare the tunnel dead so noise_tunnel_maybe_reopen reconnects it.
 // TUN_KEEPALIVE_TIMEOUT_US lives in noise_tunnel_internal.h: the session loop

@@ -132,7 +132,7 @@ menu "ESP32 Device SDK"
         default n
         help
             Accept the private bug.report command over authenticated remote
-            control. Do not advertise it in generic node.register commands.
+            control. Do not advertise it in generic link.register commands.
             The report can contain restricted support PII from the bounded
             current-boot application log, but never credentials,
             keys, signed URL queries, or arbitrary response bodies.
