@@ -2031,66 +2031,143 @@ static void reconnect_delay(uint32_t delay_ms) {
 
 // ---- Session loop -----------------------------------------------------------
 
+// A /link-control message cut across BodyChunks, held for its session until
+// the rest arrives. Bytes of one message held at most: one longer is skipped
+// whole (logged), so the stream stays in step.
+static constexpr uint32_t kCtrlRxMaxHeld = 32 * 1024;
+static struct {
+    noise_ctrl_session_generation_t generation;
+    uint8_t head[4];       // a length prefix cut short
+    size_t head_len;
+    uint8_t *body;         // a message cut short: body_have of body_len bytes
+    uint32_t body_len, body_have;
+    uint32_t skip;         // bytes left of a message too long to hold
+} s_ctrl_rx;
+
+// The session ended: free a message it left cut short.
+static void drop_held_control_message(void) {
+    free(s_ctrl_rx.body);
+    s_ctrl_rx = {};
+}
+
 // Process one inbound RX body-chunk message from the server. The Noise layer
 // gives us reassembled service frames; inside is a stream-1 BodyChunk whose
-// data is one or more u32-LE prefixed JSON messages.
+// data carries u32-LE prefixed JSON messages. The stream is bytes: a message
+// may start in one BodyChunk and end in a later one (the Linux client buffers
+// it the same way), so a partial one waits for the rest, for this session
+// only.
 static void process_inbound_body_chunk(
     ConstByteSpan data,
     noise_ctrl_session_generation_t session_generation) {
+    auto &rx = s_ctrl_rx;
+    if (rx.generation != session_generation) {
+        drop_held_control_message();
+        rx.generation = session_generation;
+    }
+    auto handle = [&](const uint8_t *p, uint32_t msg_len) {
+        // Detect the link.register reply (id matches our request) so the
+        // caller can open the tunnel stream only once the server has
+        // recorded this connection's device registration.
+        if (!s_register_acked && s_register_req_id[0]) {
+            cJSON *msg = cJSON_ParseWithLength(
+                reinterpret_cast<const char *>(p), msg_len);
+            if (msg) {
+                cJSON *id = cJSON_GetObjectItem(msg, "id");
+                if (cJSON_IsString(id) && id->valuestring
+                    && strcmp(id->valuestring, s_register_req_id) == 0) {
+                    cJSON *failure = cJSON_GetObjectItem(msg, "error");
+                    if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
+                        // Not registered, so the server would refuse the
+                        // tunnel and the Muse can't invoke this device.
+                        cJSON *reason = cJSON_IsObject(failure)
+                            ? cJSON_GetObjectItem(failure, "message") : failure;
+                        ESP_LOGE(TAG, "link.register rejected: %s",
+                                 cJSON_IsString(reason) && reason->valuestring
+                                     ? reason->valuestring : "no reason given");
+                    } else {
+                        s_register_acked = true;
+                        ESP_LOGI(TAG, "link.register acked; tunnel may open");
+                        cJSON *type = cJSON_GetObjectItem(msg, "type");
+                        cJSON *reply = cJSON_GetObjectItem(msg, "result");
+                        cJSON *status = cJSON_GetObjectItem(reply, "status");
+                        s_heartbeat_registered = cJSON_IsString(type)
+                            && strcmp(type->valuestring, "res") == 0
+                            && cJSON_IsString(status)
+                            && strcmp(status->valuestring, "registered") == 0
+                            && !failure;
+                    }
+                }
+                cJSON_Delete(msg);
+            }
+        }
+        handle_invoke_request(reinterpret_cast<const char *>(p), msg_len,
+                              session_generation);
+    };
+    // A message of msg_len bytes whose first bytes come next: held, or
+    // skipped if it can't be.
+    auto start_partial = [&](uint32_t msg_len) {
+        rx.body = msg_len <= kCtrlRxMaxHeld ? static_cast<uint8_t *>(malloc(msg_len)) : nullptr;
+        if (!rx.body) {
+            ESP_LOGW(TAG, "inbound control message of %u bytes too long to hold; skipping it",
+                     (unsigned)msg_len);
+            rx.skip = msg_len;
+            return;
+        }
+        rx.body_len = msg_len;
+        rx.body_have = 0;
+    };
     const uint8_t *p = data.data();
     size_t remaining = data.size();
 
-    while (remaining >= 4) {
-        uint32_t msg_len = static_cast<uint32_t>(p[0])
-                         | (static_cast<uint32_t>(p[1]) << 8)
-                         | (static_cast<uint32_t>(p[2]) << 16)
-                         | (static_cast<uint32_t>(p[3]) << 24);
-        p += 4;
-        remaining -= 4;
-        if (msg_len > remaining) {
-            ESP_LOGW(TAG, "truncated inbound message: want %u, have %u",
-                     (unsigned)msg_len, (unsigned)remaining);
-            break;
+    while (remaining > 0) {
+        if (rx.skip) {
+            size_t n = remaining < rx.skip ? remaining : rx.skip;
+            rx.skip -= static_cast<uint32_t>(n);
+            p += n;
+            remaining -= n;
+            continue;
         }
-        if (msg_len > 0) {
-            // Detect the link.register reply (id matches our request) so the
-            // caller can open the tunnel stream only once the server has
-            // recorded this connection's device registration.
-            if (!s_register_acked && s_register_req_id[0]) {
-                cJSON *msg = cJSON_ParseWithLength(
-                    reinterpret_cast<const char *>(p), msg_len);
-                if (msg) {
-                    cJSON *id = cJSON_GetObjectItem(msg, "id");
-                    if (cJSON_IsString(id) && id->valuestring
-                        && strcmp(id->valuestring, s_register_req_id) == 0) {
-                        cJSON *failure = cJSON_GetObjectItem(msg, "error");
-                        if (failure && !cJSON_IsNull(failure) && !cJSON_IsFalse(failure)) {
-                            // Not registered, so the server would refuse the
-                            // tunnel and the Muse can't invoke this device.
-                            cJSON *reason = cJSON_IsObject(failure)
-                                ? cJSON_GetObjectItem(failure, "message") : failure;
-                            ESP_LOGE(TAG, "link.register rejected: %s",
-                                     cJSON_IsString(reason) && reason->valuestring
-                                         ? reason->valuestring : "no reason given");
-                        } else {
-                            s_register_acked = true;
-                            ESP_LOGI(TAG, "link.register acked; tunnel may open");
-                            cJSON *type = cJSON_GetObjectItem(msg, "type");
-                            cJSON *reply = cJSON_GetObjectItem(msg, "result");
-                            cJSON *status = cJSON_GetObjectItem(reply, "status");
-                            s_heartbeat_registered = cJSON_IsString(type)
-                                && strcmp(type->valuestring, "res") == 0
-                                && cJSON_IsString(status)
-                                && strcmp(status->valuestring, "registered") == 0
-                                && !failure;
-                        }
-                    }
-                    cJSON_Delete(msg);
-                }
+        if (rx.body) {
+            size_t n = rx.body_len - rx.body_have;
+            if (n > remaining) n = remaining;
+            memcpy(rx.body + rx.body_have, p, n);
+            rx.body_have += static_cast<uint32_t>(n);
+            p += n;
+            remaining -= n;
+            if (rx.body_have == rx.body_len) {
+                handle(rx.body, rx.body_len);
+                free(rx.body);
+                rx.body = nullptr;
             }
-            handle_invoke_request(reinterpret_cast<const char *>(p), msg_len,
-                                  session_generation);
+            continue;
         }
+        uint32_t msg_len;
+        if (rx.head_len || remaining < 4) {
+            size_t n = 4 - rx.head_len;
+            if (n > remaining) n = remaining;
+            memcpy(rx.head + rx.head_len, p, n);
+            rx.head_len += n;
+            p += n;
+            remaining -= n;
+            if (rx.head_len < 4) break;
+            rx.head_len = 0;
+            msg_len = static_cast<uint32_t>(rx.head[0])
+                    | (static_cast<uint32_t>(rx.head[1]) << 8)
+                    | (static_cast<uint32_t>(rx.head[2]) << 16)
+                    | (static_cast<uint32_t>(rx.head[3]) << 24);
+        } else {
+            msg_len = static_cast<uint32_t>(p[0])
+                    | (static_cast<uint32_t>(p[1]) << 8)
+                    | (static_cast<uint32_t>(p[2]) << 16)
+                    | (static_cast<uint32_t>(p[3]) << 24);
+            p += 4;
+            remaining -= 4;
+        }
+        if (msg_len > remaining) {
+            start_partial(msg_len);
+            continue;
+        }
+        if (msg_len > 0) handle(p, msg_len);
         p += msg_len;
         remaining -= msg_len;
     }
@@ -2117,6 +2194,18 @@ static void idle_wait(esp_tls_t *tls, uint64_t last_busy_us) {
     lwip_select(fd + 1, &rd, nullptr, nullptr, &tv);
 }
 
+// Link's control stream ends (end_body on its Response or a BodyChunk) only
+// when the VM closes this device's control channel. The device is then no
+// longer registered, and nothing else would notice: WebSocket pongs keep the
+// connection looking alive. End the session so it reconnects and registers
+// again.
+static bool control_stream_ended(const DecodedServiceFrame &frame) {
+    if (frame.stream_id != CTRL_STREAM_ID) return false;
+    if (frame.kind == ServiceFrameKind::BodyChunk) return frame.body_chunk.end_body;
+    if (frame.kind == ServiceFrameKind::Response) return frame.response.end_body;
+    return false;
+}
+
 // Connectivity history: failed attempts between sessions are summarized in
 // the next session_up rather than recorded one by one. noise_ctrl_task-owned.
 static uint32_t s_failed_attempts = 0;
@@ -2127,6 +2216,51 @@ static void note_attempt_failed(const char *reason) {
     ++s_failed_attempts;
     s_last_attempt_failure = reason;
 }
+
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+// TLS session resumption for the VM WebSocket (CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS):
+// a reconnect offers the last session's id (or RFC 5077 ticket), and an edge
+// that kept it resumes, skipping the certificate chain and the ECDHE. The
+// server was verified against the CA bundle when the session was made; a
+// server that doesn't resume falls back to a full handshake, verified against
+// the same bundle (crt_bundle_attach stays set). Kept per host: a session is
+// never offered to another one. Session-task-owned.
+struct tls_resume_t {
+    esp_tls_client_session_t *session;
+    char *host;   // the host it was made with (heap copy)
+};
+
+static tls_resume_t s_tls_resume;
+
+static void tls_resume_forget(tls_resume_t *t) {
+    if (t->session) esp_tls_free_client_session(t->session);
+    free(t->host);
+    t->session = nullptr;
+    t->host = nullptr;
+}
+
+static void tls_resume_offer(tls_resume_t *t, const char *host, esp_tls_cfg_t *cfg) {
+    if (t->session && (!t->host || strcmp(t->host, host) != 0)) tls_resume_forget(t);
+    cfg->client_session = t->session;
+}
+
+// After a successful handshake: keep this connection's session for the next.
+static void tls_resume_keep(tls_resume_t *t, const char *host, esp_tls_t *tls) {
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    esp_tls_client_session_t *fresh = esp_tls_get_client_session(tls);
+    char *copy = fresh ? strdup(host) : nullptr;
+    if (!copy) {   // no memory: no resumption next time, nothing else changes
+        if (fresh) esp_tls_free_client_session(fresh);
+        tls_resume_forget(t);
+        return;
+    }
+    tls_resume_forget(t);
+    t->session = fresh;
+    t->host = copy;
+    ESP_LOGI(TAG, "TLS session kept for resumption: %d B of internal RAM",
+             (int)before - (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+#endif
 
 static session_result_t run_session(stack_monitor_t *stack) {
     session_result_t result = SESSION_FAILED;
@@ -2140,26 +2274,47 @@ static session_result_t run_session(stack_monitor_t *stack) {
     pending_json_body control_tx;
     identity_fetch identity = {};
 
-    // 1. TLS connect
-    esp_tls_t *tls = esp_tls_init();
+    // 1. TLS connect. One copy of the host for the whole handshake: setup can
+    // rewrite s_noise_host from another task (noise_ctrl_set_host()), and a
+    // kept session must be filed under the host it was made with.
+    char *tls_host = strdup(s_noise_host);
+    esp_tls_t *tls = tls_host ? esp_tls_init() : nullptr;
     if (!tls) {
+        free(tls_host);
         ESP_LOGE(TAG, "esp_tls_init failed");
         note_attempt_failed("TLS init failed");
         return SESSION_FAILED;
     }
     esp_tls_cfg_t cfg = {};
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;   // a fallback full handshake verifies as always
     cfg.timeout_ms = 15000;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    tls_resume_offer(&s_tls_resume, tls_host, &cfg);
+#endif
+    int64_t tls_t0 = esp_timer_get_time();
 
-    int r = network_proxy_tls_connect(s_noise_host, static_cast<int>(strlen(s_noise_host)),
+    int r = network_proxy_tls_connect(tls_host, static_cast<int>(strlen(tls_host)),
                                   NOISE_PORT, &cfg, tls);
     if (r != 1) {
         ESP_LOGE(TAG, "TLS connect failed: %d", r);
         esp_tls_conn_destroy(tls);
+        free(tls_host);
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        tls_resume_forget(&s_tls_resume);   // never retry with a session that may be what failed
+#endif
         note_attempt_failed("TLS connect failed");
         return SESSION_FAILED;
     }
-    ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s)", s_noise_host, NOISE_PORT, s_vm_id);
+    {
+        bool offered = false;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        offered = cfg.client_session != nullptr;
+        tls_resume_keep(&s_tls_resume, tls_host, tls);
+#endif
+        ESP_LOGI(TAG, "TLS connected to %s:%d (vm_id=%s) in %lld ms%s", tls_host, NOISE_PORT, s_vm_id,
+                 (long long)((esp_timer_get_time() - tls_t0) / 1000), offered ? ", last session offered" : "");
+        free(tls_host);
+    }
     // Send each write at once. With Nagle's algorithm on, a small write (a
     // tunnel batch holding a lone handshake packet or a short reply) waited
     // until everything sent before it was acknowledged, adding ~100 ms to
@@ -2462,7 +2617,17 @@ static session_result_t run_session(stack_monitor_t *stack) {
                                 error = true;
                                 break;
                             }
+                        } else if (frame.stream_id == CTRL_STREAM_ID) {
+                            // A Response's inline body carries messages too.
+                            process_inbound_body_chunk(frame.response.body,
+                                                       session_generation);
                         }
+                    }
+                    if (control_stream_ended(frame)) {
+                        ESP_LOGW(TAG, "server ended /link-control");
+                        end_reason = "server ended control stream";
+                        error = true;
+                        break;
                     }
                 }
             } else if (n == 0) {
@@ -2713,6 +2878,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
 cleanup:
     clear_pending_json_body(control_tx);
+    drop_held_control_message();
     free(ws_buf);
     free(identity.body);
     free(rx_buf);

@@ -47,6 +47,7 @@
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
+#include "token_fp.h"
 #include "config_store.h"
 #include "wifi_mgr.h"
 #include "wifi_known.h"
@@ -123,6 +124,7 @@ static const char *HEARTBEAT_TAG = "link.heartbeat";
 #define WIFI_JOIN_TRY_MIN_MS    8000    // each one's share of the timeout, at least
 #define WIFI_JOIN_SCAN_MAX      40      // as many networks as a scan reports
 #define WIFI_QUICK_MIN_RSSI     (-75)   // near enough to join without a full scan
+#define WIFI_REJOIN_MS          12000   // straight to the cached access point, then the probe
 #define MAX_SCAN_RESULTS        25
 #define TOKEN_BUF_BYTES         2048
 #define VM_AUTH_REFRESH_RETRY_INTERVAL_US (60LL * 1000000LL)
@@ -178,7 +180,13 @@ static bool s_ble_started = false;
 static bool s_ota_pending_verify = false;
 static uint32_t s_confirm_generation = 0;
 static uint32_t s_confirm_session_generation = 0;
-static TaskHandle_t s_confirm_timeout_task = NULL;
+// The setup confirmation's two timeouts (the press window, then the confirmed
+// session's idle limit) are one-shot esp_timers, not tasks that sleep them out:
+// that kept a 4 KB stack parked through every setup.
+typedef enum { CONFIRM_TO_NONE, CONFIRM_TO_PRESS, CONFIRM_TO_IDLE } confirm_to_t;
+static esp_timer_handle_t s_confirm_timer;
+static confirm_to_t s_confirm_to = CONFIRM_TO_NONE;   // under the setup window lock
+static uint32_t s_confirm_to_generation;
 #if CONFIG_MUSE_ENABLED
 static volatile bool s_muse_napping = false;   // app_wifi_nap(), or no network nearby, until the next join
 static volatile bool s_muse_resume_vm = false;  // napped with a VM session: resume it
@@ -249,24 +257,35 @@ static void setup_window_lock_give(void) {
 }
 
 static uint32_t advance_confirm_generation_locked(void) {
-    if (s_confirm_timeout_task) {
-        // The waiter owns no resources until it clears this handle under
-        // the same lock after its delay.
-        helper_task_delete(s_confirm_timeout_task);
-        s_confirm_timeout_task = NULL;
+    if (s_confirm_to != CONFIRM_TO_NONE) {
+        esp_timer_stop(s_confirm_timer);   // the generation check guards a callback already running
+        s_confirm_to = CONFIRM_TO_NONE;
     }
     return ++s_confirm_generation;
 }
 
-static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
-                                        uint32_t generation, uint32_t session_generation) {
+static void confirm_timer_fire(void *arg);
+
+static BaseType_t start_confirm_timeout(confirm_to_t kind, uint32_t generation, uint32_t session_generation) {
     setup_window_lock_take();
     BaseType_t rc = pdPASS;
     if (s_confirm_generation == generation
         && link_pairing_session_is_current(session_generation)) {
         s_confirm_session_generation = session_generation;
-        rc = helper_task_create(task, name, 4096, (void *)(uintptr_t)generation, 4,
-                                &s_confirm_timeout_task);
+        if (!s_confirm_timer) {
+            const esp_timer_create_args_t t = { .callback = confirm_timer_fire, .name = "pair_to" };
+            if (esp_timer_create(&t, &s_confirm_timer) != ESP_OK) rc = pdFAIL;
+        }
+        if (rc == pdPASS) {
+            uint32_t ms = kind == CONFIRM_TO_PRESS ? PAIRING_CONFIRM_WINDOW_MS : PAIRING_CONFIRMED_IDLE_TIMEOUT_MS;
+            esp_timer_stop(s_confirm_timer);
+            s_confirm_to = kind;
+            s_confirm_to_generation = generation;
+            if (esp_timer_start_once(s_confirm_timer, (uint64_t)ms * 1000) != ESP_OK) {
+                s_confirm_to = CONFIRM_TO_NONE;
+                rc = pdFAIL;
+            }
+        }
     }
     setup_window_lock_give();
     return rc;
@@ -274,7 +293,6 @@ static BaseType_t start_confirm_timeout(TaskFunction_t task, const char *name,
 
 static void open_setup_window(const char *reason);
 static void heap_snapshot(const char *label);
-static void confirmed_idle_timeout_task(void *arg);
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -530,6 +548,24 @@ static app_wifi_join_t join_saved_networks(int timeout_ms, join_mode_t mode,
         goto done;
     }
 
+    // Rejoining the network it was on (after a drop): straight to the
+    // access point cached at that join (wifi_mgr_has_cached_ap), without
+    // probing its channel first, if it was last heard (at the join, or as the
+    // link dropped) at the probe's floor or better: on a mesh, a weak one
+    // probes for a nearer node. A miss drops the cache
+    // (wifi_mgr_connect), and the probe and the scan below follow. The cap
+    // leaves time for a slow DHCP: a shorter one re-triggered the connect
+    // while DHCP was still running.
+    if (mode == JOIN_ANY && wifi_mgr_has_cached_ap(list->nets[0].ssid, WIFI_QUICK_MIN_RSSI)) {
+        restore_wifi_channel_hint(list->nets[0].ssid);
+        // Neither tries nor tried[]: the probe and the scan below count what
+        // they find, so a miss away from home is still "not nearby", and the
+        // scan may still find this network through another access point.
+        int ms = join_ms_left(deadline) / 2;
+        ok = join_saved_network(list, 0, ms < WIFI_REJOIN_MS ? ms : WIFI_REJOIN_MS, led, -1, joined);
+        if (ok) goto done;
+    }
+
     channel = saved_wifi_channel(list->nets[0].ssid);
     if (channel && mode == JOIN_ANY) {
         // A probe on one channel takes a moment; a full scan takes seconds.
@@ -693,7 +729,7 @@ static void setup_fail_for_session(const char *stage, const char *status,
         }
         uint32_t generation = advance_confirm_generation_locked();
         setup_window_lock_give();
-        start_confirm_timeout(confirmed_idle_timeout_task, "pair_idle_to", generation,
+        start_confirm_timeout(CONFIRM_TO_IDLE, generation,
                               session_generation != 0 ? session_generation
                                   : link_pairing_session_generation());
     } else if (session_generation != 0) {
@@ -2155,14 +2191,12 @@ static void enter_advertising_state(const char *reason) {
     ble_server_begin_advertising();
 }
 
+// The press window ran out (on a task of its own: confirm_timer_fire).
 static void confirm_timeout_task(void *arg) {
     uint32_t generation = (uint32_t)(uintptr_t)arg;
-    vTaskDelay(pdMS_TO_TICKS(PAIRING_CONFIRM_WINDOW_MS));
-
     setup_window_lock_take();
     bool current = s_confirm_generation == generation;
     uint32_t session_generation = current ? s_confirm_session_generation : 0;
-    if (current) s_confirm_timeout_task = NULL;
     current = current && link_pairing_session_is_current(session_generation);
     if (current) ui_set_status("pairing_confirm_timeout");
     setup_window_lock_give();
@@ -2177,14 +2211,13 @@ static void confirm_timeout_task(void *arg) {
     helper_task_delete(NULL);
 }
 
+// The confirmed session's idle limit: no provisioning in time (on a task of
+// its own: confirm_timer_fire).
 static void confirmed_idle_timeout_task(void *arg) {
     uint32_t generation = (uint32_t)(uintptr_t)arg;
-    vTaskDelay(pdMS_TO_TICKS(PAIRING_CONFIRMED_IDLE_TIMEOUT_MS));
-
     setup_window_lock_take();
     bool current = s_confirm_generation == generation;
     uint32_t session_generation = current ? s_confirm_session_generation : 0;
-    if (current) s_confirm_timeout_task = NULL;
     current = current && link_pairing_session_is_current(session_generation)
               && !link_pairing_provisioning_session_valid(0);
     if (current) ui_set_status("pairing_confirm_timeout");
@@ -2198,6 +2231,41 @@ static void confirmed_idle_timeout_task(void *arg) {
     }
     stack_monitor_record(NULL);
     helper_task_delete(NULL);
+}
+
+// On the esp_timer task, which mustn't be held up: the timeout's status send
+// waits for the BLE TX lock and paces its chunks, so it runs on a short-lived
+// task.
+static void confirm_timer_fire(void *arg) {
+    (void)arg;
+    setup_window_lock_take();
+    // A one-shot isn't active in its own callback unless it was re-armed while
+    // this one waited for the lock: that timeout isn't due yet.
+    confirm_to_t kind = esp_timer_is_active(s_confirm_timer) ? CONFIRM_TO_NONE : s_confirm_to;
+    uint32_t generation = s_confirm_to_generation;
+    if (kind != CONFIRM_TO_NONE) s_confirm_to = CONFIRM_TO_NONE;
+    setup_window_lock_give();
+    void *g = (void *)(uintptr_t)generation;
+    BaseType_t rc = pdPASS;
+    if (kind == CONFIRM_TO_PRESS) {
+        rc = helper_task_create(confirm_timeout_task, "pair_confirm_to", 4096, g, 4, NULL);
+    } else if (kind == CONFIRM_TO_IDLE) {
+        rc = helper_task_create(confirmed_idle_timeout_task, "pair_idle_to", 4096, g, 4, NULL);
+    }
+    if (rc != pdPASS) {
+        // No memory for the task: still end the session, without its status
+        // (the disconnect only queues work for NimBLE, and resets the
+        // session's keys even when it can't).
+        setup_window_lock_take();
+        bool current = s_confirm_generation == generation;
+        uint32_t session_generation = current ? s_confirm_session_generation : 0;
+        current = current && link_pairing_session_is_current(session_generation)
+                  && (kind == CONFIRM_TO_PRESS || !link_pairing_provisioning_session_valid(0));
+        if (current) ui_set_status("pairing_confirm_timeout");
+        setup_window_lock_give();
+        ESP_LOGE(TAG, "no memory for the pairing timeout's task");
+        if (current) ble_server_disconnect_pairing_session(session_generation);
+    }
 }
 
 static void notify_pairing_confirmed(uint32_t session_generation) {
@@ -2215,7 +2283,7 @@ static void notify_pairing_confirmed(uint32_t session_generation) {
     ui_set_status("pairing_confirmed");
     led_status_set_state(LED_STATE_WIFI_CONNECTING);
     setup_window_lock_give();
-    if (start_confirm_timeout(confirmed_idle_timeout_task, "pair_idle_to", generation,
+    if (start_confirm_timeout(CONFIRM_TO_IDLE, generation,
                               session_generation) != pdPASS) {
         ESP_LOGE(TAG, "failed to start confirmed-session idle timer");
         ble_server_send_pairing_status("error_pairing_unavailable", session_generation);
@@ -2248,7 +2316,7 @@ static void on_pairing_client_finished(uint32_t session_generation) {
     led_status_set_state(LED_STATE_PAIRING_CONFIRM_REQUIRED);
     setup_window_lock_give();
 
-    if (start_confirm_timeout(confirm_timeout_task, "pair_confirm_to", generation,
+    if (start_confirm_timeout(CONFIRM_TO_PRESS, generation,
                               session_generation) != pdPASS) {
         ESP_LOGE(TAG, "failed to start pairing confirmation timer");
         ble_server_send_pairing_status("error_pairing_unavailable", session_generation);
@@ -2396,6 +2464,49 @@ static void on_button_double_press(void) {
 static void on_button_long_press(void) {
     reset_setup_from_control("button long-press", SETUP_RESET_FORGET_WIFI);
 }
+
+#if !CONFIG_MUSE_ENABLED
+#define LINK_WIFI_RETRY_MIN_US (30LL * 1000 * 1000)
+#define LINK_WIFI_RETRY_MAX_US (5LL * 60 * 1000 * 1000)
+#define LINK_WIFI_JOIN_TIMEOUT_MS 20000
+
+// A paired Link whose boot join found no saved network (the router still
+// starting after a power cut, say) has nothing else to rejoin it: wifi_mgr only
+// reconnects after a first association. The heartbeat looks again, backing
+// off, until one works; from then on wifi_mgr keeps it. (Muse's keeper does
+// this on boards with the full UI.)
+static void link_keep_wifi(void) {
+    static bool joined_once;
+    static int64_t next_try;
+    static int64_t backoff = LINK_WIFI_RETRY_MIN_US;
+    if (wifi_mgr_is_connected()) {
+        joined_once = true;
+        backoff = LINK_WIFI_RETRY_MIN_US;
+        return;
+    }
+    if (joined_once || CONFIG_HOMEHUB_WIFI_SSID[0] || !config_setup_complete()) return;
+    int64_t now = esp_timer_get_time();
+    if (now < next_try || !operation_gate_take(0, "Wi-Fi rejoin")) return;
+    char joined[WIFI_KNOWN_SSID_MAX + 1];
+    app_wifi_join_t result = join_saved_networks(LINK_WIFI_JOIN_TIMEOUT_MS, JOIN_ANY,
+                                                 true, joined);
+    operation_gate_give();
+    if (result == APP_WIFI_JOINED) {
+        joined_once = true;
+        ui_set_wifi(joined);
+        ui_set_status("wifi_connected");
+        led_status_set_state(LED_STATE_WIFI_CONNECTED);
+        persist_connected_wifi_channel();
+        return;
+    }
+    if (result != APP_WIFI_BUSY) {
+        ui_set_status("wifi_failed");
+        led_status_set_state(LED_STATE_ERROR);
+    }
+    next_try = now + backoff;
+    backoff = backoff * 2 > LINK_WIFI_RETRY_MAX_US ? LINK_WIFI_RETRY_MAX_US : backoff * 2;
+}
+#endif
 
 
 #if CONFIG_MUSE_ENABLED
@@ -2776,12 +2887,13 @@ void app_run(void) {
     ESP_LOGI(TAG, "  Colour:   %s", have_colour ? colour : "(none)");
     ESP_LOGI(TAG, "  Region:   %s", have_region ? region : "(none)");
     ESP_LOGI(TAG, "  Verify:   %s", link_pairing_sign_factory_test());
-    // Only the hint gadgets.muse.ai displays; the full token is never logged.
-    ESP_LOGI(TAG, "  SDK token:  %.12s", identity_sdk_token() ? identity_sdk_token() : "(none)");
-    char paired_sdk_hint[IDENTITY_SDK_TOKEN_HINT_LEN + 1];
-    if (identity_sdk_token_changed_since_pairing(paired_sdk_hint, sizeof(paired_sdk_hint))) {
-        ESP_LOGW(TAG, "  Paired with SDK token %s, not this one. Pair again in the "
-                      "Muse app to use it.", paired_sdk_hint);
+    // Whether there is one, its length and a SHA-256 prefix: never any of its
+    // characters (token_fp.h).
+    char sdk_fp[TOKEN_FP_TEXT_LEN];
+    ESP_LOGI(TAG, "  SDK token:  %s", token_fp_text(identity_sdk_token(), sdk_fp));
+    if (identity_sdk_token_changed_since_pairing(NULL, 0)) {
+        ESP_LOGW(TAG, "  Paired with another SDK token, not this one. Pair again in the "
+                      "Muse app to use it.");
     }
     ESP_LOGI(TAG, "========================");
 
@@ -3101,6 +3213,7 @@ void app_run(void) {
 #if CONFIG_MUSE_ENABLED
         muse_keep_vm_session();
 #else
+        link_keep_wifi();
         // Paired, but with no VM session: the boot attempt failed (a refusal
         // that keeps the credentials, or the network). Nothing else retries
         // it. It keeps its own floor: a fetch that succeeds without starting a

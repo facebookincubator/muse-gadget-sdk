@@ -36,6 +36,7 @@
 #if CONFIG_MUSE_ENABLED
 #include "muse_link.h"
 #endif
+#include "token_fp.h"
 
 // The chip's own USB port, where it has one and the log goes to it.
 #define USJ_CONSOLE (SOC_USB_SERIAL_JTAG_SUPPORTED && \
@@ -126,7 +127,8 @@ bool sdk_token_console_command(const char *line) {
         fflush(stdout);
         return true;
     }
-    ESP_LOGI(TAG, "stored SDK token %.12s, restarting to use it", token);
+    char fp[TOKEN_FP_TEXT_LEN];
+    ESP_LOGI(TAG, "stored the SDK token (%s), restarting to use it", token_fp_text(token, fp));
     printf("@sdk_token ok\n");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(500));   // let the answer reach the host

@@ -39,6 +39,9 @@ if(CONFIG_MUSE_ENABLED)
         "muse_lang.c"
         "muse_link.c"
         "muse_ble.c")
+    if(CONFIG_MUSE_UI_THEME)
+        list(APPEND srcs "muse_theme.c" "muse_theme_policy.c" "muse_theme_lvgl.c")
+    endif()
     if(CONFIG_MUSE_WAKEWORD_ENABLE)
         # Wake word tap and task; without it, muse_wakeword_glue.h's inline stubs.
         list(APPEND srcs "muse_wakeword_glue.c")

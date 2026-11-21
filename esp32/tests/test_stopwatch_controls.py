@@ -174,6 +174,7 @@ static void *lv_tileview_get_tile_active(void *tv) { (void)tv; return settings ?
 static void lv_obj_set_flag(void *obj, int flag, bool value) { (void)flag; ((typeof(hints[0]) *)obj)->hidden = value; ++lv_calls; }
 static const char *lv_label_get_text(void *obj) { return ((typeof(hints[0]) *)obj)->text; }
 static void lv_label_set_text(void *obj, const char *text) { strcpy(((typeof(hints[0]) *)obj)->text, text); }
+#define muse_theme_set_style_text_color lv_obj_set_style_text_color
 static void lv_obj_set_style_text_color(void *obj, int color, int part) { (void)obj; (void)color; (void)part; }
 static int lv_color_hex(int color) { return color; }
 static bool muse_settings_speaker_on(void) { return speaker; }

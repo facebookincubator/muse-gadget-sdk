@@ -97,6 +97,8 @@ static const uint32_t FIXED[C_COUNT] = {
 
 static rgb_t s_scheme[5];      /* live, blended: f0..f3, acc */
 static bool s_scheme_init;
+static uint32_t s_background;
+void muse_pixel_set_background(uint32_t rgb) {s_background=rgb&0xffffff;}
 static uint16_t s_pal[C_COUNT];
 static uint16_t s_pal_dim[C_COUNT];
 
@@ -212,6 +214,7 @@ static void update_palette(const scheme_t *target, float dt)
     for (int i = 0; i < C_COUNT; i++) {
         pal[i] = hex_rgb(FIXED[i]);
     }
+    pal[C_BG] = hex_rgb(s_background);
     rgb_t acc = s_scheme[4];
     pal[C_G0] = s_scheme[0];
     pal[C_G1] = s_scheme[1];
@@ -219,14 +222,14 @@ static void update_palette(const scheme_t *target, float dt)
     pal[C_G3] = s_scheme[3];
     pal[C_ACC] = acc;
     pal[C_RIM] = mix(pal[C_BL], acc, 0.45f);
-    pal[C_AURA1] = scale_rgb(acc, 0.16f);
-    pal[C_AURA2] = scale_rgb(acc, 0.34f);
+    pal[C_AURA1] = mix(pal[C_BG], acc, 0.16f);
+    pal[C_AURA2] = mix(pal[C_BG], acc, 0.34f);
     pal[C_SPK] = mix(acc, pal[C_WHITE], 0.45f);
 
     for (int i = 0; i < C_COUNT; i++) {
         s_pal[i] = to565(pal[i]);
         /* The block edge shade gives the enlarged pixels a faint grid texture. */
-        s_pal_dim[i] = to565(scale_rgb(pal[i], 0.72f));
+        s_pal_dim[i] = i == C_BG ? s_pal[i] : to565(scale_rgb(pal[i], 0.72f));
     }
 }
 

@@ -72,6 +72,9 @@ static atomic_bool s_lift_wake, s_face_down_quiet;
 #if CONFIG_MUSE_APP_VIEW
 static bool s_apps_on;
 #endif
+#if CONFIG_MUSE_UI_THEME
+static atomic_uint s_theme;
+#endif
 static nvs_handle_t s_nvs;
 static muse_setting_cb_t s_listener;
 static int s_text_default = MUSE_TEXT_SMALL;
@@ -151,6 +154,10 @@ esp_err_t muse_settings_init(void)
     if (nvs_get_u8(s_nvs, "lift_wake", &b) == ESP_OK) atomic_store(&s_lift_wake, b != 0);
     if (nvs_get_u8(s_nvs, "face_quiet", &b) == ESP_OK) atomic_store(&s_face_down_quiet, b != 0);
 #endif
+#if CONFIG_MUSE_UI_THEME
+    b=MUSE_THEME_AUTO;load_u8("ui_theme_v1",&b);
+    atomic_store(&s_theme,b<=MUSE_THEME_LIGHT?b:MUSE_THEME_AUTO);
+#endif
     load_u8("volume", &s.volume);
     if (nvs_get_u8(s_nvs, "speaker", &b) == ESP_OK) {
         s.speaker_on = b;
@@ -194,6 +201,27 @@ void muse_settings_set_listener(muse_setting_cb_t cb)
 {
     s_listener = cb;
 }
+
+#if CONFIG_MUSE_UI_THEME
+muse_theme_mode_t muse_settings_theme(void) {return (muse_theme_mode_t)atomic_load(&s_theme);}
+esp_err_t muse_settings_set_theme(muse_theme_mode_t mode) {
+    if(mode<MUSE_THEME_AUTO || mode>MUSE_THEME_LIGHT)return ESP_ERR_INVALID_ARG;
+    esp_err_t error=ESP_OK;
+    LOCKED({
+        if((unsigned)mode!=atomic_load(&s_theme)) {
+            error=nvs_set_u8(s_nvs,"ui_theme_v1",(uint8_t)mode);
+            if(error==ESP_OK)error=nvs_commit(s_nvs);
+            if(error==ESP_OK)atomic_store(&s_theme,(unsigned)mode);
+            else {
+                /* Do not let a later unrelated settings commit persist a
+                 * theme value whose failed commit was rolled back in RAM. */
+                nvs_set_u8(s_nvs,"ui_theme_v1",(uint8_t)atomic_load(&s_theme));
+            }
+        }
+    });
+    return error;
+}
+#endif
 
 int muse_settings_volume(void) { return s.volume; }
 bool muse_settings_speaker_on(void) { return s.speaker_on; }

@@ -41,6 +41,7 @@
 #if CONFIG_CAPABILITIES_REGISTRY
 #include "board_capabilities.h"
 #endif
+#include "token_fp.h"
 #include "stack_monitor.h"
 #include "wifi_known.h"
 #include "network_proxy_tls.h"
@@ -435,7 +436,8 @@ static bool op_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *v
 // needs a restart, as when it's set over serial (sdk_token_console.h).
 static bool op_sdk_token_set(const char *token) {
     if (!identity_set_sdk_token(token)) return false;
-    ESP_LOGI(TAG, "SDK token %.12s set in settings, restarting to use it", token);
+    char fp[TOKEN_FP_TEXT_LEN];
+    ESP_LOGI(TAG, "SDK token (%s) set in settings, restarting to use it", token_fp_text(token, fp));
     esp_restart();
     return true;
 }
