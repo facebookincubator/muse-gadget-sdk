@@ -98,6 +98,7 @@ upstream licenses:
 | [`esp32/main/epd_it8951.c`](esp32/main/epd_it8951.c) | Seeed_GFX2's IT8951 command framing and ED103TC2 one-bit mode | MIT, retained in the file header |
 | [`esp32/components/tinyh264/src`](esp32/components/tinyh264) | the Android Open Source Project's H.264 decoder, via [udevbe/tinyh264](https://github.com/udevbe/tinyh264) | Apache-2.0, AOSP's copyright, see [`LICENSE`](esp32/components/tinyh264/LICENSE) |
 | [`esp32/components/libvpx_vp8/src`](esp32/components/libvpx_vp8) | [libvpx](https://chromium.googlesource.com/webm/libvpx) v1.16.0's VP8 decoder, trimmed | BSD-3-Clause, the WebM Project authors' copyright, see [`LICENSE`](esp32/components/libvpx_vp8/LICENSE), with Google's patent grant in [`PATENTS`](esp32/components/libvpx_vp8/PATENTS) |
+| libwebp v1.6.0's WebP decoder, for the opt-in avatar sync (fetched at build time from a pinned archive, not vendored; see [`avatar_webp.cmake`](esp32/cmake/avatar_webp.cmake)) | [webmproject/libwebp](https://github.com/webmproject/libwebp) | BSD-3-Clause, Google's copyright, with Google's patent grant, see [`libwebp.txt`](esp32/licenses/libwebp.txt) |
 
 Dependencies fetched at build time are under their own licenses: ESP-IDF
 components (into `esp32/managed_components/`), and the simulator's LVGL and
