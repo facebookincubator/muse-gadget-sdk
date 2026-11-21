@@ -81,6 +81,18 @@ static void show_seconds(uint32_t seconds)
     p = put_two(p, seconds % 60);
     *p = '\0';
     ui_set_text(time_text, P_TEXT, text);
+    /* Fill the screen width, including the longer hours format, while leaving
+     * room for the outer ring and the paused / finished heading. Layout sizes
+     * are untransformed, so each update fits without accumulating scale. */
+    int32_t w = sys_info(INFO_SCREEN_WIDTH), h = sys_info(INFO_SCREEN_HEIGHT);
+    int32_t side = w < h ? w : h;
+    int32_t tw = ui_get(time_text, P_WIDTH), th = ui_get(time_text, P_HEIGHT);
+    if (tw > 0 && th > 0) {
+        int32_t scale = side * 84 / tw;
+        int32_t height_scale = side * 32 / th;
+        if (scale > height_scale) scale = height_scale;
+        ui_set(time_text, P_TRANSFORM_SCALE, scale);
+    }
 }
 
 static void set_picker(void)
@@ -251,7 +263,9 @@ GADGET_EXPORT(on_start) void on_start(void)
     ui_style(ring, PART_KNOB, P_BG_OPA, 0);
     ui_style(ring, PART_KNOB, P_PAD_ALL, 0);
     heading = label(UI_ROOT, FONT_28, 0xFFFFFF, -side * 21 / 100);
-    time_text = label(UI_ROOT, font, TEXT, -side / 30);
+    time_text = label(UI_ROOT, font, TEXT, 0);
+    ui_set(time_text, P_TRANSFORM_PIVOT_X, PCT(50));
+    ui_set(time_text, P_TRANSFORM_PIVOT_Y, PCT(50));
     detail = label(UI_ROOT, FONT_14, DIM, side * 23 / 100);
 
     picker = ui_create(W_OBJ, UI_ROOT);
