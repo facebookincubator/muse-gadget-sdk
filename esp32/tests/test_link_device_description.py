@@ -168,6 +168,12 @@ static const char *s_node_id = "{node_id}", *s_display_name = "{display_name}";
 static void copy_wifi_ssid(char *out, size_t size) {{ snprintf(out, size, "%s", s_wifi_ssid); }}
 static void make_uuid(char *out, size_t size) {{ snprintf(out, size, "00000000-0000-4000-8000-000000000000"); }}
 static int bits = 16;
+/* The longest station address the registration can carry. */
+static bool tunnel_relay_lan_address(char *ip, size_t size, int *prefix) {{
+    snprintf(ip, size, "255.255.255.255");
+    *prefix = 32;
+    return true;
+}}
 bool led_status_display_info(int *w, int *h) {{ *w = 800; *h = 480; return true; }}
 int led_status_display_bits(void) {{ return bits; }}
 void ble_commands_register(cJSON *commands);
@@ -197,6 +203,9 @@ int main(void) {{
         ])[0])["params"]
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
+        # The VM keeps only string metadata values.
+        self.assertEqual(params["metadata"]["lan_ipv4"], "255.255.255.255")
+        self.assertEqual(params["metadata"]["lan_prefix"], "32")
         self.assertEqual(params["commands_v2"]["device.guide"],
                          {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
 

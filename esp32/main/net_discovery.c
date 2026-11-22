@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
@@ -60,7 +61,8 @@ static int sanitize_ascii(char *s) {
 #define SRC_WSD     0x08
 #define SRC_SNMP    0x10
 #define SRC_NETBIOS 0x20
-#define SRC_ALL     0x3F
+#define SRC_VENDOR  0x40
+#define SRC_ALL     0x7F
 
 #define ARP_BATCH_SIZE      8
 #define ARP_BATCH_DELAY_MS  150
@@ -70,6 +72,10 @@ static int sanitize_ascii(char *s) {
 #define WSD_LISTEN_MS       3000
 #define SNMP_LISTEN_MS      2000
 #define NETBIOS_LISTEN_MS   2000
+#define VENDOR_LISTEN_MS    6000   // Tuya broadcasts about every 5 s, Bambu every 4 to 6 s
+// The vendor queries go again this far in: Wi-Fi loses some of a burst of
+// broadcasts (a miIO hello alone was answered 8 times in 8, in the burst 2 in 6).
+#define VENDOR_RESEND_MS    1500
 #define RECV_BUF            1460
 // Includes NUL, matching SNMP's value buffer. Log shortened fields without
 // marking source truncation: that flag tracks omitted observations/coverage.
@@ -85,6 +91,7 @@ static int sanitize_ascii(char *s) {
 #define MAX_WSD     64
 #define MAX_SNMP    128
 #define MAX_NETBIOS 256
+#define MAX_VENDOR  128
 
 #define DISCOVERY_MAX_JSON_BYTES (256 * 1024)
 // Covers network/source metadata and the link.result envelope, including the
@@ -113,6 +120,7 @@ static uint32_t parse_sources(cJSON *params) {
         else if (!strcmp(v, "wsd"))     m |= SRC_WSD;
         else if (!strcmp(v, "snmp"))    m |= SRC_SNMP;
         else if (!strcmp(v, "netbios")) m |= SRC_NETBIOS;
+        else if (!strcmp(v, "vendor"))  m |= SRC_VENDOR;
     }
     return m ? m : SRC_ALL;
 }
@@ -222,7 +230,9 @@ static void arp_probe(discovery_budget_t *budget, esp_netif_t *netif,
         if (first > bcast - hc) first = bcast - hc;
     }
 
-    uint32_t *seen = malloc(hc * sizeof(uint32_t));
+    // In PSRAM where there is any: 4 KB of internal RAM at the scan's peak.
+    uint32_t *seen = heap_caps_malloc(hc * sizeof(uint32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!seen) seen = malloc(hc * sizeof(uint32_t));
     if (!seen) { source->error = "out_of_memory"; return; }
 
     ESP_LOGI(TAG, "ARP sweep: %d hosts", hc);
@@ -322,10 +332,27 @@ typedef struct {
     char txt[256];
 } mdns_entry_t;
 
+// An A record: which host has which address. When the listen ends, an
+// instance gets the address of the host its SRV record names, whichever of
+// the two records came first.
+typedef struct {
+    char name[64];
+    char ip_str[16];
+} mdns_addr_t;
+#define MAX_MDNS_ADDRS 128
+
+// DNS names match case-insensitively, with or without the root's trailing dot.
+static bool dns_name_eq(const char *a, const char *b) {
+    size_t la = strlen(a), lb = strlen(b);
+    if (la && a[la - 1] == '.') la--;
+    if (lb && b[lb - 1] == '.') lb--;
+    return la == lb && strncasecmp(a, b, la) == 0;
+}
+
 static int mdns_find_or_add(mdns_entry_t *arr, int *count, int max,
                             const char *instance) {
     for (int i = 0; i < *count; i++)
-        if (strcmp(arr[i].instance, instance) == 0) return i;
+        if (dns_name_eq(arr[i].instance, instance)) return i;
     if (*count >= max) return -1;
     int idx = (*count)++;
     memset(&arr[idx], 0, sizeof(arr[idx]));
@@ -334,7 +361,8 @@ static int mdns_find_or_add(mdns_entry_t *arr, int *count, int max,
 }
 
 static void parse_mdns_pkt(const uint8_t *pkt, int len,
-                           mdns_entry_t *found, int *fc, int max) {
+                           mdns_entry_t *found, int *fc, int max,
+                           mdns_addr_t *addrs, int *ac, bool *addrs_full) {
     if (len < 12) return;
     int qdcount = (pkt[4] << 8) | pkt[5];
     int total = ((pkt[6] << 8) | pkt[7]) + ((pkt[8] << 8) | pkt[9]) +
@@ -365,30 +393,32 @@ static void parse_mdns_pkt(const uint8_t *pkt, int len,
                 mdns_find_or_add(found, fc, max, inst);
         } else if (rtype == 33 && rdlen >= 6) {
             uint16_t port = (pkt[pos + 4] << 8) | pkt[pos + 5];
-            char target[64];
+            // Decoded as long as rname, so a target too long for the host
+            // table is dropped instead of cut to another host's name.
+            char target[sizeof(rname)];
             if (dns_decode_name(pkt, len, pos + 6, target, sizeof(target)) > 0) {
                 for (int i = 0; i < *fc; i++) {
-                    if (strstr(rname, found[i].instance) ||
-                        !strcmp(rname, found[i].instance)) {
+                    if (dns_name_eq(rname, found[i].instance)) {
                         found[i].port = port;
-                        if (!found[i].hostname[0])
-                            snprintf(found[i].hostname, sizeof(found[i].hostname),
-                                     "%s", target);
+                        if (!found[i].hostname[0] && strlen(target) < sizeof(found[i].hostname))
+                            memcpy(found[i].hostname, target, strlen(target) + 1);
                         break;
                     }
                 }
             }
         } else if (rtype == 1 && rdlen == 4) {
-            char aip[16];
-            snprintf(aip, sizeof(aip), "%d.%d.%d.%d",
-                     pkt[pos], pkt[pos+1], pkt[pos+2], pkt[pos+3]);
-            for (int i = 0; i < *fc; i++) {
-                if (!found[i].ip_str[0] &&
-                    (strstr(rname, found[i].hostname) ||
-                     strstr(found[i].hostname, rname) ||
-                     !found[i].hostname[0])) {
-                    snprintf(found[i].ip_str, sizeof(found[i].ip_str), "%s", aip);
-                    break;
+            // A name too long for an SRV target's buffer couldn't match one.
+            size_t nl = strlen(rname);
+            int a = 0;
+            while (a < *ac && !dns_name_eq(addrs[a].name, rname)) a++;
+            if (a == *ac && nl < sizeof(addrs[a].name)) {
+                if (a < MAX_MDNS_ADDRS) {
+                    memcpy(addrs[a].name, rname, nl + 1);   // a host's first address
+                    snprintf(addrs[a].ip_str, sizeof(addrs[a].ip_str), "%d.%d.%d.%d",
+                             pkt[pos], pkt[pos+1], pkt[pos+2], pkt[pos+3]);
+                    (*ac)++;
+                } else {
+                    *addrs_full = true;   // an instance may miss its address
                 }
             }
         } else if (rtype == 16) {
@@ -404,9 +434,7 @@ static void parse_mdns_pkt(const uint8_t *pkt, int len,
             }
             tb[to] = '\0';
             for (int i = 0; i < *fc; i++) {
-                if (!found[i].txt[0] &&
-                    (strstr(rname, found[i].instance) ||
-                     !strcmp(rname, found[i].instance))) {
+                if (!found[i].txt[0] && dns_name_eq(rname, found[i].instance)) {
                     snprintf(found[i].txt, sizeof(found[i].txt), "%s", tb);
                     break;
                 }
@@ -451,9 +479,14 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    mdns_entry_t *found = calloc(MAX_MDNS, sizeof(mdns_entry_t));
+    // One allocation for both tables: alone, the 10 KB address table is small
+    // enough to come from internal RAM (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL).
+    mdns_entry_t *found = calloc(1, MAX_MDNS * sizeof(mdns_entry_t)
+                                    + MAX_MDNS_ADDRS * sizeof(mdns_addr_t));
     if (!found) { source->error = "out_of_memory"; close(sock); return; }
-    int fc = 0;
+    mdns_addr_t *addrs = (mdns_addr_t *)(found + MAX_MDNS);
+    int fc = 0, ac = 0;
+    bool addrs_full = false;
 
     struct timeval tv = { .tv_sec = MDNS_LISTEN_MS / 1000,
                           .tv_usec = (MDNS_LISTEN_MS % 1000) * 1000 };
@@ -464,10 +497,19 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     while (esp_timer_get_time() < deadline && fc < MAX_MDNS) {
         int n = recvfrom(sock, rbuf, sizeof(rbuf), 0, NULL, NULL);
         if (n <= 0) break;
-        parse_mdns_pkt(rbuf, n, found, &fc, MAX_MDNS);
+        parse_mdns_pkt(rbuf, n, found, &fc, MAX_MDNS, addrs, &ac, &addrs_full);
     }
 
-    source->truncated = fc >= MAX_MDNS;
+    // An instance without an SRV record, or whose host sent no A record,
+    // keeps no address rather than another host's.
+    for (int i = 0; i < fc; i++)
+        for (int a = 0; a < ac && found[i].hostname[0]; a++)
+            if (dns_name_eq(found[i].hostname, addrs[a].name)) {
+                snprintf(found[i].ip_str, sizeof(found[i].ip_str), "%s", addrs[a].ip_str);
+                break;
+            }
+
+    source->truncated = fc >= MAX_MDNS || addrs_full;
     for (int i = 0; i < fc; i++) {
         sanitize_ascii(found[i].instance);
         sanitize_ascii(found[i].hostname);
@@ -492,6 +534,33 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     setsockopt(sock, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mr, sizeof(mr));
     close(sock);
     ESP_LOGI(TAG, "mDNS: %d unique services", fc);
+}
+
+// Copies the value of buf's "key: value" line (key case-insensitive, at least
+// one byte after the colon), sanitized, into out. False without one.
+static bool header_value(char *buf, const char *key, char *out, size_t cap) {
+    size_t kl = strlen(key);
+    for (char *line = buf; *line; ) {
+        char *eol = strstr(line, "\r\n");
+        if (!eol) eol = line + strlen(line);
+        if ((size_t)(eol - line) > kl + 1
+            && line[kl] == ':'
+            && strncasecmp(line, key, kl) == 0) {
+            char *val = line + kl + 1;
+            while (*val == ' ') val++;
+            char save = *eol; *eol = '\0';
+            int len = snprintf(out, cap, "%s", val);
+            *eol = save;
+            if (len >= (int)cap)
+                ESP_LOGW(TAG, "%s value truncated from %d to %u bytes",
+                         key, len, (unsigned)(cap - 1));
+            sanitize_ascii(out);
+            return true;
+        }
+        if (!*eol) break;
+        line = eol + 2;
+    }
+    return false;
 }
 
 // ---- SSDP ------------------------------------------------------------------
@@ -534,35 +603,16 @@ static void ssdp_probe(discovery_budget_t *budget, discovery_source_t *source) {
 
         static const char *hdrs[] = {"LOCATION","ST","USN","SERVER",NULL};
         for (int h = 0; hdrs[h]; h++) {
+            // A sanitized copy, so later header scans keep their CRLFs.
+            char value[DISCOVERY_VALUE_BUF];
+            if (!header_value(buf, hdrs[h], value, sizeof(value))) continue;
+            char lk[16];
             size_t kl = strlen(hdrs[h]);
-            for (char *line = buf; *line; ) {
-                char *eol = strstr(line, "\r\n");
-                if (!eol) eol = line + strlen(line);
-                if ((size_t)(eol - line) > kl + 1
-                    && line[kl] == ':'
-                    && strncasecmp(line, hdrs[h], kl) == 0) {
-                    char *val = line + kl + 1;
-                    while (*val == ' ') val++;
-                    char save = *eol; *eol = '\0';
-                    char lk[16];
-                    for (int i = 0; hdrs[h][i]; i++)
-                        lk[i] = (hdrs[h][i] >= 'A' && hdrs[h][i] <= 'Z')
-                                 ? hdrs[h][i] + 32 : hdrs[h][i];
-                    lk[kl] = '\0';
-                    // Sanitize a copy so subsequent header scans retain their CRLFs.
-                    char value[DISCOVERY_VALUE_BUF];
-                    int len = snprintf(value, sizeof(value), "%s", val);
-                    if (len >= (int)sizeof(value))
-                        ESP_LOGW(TAG, "SSDP %s value truncated from %d to %u bytes",
-                                 hdrs[h], len, (unsigned)(sizeof(value) - 1));
-                    sanitize_ascii(value);
-                    observation_string(&e, lk, value);
-                    *eol = save;
-                    break;
-                }
-                if (!*eol) break;
-                line = eol + 2;
-            }
+            for (size_t i = 0; i < kl; i++)
+                lk[i] = (hdrs[h][i] >= 'A' && hdrs[h][i] <= 'Z')
+                         ? hdrs[h][i] + 32 : hdrs[h][i];
+            lk[kl] = '\0';
+            observation_string(&e, lk, value);
         }
 
         if (!append_observation(budget, source, e)) break;
@@ -827,6 +877,276 @@ static void netbios_probe(discovery_budget_t *budget, esp_netif_t *netif,
     ESP_LOGI(TAG, "NetBIOS: %d responses", count);
 }
 
+// ---- Vendor probes ---------------------------------------------------------
+// The read-only "who's there" packet each vendor's own app sends, answered by
+// unicast to the asking port (Govee answers on 4002), and the broadcasts Tuya
+// (6666 plain, 6667 and 7000 encrypted) and Bambu (2021) devices send by
+// themselves, heard during the same window.
+
+#define GOVEE_REPLY_PORT 4002
+
+static const uint16_t s_vendor_listen[] = {0, GOVEE_REPLY_PORT, 6666, 6667, 7000, 2021};
+#define VENDOR_SOCKETS (sizeof(s_vendor_listen) / sizeof(s_vendor_listen[0]))
+
+enum { V_KASA, V_TPLINK, V_GOVEE, V_MIIO, V_WIZ, V_LIFX, V_YEELIGHT, V_CS2, V_TUYA, V_BAMBU };
+static const char *const s_vendor_names[] = {
+    "kasa", "tplink", "govee", "miio", "wiz", "lifx", "yeelight", "cs2", "tuya", "bambu",
+};
+
+typedef struct {
+    uint32_t ip;
+    int kind;
+} vendor_seen_t;
+
+// Kasa's cipher: each byte XORed with the previous ciphertext byte, from 171.
+static void kasa_xor(uint8_t *b, int n, bool encrypt) {
+    uint8_t key = 171;
+    for (int i = 0; i < n; i++) {
+        uint8_t in = b[i];
+        b[i] = key ^ in;
+        key = encrypt ? b[i] : in;
+    }
+}
+
+static void vendor_send(int sock, const char *group, uint16_t port,
+                        const void *msg, size_t len) {
+    struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(port),
+                              .sin_addr.s_addr = group ? inet_addr(group)
+                                                       : htonl(INADDR_BROADCAST) };
+    sendto(sock, msg, len, 0, (struct sockaddr *)&to, sizeof(to));
+}
+
+static void vendor_queries(int sock, int govee) {
+    uint8_t kasa[] = "{\"system\":{\"get_sysinfo\":{}}}";
+    kasa_xor(kasa, sizeof(kasa) - 1, true);
+    vendor_send(sock, NULL, 9999, kasa, sizeof(kasa) - 1);
+    static const uint8_t tdp[16] = {0x02, 0, 0, 0x01, 0, 0, 0, 0,
+                                    0, 0, 0, 0, 0x46, 0x3c, 0xb5, 0xd3};
+    vendor_send(sock, NULL, 20002, tdp, sizeof(tdp));
+    static const char govee_scan[] =
+        "{\"msg\":{\"cmd\":\"scan\",\"data\":{\"account_topic\":\"reserve\"}}}";
+    vendor_send(govee, "239.255.255.250", 4001, govee_scan, strlen(govee_scan));
+    uint8_t miio[32];
+    memset(miio, 0xff, sizeof(miio));
+    miio[0] = 0x21; miio[1] = 0x31; miio[2] = 0x00; miio[3] = 0x20;
+    vendor_send(sock, NULL, 54321, miio, sizeof(miio));
+    static const char wiz[] = "{\"method\":\"getPilot\",\"params\":{}}";
+    vendor_send(sock, NULL, 38899, wiz, strlen(wiz));
+    // LIFX GetService: 36-byte header, tagged, protocol 1024, message type 2.
+    static const uint8_t lifx[36] = {36, 0, 0x00, 0x34, 'M', 'u', 's', 'e', [32] = 2};
+    vendor_send(sock, NULL, 56700, lifx, sizeof(lifx));
+    static const char yeelight[] =
+        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1982\r\n"
+        "MAN: \"ssdp:discover\"\r\nST: wifi_bulb\r\n";
+    vendor_send(sock, "239.255.255.250", 1982, yeelight, strlen(yeelight));
+    static const uint8_t cs2[4] = {0xf1, 0x30, 0x00, 0x00};   // CS2/PPPP LAN search
+    vendor_send(sock, NULL, 32108, cs2, sizeof(cs2));
+}
+
+// Which vendor sent b, from the port it came to and its bytes. -1: none.
+static int vendor_kind(const uint8_t *b, int n, uint16_t listen) {
+    if (listen == GOVEE_REPLY_PORT) return V_GOVEE;
+    if (listen == 2021) return V_BAMBU;
+    if (listen) return V_TUYA;
+    if (n >= 12 && b[0] == 0xf1 && b[1] == 0x41 && (b[2] << 8 | b[3]) == n - 4) return V_CS2;
+    if (n >= 32 && b[0] == 0x21 && b[1] == 0x31 && (b[2] << 8 | b[3]) == n) return V_MIIO;
+    if (n >= 36 && (b[0] | b[1] << 8) == n && ((b[2] | b[3] << 8) & 0x0fff) == 1024
+        && b[32] == 3 && b[33] == 0) return V_LIFX;
+    if (n > 16 && b[0] == 0x02 && b[16] == '{') return V_TPLINK;
+    if (b[0] == '{') return strstr((const char *)b, "\"getPilot\"") ? V_WIZ : -1;
+    if (b[0] == 0xd0) return V_KASA;   // '{' under Kasa's cipher
+    if (!strncmp((const char *)b, "HTTP/1.1 200", 12) && strstr((const char *)b, "yeelight://"))
+        return V_YEELIGHT;
+    return -1;
+}
+
+static void vendor_json_field(cJSON **e, const cJSON *obj, const char *key, const char *as) {
+    const cJSON *v = cJSON_GetObjectItem(obj, key);
+    if (!*e || !cJSON_IsString(v) || cJSON_GetObjectItem(*e, as)) return;
+    char value[DISCOVERY_VALUE_BUF];
+    snprintf(value, sizeof(value), "%s", v->valuestring);
+    if (sanitize_ascii(value)) observation_string(e, as, value);
+}
+
+static void vendor_header_field(cJSON **e, char *text, const char *key, const char *as) {
+    char value[DISCOVERY_VALUE_BUF];
+    if (header_value(text, key, value, sizeof(value)) && value[0])
+        observation_string(e, as, value);
+}
+
+static void vendor_hex_field(cJSON **e, const uint8_t *b, int n, const char *as) {
+    char hex[13];
+    for (int i = 0; i < n && i < 6; i++) snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    observation_string(e, as, hex);
+}
+
+// The JSON object between b's first '{' and last '}'.
+static cJSON *vendor_json(const uint8_t *b, int n) {
+    const char *start = memchr(b, '{', n), *end = NULL;
+    for (int i = n - 1; i >= 0 && !end; i--) if (b[i] == '}') end = (const char *)b + i;
+    return start && end > start ? cJSON_ParseWithLength(start, end - start + 1) : NULL;
+}
+
+static cJSON *vendor_observation(uint8_t *b, int n, int kind, uint16_t listen,
+                                 uint32_t ip, uint16_t from_port) {
+    cJSON *e = cJSON_CreateObject();
+    observation_string(&e, "source", "vendor");
+    observation_string(&e, "protocol", s_vendor_names[kind]);
+    char ib[16]; ip_str(ip, ib, sizeof(ib));
+    observation_string(&e, "ip", ib);
+    if (e && !cJSON_AddNumberToObject(e, "port", listen ? listen : from_port)) {
+        cJSON_Delete(e);
+        return NULL;
+    }
+    cJSON *j = NULL;
+    switch (kind) {
+        case V_KASA: {
+            kasa_xor(b, n, false);
+            j = vendor_json(b, n);
+            const cJSON *info = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "system"), "get_sysinfo");
+            vendor_json_field(&e, info, "model", "model");
+            vendor_json_field(&e, info, "alias", "name");
+            vendor_json_field(&e, info, "mac", "mac");
+            vendor_json_field(&e, info, "mic_mac", "mac");
+            break;
+        }
+        case V_TPLINK: {
+            j = vendor_json(b + 16, n - 16);
+            const cJSON *r = cJSON_GetObjectItem(j, "result");
+            vendor_json_field(&e, r, "device_model", "model");
+            vendor_json_field(&e, r, "device_type", "type");
+            vendor_json_field(&e, r, "mac", "mac");
+            vendor_json_field(&e, cJSON_GetObjectItem(r, "mgt_encrypt_schm"), "encrypt_type", "encryption");
+            break;
+        }
+        case V_GOVEE: {
+            j = vendor_json(b, n);
+            const cJSON *d = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "msg"), "data");
+            vendor_json_field(&e, d, "sku", "model");
+            vendor_json_field(&e, d, "device", "id");
+            break;
+        }
+        case V_MIIO:
+            vendor_hex_field(&e, b + 8, 4, "id");   // the device id; never the token field
+            break;
+        case V_WIZ:
+            j = vendor_json(b, n);
+            vendor_json_field(&e, cJSON_GetObjectItem(j, "result"), "mac", "mac");
+            break;
+        case V_LIFX:
+            vendor_hex_field(&e, b + 8, 6, "mac");
+            break;
+        case V_YEELIGHT:
+            vendor_header_field(&e, (char *)b, "model", "model");
+            vendor_header_field(&e, (char *)b, "id", "id");
+            vendor_header_field(&e, (char *)b, "name", "name");
+            break;
+        case V_CS2: {
+            // The device id's vendor prefix; its serial and check code stay out.
+            char prefix[9];
+            snprintf(prefix, sizeof(prefix), "%.8s", (const char *)b + 4);
+            if (sanitize_ascii(prefix)) observation_string(&e, "id_prefix", prefix);
+            break;
+        }
+        case V_TUYA:
+            if (listen == 6666 && n > 20 && !memcmp(b, "\x00\x00\x55\xaa", 4)) {
+                j = vendor_json(b + 16, n - 16);
+                vendor_json_field(&e, j, "gwId", "id");
+                vendor_json_field(&e, j, "productKey", "model");
+                vendor_json_field(&e, j, "version", "version");
+            }
+            break;
+        case V_BAMBU:
+            vendor_header_field(&e, (char *)b, "DevModel.bambu.com", "model");
+            vendor_header_field(&e, (char *)b, "DevName.bambu.com", "name");
+            break;
+    }
+    cJSON_Delete(j);
+    return e;
+}
+
+// Whether an answer is the protocol's own: the plaintext ones must carry one
+// of its fields; Tuya's encrypted broadcasts (6667, 7000) a whole frame, from
+// its prefix to its suffix (55AA, or 6699 from newer devices). Anything else
+// is ignored, so it can't take a device's one observation or the cap.
+static bool vendor_answer_valid(const cJSON *e, int kind, uint16_t listen,
+                                const uint8_t *b, int n) {
+    if (kind == V_MIIO || kind == V_LIFX || kind == V_CS2) return true;   // vendor_kind() checked the frame
+    if (kind == V_TUYA && listen != 6666)
+        return n >= 28 && ((!memcmp(b, "\x00\x00\x55\xaa", 4)
+                            && !memcmp(b + n - 4, "\x00\x00\xaa\x55", 4))
+                           || (!memcmp(b, "\x00\x00\x66\x99", 4)
+                               && !memcmp(b + n - 4, "\x00\x00\x99\x66", 4)));
+    return cJSON_GetArraySize(e) > 4;   // a field past source, protocol, ip, port
+}
+
+static void vendor_probe(discovery_budget_t *budget, discovery_source_t *source) {
+    int socks[VENDOR_SOCKETS];
+    for (size_t i = 0; i < VENDOR_SOCKETS; i++) {
+        socks[i] = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (socks[i] < 0) {
+            source->truncated = true;   // not heard this time, so not complete
+            continue;
+        }
+        int on = 1;
+        setsockopt(socks[i], SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+        setsockopt(socks[i], SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+        struct sockaddr_in ba = { .sin_family = AF_INET,
+                                  .sin_port = htons(s_vendor_listen[i]),
+                                  .sin_addr.s_addr = htonl(INADDR_ANY) };
+        if (s_vendor_listen[i] && bind(socks[i], (struct sockaddr *)&ba, sizeof(ba)) != 0) {
+            close(socks[i]);   // a port in use on the device: not heard this time
+            socks[i] = -1;
+            source->truncated = true;
+        }
+    }
+    uint8_t *buf = malloc(RECV_BUF + 1);
+    vendor_seen_t *seen = malloc(MAX_VENDOR * sizeof(vendor_seen_t));
+    if (socks[0] < 0) source->error = "socket_failed";
+    else if (!buf || !seen) source->error = "out_of_memory";
+    else vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]);
+
+    int64_t start = esp_timer_get_time(), deadline = start + VENDOR_LISTEN_MS * 1000LL;
+    bool resent = false;
+    while (!source->error && !budget->exhausted && source->found < MAX_VENDOR
+           && esp_timer_get_time() < deadline) {
+        if (!resent && esp_timer_get_time() >= start + VENDOR_RESEND_MS * 1000LL) {
+            vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]);
+            resent = true;
+        }
+        bool heard = false;
+        for (size_t i = 0; i < VENDOR_SOCKETS && !budget->exhausted
+             && source->found < MAX_VENDOR; i++) {
+            if (socks[i] < 0) continue;
+            struct sockaddr_in from; socklen_t fl = sizeof(from);
+            int n = recvfrom(socks[i], buf, RECV_BUF, MSG_DONTWAIT,
+                             (struct sockaddr *)&from, &fl);
+            if (n <= 0) continue;
+            heard = true;
+            buf[n] = '\0';
+            int kind = vendor_kind(buf, n, s_vendor_listen[i]);
+            bool dup = kind < 0;
+            for (int k = 0; k < source->found && !dup; k++)
+                dup = seen[k].ip == from.sin_addr.s_addr && seen[k].kind == kind;
+            if (dup) continue;
+            cJSON *e = vendor_observation(buf, n, kind, s_vendor_listen[i],
+                                          from.sin_addr.s_addr, ntohs(from.sin_port));
+            if (e && !vendor_answer_valid(e, kind, s_vendor_listen[i], buf, n)) {
+                cJSON_Delete(e);
+                continue;
+            }
+            seen[source->found] = (vendor_seen_t){ from.sin_addr.s_addr, kind };
+            append_observation(budget, source, e);
+        }
+        if (!heard) vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    source->truncated |= source->found >= MAX_VENDOR;
+    for (size_t i = 0; i < VENDOR_SOCKETS; i++) if (socks[i] >= 0) close(socks[i]);
+    free(buf);
+    free(seen);
+    ESP_LOGI(TAG, "vendor: %d devices", source->found);
+}
+
 // ---- Public API ------------------------------------------------------------
 
 void net_discovery_init(void) {
@@ -881,6 +1201,7 @@ cJSON *net_discovery_run(cJSON *params) {
         {"wsd", SRC_WSD, MAX_WSD, WSD_LISTEN_MS},
         {"snmp", SRC_SNMP, MAX_SNMP, SNMP_LISTEN_MS},
         {"netbios", SRC_NETBIOS, MAX_NETBIOS, NETBIOS_LISTEN_MS},
+        {"vendor", SRC_VENDOR, MAX_VENDOR, VENDOR_LISTEN_MS},
     };
     discovery_budget_t budget = { .obs = obs, .estimated_bytes = DISCOVERY_METADATA_BYTES };
     bool complete = true, failed = false;
@@ -896,6 +1217,7 @@ cJSON *net_discovery_run(cJSON *params) {
             case SRC_WSD: wsd_probe(&budget, &source); break;
             case SRC_SNMP: snmp_probe(&budget, netif, &source); break;
             case SRC_NETBIOS: netbios_probe(&budget, netif, &source); break;
+            case SRC_VENDOR: vendor_probe(&budget, &source); break;
         }
         cJSON *report = cJSON_AddObjectToObject(reports, specs[i].name);
         if (!report

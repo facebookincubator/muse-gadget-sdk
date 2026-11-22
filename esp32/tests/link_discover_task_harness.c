@@ -68,7 +68,7 @@ static void noise_ctrl_send_command_result(noise_ctrl_session_generation_t gener
 }
 
 static void stack_monitor_record(const char *name) { (void)name; }
-static void vTaskDelete(void *task) { (void)task; }
+static void vTaskDeleteWithCaps(void *task) { (void)task; }
 
 #include "discover_task.inc"
 

@@ -25,6 +25,7 @@
 #include "noise_tunnel_internal.h"
 #include "link_events.h"
 #include "link_probe.h"
+#include "tunnel_relay.h"
 #include "ws_mask.h"
 #if CONFIG_HOMEHUB_FAST_GCM
 #include "fast_gcm.h"
@@ -1471,6 +1472,17 @@ static char *build_register_json(void) {
     add_register_metadata_string(&metadata, params, "model_name",
                                  CONFIG_MUSE_DEVICE_MODEL_NAME);
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
+#if CONFIG_HOMEHUB_TUNNEL
+    // The LAN the tunnel reaches. A new station address aborts this session's
+    // TCP connection; the next session sends it.
+    char lan_ip[16], lan_prefix[4];
+    int prefix = 0;
+    if (tunnel_relay_lan_address(lan_ip, sizeof(lan_ip), &prefix)) {
+        snprintf(lan_prefix, sizeof(lan_prefix), "%d", prefix);
+        add_register_metadata_string(&metadata, params, "lan_ipv4", lan_ip);
+        add_register_metadata_string(&metadata, params, "lan_prefix", lan_prefix);
+    }
+#endif
 
     cJSON *commands = cJSON_CreateObject();
     add_command(commands, "device.health",
@@ -1488,7 +1500,7 @@ static char *build_register_json(void) {
                 , nullptr, nullptr);
 #if CONFIG_HOMEHUB_TUNNEL
     add_command(commands, "device.discover",
-                "Scan local network for devices (ARP, mDNS, SSDP, SNMP, NetBIOS)",
+                "Scan local network for devices (ARP, mDNS, SSDP, WSD, SNMP, NetBIOS, vendor)",
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "device.discover"), "timeout_ms", 90000);

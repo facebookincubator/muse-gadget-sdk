@@ -42,6 +42,7 @@ set(GADGET_SRCS
     "pixel_font.c"
     "button.c"
     "tunnel_netif.c"
+    "tunnel_relay.c"
     "net_discovery.c"
     "noise_control.cpp"
     "noise_tunnel.cpp"
@@ -168,6 +169,75 @@ include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
 idf_build_get_property(gadget_project_dir PROJECT_DIR)
 muse_device_guide_assemble("${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" "${gadget_project_dir}")
 target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/muse_device_guide.md" TEXT)
+
+# Two of lwIP's compile-time defaults and an input check, for the tunnel.
+# ESP-IDF has no option for these, so they're compiled into its lwIP; that
+# leans on its sources, so each applies on ESP-IDF v6.0.x only, while lwIP
+# still lets it be overridden (or still calls the input hook before NAPT).
+# Elsewhere the build warns and lwIP keeps its own.
+if(CONFIG_HOMEHUB_TUNNEL)
+    set(lwip_inc "${IDF_PATH}/components/lwip/lwip/src/include/lwip")
+    set(idf_ver "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}")
+    set(napt_udp_default "")
+    set(arp_table_default "")
+    set(napt_input_hook "")
+    if(NOT idf_ver VERSION_LESS 6.0 AND idf_ver VERSION_LESS 6.1)
+        if(EXISTS "${lwip_inc}/lwip_napt.h")
+            file(STRINGS "${lwip_inc}/lwip_napt.h" napt_udp_default
+                 REGEX "^#ifndef IP_NAPT_TIMEOUT_MS_UDP")
+        endif()
+        if(EXISTS "${lwip_inc}/opt.h")
+            file(STRINGS "${lwip_inc}/opt.h" arp_table_default
+                 REGEX "^#if !defined ARP_TABLE_SIZE")
+        endif()
+        set(ip4_c "${IDF_PATH}/components/lwip/lwip/src/core/ipv4/ip4.c")
+        if(EXISTS "${ip4_c}")
+            file(READ "${ip4_c}" ip4_src)
+            string(FIND "${ip4_src}" "LWIP_HOOK_IP4_INPUT(p, inp)" hook_at)
+            string(FIND "${ip4_src}" "ip_napt_recv(p, iphdr)" napt_at)
+            if(hook_at GREATER -1 AND napt_at GREATER hook_at)
+                set(napt_input_hook TRUE)
+            endif()
+        endif()
+    endif()
+    idf_component_get_property(lwip_lib lwip COMPONENT_LIB)
+    # NAPT keeps idle UDP mappings for IP_NAPT_TIMEOUT_MS_UDP, 2 s unless
+    # defined; only ip4_napt.c reads it. A live mapping is what lets a short
+    # packet reach NAPT's rewrite, so the longer time comes only with the
+    # input check below.
+    if(napt_udp_default AND napt_input_hook)
+        math(EXPR napt_udp_ms "${CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S} * 1000")
+        target_compile_definitions(${lwip_lib} PRIVATE "IP_NAPT_TIMEOUT_MS_UDP=${napt_udp_ms}")
+    elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        message(WARNING "HOMEHUB_TUNNEL_UDP_IDLE_S needs ESP-IDF v6.0.x's lwIP and the NAPT "
+                        "input check (this is v${idf_ver}): NAPT keeps lwIP's 2 s for idle UDP")
+    endif()
+    # 64 ARP entries, not lwIP's 10 (24 bytes each): device.discover's sweep
+    # reads replies from the table, and a full one overwrites replies not yet
+    # read (entries age in whole seconds). NAPT to many LAN hosts re-resolves
+    # less too. Below 0x80, so struct netif keeps its layout; main reads the
+    # table (net_discovery.c), so it gets the same size.
+    if(arp_table_default)
+        target_compile_definitions(${lwip_lib} PRIVATE "ARP_TABLE_SIZE=64")
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE "ARP_TABLE_SIZE=64")
+    elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        message(WARNING "The 64-entry ARP table is checked on ESP-IDF v6.0.x only "
+                        "(this is v${idf_ver}): device.discover's ARP sweep may miss replies")
+    endif()
+    # NAPT rewrites a packet to the station before lwIP checks its TCP, UDP or
+    # ICMP header is there, and lwIP routes LAN packets for the tunnel's subnet
+    # to the VM; lwip_hooks/tunnel_napt_guard.h drops both first, from the
+    # input hook lwIP calls before NAPT.
+    if(napt_input_hook)
+        target_compile_definitions(${lwip_lib} PRIVATE
+            "ESP_IDF_LWIP_HOOK_FILENAME=\"tunnel_napt_guard.h\"")
+        target_include_directories(${lwip_lib} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/lwip_hooks")
+    elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
+        message(WARNING "The NAPT input check is verified on ESP-IDF v6.0.x only "
+                        "(this is v${idf_ver}): short packets to the station reach NAPT unchecked, "
+                        "LAN packets for the tunnel's subnet reach the VM, and idle UDP keeps 2 s")
+    endif()
+endif()
 
 # fast_gcm.c takes over ESP-IDF's one-shot AES-GCM entry points (PSA's AES-GCM
 # driver calls them across archives, so the linker can redirect them).
