@@ -178,6 +178,16 @@ menu "ESP32 Device SDK"
             ESP-IDF v6.0.x with the NAPT input check, where it was checked;
             otherwise the build warns and NAPT keeps 2 s.
 
+    config HOMEHUB_NET_FORWARD
+        bool "Let the VM open LAN ports to itself (net.forward)"
+        depends on HOMEHUB_TUNNEL
+        default y
+        help
+            Accept net.forward: the VM opens one of this device's LAN ports
+            (UDP or TCP, 1 to 49151) to itself for up to an hour per call, so
+            devices on the home network can connect to it. With this off, the
+            tunnel carries only connections the VM opens.
+
     config HOMEHUB_SETUP_TASKS_IN_PSRAM
         bool "Put the setup tasks' stacks in PSRAM"
         depends on SPIRAM && SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA

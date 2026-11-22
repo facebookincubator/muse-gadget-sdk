@@ -352,7 +352,7 @@ bool tunnel_netif_start(const ip4_addr_t *ip,
     // once the WS transport is ready.
 
     tunnel_relay_init(&s_netif, gw);
-    noise_tunnel_set_open_cb(tunnel_relay_reset);   // relay ports belong to one stream
+    noise_tunnel_set_open_cb(tunnel_relay_reset);   // relay ports and forwards belong to one stream
     noise_tunnel_set_packet_cb(on_tunnel_packet);
     s_started = true;
     ESP_LOGI(TAG, "tunnel netif up: ip=%s mtu=%d idx=%u",
@@ -366,7 +366,7 @@ void tunnel_netif_set_link(bool up) {
         netifapi_netif_set_link_up(&s_netif);
     } else {
         netifapi_netif_set_link_down(&s_netif);
-        tunnel_relay_reset();   // relay ports end with the tunnel
+        tunnel_relay_reset();   // relay ports and forwards end with the tunnel
     }
 }
 

@@ -28,8 +28,8 @@ struct netif;
 struct ip4_addr;
 
 // UDP the tunnel carries past lwIP's NAPT: broadcast and multicast relay to the
-// LAN, and the LAN address the device has there. docs/home-link-network.md has
-// the behavior the VM sees.
+// LAN, VM-requested inbound forwards (net.forward), and the LAN address they
+// are reached at. docs/home-link-network.md has the behavior the VM sees.
 
 // The tunnel netif and the VM's address on it. Once, before packets flow.
 void tunnel_relay_init(struct netif *tunnel, const struct ip4_addr *vm);
@@ -39,9 +39,14 @@ void tunnel_relay_init(struct netif *tunnel, const struct ip4_addr *vm);
 // other than the VM, or malformed).
 bool tunnel_relay_from_vm(const uint8_t *pkt, size_t len);
 
-// Closes every relay port: the tunnel went down, or a new tunnel stream is
-// opening.
+// Closes every relay port and forward: the tunnel went down, or a new tunnel
+// stream is opening.
 void tunnel_relay_reset(void);
+
+// net.forward: maps the device's LAN `port` to the VM's `to_port` for ttl_s
+// seconds (0 closes it). Returns the seconds left, or -1 with *error saying why.
+int tunnel_relay_forward(bool tcp, uint16_t port, uint16_t to_port,
+                         uint32_t ttl_s, const char **error);
 
 // The station's IPv4 address as text and its prefix length. False without one.
 bool tunnel_relay_lan_address(char *ip, size_t ip_len, int *prefix);

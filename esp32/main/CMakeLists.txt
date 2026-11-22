@@ -227,11 +227,14 @@ if(CONFIG_HOMEHUB_TUNNEL)
     # NAPT rewrites a packet to the station before lwIP checks its TCP, UDP or
     # ICMP header is there, and lwIP routes LAN packets for the tunnel's subnet
     # to the VM; lwip_hooks/tunnel_napt_guard.h drops both first, from the
-    # input hook lwIP calls before NAPT.
+    # input hook lwIP calls before NAPT, with TCP for a TCP forward from outside
+    # the home network.
     if(napt_input_hook)
         target_compile_definitions(${lwip_lib} PRIVATE
             "ESP_IDF_LWIP_HOOK_FILENAME=\"tunnel_napt_guard.h\"")
         target_include_directories(${lwip_lib} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/lwip_hooks")
+        # TCP forwards wait for it (tunnel_relay.c).
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE "HOMEHUB_NAPT_INPUT_GUARD=1")
     elseif(NOT CMAKE_BUILD_EARLY_EXPANSION)
         message(WARNING "The NAPT input check is verified on ESP-IDF v6.0.x only "
                         "(this is v${idf_ver}): short packets to the station reach NAPT unchecked, "

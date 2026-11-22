@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Home Link network: UDP and the LAN address
+# Home Link network: UDP, forwards and the LAN address
 
 What the VM sees from a Home Link with `CONFIG_HOMEHUB_TUNNEL`. The tunnel is
 the raw L3 stream on the Noise session: the VM is 10.42.0.2, the device
@@ -26,7 +26,7 @@ the raw L3 stream on the Noise session: the VM is 10.42.0.2, the device
 - The device takes only packets whose source is 10.42.0.2 and drops the rest.
 - TCP, ICMP and unicast UDP go through lwIP's NAPT to the LAN and the
   internet, as before, except UDP from a relay port's source port to a LAN
-  host (below).
+  host and TCP from a TCP forward's `to_port` (below).
 
 ## Unicast UDP
 
@@ -46,10 +46,11 @@ fragment shorter than the header too). It also drops a packet from the LAN
 addressed to the tunnel's subnet (10.42.0.0/24; the station's own address
 passes even on a LAN that overlaps it), which lwIP would otherwise route to
 the VM with whatever source it claims; replies to the VM's own flows arrive
-addressed to the station and still pass. Both checks are
-compiled into lwIP on ESP-IDF v6.0.x; on another version the build warns, and
-NAPT keeps idle UDP for lwIP's 2 s, since a live mapping is what lets a short
-packet reach the rewrite.
+addressed to the station and still pass. And it keeps TCP forwards (below) to
+devices on the home network. The checks are compiled into lwIP on ESP-IDF
+v6.0.x; on another version the build warns, and NAPT keeps idle UDP for
+lwIP's 2 s, since a live mapping is what lets a short packet reach the
+rewrite.
 
 ## Broadcast and multicast
 
@@ -84,11 +85,72 @@ While it lives:
   (the station's subnet) go out through the relay port too, so the LAN sees
   the relay port, not a NAPT port. Unicast elsewhere still goes through NAPT.
 
-There are 16 relay ports. When they are all taken, a new one replaces the one
-the VM used least recently. Fragmented broadcasts and multicasts are dropped,
+Relay ports and UDP forwards share 16 slots. When they are full, a new relay
+port or forward replaces the relay port the VM used least recently; a forward
+is never replaced. Fragmented broadcasts and multicasts are dropped,
 and a fragmented unicast datagram goes through NAPT even from a relay port's
 source port. A LAN datagram larger than the tunnel's 1280-byte MTU reaches the
 VM in IP fragments.
+
+## `net.forward`
+
+A link command, listed in `link.register`'s `commands_v2` (its presence is
+the capability). It's on in every tunnel build (`CONFIG_HOMEHUB_NET_FORWARD`,
+default on); a build with it off neither lists nor accepts it.
+
+```json
+{"proto": "udp", "port": 4002, "to_port": 4002, "ttl_s": 600}
+```
+
+| Parameter | |
+|---|---|
+| `proto` | `"udp"` or `"tcp"`, required |
+| `port` | the device's LAN port, 1 to 49151, required |
+| `to_port` | the VM's port on 10.42.0.2; default `port` |
+| `ttl_s` | seconds, 0 to 3600, required; 0 closes the forward |
+
+The result's payload is `{"proto", "port", "to_port", "expires_in_s"}`; a
+failure is `ok: false` with `error.message` saying why.
+
+- **UDP:** the device binds `port` on the LAN and delivers each datagram,
+  unicast or broadcast, from a host on the station's subnet to
+  `10.42.0.2:to_port` with its LAN source. The VM's datagrams from
+  `10.42.0.2:to_port` to a LAN host leave from `device:port`. A forward and a
+  relay port are the same thing with a different deadline, and the VM's
+  replies don't extend a forward. A broadcast or multicast the VM sends from
+  `to_port` makes it a relay port as well: it then also lives until 120 s
+  after the VM's last send, and its `to_port` can't change meanwhile.
+- **TCP:** lwIP's NAPT port map sends connections to `device:port` on to
+  `10.42.0.2:to_port`; the VM sees the LAN source address and port. Like a
+  UDP forward, it's for devices on the home network: the input check (above)
+  drops TCP to the forwarded port from anywhere but a host on the station's
+  subnet outside the tunnel's (another subnet, a VPN or routed address, the
+  internet through a router's port forward, a spoofed tunnel address).
+  While it lasts, any TCP the VM sends from `10.42.0.2:to_port`, to any
+  destination, leaves as `device:port`, so pick a `to_port` the VM doesn't
+  use for its own connections (outside its ephemeral range).
+  TCP forwards need the NAPT input check (Unicast UDP, above): a build without
+  it refuses them. Closing a TCP forward, letting it expire or changing its
+  `to_port` resets the LAN side of its open connections, but the VM's side
+  gets no reset (its segments are dropped), so close those connections on the
+  VM too. Renew a forward before `ttl_s` runs out.
+- Calling again renews it with the new `ttl_s` (and may change `to_port`).
+  `ttl_s` 0 closes it at once (relay port included) and answers `ok` even if
+  there was none.
+- Every forward closes when the tunnel goes down, and when a new tunnel
+  stream opens: request them again once it is back.
+- A forwarded port is the forward's until it closes: a device service that
+  starts on it meanwhile can't bind it, and forwarding one of the ports
+  `device.discover`'s vendor source listens on keeps that protocol out of
+  its scans.
+
+It is refused while the tunnel is down (including the few seconds after a new
+tunnel stream opens, before the device brings the tunnel's link up: try
+again) or the device has no LAN address; for
+ports 49152 and up (the device's own ephemeral ports and NAPT's); for UDP on
+DHCP's ports (67 or 68, as `port` or `to_port`); for a TCP or UDP port a
+device socket holds; when `to_port` already relays (UDP) or forwards (TCP)
+another device port; and beyond 8 TCP forwards or 16 UDP forwards.
 
 ## The LAN address
 
@@ -96,7 +158,7 @@ VM in IP fragments.
 `"lan_prefix"` (prefix length), both strings because the VM keeps only string
 metadata; neither is sent without a station address. A new station address
 aborts the session's TCP connection, so the next session registers the new
-one.
+one, and its forwards are gone with the tunnel.
 
 ## `device.discover`'s vendor source
 
@@ -121,7 +183,8 @@ Each observation is `{"source": "vendor", "protocol", "ip", "port", ...fields}`,
 once per device and protocol; `port` is the device's port for the protocol
 (the one a heard broadcast went to). Up to 128 observations, inside the
 result's 256 KiB budget. Tuya's 6667 and 7000 broadcasts are encrypted and
-reported by port alone. An answer counts only when it carries its protocol's
+reported by port alone: a `net.forward` of UDP 6667 brings them to the VM
+whole. An answer counts only when it carries its protocol's
 fields (Tuya's encrypted broadcasts: its frame), so other traffic on these
 ports is ignored. Kasa's location, the miIO token field, a camera's serial
 and check code and TP-Link's owner hash are never reported.
