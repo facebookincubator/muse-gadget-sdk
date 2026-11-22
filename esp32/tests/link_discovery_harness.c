@@ -54,6 +54,9 @@ static err_t request_error_code;
 static unsigned request_mem_every;
 static const char *ssdp_reply, *wsd_reply;
 static struct eth_addr mac = {{1, 2, 3, 4, 5, 6}};
+// Per-host MACs: the reply to a request for an address gets mac_for(address).
+static struct eth_addr (*mac_for)(uint32_t host_order_ip);
+static struct eth_addr cache_mac[ARP_TABLE_SIZE];
 static bool reply_arp, fail_seen, fail_mdns, large_ssdp;
 static size_t seen_bytes, allocations, releases;
 static int packets[7], received[7], active_source, sockets_open, next_fd;
@@ -77,14 +80,17 @@ static int etharp_request(struct netif *n, const ip4_addr_t *ip) {
     batch++;
     if (request_error == requests) return request_error_code;
     if (request_mem_every && requests % request_mem_every == 0) return ERR_MEM;
-    if (reply_arp) cache[cache_count++ % ARP_TABLE_SIZE] = *ip;
+    if (reply_arp) {
+        if (mac_for) cache_mac[cache_count % ARP_TABLE_SIZE] = mac_for(ntohl(ip->addr));
+        cache[cache_count++ % ARP_TABLE_SIZE] = *ip;
+    }
     return ERR_OK;
 }
 static int etharp_get_entry(int i, ip4_addr_t **ip, struct netif **n, struct eth_addr **m) {
     assert(lock_depth == 1);
     if (i == 0) harvests++;
     if ((unsigned)i >= cache_count || i >= ARP_TABLE_SIZE) return 0;
-    *ip = &cache[i]; *n = &nif; *m = &mac; return 1;
+    *ip = &cache[i]; *n = &nif; *m = mac_for ? &cache_mac[i] : &mac; return 1;
 }
 static void *host_malloc(size_t n) {
     seen_bytes = n;
@@ -102,11 +108,16 @@ static void host_free(void *p) { if (p) releases++; free(p); }
 #define MALLOC_CAP_8BIT (1 << 2)
 // No PSRAM on the host: the caller falls back to malloc, as on a board without it.
 static void *heap_caps_malloc(size_t n, uint32_t caps) { (void)n; (void)caps; return NULL; }
+static void *heap_caps_calloc(size_t n, size_t size, uint32_t caps) { (void)n; (void)size; (void)caps; return NULL; }
+static long json_live;   // cJSON blocks allocated through json_malloc and not yet freed
 static void *json_malloc(size_t n) {
     if (json_fail_after == 0) { json_fail_after = -1; return NULL; }
     if (json_fail_after > 0) json_fail_after--;
-    return malloc(n);
+    void *p = malloc(n);
+    if (p) json_live++;
+    return p;
 }
+static void json_free(void *p) { if (p) json_live--; free(p); }
 static int host_socket(int a, int b, int c) {
     (void)a; (void)b; (void)c; sockets_open++;
     int fd = 10 + next_fd++ % 32;
@@ -114,8 +125,10 @@ static int host_socket(int a, int b, int c) {
     return fd;
 }
 static int host_close(int fd) { assert(fd >= 10 && fd < 42 && sockets_open > 0); sockets_open--; return 0; }
+static bool fail_join;   // joining a multicast group fails
 static int host_setsockopt(int fd, int level, int option, const void *v, socklen_t n) {
-    (void)fd; (void)level; (void)option; (void)v; (void)n; return 0;
+    (void)fd; (void)v; (void)n;
+    return fail_join && level == IPPROTO_IP && option == IP_ADD_MEMBERSHIP ? -1 : 0;
 }
 static uint16_t refuse_bind_port;   // a port some other socket on the device holds
 static int host_bind(int fd, const struct sockaddr *addr, socklen_t n) {
@@ -130,11 +143,13 @@ typedef struct { uint16_t port; const void *data; size_t len; const char *ip; ui
 static const vendor_reply_t *vendor_replies;
 // mDNS packets to answer with, in order (NULL: one generated PTR per packet).
 typedef struct { const uint8_t *data; size_t len; } mdns_packet_t;
+static const char *const *mdns_from;   // each packet's sender (NULL: all from 10.1.2.3)
 static const mdns_packet_t *mdns_packets;
 static size_t vendor_count;
 static unsigned vendor_queries_sent;
 static uint8_t kasa_query_sent[64];
 static size_t kasa_query_len;
+static unsigned fail_send_port;   // sends to this port fail
 static ssize_t host_sendto(int fd, const void *buf, size_t n, int flags,
                            const struct sockaddr *addr, socklen_t len) {
     (void)fd; (void)buf; (void)flags; (void)len;
@@ -151,13 +166,13 @@ static ssize_t host_sendto(int fd, const void *buf, size_t n, int flags,
             break;
         default: assert(false);
     }
-    return (ssize_t)n;
+    return port == fail_send_port ? -1 : (ssize_t)n;
 }
 static ssize_t host_recvfrom(int fd, void *data, size_t size, int flags,
                              struct sockaddr *from, socklen_t *len) {
     (void)flags; (void)len;
     now += receive_tick;
-    if (received[active_source] >= packets[active_source]) return 0;
+    if (received[active_source] >= packets[active_source]) return -1;   // as a timeout does
     if (active_source == 6) {
         assert(flags == MSG_DONTWAIT);
         const vendor_reply_t *r = vendor_replies ? &vendor_replies[received[6]] : NULL;
@@ -186,6 +201,8 @@ static ssize_t host_recvfrom(int fd, void *data, size_t size, int flags,
     switch (active_source) {
         case 1: {
             if (mdns_packets) {
+                if (from && mdns_from)
+                    ((struct sockaddr_in *)from)->sin_addr.s_addr = inet_addr(mdns_from[sequence]);
                 memcpy(p, mdns_packets[sequence].data, mdns_packets[sequence].len);
                 return (ssize_t)mdns_packets[sequence].len;
             }
@@ -252,11 +269,11 @@ static void reset(const char *ip, const char *mask) {
     requests = batch = harvests = cache_count = request_error = request_mem_every = 0;
     request_error_code = ERR_IF;
     ssdp_reply = wsd_reply = NULL;
-    fail_seen = fail_mdns = large_ssdp = reply_arp = false;
+    fail_seen = fail_mdns = large_ssdp = reply_arp = fail_join = false;
     seen_bytes = 0; now = 0; receive_tick = 1000;
     memset(packets, 0, sizeof(packets)); memset(received, 0, sizeof(received));
     vendor_replies = NULL; vendor_count = 0; vendor_queries_sent = 0;
-    mdns_packets = NULL; refuse_bind_port = 0;
+    mdns_packets = NULL; mdns_from = NULL; refuse_bind_port = 0; mac_for = NULL; fail_send_port = 0;
 }
 static cJSON *run_source(const char *name) {
     cJSON *params = cJSON_CreateObject();
@@ -701,9 +718,233 @@ static void check_mdns_interleaved(void) {
     cJSON_Delete(r);
 }
 
+// One /28 of hosts: Espressif MACs in batches and alone, another maker's batch
+// with an alias in it, an alias pair alone, a random (locally administered) MAC,
+// and OUIs that touch but differ.
+static struct eth_addr hint_mac(uint32_t ip) {
+    static const uint64_t macs[15] = {
+        0, 0x020000000001ull, 0x240ac4001000ull, 0x240ac4002000ull,
+        0x240ac4012001ull, 0x240ac4022001ull,          /* 0x10001 after .3, then 0x10000 */
+        0x001788000001ull, 0x001788000002ull,
+        0x240ac4ffffffull, 0x240ac5000000ull,          /* adjacent, another OUI */
+        0x001788000002ull, 0x001788000003ull,          /* .7's alias, then one more */
+        0x001200000000ull, 0x001200000000ull,          /* one host's two addresses */
+        0x001400000000ull,
+    };
+    struct eth_addr m;
+    uint64_t v = macs[ip & 0x0f];
+    for (int i = 0; i < 6; i++) m.addr[i] = (uint8_t)(v >> (40 - 8 * i));
+    return m;
+}
+static cJSON *arp_find(cJSON *r, const char *ip) {
+    cJSON *o;
+    cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations"))
+        if (!strcmp(field(o, "source"), "arp") && !strcmp(field(o, "ip"), ip)) return o;
+    assert(!"host not reported");
+    return NULL;
+}
+static void expect_hints(cJSON *r, int last, const char *maker, bool silent, const char *batch) {
+    char ip[16]; snprintf(ip, sizeof(ip), "10.1.2.%d", last);
+    cJSON *o = arp_find(r, ip);
+    assert(maker ? field(o, "maker") && !strcmp(field(o, "maker"), maker) : !cJSON_GetObjectItem(o, "maker"));
+    assert(silent == cJSON_IsTrue(cJSON_GetObjectItem(o, "silent")));
+    assert(silent || !cJSON_GetObjectItem(o, "silent"));
+    assert(batch ? field(o, "mac_batch") && !strcmp(field(o, "mac_batch"), batch) : !cJSON_GetObjectItem(o, "mac_batch"));
+}
+static void check_hints(void) {
+    // Every source ran and completed; 10.1.2.3 answered SSDP.
+    reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac; packets[2] = 1;
+    cJSON *r = net_discovery_run(NULL);
+    assert(flag(r, "ok") && flag(r, "complete") && number(report(r, "arp"), "found") == 14);
+    check_counts(r);
+    expect_hints(r, 1, NULL, true, NULL);
+    expect_hints(r, 2, "espressif", true, "24:0a:c4:00:10:00");
+    expect_hints(r, 3, "espressif", false, "24:0a:c4:00:10:00");
+    expect_hints(r, 4, "espressif", true, "24:0a:c4:01:20:01");
+    expect_hints(r, 5, "espressif", true, "24:0a:c4:01:20:01");
+    expect_hints(r, 6, NULL, true, "00:17:88:00:00:01");
+    expect_hints(r, 7, NULL, true, "00:17:88:00:00:01");
+    expect_hints(r, 8, "espressif", true, NULL);
+    expect_hints(r, 9, NULL, true, NULL);
+    expect_hints(r, 10, NULL, true, "00:17:88:00:00:01");
+    expect_hints(r, 11, NULL, true, "00:17:88:00:00:01");
+    for (int i = 12; i <= 14; i++) expect_hints(r, i, NULL, true, NULL);
+    cJSON_Delete(r);
+    // Any datagram a scan socket received from a host means it isn't silent:
+    // an mDNS response with no A record for it, a query, an empty datagram.
+    reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+    static uint8_t answer[256], query[256];
+    size_t na = 12, nq = 12;
+    answer[2] = 0x84;   /* QR, AA */
+    na = mdns_ptr(answer, na, "_hap._tcp.local", "Plug._hap._tcp.local");
+    na = mdns_srv(answer, na, "Plug._hap._tcp.local", 80, "plug.local");
+    nq = mdns_ptr(query, nq, "_hap._tcp.local", "Phone._hap._tcp.local");   /* a known answer */
+    static uint8_t empty[1];   /* an empty datagram first doesn't end the listen */
+    const mdns_packet_t heard[] = {{empty, 0}, {answer, na}, {query, nq}};
+    static const char *const senders[] = {"10.1.2.13", "10.1.2.9", "10.1.2.12"};
+    mdns_packets = heard; mdns_from = senders; packets[1] = 3;
+    r = net_discovery_run(NULL);
+    assert(flag(r, "ok") && flag(r, "complete") && number(report(r, "mdns"), "found") == 2);
+    cJSON *o;
+    cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations"))
+        assert(strcmp(field(o, "source"), "mdns") || !cJSON_GetObjectItem(o, "ip"));
+    expect_hints(r, 9, NULL, false, NULL);
+    expect_hints(r, 12, NULL, false, NULL);
+    expect_hints(r, 13, NULL, false, NULL);
+    expect_hints(r, 14, NULL, true, NULL);
+    expect_hints(r, 2, "espressif", true, "24:0a:c4:00:10:00");
+    cJSON_Delete(r);
+    // So does a datagram no source accepts: a packet that is no vendor's, and an
+    // empty one, on the vendor sockets.
+    reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+    static const vendor_reply_t unaccepted[] = {
+        {0, "hello", 5, "10.1.2.11", 1234}, {0, "", 0, "10.1.2.13", 1234},
+    };
+    vendor_replies = unaccepted; vendor_count = 2; packets[6] = 2;
+    r = net_discovery_run(NULL);
+    assert(flag(r, "ok") && flag(r, "complete") && number(report(r, "vendor"), "found") == 0
+           && received[6] == 2);
+    expect_hints(r, 11, NULL, false, "00:17:88:00:00:01");
+    expect_hints(r, 13, NULL, false, NULL);
+    expect_hints(r, 12, NULL, true, NULL);
+    expect_hints(r, 9, NULL, true, NULL);
+    cJSON_Delete(r);
+    // A scan of ARP alone, or one whose SSDP was cut short, can't say who is silent.
+    for (int run = 0; run < 2; run++) {
+        reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+        if (run) packets[2] = MAX_SSDP;
+        r = run ? net_discovery_run(NULL) : run_source("arp");
+        assert(!flag(r, "complete") == (run == 1));
+        expect_hints(r, 2, "espressif", false, "24:0a:c4:00:10:00");
+        expect_hints(r, 9, NULL, false, NULL);
+        cJSON_Delete(r);
+    }
+    // A source whose query couldn't be sent reports itself truncated, the scan
+    // isn't complete, and no host is silent.
+    static const struct { const char *name; unsigned port; } unsent[] = {
+        {"mdns", 5353}, {"ssdp", 1900}, {"wsd", 3702}, {"snmp", 161}, {"netbios", 137}, {"vendor", 9999},
+    };
+    for (size_t u = 0; u < sizeof(unsent) / sizeof(unsent[0]); u++) {
+        reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+        fail_send_port = unsent[u].port;
+        r = net_discovery_run(NULL);
+        assert(flag(r, "ok") && !flag(r, "complete") && flag(report(r, unsent[u].name), "truncated"));
+        for (cJSON *s = cJSON_GetObjectItem(r, "sources")->child; s; s = s->next)
+            assert(flag(s, "truncated") == !strcmp(s->string, unsent[u].name));
+        cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations")) assert(!cJSON_GetObjectItem(o, "silent"));
+        assert(number(report(r, "arp"), "found") == 14);
+        cJSON_Delete(r);
+    }
+    // A relay port on 5353: the scan's queries go from another port and their
+    // answers come back to it by unicast, so the hosts that sent nothing stay
+    // silent. 5353 held without the mDNS group (multicast answers miss it): no
+    // host is silent. The mDNS report and `complete` are as before.
+    for (int join = 0; join < 2; join++) {
+        reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+        if (join) fail_join = true; else refuse_bind_port = 5353;
+        r = net_discovery_run(NULL);
+        assert(flag(r, "ok") && flag(r, "complete") && number(report(r, "arp"), "found") == 14);
+        assert(number(report(r, "mdns"), "found") == 0 && !flag(report(r, "mdns"), "truncated")
+               && !cJSON_GetObjectItem(report(r, "mdns"), "error"));
+        int silent = 0;
+        cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations"))
+            silent += cJSON_IsTrue(cJSON_GetObjectItem(o, "silent"));
+        assert(silent == (join ? 0 : 14));
+        cJSON_Delete(r);
+    }
+    // The sender list holds MAX_HEARD senders. With it full, a repeat takes
+    // no slot and the unheard ARP hosts stay silent; one more distinct sender
+    // means the scan can't say who is silent. Neither changes anything else.
+    static uint8_t bare[12] = {0, 0, 0x84};   /* a response with no records */
+    static mdns_packet_t flood[MAX_HEARD + 1];
+    static char flood_ip[MAX_HEARD + 1][16];
+    static const char *flood_from[MAX_HEARD + 1];
+    for (int i = 0; i < MAX_HEARD; i++) {
+        snprintf(flood_ip[i], sizeof(flood_ip[i]), "10.1.%d.%d", 4 + i / 256, i % 256);
+        flood[i] = (mdns_packet_t){bare, sizeof(bare)}; flood_from[i] = flood_ip[i];
+    }
+    flood[MAX_HEARD] = (mdns_packet_t){bare, sizeof(bare)};
+    char *seen[2];
+    for (int extra = 0; extra < 2; extra++) {
+        reset("10.1.2.1", "255.255.255.240"); reply_arp = true; mac_for = hint_mac;
+        flood_from[MAX_HEARD] = extra ? "10.1.5.1" : flood_ip[0];
+        mdns_packets = flood; mdns_from = flood_from; packets[1] = MAX_HEARD + 1;
+        r = net_discovery_run(NULL);
+        assert(flag(r, "ok") && flag(r, "complete") && number(report(r, "mdns"), "found") == 0
+               && !flag(report(r, "mdns"), "truncated"));
+        int silent = 0;
+        cJSON_ArrayForEach(o, cJSON_GetObjectItem(r, "observations")) {
+            silent += cJSON_IsTrue(cJSON_GetObjectItem(o, "silent"));
+            cJSON_DeleteItemFromObject(o, "silent");
+        }
+        assert(silent == (extra ? 0 : 14));
+        seen[extra] = cJSON_PrintUnformatted(cJSON_GetObjectItem(r, "observations"));
+        cJSON_Delete(r);
+    }
+    assert(!strcmp(seen[0], seen[1]));
+    free(seen[0]); free(seen[1]);
+    // Hints never take the result past its budget: the one that doesn't fit, and
+    // every one after it, is left out.
+    const size_t maker = 7 + 2 + 11;
+    for (int room = 0; room < 2; room++) {
+        reset("10.1.2.1", "255.255.255.0");
+        discovery_budget_t b = {.obs = cJSON_CreateArray(),
+                                .estimated_bytes = DISCOVERY_MAX_JSON_BYTES - maker + (room ? 0 : 1)};
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "source", "arp");
+        cJSON_AddStringToObject(e, "ip", "10.1.2.2");
+        cJSON_AddStringToObject(e, "mac", "24:0a:c4:00:10:00");
+        cJSON_AddItemToArray(b.obs, e);
+        add_host_hints(&b, true);
+        assert(b.exhausted && b.estimated_bytes <= DISCOVERY_MAX_JSON_BYTES);
+        assert(!!cJSON_GetObjectItem(e, "maker") == room && !cJSON_GetObjectItem(e, "silent"));
+        cJSON_Delete(b.obs);
+    }
+    // A hint whose value or key can't be allocated is left out: the observations
+    // stay as they were, the budget holds, and nothing leaks. Fails each allocation
+    // in turn, until a run in which none failed.
+    static const char *const pair[2][2] = {{"10.1.2.2", "24:0a:c4:00:10:00"}, {"10.1.2.3", "24:0a:c4:00:20:00"}};
+    cJSON_Hooks hooks = {.malloc_fn = json_malloc, .free_fn = json_free};
+    cJSON_InitHooks(&hooks);
+    for (int fail = 0;; fail++) {
+        reset("10.1.2.1", "255.255.255.0"); json_live = 0;
+        discovery_budget_t b = {.obs = cJSON_CreateArray(), .estimated_bytes = DISCOVERY_METADATA_BYTES};
+        for (int i = 0; i < 2; i++) {
+            cJSON *e = cJSON_CreateObject();
+            assert(cJSON_AddStringToObject(e, "source", "arp") && cJSON_AddStringToObject(e, "ip", pair[i][0])
+                   && cJSON_AddStringToObject(e, "mac", pair[i][1]) && cJSON_AddItemToArray(b.obs, e));
+        }
+        json_fail_after = fail;
+        add_host_hints(&b, true);
+        bool failed = json_fail_after < 0;
+        json_fail_after = -1;
+        assert(!b.exhausted && b.estimated_bytes <= DISCOVERY_MAX_JSON_BYTES);
+        int i = 0;
+        cJSON *o;
+        cJSON_ArrayForEach(o, b.obs) {
+            assert(!strcmp(field(o, "source"), "arp") && !strcmp(field(o, "ip"), pair[i][0])
+                   && !strcmp(field(o, "mac"), pair[i][1]));
+            cJSON *maker = cJSON_GetObjectItem(o, "maker"), *silent = cJSON_GetObjectItem(o, "silent"),
+                  *batch = cJSON_GetObjectItem(o, "mac_batch");
+            assert(!maker || !strcmp(maker->valuestring, "espressif"));
+            assert(!silent || cJSON_IsTrue(silent));
+            assert(!batch || !strcmp(batch->valuestring, pair[0][1]));
+            assert(cJSON_GetArraySize(o) == 3 + !!maker + !!silent + !!batch);
+            assert(failed || (maker && silent && batch));
+            i++;
+        }
+        assert(i == 2);
+        cJSON_Delete(b.obs);
+        assert(json_live == 0);
+        if (!failed) break;
+    }
+    cJSON_InitHooks(NULL);
+    reset("10.0.0.4", "255.255.255.0");
+}
+
 int main(void) {
     check_arp(); check_caps(); check_network_strings(); check_oom(); check_budget(); check_vendor();
-    check_mdns_interleaved();
-    puts("PASS discovery: clamp and subnet edges, synchronous 8-request batches/16-entry cache, transient ARP pressure, sanitized network strings, all seven source caps and budgets, vendor probes and their fields, mDNS addresses only from the instance's own host, shared envelope limit, allocation failures and cleanup");
+    check_mdns_interleaved(); check_hints();
+    puts("PASS discovery: clamp and subnet edges, synchronous 8-request batches/16-entry cache, transient ARP pressure, sanitized network strings, all seven source caps and budgets, vendor probes and their fields, mDNS addresses only from the instance's own host, shared envelope limit, allocation failures and cleanup, host hints (maker, silent, mac_batch) within the budget, their allocation failures and the bound on senders heard");
     return 0;
 }

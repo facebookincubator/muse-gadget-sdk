@@ -15,9 +15,11 @@
  */
 
 // Host harness for app.c's discover_task: device.discover always gets an
-// answer, even when the scan or the reply runs out of memory, and nothing
-// leaks. The runner extracts the production task into discover_task.inc.
+// answer, even when the scan or the reply runs out of memory, nothing leaks,
+// and another scan can't begin while one runs but can by the time the answer
+// goes out. The runner extracts the production task into discover_task.inc.
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,9 +47,13 @@ static void test_free(void *p) {
     free(p);
 }
 
+static bool discover_try_begin(void);
+static void discover_end(void);
+
 static cJSON *scan;
 static cJSON *net_discovery_run(cJSON *params) {
     (void)params;
+    assert(!discover_try_begin());
     return scan;
 }
 
@@ -56,6 +62,8 @@ static char reply[256];
 static void noise_ctrl_send_command_result(noise_ctrl_session_generation_t generation,
                                            const char *request_id, cJSON *result) {
     assert(generation == 7 && strcmp(request_id, "req-1") == 0);
+    assert(discover_try_begin());
+    discover_end();
     sent++;
     reply[0] = '\0';
     if (!result) return;
@@ -88,6 +96,7 @@ static void run(bool scanned, int at, int from) {
     fail_at = at;
     fail_from = from;
     sent = 0;
+    assert(discover_try_begin());   // as the command handler does
     discover_task(args);
     assert(sent == 1);
     assert(live == 0);

@@ -193,8 +193,33 @@ While it listens the vendor source holds UDP 4002, 6666, 6667, 7000 and 2021.
 A relay port the VM opens meanwhile from one of those ports gets another port,
 and one already open on them keeps that protocol out of the scan, which then
 reports itself truncated (as it does when any of its listeners can't open).
+Any source, this one included, whose query couldn't be sent reports itself
+truncated too.
 The mDNS source shares 5353 the same way: with a relay port there, the scan's
-mDNS queries go from another port and it still hears unicast answers.
+mDNS queries go from another port and it still hears unicast answers. While a
+VM relay holds 5353, the scan relies on unicast replies to its own queries.
+One scan runs at a time: a `device.discover` sent while another runs fails
+with "a network scan is already running".
+
+## `device.discover`'s host hints
+
+Once the sources have run, an ARP observation can carry hints worked out from
+the scan's own observations (nothing more is sent):
+
+| Field | When |
+|---|---|
+| `maker: "espressif"` | its MAC is in one of Espressif's IEEE MA-L blocks (OUIs): the host is built on an Espressif chip |
+| `silent: true` | nothing but ARP answered and no scan socket received anything from it (no other source reported its address). Only in a scan in which every source ran and none but ARP was cut short or failed (a host ARP didn't reach has no observation to mark), and not in one that heard from more distinct senders than it keeps (256), had no memory for that list, or held 5353 but couldn't join the mDNS group |
+| `mac_batch` | its MAC shares its first three bytes (the OUI) with another host's, each within 65,536 of the next: likely units of one product bought together, but one host's interfaces (Wi-Fi and Ethernet) or a mesh system's nodes match too, so it's a hint, not proof of separate products. A prefix IEEE splits into smaller blocks (MA-M, MA-S) is shared by several makers, so a batch there can mix them. The value is the lowest MAC of the batch; addresses that share one MAC count as one host |
+
+For a silent Espressif host, nothing but ARP answered and no scan socket
+received anything from it. Such a product
+usually talks only to its maker's cloud: it's reached through the maker's
+account, and a device list there that shows MACs, or serial numbers that end
+in one, tells which host is which. Locally administered MACs (a phone's
+random one) get neither `maker` nor `mac_batch`. The blocks are fixed at build
+time, so a block Espressif registers later gets no `maker`. A hint that doesn't
+fit the result's budget is left out, with the ones after it.
 
 ## Not here
 
