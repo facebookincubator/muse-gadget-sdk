@@ -246,6 +246,7 @@ static volatile size_t s_seed_frames;
 static int16_t *s_rec;   /* MAX_FRAMES */
 static size_t s_rec_n, s_sent;
 static bool s_live = true;
+static bool s_fail_caption;   /* the idle caption is a turn failure */
 static bool s_tried;     /* it went to Muse */
 
 typedef struct {
@@ -695,6 +696,7 @@ static bool hatch_reply(bool *delivered, const char *opening)
                 ESP_LOGW(TAG, "muse: %s", text);
                 atomic_store(&s_reply_waiting, false);
                 muse_state_set_level(0);
+                s_fail_caption = true;   /* v4.5: cleared on recovery (idle loop) */
                 muse_wakeword_set_playback(false);
                 go_idle(text);
                 return false;
@@ -1779,6 +1781,18 @@ static void voice_task(void *arg)
                 muse_audio_loopback_test(muse_settings_volume());
                 muse_wakeword_set_playback(false);
                 pre_reset();
+            }
+            if (s_fail_caption && muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+                /* v4.5: a turn-failure caption outlives the outage
+                 * (recur3: READY beside LOST CONNECTION minutes
+                 * after the resubscribe). Clear it once Hatch is
+                 * reachable again; while down it stays up. */
+                muse_hatch_status_t hst;
+                muse_hatch_status(&hst);
+                if (hst.state == MUSE_HATCH_REACHABLE) {
+                    s_fail_caption = false;
+                    go_idle("");
+                }
             }
             /* A press goes first (a waking one too: it may only wake Muse). */
             muse_input_event_t next;
