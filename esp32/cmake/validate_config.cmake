@@ -155,6 +155,14 @@ if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY AND
         "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY needs ESP-IDF v6.0.3 or later (this is v${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}): earlier releases leak heap on every TLS handshake with it on.")
 endif()
 
+# One internal DMA reserve: the firmware's (main/main.c) or, on the classic
+# ESP32, ESP-IDF's (sdkconfig.defaults.esp32), never both. From v6.0.3
+# ESP-IDF's also serves malloc() and reads as empty in the minimum free size.
+if(CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL AND CONFIG_HOMEHUB_DMA_RESERVE_KB)
+    message(FATAL_ERROR
+        "Two internal DMA reserves are on: set CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=0 to keep the firmware's (CONFIG_HOMEHUB_DMA_RESERVE_KB), or CONFIG_HOMEHUB_DMA_RESERVE_KB=0 to keep ESP-IDF's. ${GADGET_CONFIG_REGEN_HINT}")
+endif()
+
 # Stale bundle choice: a build directory configured before sdkconfig.defaults
 # picked the common bundle still trusts the full one.
 if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL)

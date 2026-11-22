@@ -278,6 +278,25 @@ menu "ESP32 Device SDK"
             and dropped, and writing a 4-byte little-endian count to it makes
             the device notify that many bytes back. Bench builds only.
 
+    config HOMEHUB_DMA_RESERVE_KB
+        int "Internal RAM kept for DMA and internal-only allocations (KB)"
+        depends on SPIRAM_USE_MALLOC && !IDF_TARGET_ESP32
+        range 0 128
+        default 64
+        help
+            Set aside before app_main as a heap of its own (main/main.c).
+            malloc() never takes from it and falls back to other internal RAM
+            and PSRAM instead: only requests that name their caps (DMA,
+            internal, 8-bit or 32-bit) do, such as AES DMA buffers and task
+            stacks. This replaces ESP-IDF's
+            CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL, which must stay 0: from
+            ESP-IDF v6.0.3 that pool also serves malloc(), and
+            heap_caps_get_minimum_free_size() counts it as empty from boot.
+            The classic ESP32 keeps ESP-IDF's reserve instead
+            (sdkconfig.defaults.esp32): its startup stacks hold the top
+            128 KB of internal RAM until main_task starts, after this
+            reserve is taken.
+
     config HOMEHUB_FAST_GCM
         bool "Faster AES-GCM GHASH (chips without a GCM engine)"
         depends on MBEDTLS_HARDWARE_AES && !MBEDTLS_HARDWARE_GCM
