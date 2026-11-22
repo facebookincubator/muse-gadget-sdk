@@ -101,5 +101,9 @@ void muse_input_inject(unsigned events);
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);
 
+/* Self-use tap-to-toggle: true while the current/last PTT session is one a
+ * tap latched on (muse_voice applies its min-length and cap rules to it). */
+bool muse_input_tap_session(void);
+
 /* Ends any live call, says so on screen and restarts the chip (from the input task). */
 void muse_input_request_restart(void);

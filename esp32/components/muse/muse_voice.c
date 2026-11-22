@@ -56,7 +56,7 @@
 
 static const char *TAG = "muse_voice";
 
-#define MAX_SECS 15
+#define MAX_SECS 20   /* raised from 15: a tap-latched note needs the headroom */
 #define TAIL_FRAMES (MUSE_AUDIO_RATE * 12 / 100)   /* capture lag + poll interval, stops before the release click */
 #define MAX_FRAMES (MUSE_AUDIO_RATE * MAX_SECS)
 #define NOTE_MIN_HOLD_US 600000
@@ -467,6 +467,8 @@ static void take_pre(rec_stats_t *st, size_t chunks)
  * kept note to fall back on (why says what failed). There is no start chirp:
  * anything played now would land on top of the first words.
  */
+static bool s_rec_capped;   /* the last record() ran out at MAX_SECS with no release */
+
 static bool record(bool seeded, char *why, size_t cap)
 {
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -492,6 +494,7 @@ static bool record(bool seeded, char *why, size_t cap)
 #endif
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
+    s_rec_capped = false;
     if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
@@ -605,6 +608,7 @@ static bool record(bool seeded, char *why, size_t cap)
         if (cap) why[0] = '\0';
         return false;
     }
+    s_rec_capped = !released && n + MUSE_AUDIO_CHUNK > MAX_FRAMES;
     take_pre(&st, s_pre_fill);
     muse_state_set_level(0);
 #if CONFIG_MUSE_WAKEWORD_ENABLE
@@ -945,6 +949,11 @@ static note_result_t note_held(bool wake, bool barge_in)
              * a later DOWN for the next gesture. Never borrow its hold time. */
             if (ev.epoch == s_press_input_epoch && ev.type == MUSE_PTT_UP && ev_synthetic(&ev) == s_press_synthetic) {
                 if (eligible) return NOTE_ACCEPTED;
+                /* Self-use tap-to-toggle: this UP is the second tap ending a
+                 * latched note (the input latch posted no UP when the first
+                 * tap was released), so the pair is a completed note however
+                 * short -- production behaviour, restored. */
+                if (muse_input_tap_session()) return NOTE_ACCEPTED;
                 xQueueReceive(s_queue, &ev, 0);
                 int64_t held_us = until - s_press_us;
                 return held_us < CALL_TAP_US ? NOTE_TAP :
@@ -1949,6 +1958,15 @@ static void voice_task(void *arg)
         bool ok = record(synthetic, why, sizeof(why));
         muse_wakeword_set_ptt_turn(false);
         note_toggled(false);
+        if (ok && muse_input_tap_session() && s_rec_capped) {
+            /* A tap-latched recording nobody stopped: drop it instead of
+             * sending up to MAX_SECS of forgotten audio. */
+            muse_hatch_turn_cancel();
+            drop_rec();
+            pre_reset();
+            go_idle("MAX TIME: NOT SENT");
+            continue;
+        }
         if (!ok) {
             pre_reset();
             go_idle(why);   /* Muse failed it while recording */

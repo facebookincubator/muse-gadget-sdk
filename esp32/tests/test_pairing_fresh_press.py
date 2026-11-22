@@ -62,6 +62,16 @@ static const struct { int (*audio_init)(void), (*mic_init)(void); bool keyboard;
     .mic_init = fake_mic, .talk_button = "boot" }, *muse_board = &board;
 static bool s_talk_down;
 static int64_t s_talk_released_us;
+/* Tap-to-toggle state (muse_input.c, tap-to-toggle PR): this prelude is
+ * maintained with the input state it stands in for; talk_release is
+ * stubbed to the pre-latch behaviour (the latch itself is covered by
+ * the ptt_ui harness). */
+#define TAP_TICKS 300u
+#define TAP_LATCH_TICKS 20000u
+static bool s_tap_latched, s_tap_swallow_release, s_press_wake;
+static uint32_t s_press_tick, s_latch_tick;
+static uint32_t xTaskGetTickCount(void) { return (uint32_t)(clock_us / 1000); }
+static void talk_release(void) { post(MUSE_PTT_UP, false); }
 
 /* Link: a pairing waiting for its press (confirm_required), its prompt armed
  * at armed_us. app_confirm_pairing_press() and link_pairing_confirm_active_session(). */
