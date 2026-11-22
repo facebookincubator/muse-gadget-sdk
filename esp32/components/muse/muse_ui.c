@@ -382,6 +382,33 @@ static lv_result_t muse_dec_open(lv_image_decoder_t *dec, lv_image_decoder_dsc_t
     return LV_RESULT_INVALID;
 }
 
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+static uint32_t s_avatar_scale_us, s_avatar_scale_pixels;
+static void avatar_perf_event(lv_event_t *e)
+{
+    static int64_t started, window;
+    static uint32_t frames, sum_us, max_us;
+    int64_t now = esp_timer_get_time();
+    if (lv_event_get_code(e) == LV_EVENT_RENDER_START) {
+        started = now;
+        if (!window) window = now;
+    } else if (lv_event_get_code(e) == LV_EVENT_RENDER_READY && started) {
+        uint32_t us = (uint32_t)(now - started);
+        frames++; sum_us += us;
+        if (us > max_us) max_us = us;
+        started = 0;
+        if (now - window >= 2000000) {
+            uint32_t scale = __atomic_exchange_n(&s_avatar_scale_us, 0, __ATOMIC_RELAXED);
+            uint32_t pixels = __atomic_exchange_n(&s_avatar_scale_pixels, 0, __ATOMIC_RELAXED);
+            ESP_LOGI(TAG, "avatar perf: mode=%d frames=%u window_ms=%u render_avg_us=%u render_max_us=%u scale_us=%u pixels=%u",
+                     (int)muse_state_mode(NULL), (unsigned)frames, (unsigned)((now-window)/1000),
+                     (unsigned)(sum_us/frames), (unsigned)max_us, (unsigned)scale, (unsigned)pixels);
+            frames = sum_us = max_us = 0; window = now;
+        }
+    }
+}
+#endif
+
 static lv_result_t muse_dec_get_area(lv_image_decoder_t *dec, lv_image_decoder_dsc_t *dsc,
                                      const lv_area_t *full, lv_area_t *area)
 {
@@ -408,7 +435,14 @@ static lv_result_t muse_dec_get_area(lv_image_decoder_t *dec, lv_image_decoder_d
     }
     if (!personal)
 #endif
-        muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    int64_t scale_started = esp_timer_get_time();
+#endif
+    muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    __atomic_fetch_add(&s_avatar_scale_us, (uint32_t)(esp_timer_get_time()-scale_started), __ATOMIC_RELAXED);
+    __atomic_fetch_add(&s_avatar_scale_pixels, (uint32_t)(w*(y2-y1+1)), __ATOMIC_RELAXED);
+#endif
     area->x1 = full->x1;
     area->x2 = full->x2;
     area->y1 = y1;
@@ -2815,6 +2849,10 @@ esp_err_t muse_ui_start(void)
 
     s_image_mutex = xSemaphoreCreateMutex();
     muse_board->display_lock(-1);
+#if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    lv_display_add_event_cb(disp, avatar_perf_event, LV_EVENT_RENDER_START, NULL);
+    lv_display_add_event_cb(disp, avatar_perf_event, LV_EVENT_RENDER_READY, NULL);
+#endif
     /* Until someone picks a Text size, replies keep the size they had before
      * there was one: Montserrat 14 on a small screen's full-screen page,
      * unscii-16 (doubled from 400 px) on a bigger screen's. Brazilian
