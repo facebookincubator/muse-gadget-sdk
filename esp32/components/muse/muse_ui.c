@@ -482,6 +482,11 @@ static int32_t rect_cells(const lv_area_t *r)
 
 static void invalidate_muse(void)
 {
+#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    /* Bilinear artwork can change between the sampled pixel-grid cells. */
+    lv_obj_invalidate(s_canvas);
+    return;
+#endif
     if (!s_cells) {
         lv_obj_invalidate(s_canvas);
         return;

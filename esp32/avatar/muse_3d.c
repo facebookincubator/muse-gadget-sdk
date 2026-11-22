@@ -138,7 +138,7 @@ void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int 
     float elapsed = s_t - s_changed_at;
     unsigned blend = s_previous && elapsed >= 0 && elapsed < 0.20f
                          ? (unsigned)(elapsed * 1280.0f) : 256;
-    if (blend >= 256) s_previous = NULL;
+    /* Decoder strips may be sampled concurrently: keep frame state read-only. */
 
     unsigned brightness = 256;
     if (s_mode == MUSE_MODE_BOOT && s_mode_t < 0.35f)
