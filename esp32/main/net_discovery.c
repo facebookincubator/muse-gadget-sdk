@@ -92,6 +92,7 @@ static int sanitize_ascii(char *s) {
 #define MAX_SNMP    128
 #define MAX_NETBIOS 256
 #define MAX_VENDOR  128
+#define MAX_HEARD   256   // distinct senders kept for the silent hint
 
 #define DISCOVERY_MAX_JSON_BYTES (256 * 1024)
 // Covers network/source metadata and the link.result envelope, including the
@@ -138,6 +139,13 @@ typedef struct {
     cJSON *obs;
     size_t estimated_bytes;
     bool exhausted;
+    // Distinct senders of any datagram a scan socket received, used only for
+    // the silent hint (NULL: not kept). Partial when one more didn't fit, or
+    // when the scan held 5353 without joining the mDNS group (multicast
+    // answers miss it).
+    uint32_t *heard;
+    int heard_count;
+    bool heard_partial;
 } discovery_budget_t;
 
 static size_t json_string_bound(const char *s) {
@@ -177,6 +185,17 @@ static bool append_observation(discovery_budget_t *budget,
     budget->estimated_bytes += bytes;
     source->found++;
     return true;
+}
+
+// Called for every datagram a scan socket receives, before it's parsed.
+static void note_heard(discovery_budget_t *budget, uint32_t ip) {
+    if (!budget->heard) return;
+    for (int i = 0; i < budget->heard_count; i++)
+        if (budget->heard[i] == ip) return;
+    if (budget->heard_count < MAX_HEARD)
+        budget->heard[budget->heard_count++] = ip;
+    else
+        budget->heard_partial = true;
 }
 
 // ---- ARP -------------------------------------------------------------------
@@ -453,11 +472,15 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
 
     struct sockaddr_in ba = { .sin_family = AF_INET, .sin_port = htons(MDNS_PORT),
                               .sin_addr.s_addr = htonl(INADDR_ANY) };
-    bind(sock, (struct sockaddr *)&ba, sizeof(ba));
+    // Bound elsewhere (a relay holds 5353), answers to its queries still come
+    // by unicast to the port they went from.
+    bool bound = bind(sock, (struct sockaddr *)&ba, sizeof(ba)) == 0;
 
     struct ip_mreq mr = { .imr_multiaddr.s_addr = inet_addr("224.0.0.251"),
                           .imr_interface.s_addr = htonl(INADDR_ANY) };
-    setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr));
+    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) != 0
+        && bound && budget->heard)
+        budget->heard_partial = true;   // multicast answers to its queries miss it
 
     struct sockaddr_in dest = { .sin_family = AF_INET, .sin_port = htons(MDNS_PORT),
                                 .sin_addr.s_addr = inet_addr("224.0.0.251") };
@@ -475,7 +498,8 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
         int off = 12 + nl;
         qbuf[off] = 0; qbuf[off + 1] = 12;
         qbuf[off + 2] = 0x80; qbuf[off + 3] = 1;
-        sendto(sock, qbuf, off + 4, 0, (struct sockaddr *)&dest, sizeof(dest));
+        if (sendto(sock, qbuf, off + 4, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)
+            source->truncated = true;   // a query not sent: not complete
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
@@ -495,8 +519,11 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
     uint8_t rbuf[RECV_BUF];
     int64_t deadline = esp_timer_get_time() + MDNS_LISTEN_MS * 1000LL;
     while (esp_timer_get_time() < deadline && fc < MAX_MDNS) {
-        int n = recvfrom(sock, rbuf, sizeof(rbuf), 0, NULL, NULL);
-        if (n <= 0) break;
+        struct sockaddr_in from; socklen_t fl = sizeof(from);
+        int n = recvfrom(sock, rbuf, sizeof(rbuf), 0, (struct sockaddr *)&from, &fl);
+        if (n < 0) break;
+        note_heard(budget, from.sin_addr.s_addr);
+        if (n == 0) continue;   // an empty datagram, not the end of the answers
         parse_mdns_pkt(rbuf, n, found, &fc, MAX_MDNS, addrs, &ac, &addrs_full);
     }
 
@@ -509,7 +536,7 @@ static void mdns_probe(discovery_budget_t *budget, discovery_source_t *source) {
                 break;
             }
 
-    source->truncated = fc >= MAX_MDNS || addrs_full;
+    source->truncated |= fc >= MAX_MDNS || addrs_full;
     for (int i = 0; i < fc; i++) {
         sanitize_ascii(found[i].instance);
         sanitize_ascii(found[i].hostname);
@@ -579,8 +606,9 @@ static void ssdp_probe(discovery_budget_t *budget, discovery_source_t *source) {
 
     struct sockaddr_in dest = { .sin_family = AF_INET, .sin_port = htons(SSDP_PORT),
                                 .sin_addr.s_addr = inet_addr("239.255.255.250") };
-    sendto(sock, msearch, strlen(msearch), 0,
-           (struct sockaddr *)&dest, sizeof(dest));
+    if (sendto(sock, msearch, strlen(msearch), 0,
+               (struct sockaddr *)&dest, sizeof(dest)) < 0)
+        source->truncated = true;
 
     struct timeval tv = { .tv_sec = SSDP_LISTEN_MS / 1000,
                           .tv_usec = (SSDP_LISTEN_MS % 1000) * 1000 };
@@ -594,7 +622,9 @@ static void ssdp_probe(discovery_budget_t *budget, discovery_source_t *source) {
         struct sockaddr_in from; socklen_t fl = sizeof(from);
         int n = recvfrom(sock, buf, sizeof(buf) - 1, 0,
                          (struct sockaddr *)&from, &fl);
-        if (n <= 0) break;
+        if (n < 0) break;
+        note_heard(budget, from.sin_addr.s_addr);
+        if (n == 0) continue;
         buf[n] = '\0';
         char ib[16]; ip_str(from.sin_addr.s_addr, ib, sizeof(ib));
         cJSON *e = cJSON_CreateObject();
@@ -648,8 +678,9 @@ static void wsd_probe(discovery_budget_t *budget, discovery_source_t *source) {
 
     struct sockaddr_in dest = { .sin_family = AF_INET, .sin_port = htons(WSD_PORT),
                                 .sin_addr.s_addr = inet_addr("239.255.255.250") };
-    sendto(sock, probe, strlen(probe), 0,
-           (struct sockaddr *)&dest, sizeof(dest));
+    if (sendto(sock, probe, strlen(probe), 0,
+               (struct sockaddr *)&dest, sizeof(dest)) < 0)
+        source->truncated = true;
 
     struct timeval tv = { .tv_sec = WSD_LISTEN_MS / 1000,
                           .tv_usec = (WSD_LISTEN_MS % 1000) * 1000 };
@@ -663,7 +694,9 @@ static void wsd_probe(discovery_budget_t *budget, discovery_source_t *source) {
         struct sockaddr_in from; socklen_t fl = sizeof(from);
         int n = recvfrom(sock, buf, sizeof(buf) - 1, 0,
                          (struct sockaddr *)&from, &fl);
-        if (n <= 0) break;
+        if (n < 0) break;
+        note_heard(budget, from.sin_addr.s_addr);
+        if (n == 0) continue;
         buf[n] = '\0';
         char ib[16]; ip_str(from.sin_addr.s_addr, ib, sizeof(ib));
         cJSON *e = cJSON_CreateObject();
@@ -752,7 +785,8 @@ static void snmp_probe(discovery_budget_t *budget, esp_netif_t *netif,
 
     struct sockaddr_in dest = { .sin_family = AF_INET, .sin_port = htons(161),
                                 .sin_addr.s_addr = baddr };
-    sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest));
+    if (sendto(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0)
+        source->truncated = true;
 
     struct timeval tv = { .tv_sec = SNMP_LISTEN_MS / 1000 };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -765,7 +799,9 @@ static void snmp_probe(discovery_budget_t *budget, esp_netif_t *netif,
         struct sockaddr_in from; socklen_t fl = sizeof(from);
         int n = recvfrom(sock, buf, sizeof(buf), 0,
                          (struct sockaddr *)&from, &fl);
-        if (n <= 0) break;
+        if (n < 0) break;
+        note_heard(budget, from.sin_addr.s_addr);
+        if (n == 0) continue;
         char val[256];
         if (snmp_extract_value(buf, n, val, sizeof(val))) {
             sanitize_ascii(val);
@@ -814,8 +850,9 @@ static void netbios_probe(discovery_budget_t *budget, esp_netif_t *netif,
 
     struct sockaddr_in dest = { .sin_family = AF_INET, .sin_port = htons(137),
                                 .sin_addr.s_addr = baddr };
-    sendto(sock, query, sizeof(query), 0,
-           (struct sockaddr *)&dest, sizeof(dest));
+    if (sendto(sock, query, sizeof(query), 0,
+               (struct sockaddr *)&dest, sizeof(dest)) < 0)
+        source->truncated = true;
 
     struct timeval tv = { .tv_sec = NETBIOS_LISTEN_MS / 1000 };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -828,7 +865,9 @@ static void netbios_probe(discovery_budget_t *budget, esp_netif_t *netif,
         struct sockaddr_in from; socklen_t fl = sizeof(from);
         int n = recvfrom(sock, buf, sizeof(buf), 0,
                          (struct sockaddr *)&from, &fl);
-        if (n <= 0) break;
+        if (n < 0) break;
+        note_heard(budget, from.sin_addr.s_addr);
+        if (n == 0) continue;
 
         int pos = 12;
         while (pos < n) {
@@ -908,39 +947,43 @@ static void kasa_xor(uint8_t *b, int n, bool encrypt) {
     }
 }
 
-static void vendor_send(int sock, const char *group, uint16_t port,
+// False when the packet couldn't be sent.
+static bool vendor_send(int sock, const char *group, uint16_t port,
                         const void *msg, size_t len) {
     struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(port),
                               .sin_addr.s_addr = group ? inet_addr(group)
                                                        : htonl(INADDR_BROADCAST) };
-    sendto(sock, msg, len, 0, (struct sockaddr *)&to, sizeof(to));
+    return sendto(sock, msg, len, 0, (struct sockaddr *)&to, sizeof(to)) >= 0;
 }
 
-static void vendor_queries(int sock, int govee) {
+// Sends every query; false when any of them couldn't be sent.
+static bool vendor_queries(int sock, int govee) {
+    bool sent = true;
     uint8_t kasa[] = "{\"system\":{\"get_sysinfo\":{}}}";
     kasa_xor(kasa, sizeof(kasa) - 1, true);
-    vendor_send(sock, NULL, 9999, kasa, sizeof(kasa) - 1);
+    sent &= vendor_send(sock, NULL, 9999, kasa, sizeof(kasa) - 1);
     static const uint8_t tdp[16] = {0x02, 0, 0, 0x01, 0, 0, 0, 0,
                                     0, 0, 0, 0, 0x46, 0x3c, 0xb5, 0xd3};
-    vendor_send(sock, NULL, 20002, tdp, sizeof(tdp));
+    sent &= vendor_send(sock, NULL, 20002, tdp, sizeof(tdp));
     static const char govee_scan[] =
         "{\"msg\":{\"cmd\":\"scan\",\"data\":{\"account_topic\":\"reserve\"}}}";
-    vendor_send(govee, "239.255.255.250", 4001, govee_scan, strlen(govee_scan));
+    sent &= vendor_send(govee, "239.255.255.250", 4001, govee_scan, strlen(govee_scan));
     uint8_t miio[32];
     memset(miio, 0xff, sizeof(miio));
     miio[0] = 0x21; miio[1] = 0x31; miio[2] = 0x00; miio[3] = 0x20;
-    vendor_send(sock, NULL, 54321, miio, sizeof(miio));
+    sent &= vendor_send(sock, NULL, 54321, miio, sizeof(miio));
     static const char wiz[] = "{\"method\":\"getPilot\",\"params\":{}}";
-    vendor_send(sock, NULL, 38899, wiz, strlen(wiz));
+    sent &= vendor_send(sock, NULL, 38899, wiz, strlen(wiz));
     // LIFX GetService: 36-byte header, tagged, protocol 1024, message type 2.
     static const uint8_t lifx[36] = {36, 0, 0x00, 0x34, 'M', 'u', 's', 'e', [32] = 2};
-    vendor_send(sock, NULL, 56700, lifx, sizeof(lifx));
+    sent &= vendor_send(sock, NULL, 56700, lifx, sizeof(lifx));
     static const char yeelight[] =
         "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1982\r\n"
         "MAN: \"ssdp:discover\"\r\nST: wifi_bulb\r\n";
-    vendor_send(sock, "239.255.255.250", 1982, yeelight, strlen(yeelight));
+    sent &= vendor_send(sock, "239.255.255.250", 1982, yeelight, strlen(yeelight));
     static const uint8_t cs2[4] = {0xf1, 0x30, 0x00, 0x00};   // CS2/PPPP LAN search
-    vendor_send(sock, NULL, 32108, cs2, sizeof(cs2));
+    sent &= vendor_send(sock, NULL, 32108, cs2, sizeof(cs2));
+    return sent;
 }
 
 // Which vendor sent b, from the port it came to and its bytes. -1: none.
@@ -1104,14 +1147,16 @@ static void vendor_probe(discovery_budget_t *budget, discovery_source_t *source)
     vendor_seen_t *seen = malloc(MAX_VENDOR * sizeof(vendor_seen_t));
     if (socks[0] < 0) source->error = "socket_failed";
     else if (!buf || !seen) source->error = "out_of_memory";
-    else vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]);
+    else if (!vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]))
+        source->truncated = true;   // a query not sent: not complete
 
     int64_t start = esp_timer_get_time(), deadline = start + VENDOR_LISTEN_MS * 1000LL;
     bool resent = false;
     while (!source->error && !budget->exhausted && source->found < MAX_VENDOR
            && esp_timer_get_time() < deadline) {
         if (!resent && esp_timer_get_time() >= start + VENDOR_RESEND_MS * 1000LL) {
-            vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]);
+            if (!vendor_queries(socks[0], socks[1] >= 0 ? socks[1] : socks[0]))
+                source->truncated = true;
             resent = true;
         }
         bool heard = false;
@@ -1121,7 +1166,9 @@ static void vendor_probe(discovery_budget_t *budget, discovery_source_t *source)
             struct sockaddr_in from; socklen_t fl = sizeof(from);
             int n = recvfrom(socks[i], buf, RECV_BUF, MSG_DONTWAIT,
                              (struct sockaddr *)&from, &fl);
-            if (n <= 0) continue;
+            if (n < 0) continue;
+            note_heard(budget, from.sin_addr.s_addr);
+            if (n == 0) continue;
             heard = true;
             buf[n] = '\0';
             int kind = vendor_kind(buf, n, s_vendor_listen[i]);
@@ -1145,6 +1192,189 @@ static void vendor_probe(discovery_budget_t *budget, discovery_source_t *source)
     free(buf);
     free(seen);
     ESP_LOGI(TAG, "vendor: %d devices", source->found);
+}
+
+// ---- Host hints ------------------------------------------------------------
+// Added to ARP observations after every source has run, from what the scan saw:
+// `maker` for an Espressif-made MAC, `silent` for a host where nothing but ARP
+// answered and no scan socket received anything from it, `mac_batch` for MACs
+// with one OUI close enough to be one product's batch.
+
+// Espressif's MA-L blocks, from the IEEE registry (https://standards-oui.ieee.org/oui/oui.txt).
+static const uint32_t s_espressif_oui[] = {
+    0x004b12, 0x007007, 0x00fb4a, 0x048308, 0x04b247, 0x083a8d, 0x083af2, 0x089272,
+    0x08a6f7, 0x08ad0a, 0x08b61f, 0x08d1f9, 0x08f9e0, 0x0c4ea0, 0x0c8b95, 0x0cb815,
+    0x0cdc7e, 0x10003b, 0x10061c, 0x1020ba, 0x1051db, 0x10521c, 0x1091a8, 0x1097bd,
+    0x10a85b, 0x10b41d, 0x10bda3, 0x140808, 0x142b2f, 0x14335c, 0x146393, 0x14c19f,
+    0x188b0e, 0x18fe34, 0x1c2904, 0x1c6465, 0x1c6920, 0x1c8b84, 0x1c8f57, 0x1c9dc2,
+    0x1cc3ab, 0x1cdbd4, 0x1ce4cb, 0x202565, 0x2043a8, 0x20500d, 0x206ef1, 0x209ba9,
+    0x20d5c2, 0x20e5a4, 0x20e7c8, 0x240ac4, 0x244cab, 0x24587c, 0x2462ab, 0x246f28,
+    0x24a160, 0x24b2de, 0x24d7eb, 0x24dcc3, 0x24ec4a, 0x2805a5, 0x28372f, 0x28562f,
+    0x288485, 0x2c3ae8, 0x2cbcbb, 0x2cf432, 0x3030f9, 0x3076f5, 0x308398, 0x30aea4,
+    0x30c6f7, 0x30c922, 0x30e8b9, 0x30eda0, 0x345f45, 0x348518, 0x34865d, 0x349454,
+    0x34987a, 0x34ab95, 0x34b472, 0x34b7da, 0x34c934, 0x34cdb0, 0x38182b, 0x383e51,
+    0x3844be, 0x3c0d0d, 0x3c0f02, 0x3c6105, 0x3c71bf, 0x3c8427, 0x3c8a1f, 0x3cdc75,
+    0x3ce255, 0x3ce90e, 0x4022d8, 0x402bd6, 0x404cca, 0x409151, 0x40f520, 0x441793,
+    0x441bf6, 0x441d64, 0x447b30, 0x44b176, 0x44bd8d, 0x4827e2, 0x4831b7, 0x483fda,
+    0x485519, 0x489d31, 0x48aff3, 0x48ca43, 0x48e729, 0x48f6ee, 0x4c11ae, 0x4c7525,
+    0x4c8421, 0x4cc382, 0x4cebd6, 0x500291, 0x50787d, 0x5416a5, 0x542b88, 0x543204,
+    0x5443b2, 0x545aa6, 0x549dea, 0x582abd, 0x582bd3, 0x588c81, 0x58b145, 0x58bf25,
+    0x58cf79, 0x58e6c5, 0x5c013b, 0x5ccf7f, 0x600194, 0x6055f9, 0x648914, 0x64b708,
+    0x64e833, 0x680947, 0x6825dd, 0x686725, 0x689dd2, 0x68b6b3, 0x68c63a, 0x68ee8f,
+    0x68fe71, 0x6c2fa0, 0x6c3dd8, 0x6cb456, 0x6cc4af, 0x6cc840, 0x6ce210, 0x70039f,
+    0x70041d, 0x704bca, 0x70af09, 0x70b8f6, 0x744dbd, 0x748927, 0x781c3c, 0x782184,
+    0x78421c, 0x78e36d, 0x78ee4c, 0x7c0c5f, 0x7c2c67, 0x7c4fad, 0x7c7398, 0x7c87ce,
+    0x7c9ebd, 0x7cd544, 0x7cdfa1, 0x7ce8b1, 0x80456b, 0x8053e0, 0x80646f, 0x806599,
+    0x807d3a, 0x80b54e, 0x80f1b2, 0x80f3da, 0x840d8e, 0x841fe8, 0x84c7bb, 0x84cca8,
+    0x84f3eb, 0x84f703, 0x84fce6, 0x8813bf, 0x8856a6, 0x885721, 0x88f155, 0x8c4598,
+    0x8c4b14, 0x8c4f00, 0x8c8c29, 0x8c94df, 0x8caab5, 0x8cbfea, 0x8cce4e, 0x8cfd49,
+    0x901506, 0x90380c, 0x90649b, 0x907069, 0x9097d5, 0x90b339, 0x90da72, 0x90e5b1,
+    0x943cc6, 0x9451dc, 0x9454c5, 0x94a990, 0x94b555, 0x94b97e, 0x94e686, 0x983dae,
+    0x9888e0, 0x98a316, 0x98c377, 0x98cdac, 0x98f4ab, 0x9c139e, 0x9c96d5, 0x9c9c1f,
+    0x9c9e6e, 0x9ccc01, 0x9ce087, 0xa020a6, 0xa06025, 0xa0764e, 0xa085e3, 0xa0a3b3,
+    0xa0b765, 0xa0dd6c, 0xa0f262, 0xa47b9d, 0xa4cb8f, 0xa4cf12, 0xa4e57c, 0xa4e972,
+    0xa4f00f, 0xa8032a, 0xa842e3, 0xa84674, 0xa848fa, 0xa8fd07, 0xac0bfb, 0xac1518,
+    0xac276e, 0xac67b2, 0xaca26a, 0xaca704, 0xacd074, 0xacebe6, 0xb03fd3, 0xb08184,
+    0xb0a604, 0xb0a732, 0xb0b21c, 0xb0cbd8, 0xb43a45, 0xb48a0a, 0xb4a64a, 0xb4bfe9,
+    0xb4e62d, 0xb4feb5, 0xb81f3f, 0xb87b4d, 0xb8bb11, 0xb8d61a, 0xb8f009, 0xb8f862,
+    0xbc1926, 0xbcddc2, 0xbcff4d, 0xc049ef, 0xc04e30, 0xc05d89, 0xc0cdd6, 0xc44f33,
+    0xc45bbe, 0xc49a90, 0xc49e7e, 0xc4d8d5, 0xc4dd57, 0xc4dee2, 0xc82b96, 0xc82e18,
+    0xc88541, 0xc88a7b, 0xc8c9a3, 0xc8da29, 0xc8ea71, 0xc8ed8b, 0xc8f09e, 0xcc50e3,
+    0xcc68c7, 0xcc7b5c, 0xcc7e1f, 0xcc8da2, 0xccba97, 0xccdba7, 0xcce732, 0xd09aaf,
+    0xd0cf13, 0xd0ef76, 0xd40592, 0xd48afc, 0xd48c49, 0xd4d4da, 0xd4e9f4, 0xd4f98d,
+    0xd8132a, 0xd82332, 0xd83bda, 0xd885ac, 0xd8a01d, 0xd8bc38, 0xd8bfc0, 0xd8f15b,
+    0xdc0675, 0xdc0a69, 0xdc1ed5, 0xdc4f22, 0xdc5475, 0xdc55b1, 0xdcb4d9, 0xdcda0c,
+    0xe05a1b, 0xe072a1, 0xe08cfe, 0xe09806, 0xe0e2e6, 0xe465b8, 0xe4b063, 0xe4b323,
+    0xe80690, 0xe831cd, 0xe83dc1, 0xe868e7, 0xe86bea, 0xe89f6d, 0xe8db84, 0xe8edbd,
+    0xe8f60a, 0xec6260, 0xec64c9, 0xec94cb, 0xecc9ff, 0xecd61b, 0xecda3b, 0xece334,
+    0xecfabc, 0xf008d1, 0xf0161d, 0xf024f9, 0xf09e9e, 0xf0f5bd, 0xf412fa, 0xf42dc9,
+    0xf4650b, 0xf4cfa2, 0xf80c4e, 0xf843ee, 0xf85b1b, 0xf8b3b7, 0xfc012c, 0xfcb467,
+    0xfce8c0, 0xfcf5c4,
+};
+
+// Consecutive MACs this close with the same OUI (first three bytes) chain into a batch.
+#define MAC_BATCH_GAP 0x10000
+
+typedef struct {
+    uint64_t mac;
+    cJSON *obs;
+} hint_host_t;
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// "aa:bb:cc:dd:ee:ff" as a 48-bit number.
+static bool parse_mac(const char *s, uint64_t *out) {
+    uint64_t v = 0;
+    for (int i = 0; i < 6; i++) {
+        int hi = hex_digit(s[3 * i]);
+        if (hi < 0) return false;
+        int lo = hex_digit(s[3 * i + 1]);
+        if (lo < 0 || s[3 * i + 2] != (i < 5 ? ':' : '\0')) return false;
+        v = v << 8 | (uint64_t)(hi << 4 | lo);
+    }
+    *out = v;
+    return true;
+}
+
+// Neither multicast nor locally administered (a phone's random MAC).
+static bool mac_universal(uint64_t mac) {
+    return !((mac >> 40) & 0x03);
+}
+
+static int cmp_u32(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return (x > y) - (x < y);
+}
+
+static int cmp_host(const void *a, const void *b) {
+    uint64_t x = ((const hint_host_t *)a)->mac, y = ((const hint_host_t *)b)->mac;
+    return (x > y) - (x < y);
+}
+
+static bool add_hint(discovery_budget_t *budget, cJSON *obs, const char *key, cJSON *value) {
+    if (!value) return false;
+    size_t bytes = json_string_bound(key) + 2
+                   + (cJSON_IsString(value) ? json_string_bound(value->valuestring) : 6);
+    if (budget->exhausted || bytes > DISCOVERY_MAX_JSON_BYTES - budget->estimated_bytes) {
+        budget->exhausted = true;
+        cJSON_Delete(value);
+        return false;
+    }
+    if (!cJSON_AddItemToObject(obs, key, value)) {
+        cJSON_Delete(value);
+        return false;
+    }
+    budget->estimated_bytes += bytes;
+    return true;
+}
+
+// `silent_known`: every source ran and none but ARP was cut short, so an ARP
+// host is `silent` when nothing but ARP answered and no scan socket received
+// anything from it (no other source named its address, and it isn't in `heard`).
+static void add_host_hints(discovery_budget_t *budget, bool silent_known) {
+    int hosts = 0, named = 0;
+    cJSON *o;
+    cJSON_ArrayForEach(o, budget->obs) {
+        const char *src = cJSON_GetStringValue(cJSON_GetObjectItem(o, "source"));
+        if (!src || !cJSON_GetStringValue(cJSON_GetObjectItem(o, "ip"))) continue;
+        if (!strcmp(src, "arp")) hosts++;
+        else named++;
+    }
+    if (!hosts) return;
+    size_t bytes = hosts * sizeof(hint_host_t) + named * sizeof(uint32_t);
+    hint_host_t *host = heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!host) host = calloc(1, bytes);
+    if (!host) {
+        ESP_LOGW(TAG, "no memory for host hints");
+        return;
+    }
+    uint32_t *ips = (uint32_t *)(host + hosts);
+    int h = 0, n = 0;
+    cJSON_ArrayForEach(o, budget->obs) {
+        const char *src = cJSON_GetStringValue(cJSON_GetObjectItem(o, "source"));
+        const char *ip = cJSON_GetStringValue(cJSON_GetObjectItem(o, "ip"));
+        if (!src || !ip) continue;
+        if (strcmp(src, "arp")) {
+            ips[n++] = inet_addr(ip);
+            continue;
+        }
+        const char *mac = cJSON_GetStringValue(cJSON_GetObjectItem(o, "mac"));
+        if (mac && parse_mac(mac, &host[h].mac)) host[h++].obs = o;
+    }
+    qsort(ips, n, sizeof(*ips), cmp_u32);
+    int hc = budget->heard ? budget->heard_count : 0;
+    if (hc) qsort(budget->heard, hc, sizeof(uint32_t), cmp_u32);
+
+    for (int i = 0; i < h && !budget->exhausted; i++) {
+        uint32_t oui = (uint32_t)(host[i].mac >> 24);
+        if (mac_universal(host[i].mac)
+            && bsearch(&oui, s_espressif_oui, sizeof(s_espressif_oui) / sizeof(s_espressif_oui[0]),
+                       sizeof(s_espressif_oui[0]), cmp_u32))
+            add_hint(budget, host[i].obs, "maker", cJSON_CreateString("espressif"));
+        uint32_t ip = inet_addr(cJSON_GetStringValue(cJSON_GetObjectItem(host[i].obs, "ip")));
+        if (silent_known && !bsearch(&ip, ips, n, sizeof(*ips), cmp_u32)
+            && !(hc && bsearch(&ip, budget->heard, hc, sizeof(uint32_t), cmp_u32)))
+            add_hint(budget, host[i].obs, "silent", cJSON_CreateTrue());
+    }
+
+    qsort(host, h, sizeof(*host), cmp_host);
+    for (int start = 0, end; start < h && !budget->exhausted; start = end) {
+        end = start + 1;
+        // Equal MACs (one host's aliases) stay in the run, but don't make a batch alone.
+        while (end < h && host[end].mac - host[end - 1].mac <= MAC_BATCH_GAP
+               && host[end].mac >> 24 == host[end - 1].mac >> 24)
+            end++;
+        if (host[end - 1].mac == host[start].mac || !mac_universal(host[start].mac)) continue;
+        const char *first = cJSON_GetStringValue(cJSON_GetObjectItem(host[start].obs, "mac"));
+        for (int i = start; i < end; i++)
+            if (!add_hint(budget, host[i].obs, "mac_batch", cJSON_CreateString(first))) break;
+    }
+    free(host);
 }
 
 // ---- Public API ------------------------------------------------------------
@@ -1205,6 +1435,13 @@ cJSON *net_discovery_run(cJSON *params) {
     };
     discovery_budget_t budget = { .obs = obs, .estimated_bytes = DISCOVERY_METADATA_BYTES };
     bool complete = true, failed = false;
+    bool silent_known = (sources & SRC_ALL) == SRC_ALL;
+    if (silent_known) {
+        // 1 KB: in PSRAM where there is any.
+        budget.heard = heap_caps_malloc(MAX_HEARD * sizeof(uint32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!budget.heard) budget.heard = malloc(MAX_HEARD * sizeof(uint32_t));
+        if (!budget.heard) silent_known = false;
+    }
     for (size_t i = 0; i < sizeof(specs) / sizeof(specs[0]); i++) {
         if (!(sources & specs[i].mask)) continue;
         discovery_source_t source = { .cap = specs[i].cap };
@@ -1229,12 +1466,19 @@ cJSON *net_discovery_run(cJSON *params) {
                    || !cJSON_AddNumberToObject(report, "subnet_hosts", source.subnet_hosts))
                 : !cJSON_AddNumberToObject(report, "listen_ms", specs[i].listen_ms))
             || (source.error && !cJSON_AddStringToObject(report, "error", source.error))) {
+            free(budget.heard);
             cJSON_Delete(result);
             return NULL;
         }
-        if (source.truncated || source.error) complete = false;
+        if (source.truncated || source.error) {
+            complete = false;
+            if (specs[i].mask != SRC_ARP) silent_known = false;
+        }
         if (source.error) failed = true;
     }
+    if (budget.heard_partial) silent_known = false;
+    add_host_hints(&budget, silent_known);
+    free(budget.heard);
     if (!cJSON_AddBoolToObject(result, "complete", complete)) {
         cJSON_Delete(result);
         return NULL;

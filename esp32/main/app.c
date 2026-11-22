@@ -1669,10 +1669,24 @@ typedef struct {
     cJSON *params;
 } discover_task_args_t;
 
+// One scan at a time: a second scan's mDNS socket on 5353 would take the
+// replies meant for the first.
+static atomic_bool s_discover_running = ATOMIC_VAR_INIT(false);
+
+static bool discover_try_begin(void) {
+    return !atomic_exchange_explicit(&s_discover_running, true, memory_order_acq_rel);
+}
+
+static void discover_end(void) {
+    atomic_store_explicit(&s_discover_running, false, memory_order_release);
+}
+
 static void discover_task(void *arg) {
     discover_task_args_t *args = (discover_task_args_t *)arg;
     ESP_LOGI(TAG, "starting network discovery scan");
     cJSON *result = net_discovery_run(args->params);
+    // The scan's sockets are closed: a scan sent once this result arrives can run.
+    discover_end();
     cJSON *wrapper = result ? cJSON_CreateObject() : NULL;
     if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
         || !cJSON_AddItemToObject(wrapper, "payload", result)) {
@@ -2225,14 +2239,20 @@ static cJSON *on_ws_command(
 #endif
 #if CONFIG_HOMEHUB_TUNNEL
     if (strcmp(command, "device.discover") == 0) {
+        if (!discover_try_begin())
+            return command_error("busy", "a network scan is already running");
         discover_task_args_t *args = calloc(1, sizeof(*args));
-        if (!args) return command_error("out_of_memory", "failed to allocate");
+        if (!args) {
+            discover_end();
+            return command_error("out_of_memory", "failed to allocate");
+        }
         args->session_generation = session_generation;
         strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
         args->params = params ? cJSON_Duplicate(params, 1) : NULL;
         if (!start_discover_task(args)) {
             if (args->params) cJSON_Delete(args->params);
             free(args);
+            discover_end();
             return command_error("out_of_memory", "failed to start task");
         }
         cJSON *async = cJSON_CreateObject();
