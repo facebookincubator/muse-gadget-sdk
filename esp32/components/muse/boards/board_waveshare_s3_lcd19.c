@@ -21,7 +21,9 @@
  * battery gauge.
  *
  * Pins, the panel's init sequence and its 35 px column offset come from the
- * board's schematic and from the vendor firmware Waveshare ships for it. The
+ * board's schematic and from the vendor firmware Waveshare ships for it
+ * (waveshareteam/ESP32-S3-LCD-1.9: lcd_init_cmds in main/main.c of the
+ * 07_LVGL_Test and 08_FactoryProgram examples, plus 0x36 set to 0x00). The
  * offset is the part that isn't guessable: the SH8601 is a 240-column
  * controller driving a 170-column panel, so columns 35..204 are the visible
  * ones. `esp_lcd_panel_set_gap()` applies it, which is why the draw path here

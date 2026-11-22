@@ -23,7 +23,15 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 : "${X264_SRC:?set X264_SRC to an x264 checkout}"
 out=${LIB_DIR:-$here/../lib}
-work=${WORK:-/tmp/mgx264-ios}
+# A private scratch directory, removed on exit. WORK names one to use and
+# keep instead.
+if [ -n "${WORK:-}" ]; then
+    work=$WORK
+else
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mgx264-ios.XXXXXX")
+    trap 'rm -rf -- "$work"' EXIT
+    trap 'exit 1' HUP INT TERM
+fi
 rm -rf "$work/src" "$work/x264" && mkdir -p "$work" "$out"
 cp -R "$X264_SRC" "$work/src"
 if [ "${MV_CHEAP:-1}" != 0 ]; then

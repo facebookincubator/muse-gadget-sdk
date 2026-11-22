@@ -121,7 +121,7 @@ class AppApiTest(unittest.TestCase):
     def test_apps_include_the_generated_header(self):
         # One header, beside build.py, where MUSE.md and the apps take it from.
         self.assertIn("Generated from components/muse_apps/sdk/api/api.json by components/muse_apps/sdk/api/gen_api.py", HEADER.read_text())
-        self.assertFalse((API / "gadget.h").exists(), "the header lives in apps/, not components/muse_apps/sdk/api/")
+        self.assertFalse((API / "gadget.h").exists(), "the header lives in components/muse_apps/sdk/, not components/muse_apps/sdk/api/")
         self.assertIn('#include "../gadget.h"', EXAMPLE.read_text())
 
     def test_mistakes_in_api_json_are_caught(self):

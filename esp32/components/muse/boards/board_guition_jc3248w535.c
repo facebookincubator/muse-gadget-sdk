@@ -23,7 +23,9 @@
  * Pins: LCD and touch from me-processware/JC3248W535-Driver
  * (src/JC3248W535_Display.h, src/JC3248W535_Touch.h), audio from
  * sirisakG2/JC3248W535C. The panel's init sequence is Arduino_GFX 1.4.9's
- * axs15231b_init_operations, which is what runs this board under Arduino.
+ * axs15231b_init_operations (src/display/Arduino_AXS15231B.h), which is what
+ * runs this board under Arduino. Arduino_GFX is BSD-licensed; its notice is
+ * retained in devices/licenses/Arduino_GFX.txt.
  *
  * In QSPI mode the AXS15231B ignores the row address: a write lands at the
  * top of the screen (RAMWR, which esp_lcd_axs15231b sends when y is 0) or

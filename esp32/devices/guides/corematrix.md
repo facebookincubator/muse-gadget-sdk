@@ -21,7 +21,7 @@ when a pairing needs confirming, a spinner while it connects, a check mark
 when it is connected, and a face with crossed-out eyes on an error.
 
 It can also show a 16 by 16 picture with each pixel either lit or dark,
-which replaces the status until display.show_animation. Lit pixels are
+which replaces the status until `display.show_animation`. Lit pixels are
 white LEDs: icons, symbols and simple shapes work, but words, photos and
 replies don't fit.
 

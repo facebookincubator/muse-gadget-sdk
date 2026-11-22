@@ -17,7 +17,8 @@ limitations under the License.
 
 A speaker-and-microphone device for talking to Muse, with no screen: a Home
 Assistant Voice Preview Edition, a Seeed reSpeaker Lite or a Seeed reSpeaker
-XVF3800 running the Muse Gadget SDK firmware. Muse uses it through the commands it lists.
+XVF3800 running the Muse Gadget SDK firmware. Muse uses it through the
+commands it lists.
 
 ## What it can do
 

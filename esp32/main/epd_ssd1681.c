@@ -18,7 +18,11 @@
 // SSD1681 controller on SPI3, active-low power enable, manual chip select.
 //
 // Init sequence and waveform LUT from the working XiaoZhi V2 driver
-// (waveshareteam/ESP32-S3-ePaper-1.54). Pins from user_config.h.
+// (waveshareteam/ESP32-S3-ePaper-1.54, 02_Example/XiaoZhi/V2-Src-XiaoZhi.zip:
+// main/boards/waveshare-s3-epaper-1.54/custom_lcd_display.cc, EPD_Init() and
+// WF_Full_1IN54). That source is 78/xiaozhi-esp32 with Waveshare's board, under
+// xiaozhi-esp32's MIT licence; its notice is retained in
+// devices/licenses/xiaozhi-esp32.txt. Pins from user_config.h.
 
 #include "epd_panel.h"
 

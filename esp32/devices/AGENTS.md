@@ -279,7 +279,7 @@ On a classic ESP32 (see `board_m5stack_stickc_plus2.c`):
 - There's no USB Serial/JTAG, so the Muse tools use the console UART behind
   the USB bridge. `muse_console.h` covers both; don't call either driver
   directly.
-- Set `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y` (with
+- Set `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y` (with
   `CONFIG_ESP32_REV_MIN_3=y`). Muse's voice task keeps its stack in PSRAM, and
   without it the board asserts at boot and restarts in a loop.
 - GPIO34 to 39 are inputs only, with no pull-ups. Buttons on them need the

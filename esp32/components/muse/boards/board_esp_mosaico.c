@@ -40,6 +40,10 @@
  * VCC_3V3 rail (display, touch, codec) on GPIO60, low = on; PWR_SW GPIO57,
  * open drain, low turns the board off; AI GPIO7 and BOOT GPIO61, active low.
  * GPIO7 held at reset also selects the retained Vibe Mode firmware.
+ *
+ * The panel's init table (s_lcd_init) is the BSP's vendor init from
+ * onboard/display.c, with shorter delays. That file is Apache-2.0, Copyright
+ * 2026 Espressif Systems (Shanghai) CO LTD.
  */
 
 #include <string.h>
