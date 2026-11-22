@@ -81,6 +81,18 @@ bool muse_hatch_ready(void);
 
 /* Press: connects if needed and starts streaming speech to the VM. */
 void muse_hatch_turn_begin(void);
+/* v4.4: true while a turn is in flight or the agent reports busy.
+ * The voice layer holds new notes in the send queue while this is
+ * true and releases them once the session is idle again. */
+bool muse_hatch_busy(void);
+/* v4.5: why the send gate last cleared ("previous turn completed",
+ * "cancelled reply completed late", "quiet 10 s after it ended",
+ * "no previous turn"). The voice layer logs it when a held note is
+ * finally released, so a serial capture shows why sends waited. */
+const char *muse_hatch_settle_reason(void);
+/* v4: increments on every settle-gate clear; the voice layer uses
+ * it to release the held-note retry backoff on the event itself. */
+uint32_t muse_hatch_settle_epoch(void);
 /* 16 kHz mono speech, in order, from press to release. */
 void muse_hatch_turn_audio(const int16_t *pcm, size_t frames);
 /* Release: no more audio; the reply follows. */
