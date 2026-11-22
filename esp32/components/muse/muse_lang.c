@@ -640,8 +640,27 @@ const lv_font_t *muse_lang_montserrat(const lv_font_t *font)
 LV_FONT_DECLARE(muse_font_latin_16)
 #endif
 
+#if CONFIG_MUSE_CJK_FONT
+LV_FONT_DECLARE(muse_font_cjk_16)
+#endif
+
 const lv_font_t *muse_lang_label_font(const char *text, const lv_font_t *plain)
 {
+#if CONFIG_MUSE_CJK_FONT
+    if (muse_text_has_cjk(text)) {
+        /* The CJK subset font holds no ASCII at all, so the digits and
+         * Latin letters of a mixed label (BATTERY 85%, SET UP WI-FI) drew
+         * as empty boxes. Mirror caption_font(): hand out a writable copy
+         * whose fallback is unscii-16, the font the subset's metrics were
+         * built on, for what the subset lacks. */
+        static lv_font_t cjk_fb;
+        if (!cjk_fb.get_glyph_dsc) {
+            cjk_fb = muse_font_cjk_16;
+            cjk_fb.fallback = &lv_font_unscii_16;
+        }
+        return &cjk_fb;
+    }
+#endif
 #if CONFIG_MUSE_LATIN_FONT
     if (muse_text_has_latin(text)) {
         return &muse_font_latin_16;
