@@ -41,6 +41,7 @@ DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#su
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
 FEDORA_PACKAGES=(bluez python3 python3-dbus python3-gobject python3-cryptography curl ca-certificates)
+SUSE_PACKAGES=(bluez python313 python313-dbus-python python313-gobject python313-cryptography curl ca-certificates)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -194,6 +195,8 @@ check_system() {
             DISTRO_FAMILY=arch ;;
         fedora)
             DISTRO_FAMILY=fedora ;;
+        opensuse-tumbleweed|opensuse-leap)
+            DISTRO_FAMILY=suse ;;
         *)
             case " ${ID_LIKE:-} " in
                 *" fedora "*|*" rhel "*)
@@ -205,7 +208,10 @@ check_system() {
                 *" debian "*|*" ubuntu "*)
                     DISTRO_FAMILY=debian
                     warn "$PRETTY_NAME is untested; continuing because it is Debian-based." ;;
-                *) die "$PRETTY_NAME is not supported. This installer needs Debian/Ubuntu, Arch or Fedora Linux." ;;
+                *" suse "*|*" opensuse "*)
+                    DISTRO_FAMILY=suse
+                    warn "$PRETTY_NAME is untested; continuing because it is SUSE-based." ;;
+                *) die "$PRETTY_NAME is not supported. This installer needs Debian/Ubuntu, Arch, Fedora or SUSE Linux." ;;
             esac ;;
     esac
     if [ "$DISTRO_FAMILY" = fedora ]; then
@@ -216,6 +222,10 @@ check_system() {
         command -v pacman >/dev/null || die "pacman not found."
         ARCH="$(uname -m)"
         case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported Arch architecture: $ARCH" ;; esac
+    elif [ "$DISTRO_FAMILY" = suse ]; then
+        command -v zypper >/dev/null || die "zypper not found."
+        ARCH="$(uname -m)"
+        case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported SUSE architecture: $ARCH" ;; esac
     else
         command -v apt-get >/dev/null || die "apt-get not found."
         # Many 32-bit Raspberry Pi installs run a 64-bit kernel, so ask dpkg,
@@ -260,6 +270,10 @@ install_packages() {
         for pkg in "${ARCH_PACKAGES[@]}"; do
             pacman -Qq "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
         done
+    elif [ "$DISTRO_FAMILY" = suse ]; then
+        for pkg in "${SUSE_PACKAGES[@]}"; do
+            rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+        done
     else
         for pkg in "${APT_PACKAGES[@]}"; do
             dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
@@ -272,6 +286,8 @@ install_packages() {
         as_root dnf install -y "${missing[@]}"
     elif [ "$DISTRO_FAMILY" = arch ]; then
         as_root pacman -S --needed --noconfirm "${missing[@]}"
+    elif [ "$DISTRO_FAMILY" = suse ]; then
+        as_root zypper --non-interactive install "${missing[@]}"
     else
         as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq
         as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
@@ -288,6 +304,8 @@ update_ca_certificates() {
         as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 &&
             as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
                 ca-certificates >/dev/null 2>&1 && updated=1
+    elif [ "$DISTRO_FAMILY" = suse ]; then
+        as_root zypper --non-interactive update ca-certificates >/dev/null 2>&1 && updated=1
     else
         # Upgrading one package without the rest is a partial upgrade on Arch.
         say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
@@ -410,7 +428,7 @@ install_uv() {
 }
 
 enable_bluez() {
-    if { [ "$DISTRO_FAMILY" = arch ] || [ "$DISTRO_FAMILY" = fedora ]; } && systemd_running; then
+    if { [ "$DISTRO_FAMILY" = arch ] || [ "$DISTRO_FAMILY" = fedora ] || [ "$DISTRO_FAMILY" = suse ]; } && systemd_running; then
         say "Enabling the BlueZ service"
         as_root systemctl enable --now bluetooth.service
     fi
