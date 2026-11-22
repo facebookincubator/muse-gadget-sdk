@@ -3094,7 +3094,8 @@ extern "C" bool noise_ctrl_connect(const char *vm_id, const char *auth_token,
 
     s_running = true;
     release_stack();
-    if (xTaskCreate(noise_ctrl_task, "noise_ctrl", NOISE_CTRL_STACK, nullptr, 5, &s_task) != pdPASS) {
+    if (xTaskCreateWithCaps(noise_ctrl_task, "noise_ctrl", NOISE_CTRL_STACK, nullptr, 5, &s_task,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         s_running = false;
         s_task = nullptr;
         reserve_stack();
