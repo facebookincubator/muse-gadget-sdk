@@ -18,7 +18,7 @@ cache layout, tuning decisions and measurements are recorded in
 | Idle | Current friendly idle pose | Occasional blink; no bob, sway or independent sparkle movement. |
 | Listening or recording | Blue accents, head tilted toward a hand held near the ear | Entirely still; no blinking. |
 | Thinking or waiting | Purple accents, thoughtful face, hand near chin, fixed head tilt | Small thought dots appear and disappear; body and head stay still. |
-| Working | Amber accents, downward gaze, hands over small keys | Entirely still; keys and decorative spinner symbol remain still. |
+| Working (artwork only in this profile) | Amber accents, downward gaze, hands over small keys | Entirely still; keys and decorative spinner symbol remain still. |
 | Speaking | Friendly speaking pose with stationary hands | Fixed timer cycles closed, slightly open, open, slightly open, closed mouth. No audio-level or pause detection. |
 | Error | Worried face with red accents | Entirely still; no shaking or bobbing. |
 | Off or goodbye | One hand raised in goodbye | Hold the pose until the existing shutdown sequence switches off. |
@@ -30,9 +30,9 @@ global `muse_mode_t` value. State changes replace the base pose directly.
 Remove the 200 ms full-image dissolve, startup fade, goodbye fade and all
 whole-body translations from this renderer.
 
-Voice notes and live calls reuse the same poses. Recording, call connection
-and audio processing start independently of visual preparation. A slow frame
-must never postpone microphone capture or call setup.
+The Waveshare 1.75C uses the voice-note workflow enabled by its upstream
+board profile. Recording and reply playback start independently of avatar
+preparation. Live-call support is deferred.
 
 ## Animation timing
 
@@ -220,7 +220,7 @@ checks establish that ring behavior is preserved.
 | Total persistent renderer memory | Target at most 512 KiB for the normal 320x320 path, with temporary preparation memory separately reported |
 | Eight 160x160 RGB565 bases | 409,600 bytes of flash before patches |
 | Signed app | Must fit both existing 4 MiB OTA slots; target at least 1 MiB remaining after the new assets |
-| Audio and networking | Compare current free memory, largest blocks and allocation failures during recording, playback, call setup and pairing |
+| Audio and networking | Compare current free memory, largest blocks and allocation failures during recording, playback and pairing |
 
 The current signed app is 2,560,000 bytes with about 1.56 MiB free in its
 4 MiB slot. Eight compact bases add only one base versus the existing seven;
@@ -278,7 +278,7 @@ it must not fall through and overwrite a personal avatar with built-in pixels.
    states request no autonomous avatar redraws; only intended patches
    change during expression animation.
 5. **Validate and tune on the 1.75C.** Build, flash, check state images and
-   run voice-note and live-call tests with timing counters. Adjust the
+   run voice-note tests with timing counters. Adjust the
    proposed small-animation holds based on measurements and visual review.
 6. **Record results and finalize.** Update memory, storage, timing and
    behavior documentation. Keep commits scoped to the avatar branch and
@@ -320,14 +320,15 @@ Build the 1.75C bench profile and normal profile, check signed sizes, and
 compile a representative legacy renderer configuration. Preserve pairing
 and settings when flashing the connected board.
 
-Capture each pose and expression through a persistent USB connection.
+Capture the poses and expressions reachable in the default board profile
+through a persistent USB connection. The renderer harness covers the dormant
+Working artwork.
 Screenshots verify pixels; collect performance separately without screenshot
-transfers. Confirm immediate recording/call start, independent ring motion,
+transfers. Confirm immediate recording start, independent ring motion,
 mouth cycling during pauses, return from settings, screen sleep/wake, pet
-reactions, interrupted replies, working during a live call and goodbye.
+reactions, interrupted replies and goodbye.
 Use user-observed audio/touch checks for behavior that cannot be assessed
-through logs. A missing live-call service is an explicitly recorded blocker,
-not a passing test.
+through logs.
 
 ### Performance gates
 
@@ -351,7 +352,7 @@ not a passing test.
   ring invalidation/merging, display transfer and audio scheduling before
   changing timing or artwork again.
 - No panics, tearing caused by mixed cache generations, new audio allocation
-  failures or sustained heap loss across repeated voice notes and calls.
+  failures or sustained heap loss across repeated voice notes.
   Compare free internal/DMA RAM, largest blocks, PSRAM and minimum heap
   against the recorded baseline. Save actual acoustic observations separately.
 

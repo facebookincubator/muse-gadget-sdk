@@ -150,7 +150,7 @@ the on-device sleep/wake and local MP3 checks. The pose controller, clipped
 pixel copies, exact reference images, allocation failures, corrupted
 preparation and cancelled pose preparation have host regression coverage.
 
-### Live call
+### Historical experiment with live calls enabled
 
 The user placed a call on a temporary call-enabled build with the same cached
 renderer. The service returned HTTP 200 after 876 ms and the call became live
