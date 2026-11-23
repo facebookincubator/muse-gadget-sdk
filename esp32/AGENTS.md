@@ -847,13 +847,17 @@ For app authoring and the guide to send Muse, see
   running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
   Other chips keep 16 KiB windows in internal RAM;
   `cmake/validate_config.cmake` enforces both.
+- `sdkconfig.defaults.esp32` keeps ESP-IDF's 64 KB internal DMA reserve on
+  the classic ESP32, which isn't offered `CONFIG_HOMEHUB_DMA_RESERVE_KB`.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
   delete the generated `sdkconfig` (or the whole build directory) and rebuild.
   `cmake/validate_config.cmake` stops the build if a stale config has the old
-  TCP buffer sizes or cJSON nesting limit, and warns if it still has the full
-  root CA bundle.
+  TCP buffer sizes, the old cJSON nesting limit or ESP-IDF's internal DMA
+  reserve (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`) on alongside
+  `CONFIG_HOMEHUB_DMA_RESERVE_KB`, and warns if it still has the full root CA
+  bundle.
 - HTTPS trusts ESP-IDF's common root CAs only (`sdkconfig.defaults`), with
   cross-signed verification so chains that reach one of them through a
   cross-sign still verify. A server whose chain ends at another root (some
