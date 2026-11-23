@@ -1,165 +1,248 @@
-/*
- * 3D-style Muse artwork for the Waveshare ESP32-S3-Touch-AMOLED-1.75C.
- * The seven RGB565 stills are pre-rendered concept art. Small source-image
- * shifts, a short state crossfade, and voice-driven motion animate them while
- * keeping all pixel work in the existing LVGL strip decoder.
- *
- * The artwork depicts the Jollybot character, whose rights are separate from
- * the Apache-licensed SDK (see the repository README).
- */
-
+/* Jollybot artwork has separate character rights. See avatar/3d/README.md. */
+#include "muse_3d.h"
 #include "muse_pixel.h"
 
-#include <math.h>
-#include <stddef.h>
 #include <string.h>
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 
-#define ART_SIZE 160
-#define MAP_MAX 512
+#define ART_SIZE 320
+#define BLOCK_ROWS 16
+#define BLOCKS (ART_SIZE / BLOCK_ROWS)
 
-#define ART_SYMBOL(name) \
-    extern const uint8_t name##_start[] asm("_binary_" #name "_rgb565_start"); \
-    extern const uint8_t name##_end[] asm("_binary_" #name "_rgb565_end")
+typedef struct {
+    muse_art_rect_t rect;
+    uint32_t offset;
+} patch_t;
 
-ART_SYMBOL(muse3d_idle);
-ART_SYMBOL(muse3d_boot);
-ART_SYMBOL(muse3d_listening);
-ART_SYMBOL(muse3d_thinking);
-ART_SYMBOL(muse3d_speaking);
-ART_SYMBOL(muse3d_error);
-ART_SYMBOL(muse3d_off);
+typedef struct {
+    uint32_t blocks[BLOCKS + 1];
+    patch_t patches[MUSE_EXPRESSION_COUNT];
+} pose_art_t;
 
-static const uint8_t *const ART[MUSE_MODE_COUNT] = {
-    [MUSE_MODE_BOOT] = muse3d_boot_start,
-    [MUSE_MODE_IDLE] = muse3d_idle_start,
-    [MUSE_MODE_LISTENING] = muse3d_listening_start,
-    [MUSE_MODE_THINKING] = muse3d_thinking_start,
-    [MUSE_MODE_SPEAKING] = muse3d_speaking_start,
-    [MUSE_MODE_ERROR] = muse3d_error_start,
-    [MUSE_MODE_OFF] = muse3d_off_start,
-};
+#include "3d/muse3d_assets.inc"
+extern const uint8_t art[] asm("_binary_muse3d_bin_start");
+extern const uint8_t art_end[] asm("_binary_muse3d_bin_end");
 
-static const uint32_t ACCENT[MUSE_MODE_COUNT] = {
-    [MUSE_MODE_BOOT] = 0xa9c0ff,
-    [MUSE_MODE_IDLE] = 0xa77dff,
-    [MUSE_MODE_LISTENING] = 0x5cb8ff,
-    [MUSE_MODE_THINKING] = 0xe07bff,
-    [MUSE_MODE_SPEAKING] = 0x6ff0bf,
-    [MUSE_MODE_ERROR] = 0xff5c5c,
-    [MUSE_MODE_OFF] = 0x7c72d0,
-};
+typedef struct {
+    uint16_t *pixels, *patch_pixels;
+    patch_t patches[MUSE_EXPRESSION_COUNT];   /* offsets in uint16_t pixels */
+    muse_base_t pose;
+    int size;
+} frame_t;
 
-static uint16_t s_coord[MAP_MAX]; /* Q8 source coordinate for each output pixel */
-static int s_size;
-static const uint8_t *s_art = muse3d_idle_start;
-static const uint8_t *s_previous;
-static float s_changed_at;
-static float s_t;
-static float s_mode_t;
-static muse_mode_t s_mode = MUSE_MODE_IDLE;
-static int s_shift;
-static int s_shift_x;
+static frame_t frames[2], *front = &frames[0], *back = &frames[1];
+static int requested_size, shown_variant, capacity;
+static int next_block;
+static bool preparing, ready, failed;
+static uint16_t *scratch;
+static const char *TAG = "muse_art";
 
 uint32_t muse_pixel_accent(muse_mode_t mode)
 {
-    return ACCENT[mode < MUSE_MODE_COUNT ? mode : MUSE_MODE_IDLE];
+    static const uint32_t colors[MUSE_MODE_COUNT] = {
+        [MUSE_MODE_BOOT] = 0xa9c0ff, [MUSE_MODE_IDLE] = 0xa77dff,
+        [MUSE_MODE_LISTENING] = 0x5cb8ff, [MUSE_MODE_THINKING] = 0xe07bff,
+        [MUSE_MODE_SPEAKING] = 0x6ff0bf, [MUSE_MODE_ERROR] = 0xff5c5c,
+        [MUSE_MODE_OFF] = 0x7c72d0,
+    };
+    return colors[(unsigned)mode < MUSE_MODE_COUNT ? mode : MUSE_MODE_IDLE];
 }
 
-uint32_t muse_pixel_working_accent(void)
-{
-    /* This art uses the thinking image for working, so keep its violet UI. */
-    return 0;
-}
+uint32_t muse_pixel_working_accent(void) { return 0xffbc65; }
 
 void muse_pixel_set_size(int px)
 {
-    s_size = px < MAP_MAX ? px : MAP_MAX;
-    if (s_size < 1) s_size = 1;
-    for (int i = 0; i < s_size; i++) {
-        s_coord[i] = (uint16_t)((uint32_t)i * (ART_SIZE - 1) * 256 / (s_size - 1 ? s_size - 1 : 1));
+    requested_size = px;
+    if (capacity || failed || px < 1) return;
+    capacity = ART_SIZE;  /* the largest native pose, even when starting in a small layout */
+    const unsigned caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    scratch = heap_caps_malloc(ART_SIZE * BLOCK_ROWS * sizeof(*scratch), caps);
+    for (int i = 0; i < 2; i++) {
+        frames[i].pixels = heap_caps_malloc(capacity * capacity * sizeof(uint16_t), caps);
+        frames[i].patch_pixels = heap_caps_malloc(PATCH_BYTES, caps);
     }
-}
-
-void muse_pixel_render(const muse_pose_t *pose)
-{
-    muse_mode_t mode = pose->mode < MUSE_MODE_COUNT ? pose->mode : MUSE_MODE_IDLE;
-    const uint8_t *next = ART[mode];
-    if (next != s_art) {
-        s_previous = s_art;
-        s_art = next;
-        s_changed_at = pose->t;
+    if (!scratch || !frames[0].pixels || !frames[1].pixels ||
+        !frames[0].patch_pixels || !frames[1].patch_pixels) {
+        for (int i = 0; i < 2; i++) {
+            heap_caps_free(frames[i].pixels);
+            heap_caps_free(frames[i].patch_pixels);
+            frames[i] = (frame_t){0};
+        }
+        heap_caps_free(scratch);
+        failed = true;
+        ESP_LOGE(TAG, "insufficient PSRAM for avatar cache");
+        return;
     }
-    s_mode = mode;
-    s_t = pose->t;
-    s_mode_t = pose->mode_t;
-    /* A few source pixels of motion animate the stills without moving the UI. */
-    float bob = sinf(pose->t * 3.0f) * 0.65f;
-    if (mode == MUSE_MODE_SPEAKING) bob -= pose->level * 1.5f;
-    if (mode == MUSE_MODE_BOOT) bob -= 2.0f * fmaxf(0.0f, 1.0f - pose->mode_t / 0.6f);
-    s_shift = (int)lroundf(bob - pose->happy * 2.0f);
-    s_shift_x = 0;
-    if (mode == MUSE_MODE_LISTENING || mode == MUSE_MODE_THINKING)
-        s_shift_x = (int)lroundf(sinf(pose->t * 1.9f) * 0.9f);
-    if (mode == MUSE_MODE_ERROR)
-        s_shift_x = (int)lroundf(sinf(pose->t * 17.0f) * 1.2f);
+    ESP_LOGI(TAG, "pose caches %u bytes, preparation %u bytes",
+             (unsigned)(2 * (capacity * capacity * sizeof(uint16_t) + PATCH_BYTES)),
+             (unsigned)(ART_SIZE * BLOCK_ROWS * sizeof(*scratch)));
 }
 
-static inline uint16_t pixel(const uint8_t *art, int x, int y)
+/* First output coordinate whose source sample is at or beyond src. All
+ * patches use exactly the base's sampling grid, also in smaller reply layouts. */
+static int project(int src, int size) { return (src * size + ART_SIZE - 1) / ART_SIZE; }
+
+static bool decode_block(int block)
 {
-    if (y < 0 || y >= ART_SIZE) return 0;
-    const uint8_t *p = art + ((size_t)y * ART_SIZE + x) * 2;
-    return (uint16_t)p[0] | (uint16_t)p[1] << 8;
+    const uint32_t *offset = assets[back->pose].blocks;
+    if (offset[block+1] > (size_t)(art_end-art)) return false;
+    const uint8_t *src = art + offset[block], *end = art + offset[block+1];
+    int first = block * BLOCK_ROWS, size = back->size;
+    uint16_t *dst = size == ART_SIZE ? back->pixels + first*size : scratch;
+    unsigned remaining = ART_SIZE * BLOCK_ROWS;
+    while (end-src >= 2) {
+        uint16_t header;
+        memcpy(&header, src, 2);
+        src += 2;
+        unsigned count = header & 0x7fff;
+        if (!count || count > remaining) return false;
+        if (header & 0x8000) {
+            if (end-src < 2) return false;
+            uint16_t color;
+            memcpy(&color, src, 2);
+            src += 2;
+            if (!color) memset(dst, 0, count*sizeof(*dst));
+            else for (unsigned i = 0; i < count; i++) dst[i] = color;
+        } else {
+            if ((size_t)(end-src) < count*2) return false;
+            memcpy(dst, src, count*2);
+            src += count*2;
+        }
+        dst += count;
+        remaining -= count;
+    }
+    if (remaining || src != end) return false;
+    if (size != ART_SIZE) {
+        for (int y = project(first, size); y < project(first + BLOCK_ROWS, size); y++) {
+            const uint16_t *row = scratch + (y * ART_SIZE / size - first) * ART_SIZE;
+            for (int x = 0; x < size; x++) back->pixels[y*size+x] = row[x * ART_SIZE / size];
+        }
+    }
+    return true;
 }
 
-static inline uint16_t mix565(uint16_t a, uint16_t b, unsigned t)
+static bool prepare_patches(void)
 {
-    unsigned u = 256 - t;
-    unsigned r = (((a >> 11) * u + (b >> 11) * t) >> 8);
-    unsigned g = ((((a >> 5) & 63) * u + ((b >> 5) & 63) * t) >> 8);
-    unsigned bl = (((a & 31) * u + (b & 31) * t) >> 8);
-    return (uint16_t)((r << 11) | (g << 5) | bl);
-}
-
-static inline uint16_t sample(const uint8_t *art, unsigned fx, int fy)
-{
-    int x = fx >> 8;
-    int y = fy >> 8;
-    unsigned tx = fx & 255;
-    unsigned ty = fy & 255;
-    int x1 = x + (x < ART_SIZE - 1);
-    uint16_t top = mix565(pixel(art, x, y), pixel(art, x1, y), tx);
-    uint16_t bottom = mix565(pixel(art, x, y + 1), pixel(art, x1, y + 1), tx);
-    return mix565(top, bottom, ty);
-}
-
-void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1)
-{
-    if (!s_size) muse_pixel_set_size(MUSE_PX_W * 2);
-    float elapsed = s_t - s_changed_at;
-    unsigned blend = s_previous && elapsed >= 0 && elapsed < 0.20f
-                         ? (unsigned)(elapsed * 1280.0f) : 256;
-    /* Decoder strips may be sampled concurrently: keep frame state read-only. */
-
-    unsigned brightness = 256;
-    if (s_mode == MUSE_MODE_BOOT && s_mode_t < 0.35f)
-        brightness = (unsigned)(s_mode_t > 0 ? s_mode_t * (256.0f / 0.35f) : 0);
-    if (s_mode == MUSE_MODE_OFF && s_mode_t > 0.4f)
-        brightness = s_mode_t >= 1.3f ? 0 : (unsigned)((1.3f - s_mode_t) * (256.0f / 0.9f));
-    if (brightness > 256) brightness = 256;
-
-    for (int y = y0; y <= y1; y++, dst += stride_px) {
-        int fy = (int)s_coord[y] - s_shift * 256;
-        for (int x = x0; x <= x1; x++) {
-            int fx = (int)s_coord[x] - s_shift_x * 256;
-            uint16_t color = fx >= 0 && fx <= (ART_SIZE - 1) * 256
-                                 ? sample(s_art, (unsigned)fx, fy) : 0;
-            if (blend < 256) {
-                uint16_t before = fx >= 0 && fx <= (ART_SIZE - 1) * 256
-                                      ? sample(s_previous, (unsigned)fx, fy) : 0;
-                color = mix565(before, color, blend);
+    const int size = back->size;
+    size_t used = 0;
+    for (int i = 0; i < MUSE_EXPRESSION_COUNT; i++) {
+        patch_t source = assets[back->pose].patches[i];
+        muse_art_rect_t r = source.rect;
+        int x = project(r.x, size), y = project(r.y, size);
+        int w = project(r.x + r.w, size) - x, h = project(r.y + r.h, size) - y;
+        if (used + w*h > PATCH_BYTES / 2 || source.offset + 2*r.w*r.h > (size_t)(art_end-art))
+            return false;
+        back->patches[i] = (patch_t){{x,y,w,h}, used};
+        uint16_t *out = back->patch_pixels + used;
+        used += w*h;
+        const uint8_t *src = art + source.offset;
+        if (size == ART_SIZE) {
+            memcpy(out, src, 2*w*h);
+        } else {
+            for (int j = y; j < y+h; j++) {
+                int row = (j * ART_SIZE / size - r.y) * r.w;
+                for (int k = x; k < x+w; k++) {
+                    int index = row + k * ART_SIZE / size - r.x;
+                    memcpy(out++, src + index*2, 2);
+                }
             }
-            if (brightness < 256) color = mix565(0, color, brightness);
-            dst[x - x0] = color;
+        }
+    }
+    return true;
+}
+
+bool muse_3d_preparing(void) { return preparing; }
+
+void muse_3d_prepare_slice(void)
+{
+    if (!preparing) return;
+    int64_t until = esp_timer_get_time() + 2000;
+    do {
+        if (next_block == BLOCKS) {
+            ready = prepare_patches();
+            failed = !ready;
+            preparing = false;
+        } else if (!decode_block(next_block++)) {
+            failed = true;
+            preparing = false;
+        }
+    } while (preparing && esp_timer_get_time() < until);
+    if (failed) ESP_LOGE(TAG, "asset preparation failed for pose %d", back->pose);
+}
+
+muse_art_damage_t muse_3d_update(muse_expression_t wanted)
+{
+    muse_art_damage_t damage = {0};
+    int size = requested_size < capacity ? requested_size : capacity;
+    if (failed || !size || (unsigned)wanted.base >= POSE_COUNT || wanted.variant >= MUSE_EXPRESSION_COUNT)
+        return damage;
+    if (front->pose != wanted.base || front->size != size) {
+        if ((!ready && !preparing) || back->pose != wanted.base || back->size != size) {
+            back->pose = wanted.base;
+            back->size = size;
+            next_block = 0;
+            preparing = true;
+            ready = false;
+            muse_3d_prepare_slice();  /* use this tick's first bounded slice */
+        }
+        if (!ready) return damage;
+        /* LVGL timers run serially. draw_buf_flush joins all draw tasks before
+         * its refresh returns. DMA owns LVGL's separate band, never this image. */
+        frame_t *previous = front;
+        front = back;
+        back = previous;
+        damage.rect[damage.count++] = (muse_art_rect_t){0, 0, requested_size, requested_size};
+    } else if ((unsigned)shown_variant != wanted.variant) {
+        muse_art_rect_t old = front->patches[shown_variant].rect;
+        muse_art_rect_t next = front->patches[wanted.variant].rect;
+        if (old.w && old.h) damage.rect[damage.count++] = old;
+        if (next.w && next.h && (!damage.count || memcmp(&old, &next, sizeof(old))))
+            damage.rect[damage.count++] = next;
+    }
+    if (size != requested_size && damage.count && damage.rect[0].w != requested_size) {
+        for (unsigned i = 0; i < damage.count; i++) {
+            muse_art_rect_t r = damage.rect[i];
+            int x = (r.x * requested_size + size - 1) / size;
+            int y = (r.y * requested_size + size - 1) / size;
+            damage.rect[i] = (muse_art_rect_t){x, y,
+                ((r.x+r.w)*requested_size + size-1)/size-x,
+                ((r.y+r.h)*requested_size + size-1)/size-y};
+        }
+    }
+    preparing = ready = false;
+    shown_variant = wanted.variant;
+    return damage;
+}
+
+/* Base is immutable. A patch is a second immutable layer; switching it
+ * restores all old pixels automatically, including when the ring exposes them. */
+void muse_pixel_scale(uint16_t *dst, int stride, int x0, int x1, int y0, int y1)
+{
+    const int size = front->size;
+    const patch_t *p = &front->patches[shown_variant];
+    const muse_art_rect_t r = p->rect;
+    int width = x1-x0+1;
+    for (int y = y0; y <= y1; y++, dst += stride) {
+        if (!size) {
+            memset(dst, 0, width*sizeof(*dst));
+        } else if (size == requested_size) {
+            memcpy(dst, front->pixels+y*size+x0, width*sizeof(*dst));
+            int left = x0 > r.x ? x0 : r.x, end = x1+1 < r.x+r.w ? x1+1 : r.x+r.w;
+            if (y >= r.y && y < r.y+r.h && end > left)
+                memcpy(dst+left-x0, front->patch_pixels+p->offset+(y-r.y)*r.w+left-r.x,
+                       (end-left)*sizeof(*dst));
+        } else {
+            /* The existing caption layout can resize the widget every tick.
+             * Keep showing the previous complete pose until the new size is ready. */
+            int sy = y * size / requested_size;
+            for (int x = x0; x <= x1; x++) {
+                int sx = x * size / requested_size;
+                bool overlay = sx >= r.x && sx < r.x+r.w && sy >= r.y && sy < r.y+r.h;
+                dst[x-x0] = overlay ? front->patch_pixels[p->offset+(sy-r.y)*r.w+sx-r.x]
+                                    : front->pixels[sy*size+sx];
+            }
         }
     }
 }

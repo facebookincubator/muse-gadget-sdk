@@ -55,6 +55,13 @@ static SemaphoreHandle_t s_band_done;    /* given once the band LVGL queued has 
 static volatile bool s_band_busy;        /* queued and not yet gone */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
+#if MUSE_CACHED_AVATAR
+static uint32_t s_submitted, s_completed, s_failures;
+uint32_t muse_lcd_bands_submitted(void) { return __atomic_load_n(&s_submitted, __ATOMIC_RELAXED); }
+uint32_t muse_lcd_bands_completed(void) { return __atomic_load_n(&s_completed, __ATOMIC_ACQUIRE); }
+uint32_t muse_lcd_bands_failures(void) { return __atomic_load_n(&s_failures, __ATOMIC_RELAXED); }
+#endif
+
 /* Tearing effect (muse_lcd_bands_set_te): the last scan's start, the period, the blanking. */
 static bool s_te_on;
 static int s_te_gpio = -1;
@@ -96,6 +103,9 @@ static bool IRAM_ATTR on_chunk_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_
     bool last = chunk_done();
     bool yield = false;
     if (last) {
+#if MUSE_CACHED_AVATAR
+        __atomic_store_n(&s_completed, s_submitted, __ATOMIC_RELEASE);
+#endif
         s_band_end = esp_timer_get_time();
         s_band_busy = false;
         xSemaphoreGiveFromISR(s_band_done, &woken);
@@ -141,7 +151,14 @@ static esp_err_t queue_band(lv_display_t *disp, esp_lcd_panel_handle_t panel, in
     band_t b = { data, x1, y1, x2, y2 };
     xSemaphoreTake(s_band_done, 0);   /* left by a band that had gone before LVGL waited for it */
     s_band_busy = true;
+#if MUSE_CACHED_AVATAR
+    ++s_submitted;  /* LVGL is the only submitter; published before the queue send */
+#endif
     if (xQueueSend(s_bands, &b, 0) != pdTRUE) {
+#if MUSE_CACHED_AVATAR
+        __atomic_add_fetch(&s_failures, 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&s_completed, s_submitted, __ATOMIC_RELEASE);
+#endif
         s_band_busy = false;
         return ESP_FAIL;
     }
@@ -176,6 +193,9 @@ static void wait_band(lv_display_t *disp)
 static void band_failed(void)
 {
     portENTER_CRITICAL(&s_lock);
+#if MUSE_CACHED_AVATAR
+    __atomic_store_n(&s_completed, s_submitted, __ATOMIC_RELEASE);
+#endif
     lv_display_flush_ready(s_disp);
     s_band_busy = false;
     portEXIT_CRITICAL(&s_lock);
@@ -333,6 +353,9 @@ static void send_bands(void *arg)
             wire_idle(1);
             esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, b.x1, y, b.x2, y + h, s_chunk[k]);
             if (err != ESP_OK) {
+#if MUSE_CACHED_AVATAR
+                __atomic_add_fetch(&s_failures, 1, __ATOMIC_RELAXED);
+#endif
                 xSemaphoreGive(s_chunk_free);
                 if (chunk_done()) {
                     band_failed();

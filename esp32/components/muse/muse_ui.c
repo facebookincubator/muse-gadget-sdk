@@ -52,6 +52,13 @@
 #include "muse_mirror.h"
 #endif
 #include "muse_pixel.h"
+#if MUSE_CACHED_AVATAR
+#include "muse_3d.h"
+#include "boards/muse_lcd_bands.h"
+#define LAYOUT_GRID 160   /* retain this board's existing artwork margins and caption placement */
+#else
+#define LAYOUT_GRID MUSE_PX_W
+#endif
 #if CONFIG_MUSE_AVATAR_SYNC
 #include "muse_avatar.h"
 #if CONFIG_MUSE_UI_THEME
@@ -339,9 +346,11 @@ static float s_avatar_reaction_start=-10.0f,s_avatar_last_happy;
 static uint32_t s_avatar_revision;
 static bool s_avatar_visible;
 #endif
+#if !MUSE_CACHED_AVATAR
 static uint16_t *s_cells;       /* each cell's colour as last invalidated */
 static uint16_t *s_cell_row;    /* one screen row of Muse */
 static bool s_cells_valid;
+#endif
 
 static lv_result_t muse_dec_info(lv_image_decoder_t *dec, lv_image_decoder_dsc_t *dsc, lv_image_header_t *header)
 {
@@ -384,12 +393,16 @@ static lv_result_t muse_dec_open(lv_image_decoder_t *dec, lv_image_decoder_dsc_t
 
 #if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
 static uint32_t s_avatar_scale_us, s_avatar_scale_pixels;
+static uint32_t s_full_updates, s_patch_updates, s_damage_pixels, s_flush_pixels;
 static void avatar_perf_event(lv_event_t *e)
 {
     static int64_t started, window;
     static uint32_t frames, sum_us, max_us;
     int64_t now = esp_timer_get_time();
-    if (lv_event_get_code(e) == LV_EVENT_RENDER_START) {
+    if (lv_event_get_code(e) == LV_EVENT_FLUSH_START) {
+        const lv_area_t *area = lv_event_get_param(e);
+        s_flush_pixels += lv_area_get_width(area) * lv_area_get_height(area);
+    } else if (lv_event_get_code(e) == LV_EVENT_RENDER_START) {
         started = now;
         if (!window) window = now;
     } else if (lv_event_get_code(e) == LV_EVENT_RENDER_READY && started) {
@@ -403,6 +416,10 @@ static void avatar_perf_event(lv_event_t *e)
             ESP_LOGI(TAG, "avatar perf: mode=%d frames=%u window_ms=%u render_avg_us=%u render_max_us=%u scale_us=%u pixels=%u",
                      (int)muse_state_mode(NULL), (unsigned)frames, (unsigned)((now-window)/1000),
                      (unsigned)(sum_us/frames), (unsigned)max_us, (unsigned)scale, (unsigned)pixels);
+            ESP_LOGI(TAG, "avatar damage: full=%u partial=%u requested_px=%u panel_px=%u",
+                     (unsigned)s_full_updates, (unsigned)s_patch_updates,
+                     (unsigned)s_damage_pixels, (unsigned)s_flush_pixels);
+            s_full_updates = s_patch_updates = s_damage_pixels = s_flush_pixels = 0;
             frames = sum_us = max_us = 0; window = now;
         }
     }
@@ -435,14 +452,16 @@ static lv_result_t muse_dec_get_area(lv_image_decoder_t *dec, lv_image_decoder_d
     }
     if (!personal)
 #endif
+    {
 #if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
-    int64_t scale_started = esp_timer_get_time();
+        int64_t scale_started = esp_timer_get_time();
 #endif
-    muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
+        muse_pixel_scale((uint16_t *)buf->data, buf->header.stride / sizeof(uint16_t), full->x1, full->x2, y1, y2);
 #if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
-    __atomic_fetch_add(&s_avatar_scale_us, (uint32_t)(esp_timer_get_time()-scale_started), __ATOMIC_RELAXED);
-    __atomic_fetch_add(&s_avatar_scale_pixels, (uint32_t)(w*(y2-y1+1)), __ATOMIC_RELAXED);
+        __atomic_fetch_add(&s_avatar_scale_us, (uint32_t)(esp_timer_get_time()-scale_started), __ATOMIC_RELAXED);
+        __atomic_fetch_add(&s_avatar_scale_pixels, (uint32_t)(w*(y2-y1+1)), __ATOMIC_RELAXED);
 #endif
+    }
     area->x1 = full->x1;
     area->x2 = full->x2;
     area->y1 = y1;
@@ -487,6 +506,7 @@ static void muse_image_init(void)
     lv_image_decoder_set_close_cb(dec, muse_dec_close);
     dec->name = "muse";
 
+#if !MUSE_CACHED_AVATAR
     s_cells = heap_caps_malloc(MUSE_PX_W * MUSE_PX_H * sizeof(uint16_t), MUSE_BIG_CAPS);
     s_cell_row = heap_caps_malloc(MUSE_PIXEL_MAX_PX * sizeof(uint16_t), MUSE_BIG_CAPS);
     if (!s_cells || !s_cell_row) {
@@ -494,8 +514,10 @@ static void muse_image_init(void)
         free(s_cell_row);
         s_cells = s_cell_row = NULL;   /* redraw all of Muse every frame */
     }
+#endif
 }
 
+#if !MUSE_CACHED_AVATAR
 /*
  * Most frames change only a few of Muse's cells, so only those are redrawn.
  * Each frame reads back one screen pixel of every cell (its first, which the
@@ -516,11 +538,7 @@ static int32_t rect_cells(const lv_area_t *r)
 
 static void invalidate_muse(void)
 {
-#if CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
-    /* Bilinear artwork can change between the sampled pixel-grid cells. */
-    lv_obj_invalidate(s_canvas);
-    return;
-#endif
+
     if (!s_cells) {
         lv_obj_invalidate(s_canvas);
         return;
@@ -581,6 +599,105 @@ static void invalidate_muse(void)
         lv_obj_invalidate_area(s_canvas, &a);
     }
 }
+
+#else
+static muse_expression_clock_t s_expression;
+static muse_expression_t s_submitted_expression;
+static lv_timer_t *s_prepare_timer, *s_frame_timer;
+static bool s_was_visible, s_await_render, s_await_transfer;
+static uint32_t s_transfer_ticket, s_failure_count;
+#if LV_USE_SNAPSHOT
+static int64_t s_pose_requested_at;
+static muse_base_t s_requested_pose = POSE_COUNT;
+#endif
+
+static void prepare_avatar(lv_timer_t *timer)
+{
+    muse_3d_prepare_slice();
+    if (!muse_3d_preparing()) {
+        lv_timer_pause(timer);
+        lv_timer_ready(s_frame_timer);   /* recheck the latest logical state before publishing */
+    }
+}
+
+static void avatar_rendered(lv_event_t *event)
+{
+    (void)event;
+    if (s_await_render && muse_lcd_bands_submitted() != s_transfer_ticket) {
+        s_transfer_ticket = muse_lcd_bands_submitted();   /* includes the last band in this refresh */
+        s_await_render = false;
+        s_await_transfer = true;
+    }
+}
+
+static void update_cached_avatar(muse_mode_t mode, const muse_pose_t *pose, bool resuming)
+{
+    int64_t now = esp_timer_get_time() / 1000;
+    if (resuming) {
+        s_expression.due = 0;
+        s_await_render = s_await_transfer = false;
+    }
+    bool retry = false;
+    if (s_await_transfer && (int32_t)(muse_lcd_bands_completed() - s_transfer_ticket) >= 0) {
+        s_await_transfer = false;
+        retry = muse_lcd_bands_failures() != s_failure_count;
+        if (!retry) muse_expression_presented(&s_expression, s_submitted_expression, now);
+#if LV_USE_SNAPSHOT
+        if (s_pose_requested_at && s_submitted_expression.base == s_requested_pose) {
+            ESP_LOGI(TAG, "avatar pose=%d presented_ms=%u", (int)s_requested_pose,
+                     (unsigned)(now - s_pose_requested_at));
+            s_pose_requested_at = 0;
+        }
+#endif
+    }
+    muse_expression_t wanted = muse_expression_tick(&s_expression, mode, pose->working > 0,
+                                                     muse_state_pet_event(), pose->happy > 0, now);
+#if LV_USE_SNAPSHOT
+    if (s_requested_pose != wanted.base) {
+        s_requested_pose = wanted.base;
+        s_pose_requested_at = now;
+    }
+#endif
+    if (s_await_render || s_await_transfer) return;
+    muse_art_damage_t damage = muse_3d_update(wanted);
+    if (muse_3d_preparing()) {
+        lv_timer_resume(s_prepare_timer);
+        return;
+    }
+    if (resuming || retry) {
+        int size = s_muse_src.header.w;
+        damage = (muse_art_damage_t){.rect = {{0,0,size,size}}, .count = 1};
+    }
+    if (!damage.count) {
+        /* A short-lived request can be superseded before it gets to the panel,
+         * returning to the expression that is already visible. Restart its hold. */
+        if (!s_expression.due && s_submitted_expression.base == wanted.base &&
+            s_submitted_expression.variant == wanted.variant)
+            muse_expression_presented(&s_expression, wanted, now);
+        return;
+    }
+#if LV_USE_SNAPSHOT
+    if (damage.rect[0].w == s_muse_src.header.w && damage.rect[0].h == s_muse_src.header.h)
+        s_full_updates++;
+    else
+        s_patch_updates++;
+#endif
+    lv_area_t at;
+    lv_obj_get_coords(s_canvas, &at);
+    for (unsigned i = 0; i < damage.count; i++) {
+        muse_art_rect_t r = damage.rect[i];
+#if LV_USE_SNAPSHOT
+        s_damage_pixels += r.w*r.h;
+#endif
+        lv_area_t a = {at.x1+r.x, at.y1+r.y, at.x1+r.x+r.w-1, at.y1+r.y+r.h-1};
+        lv_obj_invalidate_area(s_canvas, &a);
+    }
+    s_submitted_expression = wanted;
+    s_transfer_ticket = muse_lcd_bands_submitted();
+    s_failure_count = muse_lcd_bands_failures();
+    s_await_render = true;
+}
+#endif
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color);
 
@@ -966,6 +1083,18 @@ static void move_muse(int px, int y)
     s_from_y = s_muse_y;
     s_to_px = px;
     s_to_y = y;
+#if MUSE_CACHED_AVATAR
+#if CONFIG_MUSE_AVATAR_SYNC
+    if (!s_avatar_visible)
+#endif
+    {
+        /* Place the still pose directly in its caption layout. Animating the
+         * widget itself causes full-image redraws throughout the 300 ms move. */
+        lv_anim_delete(s_canvas, move_muse_t);
+        move_muse_t(s_canvas, 256);
+        return;
+    }
+#endif
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_canvas);
@@ -1182,11 +1311,11 @@ static void build_answer(lv_obj_t *face, int ring_in)
     int pitch = lv_font_get_line_height(font) + CAPTION_LINE_SPACE;
 
     answer_layout_t *l = &s_answers[ANSWER_HEARD];
-    int cell = s_canvas_px / MUSE_PX_W - 1;
+    int cell = s_canvas_px / LAYOUT_GRID - 1;
     cell = cell > MINI_CELL_PX ? cell : MINI_CELL_PX;
     l->font = font;
     l->scale = 1;
-    l->px = MUSE_PX_W * cell;
+    l->px = LAYOUT_GRID * cell;
     l->y = s_big_y;
     l->align = LV_TEXT_ALIGN_CENTER;
     int h = 3 * pitch - CAPTION_LINE_SPACE;
@@ -1206,7 +1335,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
     s_ring_in = ring_in;
     l = &s_answers[ANSWER_READ];
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
-    l->px = MUSE_PX_W * MINI_CELL_PX;
+    l->px = LAYOUT_GRID * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_CENTER;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;
@@ -1618,7 +1747,7 @@ static void build_screen(void)
     int cap_top = cap_bottom - cap_h;
     int meter_y = cap_top - 6 - METER_SEG_PX / 2;
     int art_bottom = meter_y - METER_SEG_PX / 2 - 4;
-    s_big_y = s_small ? 0 : art_bottom - (s_canvas_px / 2 - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W));
+    s_big_y = s_small ? 0 : art_bottom - (s_canvas_px / 2 - ART_BLANK_ROWS * (s_canvas_px / LAYOUT_GRID));
 #if CONFIG_MUSE_BOARD_SPOTPEAR_ESP32_AI_128
     /* The 128 px avatar ends at y=159; Japanese captions start at y=164. */
     s_big_y = -25;
@@ -1736,7 +1865,7 @@ static void build_screen(void)
              * label's width in pixels as the label measures it: a line never
              * wraps again on screen, and every page fits. */
             const lv_font_t *font = &lv_font_montserrat_16;
-            int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / MUSE_PX_W) + 14;
+            int top = LONG_MUSE_TOP + s_canvas_px - ART_BLANK_ROWS * (s_canvas_px / LAYOUT_GRID) + 14;
             int pitch = lv_font_get_line_height(font) + LONG_LINE_SPACE;
             int lines = (s_h - LONG_HINTS_H - top + LONG_LINE_SPACE) / pitch;
             if (lines < 1) {
@@ -2646,13 +2775,19 @@ __attribute__((weak)) void muse_pixel_set_background(uint32_t rgb) {(void)rgb;}
 
 static void frame_tick(lv_timer_t *timer)
 {
+#if MUSE_CACHED_AVATAR
+    bool was_visible = s_was_visible;
+    s_was_visible = false;  /* covers every hidden/sleep/overlay early return */
+#endif
 #if CONFIG_MUSE_AVATAR_SYNC && CONFIG_MUSE_UI_THEME
     muse_avatar_theme_tick();
 #endif
 #if CONFIG_MUSE_UI_THEME
     if (muse_theme_lvgl_tick()) {
         muse_pixel_set_background(muse_theme_background());
+#if !MUSE_CACHED_AVATAR
         s_cells_valid = false;
+#endif
         if (s_canvas) lv_obj_invalidate(s_canvas);
     }
 #endif
@@ -2765,7 +2900,9 @@ static void frame_tick(lv_timer_t *timer)
 #if CONFIG_MUSE_AVATAR_ANIMATIONS
         /* End the procedural speaking state when personal idle resumes, so
          * the next fallback turn starts its normal mouth/hand controller. */
+#if !MUSE_CACHED_AVATAR
         if (!s_avatar_visible) muse_pixel_render(&pose);
+#endif
         if (personal->release) muse_avatar_motion_seen(personal->revision);
 #endif
         if(pose.happy>s_avatar_last_happy+0.1f)s_avatar_reaction_start=now;
@@ -2794,13 +2931,20 @@ static void frame_tick(lv_timer_t *timer)
         muse_avatar_release(personal);
     } else if (s_avatar_visible) {
         s_avatar_visible = false;
+#if !MUSE_CACHED_AVATAR
         s_cells_valid = false;
+#endif
         lv_obj_invalidate(s_canvas);
     }
 #endif
     if (render_builtin && (!muse_board->epaper || mode != s_last_epaper_pose)) {
+#if MUSE_CACHED_AVATAR
+        s_was_visible = !lv_obj_has_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        if (s_was_visible) update_cached_avatar(mode, &pose, !was_visible);
+#else
         muse_pixel_render(&pose);
         invalidate_muse();
+#endif
         s_last_epaper_pose = mode;
     }
 
@@ -2821,7 +2965,7 @@ esp_err_t muse_ui_start(void)
     s_long = s_tall && s_h >= 3 * s_w;
     /* Small screens keep room for the status line and button icons. A narrow
      * one is as wide as Muse gets, in whole pixels. */
-    s_canvas_px = s_small ? s_h * 3 / 4 : MUSE_PX_W * 5;
+    s_canvas_px = s_small ? s_h * 3 / 4 : LAYOUT_GRID * 5;
     if (short_landscape) {
         /* Leave the header's first 40 rows and bottom captions clear. */
         s_canvas_px = s_h * 2 / 3;
@@ -2830,14 +2974,14 @@ esp_err_t muse_ui_start(void)
         s_canvas_px = muse_board->avatar_px;
     }
     if (s_canvas_px > s_w) {
-        s_canvas_px = s_w / MUSE_PX_W * MUSE_PX_W;
+        s_canvas_px = s_w / LAYOUT_GRID * LAYOUT_GRID;
     }
     s_dy = (s_h - 466) / 2;
     if (!s_small && muse_board->round && s_dy < 0) {
         /* A shorter screen moves the labels out towards its edges, but a
          * smaller circle's edges curve away from them. Keep them where they
          * are and shrink Muse to whole pixels that fit between them. */
-        s_canvas_px = (MUSE_PX_W * 5 + 2 * s_dy) / MUSE_PX_W * MUSE_PX_W;
+        s_canvas_px = (LAYOUT_GRID * 5 + 2 * s_dy) / LAYOUT_GRID * LAYOUT_GRID;
         s_dy = 0;
     }
 
@@ -2850,6 +2994,7 @@ esp_err_t muse_ui_start(void)
     s_image_mutex = xSemaphoreCreateMutex();
     muse_board->display_lock(-1);
 #if LV_USE_SNAPSHOT && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
+    lv_display_add_event_cb(disp, avatar_perf_event, LV_EVENT_FLUSH_START, NULL);
     lv_display_add_event_cb(disp, avatar_perf_event, LV_EVENT_RENDER_START, NULL);
     lv_display_add_event_cb(disp, avatar_perf_event, LV_EVENT_RENDER_READY, NULL);
 #endif
@@ -2872,7 +3017,14 @@ esp_err_t muse_ui_start(void)
         muse_menu_build(lv_screen_active(), s_w, s_h);
     }
     build_overlays();
+#if MUSE_CACHED_AVATAR
+    lv_display_add_event_cb(disp, avatar_rendered, LV_EVENT_RENDER_READY, NULL);
+    s_prepare_timer = lv_timer_create(prepare_avatar, 2, NULL);
+    lv_timer_pause(s_prepare_timer);
+    s_frame_timer = lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#else
     lv_timer_create(frame_tick, muse_board->frame_ms, NULL);
+#endif
 #if CONFIG_MUSE_MIRROR
     lv_indev_t *mirror_pointer = muse_mirror_start(disp);
     if (mirror_pointer) lv_indev_add_event_cb(mirror_pointer, on_any_press, LV_EVENT_PRESSED, NULL);

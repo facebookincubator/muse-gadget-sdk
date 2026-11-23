@@ -117,10 +117,9 @@ if(CONFIG_MUSE_ENABLED)
         message(STATUS "Custom avatar: components/muse/avatar/muse_pixel.c")
         list(APPEND srcs "avatar/muse_pixel.c")
     elseif(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C)
-        list(APPEND srcs "../../avatar/muse_3d.c")
-        foreach(state idle boot listening thinking speaking error off)
-            list(APPEND embed "../../avatar/3d/muse3d_${state}.rgb565")
-        endforeach()
+        set(muse_cached_avatar ON)
+        list(APPEND srcs "../../avatar/muse_3d.c" "muse_expression.c")
+        list(APPEND embed "../../avatar/3d/muse3d.bin")
     else()
         list(APPEND srcs "../../avatar/muse_pixel.c")
     endif()
@@ -304,6 +303,10 @@ idf_component_register(
     REQUIRES esp_driver_gpio esp_driver_i2c
     PRIV_REQUIRES ${muse_priv_requires}
 )
+
+if(muse_cached_avatar)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MUSE_CACHED_AVATAR=1)
+endif()
 
 if(CONFIG_MUSE_UI_FREEINK)
     # FreeInk's board profile, for the panel and its pins. PUBLIC: FreeInk's

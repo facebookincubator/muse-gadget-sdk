@@ -19,25 +19,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifdef ESP_PLATFORM
-#include "sdkconfig.h"
-#endif
-
 #include "muse_state.h"
 
-/*
- * Muse avatar renderer. Most boards use a procedural 64x64 pixel-art grid;
- * the Waveshare 1.75C uses pre-rendered 160x160 RGB565 artwork instead.
- * Both implement the same frame and scaling API for the UI.
- */
-
-#if defined(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C) && CONFIG_MUSE_BOARD_WAVESHARE_S3_175C
-#define MUSE_PX_W 160
-#define MUSE_PX_H 160
-#else
+/* Grid dimensions for procedural and custom pixel renderers. */
 #define MUSE_PX_W 64
 #define MUSE_PX_H 64
-#endif
 
 typedef struct {
     muse_mode_t mode;

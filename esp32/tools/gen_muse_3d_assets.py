@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Compile registered 320 px Muse poses and expression patches. Requires ImageMagick."""
+from itertools import groupby
 import json
 import math
 from pathlib import Path
 import struct
 import subprocess
 import tempfile
-import zlib
 
 ART = Path(__file__).resolve().parents[1] / "avatar" / "3d"
 POSES = ("boot", "idle", "listening", "thinking", "speaking", "error", "off", "working")
@@ -113,6 +113,28 @@ def expressions(name, art, manifest):
     return base, variants
 
 
+def encode_block(data):
+    """RGB565 packets: count in the low 15 bits, high bit for repeated colors."""
+    out = bytearray()
+    literal = bytearray()
+
+    def flush():
+        if literal:
+            out.extend(struct.pack("<H", len(literal)//2))
+            out.extend(literal)
+            literal.clear()
+
+    for (color,), group in groupby(struct.iter_unpack("<H", data)):
+        count = sum(1 for _ in group)
+        if count >= 4:
+            flush()
+            out.extend(struct.pack("<HH", 0x8000 | count, color))
+        else:
+            literal.extend(struct.pack("<H", color) * count)
+    flush()
+    return out
+
+
 def generate():
     manifest = json.loads((ART / "manifest.json").read_text())
     assert set(manifest["poses"]) == set(POSES) and (manifest["size"], manifest["block_rows"]) == (SIZE, ROWS)
@@ -127,7 +149,7 @@ def generate():
             packed = rgb565(base)
             blocks = []
             for i in range(0, len(packed), SIZE*ROWS*2):
-                data = zlib.compress(packed[i:i+SIZE*ROWS*2], 9)
+                data = encode_block(packed[i:i+SIZE*ROWS*2])
                 blocks.append(len(blob))
                 blob.extend(data)
             blocks.append(len(blob))
