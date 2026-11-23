@@ -55,6 +55,8 @@ log = logging.getLogger(__name__)
 NOISE_PATH = "/v1/noise"
 CONTROL_PATH = "/link-control"
 CHAT_PATH = "/chat/stream"
+# The Gadget API's discovery call, which carries the Muse's name.
+GADGET_ME_PATH = "/api/gadget/me"
 APP_ID = "musegadget"
 REQUEST_TIMEOUT_S = 60
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -246,6 +248,9 @@ class LinkSession:
         self._closed = False
         self._used = False
         self.registered_at: float | None = None
+        # The Muse's name, read once after the session registers. None until
+        # then, or when the VM doesn't answer with one.
+        self.muse_name: str | None = None
 
     async def run(self, stop: asyncio.Event) -> Outcome:
         if self._used:
@@ -479,12 +484,42 @@ class LinkSession:
         )
 
     async def request(self, method: str, path: str, body: bytes = b"", *,
-                      headers=None, timeout: float = REQUEST_TIMEOUT_S) -> dict:
-        """Buffered request for small JSON replies, including call cleanup."""
-        return await self._request(method, path, body, headers=headers, timeout=timeout)
+                      headers=None, timeout: float = REQUEST_TIMEOUT_S,
+                      service: str = "daemon") -> dict:
+        """Buffered request for small JSON replies, including call cleanup.
+
+        ``service`` names the VM backend: ``"daemon"``, or ``"gadget"`` for the
+        Gadget API under ``/api/gadget/``.
+        """
+        return await self._request(method, path, body, headers=headers, timeout=timeout,
+                                   service=service)
+
+    async def _read_muse_name(self) -> None:
+        """Read the Muse's name from the Gadget API, once per session.
+
+        A refusal or a failure only leaves ``muse_name`` unset; it never ends
+        the session.
+        """
+        try:
+            reply = await self.request("GET", GADGET_ME_PATH, headers=self._http_headers(),
+                                       service="gadget")
+        except Exception as exc:
+            log.warning("could not read the Muse's name: %s", type(exc).__name__)
+            return
+        response = reply["response"]
+        result = response.get("result") if isinstance(response, dict) else None
+        name = result.get("muse_name") if isinstance(result, dict) else None
+        if not reply["ok"]:
+            log.warning("could not read the Muse's name: HTTP %d", reply["status"])
+        elif isinstance(name, str) and name.strip():
+            self.muse_name = name
+            log.info("the Muse is called %s", printable(name))
+        else:
+            log.warning("the VM's reply carried no name for the Muse")
 
     async def _request(self, method: str, path: str, body: bytes, *,
-                       headers, timeout: float, finish_sends: bool = False) -> dict:
+                       headers, timeout: float, finish_sends: bool = False,
+                       service: str = "daemon") -> dict:
         send = self._send_complete if finish_sends else self._send_encrypted
         upload_in_parts = len(body) > MAX_INLINE_REQUEST_BYTES
         request = _Request(asyncio.get_running_loop().create_future())
@@ -493,9 +528,11 @@ class LinkSession:
         def encrypt():
             nonlocal stream_id
             if upload_in_parts:
-                encrypted = self._transport.start_stream_request(method, path, headers=headers)
+                encrypted = self._transport.start_stream_request(
+                    method, path, service=service, headers=headers)
             else:
-                encrypted = self._transport.encrypt_http_request(method, path, body, headers=headers)
+                encrypted = self._transport.encrypt_http_request(
+                    method, path, body, service=service, headers=headers)
             stream_id = encrypted.stream_id
             self._requests[stream_id] = request
             return encrypted
@@ -507,7 +544,7 @@ class LinkSession:
                 for offset in range(0, len(body), REQUEST_CHUNK_BYTES):
                     part = body[offset:offset + REQUEST_CHUNK_BYTES]
                     await send(lambda: self._transport.encrypt_body_chunk(
-                        stream_id, part, end_body=offset + len(part) == len(body),
+                        stream_id, part, service=service, end_body=offset + len(part) == len(body),
                     ))
             status, response = await asyncio.wait_for(request.done, timeout)
             completed = True
@@ -521,7 +558,8 @@ class LinkSession:
             if not completed and stream_id is not None and not self._closed:
                 try:
                     await asyncio.wait_for(self._send_encrypted(
-                        lambda: self._transport.encrypt_reset(stream_id, reason="request ended"),
+                        lambda: self._transport.encrypt_reset(
+                            stream_id, service=service, reason="request ended"),
                     ), 1)
                 except Exception:
                     log.warning("could not reset abandoned request")
@@ -809,9 +847,14 @@ class LinkSession:
                 log.error("link.register rejected")
                 return Outcome.FORBIDDEN
             else:
+                first = self.registered_at is None
                 self.registered_at = time.monotonic()
                 self.registered.set()
                 log.info("registered with the Muse")
+                if first:
+                    task = asyncio.ensure_future(self._read_muse_name())
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
             self._registration_changed.set()
             return None
         event = message.get("event")

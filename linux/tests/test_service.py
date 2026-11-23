@@ -42,6 +42,7 @@ from test_link_client import FakeVm, Pipe, bounded_scenario
 
 class FakeSession:
     registered_at = 1.0
+    muse_name: str | None = None
 
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -149,6 +150,18 @@ def test_local_request_over_the_line_limit_gets_a_json_error():
     run_with_socket(check)
 
 
+def test_local_clients_can_ask_for_the_muses_name():
+    async def check(service, path):
+        assert await ask(path, b'{"op": "muse_name"}\n') == {
+            "ok": False, "error": "not connected to the Muse"}
+        service._current = FakeSession()
+        assert await ask(path, b'{"op": "muse_name"}\n') == {"ok": True, "muse_name": None}
+        service._current.muse_name = "Juniper"
+        assert await ask(path, b'{"op": "muse_name"}\n') == {"ok": True, "muse_name": "Juniper"}
+
+    run_with_socket(check)
+
+
 def test_local_message_fails_cleanly_when_not_connected():
     async def check(service, path):
         reply = await ask(path, b'{"message": "hi"}\n')
@@ -243,6 +256,7 @@ def test_a_subclass_runs_its_own_device_and_work_on_the_service_session(paired_d
                     status=200, body=b'{"message_id":"user-1"}', end_body=True,
                 )))
                 assert await message == {"ok": True, "status": 200, "response": {"message_id": "user-1"}}
+                assert await ask(path, b'{"op": "muse_name"}\n') == {"ok": True, "muse_name": "Muse"}
                 lamp.stop()
 
             tasks = [asyncio.ensure_future(lamp.run()), asyncio.ensure_future(use_gadget())]
