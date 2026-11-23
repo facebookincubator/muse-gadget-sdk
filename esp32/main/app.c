@@ -2148,7 +2148,13 @@ static cJSON *on_ws_command(
 #endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
-    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+    int gray_levels = 0;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+    if (strcmp(command, "display.draw_gray4_url") == 0) gray_levels = 4;
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (strcmp(command, "display.draw_gray16_url") == 0) gray_levels = 16;
+#endif
+    if (draw_file || gray_levels || strcmp(command, "display.draw_url") == 0) {
         // draw_file takes a path on the VM, fetched over this session.
         cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
@@ -2156,15 +2162,28 @@ static cJSON *on_ws_command(
             return command_error("missing_param",
                                  draw_file ? "path is required" : "url is required");
         }
+        if (gray_levels && row && (!cJSON_IsNumber(row) ||
+                                  row->valuedouble != row->valueint)) {
+            return command_error("invalid_params", "row must be an integer");
+        }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
         int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
-        bool started = draw_file
-            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
-            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        bool started;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        if (gray_levels) {
+            started = image_fetch_start_gray(target->valuestring, top, gray_levels,
+                                             draw_url_done, ctx, &code, &message);
+        } else
+#endif
+        {
+            started = draw_file
+                ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+                : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        }
         if (!started) {
             free(ctx);
             return command_error(code, message);

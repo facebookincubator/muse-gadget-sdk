@@ -541,6 +541,24 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
 void led_status_draw_done(void) {
 }
 
+static int g_gray_begins, g_gray_refreshes, g_status_restores;
+static bool g_gray_ok;
+
+void led_status_draw_gray_begin(void) {
+    CHECK(!g_rows_drawn, "grayscale canvas must be cleared before the first band");
+    ++g_gray_begins;
+}
+
+bool led_status_draw_gray_done(int levels) {
+    CHECK(levels == 16 && g_rows_drawn == 4, "expected a complete 16-gray image");
+    ++g_gray_refreshes;
+    return g_gray_ok;
+}
+
+void led_status_show_animation(void) {
+    ++g_status_restores;
+}
+
 // A model of the ROM's TJpgDec (ChaN R0.01b). Its jd_prepare sets the image
 // and MCU size only from a SOF0 segment and never clears them, so a stream
 // with a scan but no SOF0 decodes with whatever the object held, and fails
@@ -1037,7 +1055,27 @@ static void test_vm_refusals(void) {
     CHECK(strcmp(code, "invalid_params") == 0, "code %s", code);
 }
 
+static void test_gray_refresh_result(void) {
+    for (int i = 0; i < 3; ++i) {
+        reset_server();
+        add_response((response_t){.status = 200, .body_len = 4 * ROW_BYTES + (i == 2)});
+        g_done = false;
+        g_rows_drawn = 0;
+        g_next_byte = 0;
+        g_gray_begins = g_gray_refreshes = g_status_restores = 0;
+        g_gray_ok = i == 0;
+        const char *code = NULL, *message = NULL;
+        CHECK(image_fetch_start_gray("http://host/img", 0, 16, on_done, NULL, &code, &message),
+              "grayscale download refused: %s", message ? message : "");
+        CHECK(g_done && g_result.ok == (i == 0), "wrong grayscale result");
+        CHECK(g_gray_begins == 1 && g_gray_refreshes == (i != 2) &&
+              g_status_restores == (i != 0), "wrong grayscale refresh or recovery count");
+        if (i == 1) CHECK(strcmp(g_result.code, "display_failed") == 0, "lost refresh error");
+    }
+}
+
 int main(void) {
+    test_gray_refresh_result();
     test_http_redirect_to_https_is_refused();
     test_https_redirect_to_http_is_refused();
     test_scheme_check_ignores_case();
