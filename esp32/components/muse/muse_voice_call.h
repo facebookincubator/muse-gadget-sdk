@@ -58,6 +58,7 @@ typedef enum {
     MUSE_VOICE_CALL_EV_HOLD,      /* Muse holds the input (switching it): the mic is ignored */
     MUSE_VOICE_CALL_EV_RESUME,
     MUSE_VOICE_CALL_EV_ENDED,     /* text: why. Nothing more comes for this call */
+    MUSE_VOICE_CALL_EV_REPLY_START, /* hands-free pose cue, before speaker-timed words */
 } muse_voice_call_ev_t;
 
 /* Set up, on Wi-Fi and with the session started: a tap can start a call. */
@@ -93,6 +94,8 @@ bool muse_voice_call_audio(const int16_t *pcm, size_t frames);
  * whatever it buffered downstream too.
  */
 size_t muse_voice_call_read(int16_t *pcm, size_t frames, bool *flushed);
+/* Hands-free speaker: bounded startup/refill cushion for uneven network delivery. */
+size_t muse_voice_call_read_paced(int16_t *pcm, size_t frames, bool *flushed);
 /* Non-blocking; events of earlier calls are dropped. */
 muse_voice_call_ev_t muse_voice_call_event(char *text, size_t cap);
 

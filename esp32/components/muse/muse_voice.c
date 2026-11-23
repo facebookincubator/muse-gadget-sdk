@@ -1507,6 +1507,10 @@ static void run_call(bool ptt, size_t waking_chunks)
     muse_vc_gate_init(&c.gate, false, ptt ? 0 : CALL_TAIL_US);
     bool ended = false;
     int64_t caption_until = 0;
+#if CONFIG_LV_USE_SNAPSHOT
+    int64_t last_write = 0, longest_write_gap = 0;
+    unsigned empty_during_speech = 0, write_errors = 0;
+#endif
     atomic_store(&s_ptt_call, ptt);
     call_view(MUSE_VOICE_VIEW_CONNECTING);
     muse_input_clear_call_pending(s_press_mark);
@@ -1551,6 +1555,7 @@ static void run_call(bool ptt, size_t waking_chunks)
                 caption_until = 0;
                 muse_state_set_caption("\"%s\"", text);
                 break;
+            case MUSE_VOICE_CALL_EV_REPLY_START:
             case MUSE_VOICE_CALL_EV_REPLY:
                 if (!ptt && c.live && !c.hung_up && !c.server_hold) {
                     /* Text can lead the first audible chunk. Give even a
@@ -1558,7 +1563,7 @@ static void run_call(bool ptt, size_t waking_chunks)
                     caption_until = now + 600000;
                     call_view(MUSE_VOICE_VIEW_SPEAKING);
                 }
-                muse_state_set_caption("%s", text);
+                if (ev == MUSE_VOICE_CALL_EV_REPLY) muse_state_set_caption("%s", text);
                 break;
             case MUSE_VOICE_CALL_EV_HOLD:
                 caption_until = 0;
@@ -1613,8 +1618,11 @@ static void run_call(bool ptt, size_t waking_chunks)
         float mic_level = show_mic ? muse_audio_level(s_chunk, MUSE_AUDIO_CHUNK) : 0;
         if (s_monitor) s_monitor_db = show_mic ? muse_audio_dbfs(s_chunk, MUSE_AUDIO_CHUNK) : -100.0f;
         bool flushed = false;
-        size_t n = c.hung_up || (ptt && (c.held || c.release_until)) ? 0 :
-            muse_voice_call_read(out, MUSE_AUDIO_CHUNK, &flushed);
+        size_t n = 0;
+        if (!c.hung_up && !(ptt && (c.held || c.release_until))) {
+            n = ptt ? muse_voice_call_read(out, MUSE_AUDIO_CHUNK, &flushed)
+                    : muse_voice_call_read_paced(out, MUSE_AUDIO_CHUNK, &flushed);
+        }
 #if CONFIG_MUSE_VOICE_SOFTWARE_AEC
         /* AEC's reference is one whole chunk per pass, so play exactly that:
          * a short read must not slide the echo away from its reference. */
@@ -1627,12 +1635,17 @@ static void run_call(bool ptt, size_t waking_chunks)
             caption_until = 0;
             muse_vc_gate_flush(&c.gate, now);
         }
-        if (n) {
-            muse_vc_gate_playout(&c.gate, out, n, now, CALL_SPEAKER_LAG_US);
-            muse_audio_write(out, n);
-        } else {
-            muse_audio_write(silence, MUSE_AUDIO_CHUNK);
-        }
+        if (n) muse_vc_gate_playout(&c.gate, out, n, now, CALL_SPEAKER_LAG_US);
+        esp_err_t written = muse_audio_write(n ? out : silence, n ? n : MUSE_AUDIO_CHUNK);
+#if CONFIG_LV_USE_SNAPSHOT
+        int64_t write_at = esp_timer_get_time();
+        if (last_write && n && write_at - last_write > longest_write_gap) longest_write_gap = write_at - last_write;
+        if (!n && !c.hung_up && !muse_vc_gate_mic_open(&c.gate, now)) ++empty_during_speech;
+        if (written != ESP_OK) ++write_errors;
+        last_write = write_at;
+#else
+        (void)written;
+#endif
 #if CONFIG_MUSE_VOICE_SOFTWARE_AEC
         if (aec) {
             /* Advance the reference even when a mic read fails; otherwise
@@ -1677,6 +1690,10 @@ static void run_call(bool ptt, size_t waking_chunks)
         else if (ptt && status.reply_lost) muse_state_set_caption("REPLY MISSED - HOLD TO TRY AGAIN");
         if (c.hung_up && now > c.give_up) break;
     }
+#if CONFIG_LV_USE_SNAPSHOT
+    ESP_LOGI(TAG, "playback timing: longest_write_gap_ms=%u empty_in_tail=%u write_errors=%u",
+             (unsigned)(longest_write_gap / 1000), empty_during_speech, write_errors);
+#endif
     finish_release(&c);
     /* ENDED closes the network, not the speaker queue. Drain its bounded
      * tail without reopening the mic; a new press only interrupts this tail. */

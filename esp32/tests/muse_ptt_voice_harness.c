@@ -320,6 +320,9 @@ size_t muse_voice_call_read(int16_t *p,size_t n,bool *flushed) {
     }
     return 0;
 }
+size_t muse_voice_call_read_paced(int16_t *p,size_t n,bool *flushed) {
+    return muse_voice_call_read(p,n,flushed);
+}
 muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     if (!ready_event && frame>=2) { ready_event=true; return MUSE_VOICE_CALL_EV_READY; }
     if(scenario==41) {
