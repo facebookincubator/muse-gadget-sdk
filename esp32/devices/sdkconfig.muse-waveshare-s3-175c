@@ -81,3 +81,10 @@ CONFIG_PM_PROFILING=y
 #   link.register.
 CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+# Local branch setup for this board (not upstream defaults):
+# - live voice calls with software echo cancellation, so Muse can be
+#   interrupted mid-sentence. MUSE_VOICE_AEC_REF_DELAY_CHUNKS stays at its
+#   default of 2, measured on the Waveshare 2.06; the 1.75C's own delay
+#   still needs a bench check.
+CONFIG_MUSE_REALTIME_VOICE=y
+CONFIG_MUSE_VOICE_SOFTWARE_AEC=y
