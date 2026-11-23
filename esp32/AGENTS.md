@@ -670,6 +670,11 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 
 ## Requests to Muse's VM from your code
 
+Link reads the agent's name from the VM's Gadget API: `GET /api/gadget/me` on
+`SERVICE_GADGET` (`result.muse_name`). A VM without the route refuses it, which
+only leaves the name unknown. The control and tunnel streams (`/link-control`,
+`/link-tunnel`) and the requests below still go to the daemon.
+
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
 on Link's Noise session, with `noise_ctrl_req_open()`, `noise_ctrl_req_send()`

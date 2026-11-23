@@ -84,9 +84,9 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define IDENTITY_STREAM_ID 3
 // The reply is a short JSON object. Held only until it is parsed.
 #define IDENTITY_BODY_MAX  8192
-// The agent's name comes from the VM's Gadget API.
-#define IDENTITY_SERVICE   ServiceType::Gadget
-#define IDENTITY_PATH      "/api/gadget/me"
+// The VM's Gadget API, the surface meant for device credentials.
+static constexpr ServiceType GADGET_SERVICE = ServiceType::Gadget;
+#define GADGET_ME_PATH "/api/gadget/me"
 #if CONFIG_HOMEHUB_SHOW_AGENT_NAME
 #define SHOW_AGENT_NAME 1
 #else
@@ -1315,10 +1315,10 @@ static bool identity_request(esp_tls_t *tls, ClientSession &session,
                              uint8_t *ws_buf) {
     ApplicationRequestView req;
     req.verb = StringView("GET");
-    req.path = StringView(IDENTITY_PATH);
+    req.path = StringView(GADGET_ME_PATH);
     req.end_body = true;
     auto sws = session.StartOutboundApplicationRequest(
-        IDENTITY_SERVICE, IDENTITY_STREAM_ID, req,
+        GADGET_SERVICE, IDENTITY_STREAM_ID, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1368,7 +1368,7 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
     if (f.done) return;
     if (frame.kind == ServiceFrameKind::Response) {
         if (frame.response.status != 200) {
-            ESP_LOGW(TAG, "server rejected " IDENTITY_PATH ": %d",
+            ESP_LOGW(TAG, "server rejected " GADGET_ME_PATH ": %d",
                      frame.response.status);
             f.done = true;
             return;
