@@ -6,9 +6,9 @@ Waveshare ESP32-S3-Touch-AMOLED-1.75C. Entering a state draws its pose once;
 remaining in a state changes only the relevant eyes, mouth or thought dots.
 The surrounding ring retains its existing rotation and progress behavior.
 
-This plan specifies the next implementation. The device currently runs the
-earlier renderer with timing instrumentation. Baseline results are recorded
-in [3d-avatar-performance.md](3d-avatar-performance.md).
+This document records the agreed design and initial targets. The implemented
+cache layout, tuning decisions and measurements are recorded in
+[3d-avatar-performance.md](3d-avatar-performance.md#cached-poses-on-the-175c).
 
 ## Agreed behavior
 

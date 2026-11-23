@@ -85,3 +85,93 @@ rendering/scheduling bottleneck rather than a demonstrated memory exhaustion.
 These are baseline findings, not a claim that optimization has already
 been implemented. A paired 2D timing run has not been performed, so no
 measured speedup ratio versus the 2D renderer is claimed.
+
+## Cached poses on the 1.75C
+
+The final bench run used the same physical board, two LVGL draw workers and
+40 ms UI tick as the baseline. Timing and framebuffer snapshots were taken
+in separate passes. An LVGL refresh measures the UI work for the entire
+screen, including the meter, ring, captions and avatar.
+
+| Physical device scenario | Previous 3D build, average refresh | Cached build, average refresh |
+|---|---:|---:|
+| Recording a real voice note, steady | 102–107 ms | 4.6–5.5 ms |
+| Thinking after sending the note, steady | 82–84 ms | 5.7–6.4 ms |
+| Speaking pose, bench command with no playback | 65 ms | 1.1–1.2 ms |
+| Remote reply audio playing, steady | No equivalent baseline capture | 2.0–2.6 ms |
+
+The new note was 13.18 seconds long. Each steady recording window completed
+about 25 refreshes per second and had **zero avatar invalidations**. The ring
+and meter still transferred roughly 264,000–296,000 panel pixels per two-second
+window. Steady thinking also sustained about 25 refreshes per second. For
+speaking without playback, seven mouth updates in 2.24 seconds each requested
+27 × 19 pixels. Panel alignment brought the average transfer to 560 pixels per
+update. The full base contains 102,400 pixels.
+
+The service returned one reply. The firmware logged the first reply audio
+after 13.31 seconds and completed 13.81 seconds of audio. This interval
+includes the remote turn. The UI timings in the table measure local draws.
+The local MP3 self-test separately decoded 3.67 seconds of audio in 166 ms.
+
+### Entering a state
+
+In the first implementation, thinking and error entry took about 410 ms.
+The tuned implementation uses native-resolution run/literal packets and places
+the cached pose directly in its reply layout. Preparing a different base uses
+bounded slices. The last complete base stays available until the replacement
+is ready. Changing an expression selects an immutable patch over that base.
+LVGL drains both draw workers before returning to the UI timers, so the same
+base and patch remain readable for every strip of one refresh. The clock
+waits for the final submitted band to complete before arming its next hold.
+
+Across 20 controlled state changes, the interval from the UI observing the
+new state to the UI observing the completed panel transfer was 97–157 ms.
+Median was 139 ms and nearest-rank p95 was 156 ms. The UI polls completion,
+so this includes up to a scheduling interval after the driver's notification.
+On the actual note, listening, thinking and speaking entry measured 152,
+140 and 161 ms respectively. The 150 ms entry target was exceeded on some
+transitions. The recording and thinking refresh targets were met. No optical
+latency, battery savings or paired 2D baseline were measured.
+
+### Memory and build sizes
+
+The two base caches occupy 409,600 bytes of PSRAM. Two prepared patch sets
+use another 38,480 bytes and the shared preparation scratch uses 10,240 bytes.
+Total allocated renderer PSRAM is **458,320 bytes**. The asset blob in flash
+is 606,508 bytes. This trades some OTA headroom for faster preparation of
+native-resolution images. The bench and standard signed images each used
+2,822,144 bytes in a 4,194,304-byte slot, leaving 1,372,160 bytes.
+The partition table and device settings are independent of the renderer.
+
+During the physical note, heartbeat samples reported about 87 KB free internal
+RAM, 79–80 KB DMA-capable RAM and a minimum internal heap of 15 KB. Sampled
+free PSRAM was about 1,849–1,881 KB during the turn. The build also passed
+the on-device sleep/wake and local MP3 checks. The pose controller, clipped
+pixel copies, exact reference images, allocation failures, corrupted
+preparation and cancelled pose preparation have host regression coverage.
+
+### Live call
+
+The user placed a call on a temporary call-enabled build with the same cached
+renderer. The service returned HTTP 200 after 876 ms and the call became live
+after 1.56 s. It played 1,172 audio frames. The firmware counted zero dropped
+frames and zero bad audio frames. Working appeared during an actual call, with
+zero autonomous avatar invalidations in steady windows. The ring continued
+at about 25 refreshes per second. The first end-call request timed out and
+the subsequent connection confirmed the call had ended.
+
+The user observed delayed reply audio and Working remaining visible after
+Muse had sent a response. The board logged a completed response, presented
+Working 1.42 s later, then presented Speaking another **12.65 s** later.
+Preparing and presenting that Speaking update took 165 ms from the UI
+observing the state change. During the intervening Working windows, average
+LVGL refreshes took about 7–8 ms. The hands-free call code chooses Working
+when the session reports outstanding work and its local speaker gate is
+open for microphone input. The capture lacks per-response audio arrival,
+queue depth and first-speaker-write timestamps. It cannot distinguish
+remote audio generation, transport delay, buffered playback or a stale
+work indication. Live-call A/V synchronization remains unresolved.
+
+The original voice-note bench image was restored after the call. Esptool
+verified its hash. The board booted to its 466 × 466 UI, completed the
+audio self-test and retained pairing, speaker volume and microphone gain.

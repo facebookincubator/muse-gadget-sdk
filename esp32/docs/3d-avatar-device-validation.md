@@ -1,5 +1,19 @@
 # 3D-style Muse: Waveshare 1.75C validation
 
+## Cached renderer
+
+The physical board runs the still-pose renderer described in the performance
+report. Each tile below is a scaled 466 × 466 **device framebuffer capture**.
+The top row shows boot, idle, listening and thinking. The bottom row shows
+speaking, error, goodbye and the temporary happy face. These are single
+frames from bench-selected states. The call-only working pose also appears in
+the source-art contact sheet. [Measurements](3d-avatar-performance.md#cached-poses-on-the-175c)
+and [expression variants](../avatar/3d/expressions.png).
+
+![Eight poses captured from the Waveshare framebuffer](3d-avatar-device-states.png)
+
+## Original renderer baseline
+
 Validated on a physical Waveshare ESP32-S3-Touch-AMOLED-1.75C over USB on
 2026-11-22. The avatar branch is based on main at `ded4222`; the flashed
 renderer revision is `ca5f3c5`. Unrelated motion and reply edits were excluded.
@@ -46,3 +60,18 @@ renderer revision is `ca5f3c5`. Unrelated motion and reply edits were excluded.
   facial animation and independent limb motion are not implemented.
 - The board was left awake in idle, paired and online, running the bench
   firmware. Its build configuration and SDK token remain local.
+
+## Cached renderer build and test coverage
+
+ESP-IDF v6.0.3 built both 1.75C profiles, the Waveshare 1.75 legacy pixel
+profile, a 1.75C profile with personal-avatar sync, animation, bench and live
+calls, and a separate custom 64 × 64 renderer on the 1.75C. The sync UI also
+compiled with snapshots disabled. Only the 1.75C was physically tested.
+
+The focused run passed 185 tests, including the expression clock, compositor,
+voice-note and live-call logic, and panel timing. Reference-image comparisons
+covered every expression at 320 and 173 pixels, with address and undefined
+behavior sanitizers on the compositor. The full host run executed 1,620 tests
+with 16 skipped. Four modules initially errored because of local socket
+restrictions or missing FreeInk sources. All four passed on rerun with
+loopback access and the repository's pinned FreeInk checkout.
