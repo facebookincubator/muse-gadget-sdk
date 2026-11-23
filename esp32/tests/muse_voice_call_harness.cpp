@@ -511,7 +511,7 @@ static void happy(void)
     line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"Hello \"}");
     line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"there\"}");
     char text[96];
-    expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    poll();   /* deltas received together share one screen update */
     expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
     assert(!strcmp(text, "Hello there"));
     line(id, "{\"type\":\"conversation.item.input_audio_transcription.completed\",\"event_id\":\"e\","
@@ -2936,6 +2936,37 @@ static void hands_free_early_media_and_keep_cap(void)
     expect_event(MUSE_VOICE_CALL_EV_ENDED);
 }
 
+/* The final can be the first complete text, or repeat a burst of deltas.
+ * All words are shown in order, including those beyond the old 255-byte cap. */
+static void long_call_captions(void)
+{
+    int64_t id = live_call();
+    const std::string delta = R"({"type":"response.output_audio_transcript.delta","delta":")";
+    const std::string done = R"({"type":"response.output_audio_transcript.done","transcript":")";
+    char text[96];
+    for (bool incremental : {false, true}) {
+        line(id, R"({"type":"response.created","response":{"id":"r1"}})");
+        std::string transcript;
+        for (int i = 0; i < 120; ++i) {
+            std::string word = (i ? " " : "") + std::to_string(i);
+            transcript += word;
+            if (incremental) line(id, delta + word + R"("})");
+        }
+        line(id, done + transcript + R"( fin\u00e9"})");
+        std::string shown;
+        for (int i = 0; i < 60; ++i) {
+            poll(1, 2000000);
+            if (next_event(text, sizeof(text)) != MUSE_VOICE_CALL_EV_REPLY) break;
+            if (!shown.empty()) shown += " ";
+            shown += text;
+        }
+        assert(shown == transcript + " finé");
+    }
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2957,7 +2988,7 @@ int main(int argc, char **argv)
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
                                     ptt_stop_paced_interrupts, hands_free_working,
-                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap };
+                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap, long_call_captions };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;
