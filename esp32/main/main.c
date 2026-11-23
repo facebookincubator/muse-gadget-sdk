@@ -28,6 +28,9 @@
 #include "esp_psram.h"
 #endif
 #include "diagnostic_log.h"
+#if CONFIG_HOMEHUB_ERROR_REPORT
+#include "error_report.h"
+#endif
 #include "link_events.h"
 #if CONFIG_MUSE_POWER_TEST
 #include "muse_power_test.h"
@@ -109,6 +112,9 @@ void app_main(void) {
     if (!link_events_init()) {
         ESP_LOGW("link.main", "connectivity history disabled: PSRAM unavailable");
     }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+    error_report_init();
+#endif
     ESP_LOGI("link.main", CONFIG_GADGET_PRODUCT_NAME " starting");
 #if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP && CONFIG_SPIRAM_IGNORE_NOTFOUND
     // The C5's TCP windows are sized for lwIP buffers in PSRAM. Its defaults

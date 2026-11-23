@@ -31,6 +31,9 @@
 #if CONFIG_HOMEHUB_FAST_GCM
 #include "fast_gcm.h"
 #endif
+#if CONFIG_HOMEHUB_ERROR_REPORT
+#include "error_report.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -920,6 +923,7 @@ struct pending_json_body {
     noise_ctrl_session_generation_t session_generation = 0;
     bool is_registration = false;
     bool is_heartbeat = false;
+    bool is_error_report = false;
 };
 
 static void clear_pending_json_body(pending_json_body &body) {
@@ -2715,6 +2719,17 @@ static session_result_t run_session(stack_monitor_t *stack) {
                 control_tx.is_heartbeat = true;
             }
         }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+        // Same gate as heartbeats: only a VM that confirmed this registration
+        // gets the report, and it stays queued until a send completes.
+        if (!control_tx.json && s_heartbeat_registered) {
+            char *json = error_report_pending_json();
+            if (json) {
+                control_tx = {json, strlen(json), 0, false, session_generation};
+                control_tx.is_error_report = true;
+            }
+        }
+#endif
         pending_result pr;
         while (!control_tx.json && noise_tx_has_dma_headroom(nullptr)
                && xQueueReceive(s_result_q, &pr, 0) == pdTRUE) {
@@ -2757,9 +2772,14 @@ static session_result_t run_session(stack_monitor_t *stack) {
                     heartbeat_sent = true;
                     last_heartbeat_us = esp_timer_get_time();
                 }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+                if (control_tx.is_error_report) error_report_mark_sent();
+#endif
                 ESP_LOGI(TAG, "sent %s (%u bytes)",
                          control_tx.is_registration ? "link.register" :
-                         control_tx.is_heartbeat ? "link.heartbeat" : "control message",
+                         control_tx.is_heartbeat ? "link.heartbeat" :
+                         control_tx.is_error_report ? "link.error_report" :
+                         "control message",
                          (unsigned)control_tx.json_len);
                 clear_pending_json_body(control_tx);
             }

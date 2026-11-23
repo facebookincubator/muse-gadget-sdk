@@ -45,6 +45,7 @@ pairing and control protocols, so the same app pairs either.
 | `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `reaper.py` | Reaps orphaned child processes when the service runs as PID 1 |
+| `error_report.py` | Notes how `musegadget run` ended and reports a crash to Muse on the next registration |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
@@ -132,7 +133,8 @@ sudo musegadget info                 # identity and pairing state
 ```
 
 State lives in `/var/lib/musegadget` (mode 0700): `identity.json` survives
-unpairing, `pairing.json` holds the device tokens. The local socket is
+unpairing, `pairing.json` holds the device tokens, and `error_report.json`
+exists only while the service runs or a crash report waits to be sent. The local socket is
 `/run/musegadget/musegadget.sock`, owned by root and the run-as account's group.
 
 A healthy start logs `commands run as <user>`, `Noise session established`,
@@ -183,6 +185,11 @@ never has a command's parameters, output or error message.
   Both directions carry JSON messages, each prefixed with a little-endian u32
   length. The device sends `link.register`, then a `link.result` for each
   `link.invoke`. `link.unpaired` means the Muse removed the device.
+- After `musegadget run` ended in an exception, or was killed while the
+  machine stayed up, the next run sends one `link.error_report` once it has
+  registered (`../protocols/ERROR_REPORT.md`). It names the exception's type
+  and where it was raised, never its message. `MUSEGADGET_ERROR_REPORT=0` in
+  the service's environment turns it off.
 - Register as `platform: "linux"` and `device_family: "gadget"`, with
   `model_id` and `metadata.model_name` from the `DeviceDescription`
   (`../protocols/DEVICE.md`). Every device built with this SDK registers
@@ -365,6 +372,9 @@ listed here. Everything else is internal and can change.
   and clean up its background tasks before returning the outcome. `Service`
   logs exceptions from `serve()` and reconnects with backoff. Cancellation
   propagates to the caller.
+- `with error_report.watch_run(version):` around your program's whole run,
+  as `run_service` does, makes an exception that escapes it a crash that the
+  next run reports. `Service` sends a waiting report by itself.
 - `await Service.serve_local(path)` starts the optional local message socket
   at a `pathlib.Path`. It returns an `asyncio.Server` that the caller must
   close. The socket forwards to the registered session while `serve()` runs.

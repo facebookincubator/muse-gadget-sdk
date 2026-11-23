@@ -120,6 +120,10 @@ if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
 endif()
 
+if(CONFIG_HOMEHUB_ERROR_REPORT)
+    list(APPEND GADGET_SRCS "error_report.c")
+endif()
+
 # image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
 # Kconfig is not loaded yet when requirements expand.
 if(IDF_TARGET STREQUAL "esp32p4")
@@ -252,6 +256,14 @@ if(CONFIG_HOMEHUB_FAST_GCM)
         "-Wl,--wrap=esp_aes_gcm_auth_decrypt"
         "-Wl,-u,__wrap_esp_aes_gcm_crypt_and_tag"
         "-Wl,-u,__wrap_esp_aes_gcm_auth_decrypt")
+endif()
+
+# error_report.c records the fault in retained RAM before ESP-IDF's panic
+# handler prints and resets.
+if(CONFIG_HOMEHUB_ERROR_REPORT)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=esp_panic_handler"
+        "-Wl,-u,__wrap_esp_panic_handler")
 endif()
 
 # ble_coex.c sits between the BLE controller and the coexistence scheduler
