@@ -1506,6 +1506,7 @@ static void run_call(bool ptt, size_t waking_chunks)
     call_ui_t c = { .ptt = ptt, .held = ptt, .input_epoch = s_press_input_epoch };
     muse_vc_gate_init(&c.gate, false, ptt ? 0 : CALL_TAIL_US);
     bool ended = false;
+    int64_t caption_until = 0;
     atomic_store(&s_ptt_call, ptt);
     call_view(MUSE_VOICE_VIEW_CONNECTING);
     muse_input_clear_call_pending(s_press_mark);
@@ -1547,12 +1548,20 @@ static void run_call(bool ptt, size_t waking_chunks)
                 muse_state_set_caption(ptt ? "HOLD YELLOW TO TALK" : "IN A CALL - PRESS TO HANG UP");
                 break;
             case MUSE_VOICE_CALL_EV_HEARD:
+                caption_until = 0;
                 muse_state_set_caption("\"%s\"", text);
                 break;
             case MUSE_VOICE_CALL_EV_REPLY:
+                if (!ptt && c.live && !c.hung_up && !c.server_hold) {
+                    /* Text can lead the first audible chunk. Give even a
+                     * text-only phrase time to appear, independently of AEC. */
+                    caption_until = now + 600000;
+                    call_view(MUSE_VOICE_VIEW_SPEAKING);
+                }
                 muse_state_set_caption("%s", text);
                 break;
             case MUSE_VOICE_CALL_EV_HOLD:
+                caption_until = 0;
                 c.server_hold = true;
                 finish_release(&c);
                 muse_state_set_caption("ONE MOMENT...");
@@ -1614,7 +1623,10 @@ static void run_call(bool ptt, size_t waking_chunks)
             n = MUSE_AUDIO_CHUNK;
         }
 #endif
-        if (flushed) muse_vc_gate_flush(&c.gate, now);
+        if (flushed) {
+            caption_until = 0;
+            muse_vc_gate_flush(&c.gate, now);
+        }
         if (n) {
             muse_vc_gate_playout(&c.gate, out, n, now, CALL_SPEAKER_LAG_US);
             muse_audio_write(out, n);
@@ -1648,7 +1660,7 @@ static void run_call(bool ptt, size_t waking_chunks)
             !c.live ? MUSE_VOICE_VIEW_CONNECTING :
             c.server_hold ? MUSE_VOICE_VIEW_THINKING :
             ptt && c.held ? (mic ? MUSE_VOICE_VIEW_LISTENING : MUSE_VOICE_VIEW_THINKING) :
-            speaking ? MUSE_VOICE_VIEW_SPEAKING :
+            (speaking || now < caption_until) ? MUSE_VOICE_VIEW_SPEAKING :
             !ptt ? (muse_voice_call_working() ? MUSE_VOICE_VIEW_WORKING : MUSE_VOICE_VIEW_LISTENING) :
             c.release_until || c.awaiting || status.sending ? MUSE_VOICE_VIEW_THINKING :
             status.working ? MUSE_VOICE_VIEW_WORKING : MUSE_VOICE_VIEW_READY;
