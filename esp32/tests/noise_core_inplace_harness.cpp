@@ -63,6 +63,12 @@ void CheckEnvelopePrefix(tn::ServiceType service, int64_t streamId, size_t n) {
       tn::ConstByteSpan(frame.data(), f.size()),
       tn::ByteSpan(envelope.data(), envelope.size()));
   EXPECT(e.ok());
+  // The receiving side reads the same service back.
+  tn::DecodedServiceRequestEnvelope decoded;
+  EXPECT(tn::DecodeServiceRequestEnvelopeDetailed(
+             tn::ConstByteSpan(envelope.data(), e.size()), decoded)
+             .ok());
+  EXPECT(decoded.service == service);
   // The in-place path.
   uint8_t prefix[64];
   tn::StatusWithSize p = tn::EncodeBodyChunkRequestPrefix(
@@ -173,7 +179,8 @@ void CheckSplitMessageReassembles() {
 
 int main() {
   const tn::ServiceType services[] = {
-      tn::ServiceType::Daemon, static_cast<tn::ServiceType>(1)};
+      tn::ServiceType::Daemon, static_cast<tn::ServiceType>(1),
+      tn::ServiceType::Gadget};
   const int64_t streams[] = {1, 2, 127, 128, 300, 1LL << 40};
   const size_t sizes[] = {1, 2, 100, 127, 128, 1500, 8192, 16383, 16384, 60000};
   for (tn::ServiceType s : services) {

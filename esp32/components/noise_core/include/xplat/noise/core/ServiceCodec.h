@@ -30,6 +30,8 @@ enum class ServiceType : int32_t {
   Sentinel = 1,
   Vault = 2,
   Authd = 3,
+  // The VM's Gadget API, the surface meant for device credentials.
+  Gadget = 6,
 };
 
 struct HeaderView {

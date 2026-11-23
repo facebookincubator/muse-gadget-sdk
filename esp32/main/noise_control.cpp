@@ -80,11 +80,13 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define NOISE_PATH       "/v1/noise"
 #define NOISE_PORT       443
 #define CTRL_STREAM_ID   1
-// One-shot GET /identity for the agent's name (TUNNEL_STREAM_ID is 2).
+// One-shot GET /api/gadget/me for the agent's name (TUNNEL_STREAM_ID is 2).
 #define IDENTITY_STREAM_ID 3
-// Without include_markdown the identity reply is ~3 KB of JSON, mostly avatar
-// asset paths. Held only until it is parsed.
+// The reply is a short JSON object. Held only until it is parsed.
 #define IDENTITY_BODY_MAX  8192
+// The agent's name comes from the VM's Gadget API.
+#define IDENTITY_SERVICE   ServiceType::Gadget
+#define IDENTITY_PATH      "/api/gadget/me"
 #if CONFIG_HOMEHUB_SHOW_AGENT_NAME
 #define SHOW_AGENT_NAME 1
 #else
@@ -1297,7 +1299,8 @@ static bool req_on_frame(const DecodedServiceFrame &) { return false; }
 
 // ---- Agent identity ----------------------------------------------------------
 
-// Reply to GET /identity, collected across the Response and BodyChunk frames.
+// Reply to GET /api/gadget/me, collected across the Response and BodyChunk
+// frames.
 struct identity_fetch {
     bool requested;
     bool done;
@@ -1305,17 +1308,17 @@ struct identity_fetch {
     size_t len;
 };
 
-// Ask the daemon for the agent identity. Returns false only if the transport
-// failed; a refused request just leaves the name unknown.
+// Ask the VM for the agent's name. Returns false only if the transport failed;
+// a refused request just leaves the name unknown.
 static bool identity_request(esp_tls_t *tls, ClientSession &session,
                              uint8_t *svc_scratch, uint8_t *env_scratch,
                              uint8_t *ws_buf) {
     ApplicationRequestView req;
     req.verb = StringView("GET");
-    req.path = StringView("/identity");
+    req.path = StringView(IDENTITY_PATH);
     req.end_body = true;
     auto sws = session.StartOutboundApplicationRequest(
-        ServiceType::Daemon, IDENTITY_STREAM_ID, req,
+        IDENTITY_SERVICE, IDENTITY_STREAM_ID, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1328,10 +1331,10 @@ static bool identity_request(esp_tls_t *tls, ClientSession &session,
 
 static void identity_finish(identity_fetch &f) {
     f.done = true;
-    // The daemon wraps the identity: {"ok":true,"result":{"name":...}}.
+    // The reply wraps the payload: {"ok":true,"result":{"muse_name":...}}.
     cJSON *root = f.body ? cJSON_ParseWithLength(f.body, f.len) : nullptr;
     cJSON *result = root ? cJSON_GetObjectItem(root, "result") : nullptr;
-    cJSON *name = cJSON_GetObjectItem(result, "name");
+    cJSON *name = cJSON_GetObjectItem(result, "muse_name");
     if (cJSON_IsString(name) && name->valuestring && *name->valuestring) {
         ESP_LOGI(TAG, "agent name: %s", name->valuestring);
         if (s_agent_name_cb) s_agent_name_cb(name->valuestring);
@@ -1365,7 +1368,8 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
     if (f.done) return;
     if (frame.kind == ServiceFrameKind::Response) {
         if (frame.response.status != 200) {
-            ESP_LOGW(TAG, "server rejected /identity: %d", frame.response.status);
+            ESP_LOGW(TAG, "server rejected " IDENTITY_PATH ": %d",
+                     frame.response.status);
             f.done = true;
             return;
         }

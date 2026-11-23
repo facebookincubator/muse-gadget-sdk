@@ -147,8 +147,8 @@ menu "ESP32 Device SDK"
         bool "Show the agent's name on the display"
         default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306
         help
-            After the device registers, fetch GET /identity over the Noise
-            session and show the agent's name on the status display. Only
+            After the device registers, fetch the agent's name over the Noise
+            session (GET /api/gadget/me) and show it on the status display. Only
             display backends (and the C3's text OLED) can show it, so it is
             off for LED-only builds.
 

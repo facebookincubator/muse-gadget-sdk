@@ -61,8 +61,8 @@ void noise_ctrl_init(const char *node_id, const char *display_name,
 
 void noise_ctrl_set_command_cb(noise_ctrl_command_cb cb);
 
-// Called from the session task with the agent's name (GET /identity) once per
-// Noise session, shortly after the device registers.
+// Called from the session task with the agent's name (GET /api/gadget/me)
+// once per Noise session, shortly after the device registers.
 typedef void (*noise_ctrl_agent_name_cb)(const char *name);
 
 void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb);
