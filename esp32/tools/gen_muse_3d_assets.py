@@ -28,6 +28,9 @@ def paste_feature(target, center, donor, source, half, scale_y=1.0, scale_x=1.0)
     cx, cy = center
     sx, sy = source
     w, h = half
+    if not (w <= cx < SIZE-w and h <= cy < SIZE-h and
+            w <= sx < SIZE-w-1 and h <= sy < SIZE-h-1 and scale_x >= 1 and 0 < scale_y <= 1):
+        raise ValueError(f"Invalid registered feature: {center}, {source}, {half}")
     for dy in range(-h, h + 1):
         for dx in range(-w, w + 1):
             alpha = min(1, (w - abs(dx)) / 3, (h - abs(dy)) / 3)
@@ -96,6 +99,9 @@ def expressions(name, art, manifest):
     if name == "thinking":
         frame = base.copy()
         for stage, (cx, cy, radius) in enumerate(spec["dots"], 1):
+            margin = radius + 3
+            if not (radius > 0 and margin <= cx < SIZE-margin and margin <= cy < SIZE-margin):
+                raise ValueError(f"Thought dot outside image: {cx}, {cy}, {radius}")
             for y in range(cy-radius-3, cy+radius+4):
                 for x in range(cx-radius-3, cx+radius+4):
                     d = math.hypot(x-cx, y-cy)
