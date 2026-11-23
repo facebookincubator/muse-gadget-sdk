@@ -55,6 +55,11 @@ int main(int argc,char **argv) {
     for(size_t i=0;i<n;i++)assert(!muse_avatar_pack_parse(p,i,key,&pack));
     key[0]=1;assert(!muse_avatar_pack_parse(p,n,key,&pack));key[0]=0;
     for(size_t i=0;i<n;i++) {memcpy(copy,p,n);copy[i]^=0x80;assert(!muse_avatar_pack_parse(copy,n,key,&pack));}
+    /* A valid-CRC one-shot idle would spin at EOF. Reject it, while still
+     * allowing one-shot non-idle clips to fall back to the looping idle. */
+    memcpy(copy,p,n);copy[66]=0;repair(copy,n);assert(!muse_avatar_pack_parse(copy,n,key,&pack));
+    memcpy(copy,p,n);copy[pack.clip[MUSE_CLIP_WORKING].offset-14]=0;repair(copy,n);
+    assert(muse_avatar_pack_parse(copy,n,key,&pack));assert(!pack.clip[MUSE_CLIP_WORKING].loop);
     /* Repaired outer CRCs force malformed clip/frame lengths past the first checks. */
     uint32_t values[]={0,1,0x7fffffff,0xffffffff};
     for(unsigned i=0;i<4;i++) for(unsigned pos=68;pos<=84;pos+=4) {
@@ -117,12 +122,27 @@ class AvatarClips(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Avatar changed'):
                 clips.install('fake',path)
         self.assertEqual(commands,['avatar.assets'])
-    def compile(self,tmp,source,decoder=False):
+    def compile(self,tmp,source,decoder=False,target=None):
         src=Path(tmp)/'harness.c';src.write_text(source);exe=Path(tmp)/'harness'
         command=[*shlex.split(os.environ.get('CC','cc')),'-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
             '-I',str(MUSE),'-I',str(ROOT/'components/muse_vstream/include'),'-I',str(ROOT/'components/tinyh264/src')]
         if decoder:
-            (Path(tmp)/'sdkconfig.h').write_text('#define CONFIG_MUSE_VIDEO_VP8 0\n')
+            config='#define CONFIG_MUSE_VIDEO_VP8 0\n'
+            if target:
+                self.assertIn(target,('ESP32S3','ESP32P4'))
+                config+='#define CONFIG_SPIRAM 1\n#define CONFIG_IDF_TARGET_%s 1\n'%target
+                (Path(tmp)/'esp_heap_caps.h').write_text('''
+#pragma once
+#include <stdlib.h>
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+#define MALLOC_CAP_INTERNAL 4
+#define MALLOC_CAP_DMA 8
+static inline void *heap_caps_malloc(size_t n,unsigned caps) {(void)caps;return malloc(n);}
+static inline void *heap_caps_calloc(size_t n,size_t bytes,unsigned caps) {(void)caps;return calloc(n,bytes);}
+''')
+                command+=['-DESP_PLATFORM=1']
+            (Path(tmp)/'sdkconfig.h').write_text(config)
             command+=['-I',tmp,'-w','-fno-sanitize=shift-base',str(MUSE/'muse_vdec.c'),str(MUSE/'muse_vdec_same.c')]+[str(p) for p in sorted((ROOT/'components/tinyh264/src').glob('*.c'))]
         else:command+=['-Wall','-Wextra','-Werror']
         subprocess.run(command+[str(src),str(MUSE/'muse_avatar_pack.c'),'-o',str(exe)],check=True,capture_output=True)
@@ -146,7 +166,9 @@ class AvatarClips(unittest.TestCase):
             units=clips.convert_clip(src)
             self.assertEqual(len(units),16)
             path=Path(tmp)/'real.mav';path.write_bytes(clips.make_pack(bytes(32),{'idle':units,'working':units}))
-            self.run_harness(self.compile(tmp,DECODE,True),path)
+            for target in (None,'ESP32S3','ESP32P4'):
+                with self.subTest(target=target or 'host'):
+                    self.run_harness(self.compile(tmp,DECODE,True,target),path)
     def test_usb_export_busy_retry_and_exact_range_eof(self):
         data=bytes(range(256))*32
         class Board:

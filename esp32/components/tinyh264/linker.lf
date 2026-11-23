@@ -18,8 +18,10 @@
 # on every macroblock. On the S3 IRAM and DRAM are the same SRAM, so that is
 # 44 KB less heap: a board running Wi-Fi, BLE and the UI beside it can't
 # spare it (LVGL's task no longer starts), and runs the decoder from cache.
-[mapping:tinyh264]
-archive: libtinyh264.a
+# The P4's esp_h264 component has a mapping named tinyh264 for its prebuilt
+# decoder. Namespace both our mapping and archive so the two can coexist.
+[mapping:muse_tinyh264]
+archive: libmuse_tinyh264.a
 entries:
     if MUSE_VIDEO_DECODER_IRAM = y:
         h264bsd_byte_stream (noflash)

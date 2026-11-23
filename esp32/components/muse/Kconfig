@@ -35,13 +35,15 @@ menu "Muse"
 
     config MUSE_AVATAR_ANIMATIONS
         bool "Experimental phone-avatar clip playback"
-        depends on MUSE_AVATAR_SYNC && IDF_TARGET_ESP32S3
+        depends on MUSE_AVATAR_SYNC && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4)
         default n
         help
             Adds bounded local H.264 clip packs to My Muse, rendered in the
-            existing home canvas. Requires conversion of phone MP4 assets.
-            Missing interactive clips keep the personal image with local
-            feedback. This does not provide a personal face or mouth rig.
+            existing home canvas. Uses the same TinyH264 software decoder and
+            scalar RGB565 conversion on the ESP32-S3 and ESP32-P4; the P4's
+            hardware H.264 encoder is not used. Requires conversion of phone
+            MP4 assets. Missing interactive clips keep the personal image with
+            local feedback. This does not provide a personal face or mouth rig.
             No camera view, Wi-Fi listener, or video transport is enabled.
 
     # Always present in sdkconfig.json, including when the bool is disabled.

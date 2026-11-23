@@ -24,6 +24,9 @@ if(CONFIG_MUSE_VIDEO OR CONFIG_MUSE_AVATAR_ANIMATIONS)
         SRCS ${srcs}
         INCLUDE_DIRS "src"
         LDFRAGMENTS "linker.lf")
+    # P4 BSPs also pull in esp_h264's prebuilt libtinyh264.a. Keep this
+    # source-built decoder's archive and linker mapping in a Muse namespace.
+    set_target_properties(${COMPONENT_LIB} PROPERTIES OUTPUT_NAME muse_tinyh264)
     # Upstream code, warnings and all. -O2, not the -O3 the host bench liked:
     # -O3's inlining makes the hot code 2.3 times bigger (110 KB), more than
     # IRAM can spare, and IRAM matters more.
