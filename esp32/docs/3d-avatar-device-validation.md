@@ -47,7 +47,7 @@ renderer revision is `ca5f3c5`. Unrelated motion and reply edits were excluded.
   reset. Boot reached the UI and audio initialization without a captured
   panic, assertion failure or reboot loop.
 
-## Physical-device checks
+## Original renderer physical-device checks
 
 - Captured 466x466 screen images for idle, boot, listening, thinking,
   speaking, error, off and happy through a single persistent USB session.
@@ -66,7 +66,7 @@ renderer revision is `ca5f3c5`. Unrelated motion and reply edits were excluded.
   62 KB largest internal block, 79 KB DMA-capable RAM free, and 2,992 KB
   PSRAM free. The recorded minimum internal heap was approximately 15 KB.
 
-## Limits
+## Original renderer limits
 
 - Bench mode enables framebuffer screenshots and temporarily allocates a
   full-screen image. Screenshot transfers interrupt ordinary animation
@@ -79,7 +79,32 @@ renderer revision is `ca5f3c5`. Unrelated motion and reply edits were excluded.
 - The board was left awake in idle, paired and online, running the bench
   firmware. Its build configuration and SDK token remain local.
 
-## Cached renderer build and test coverage
+## Current voice-note validation
+
+The user tested the cached renderer on a physical Waveshare 1.75C, including
+petting, recording during a smile, interrupted replies, captions with a rotating
+ring, ten consecutive notes, sleep/wake, settings and 20 minutes of mixed use.
+The corrected pet smile and compact muted-reply layout passed subsequent checks.
+
+After rebasing onto upstream main `fbfe3b0`, the user verified pet-then-record,
+muting and unmuting during a reply, and ring/caption independence.
+A 200-word reply exposed the shared 1,023-byte live-caption pacing limit.
+Commit `f96f315` paces the complete retained text. The user confirmed that a long
+reply now reaches its end and that late muting, unmuting and interruption by a
+new recording work.
+
+The full reply still follows the shared three-minute voice-turn deadline,
+measured from turn start, including recording and server waiting time. Extremely
+long replies can exceed that deadline and report incomplete. This validation
+does not establish arbitrary-length playback.
+
+The current firmware uses the upstream voice-note profile. The body uses cached
+poses with local facial patches. The speaker-on and reading layouts use 256 px
+and 128 px avatars. Reference comparisons cover 320, 256, 128 and 173 px sizes.
+The tests exercise allocation failure, malformed art, canceled pose preparation,
+clipped drawing and expression timing with address/undefined behavior sanitizers.
+
+## Earlier cached renderer build and test coverage
 
 ESP-IDF v6.0.3 built both 1.75C profiles, the Waveshare 1.75 legacy pixel
 profile, a 1.75C profile with personal-avatar sync, animation, bench and live
