@@ -30,8 +30,8 @@ enum class ServiceType : int32_t {
   Sentinel = 1,
   Vault = 2,
   Authd = 3,
-  SshAccess = 4,
-  Yolk = 5,
+  // The VM's Gadget API: Link's control, tunnel and identity streams.
+  // 4 and 5 are services this SDK never uses.
   Gadget = 6,
 };
 

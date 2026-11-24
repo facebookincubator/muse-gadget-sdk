@@ -2695,7 +2695,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         }
                     }
                     if (control_stream_ended(frame)) {
-                        ESP_LOGW(TAG, "server ended /link-control");
+                        ESP_LOGW(TAG, "server ended " GADGET_CONTROL_PATH);
                         end_reason = "server ended control stream";
                         error = true;
                         break;

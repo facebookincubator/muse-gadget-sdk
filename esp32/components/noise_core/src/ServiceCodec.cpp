@@ -110,12 +110,12 @@ struct TopLevelServiceFrame {
 [[nodiscard]] bool IsKnownServiceType(ServiceType service) noexcept {
   return service == ServiceType::Daemon || service == ServiceType::Sentinel ||
       service == ServiceType::Vault || service == ServiceType::Authd ||
-      service == ServiceType::SshAccess || service == ServiceType::Yolk ||
       service == ServiceType::Gadget;
 }
 
 [[nodiscard]] bool IsKnownServiceValue(uint64_t service) noexcept {
-  return service <= static_cast<uint64_t>(ServiceType::Gadget);
+  return service <= static_cast<uint64_t>(ServiceType::Authd) ||
+      service == static_cast<uint64_t>(ServiceType::Gadget);
 }
 
 [[nodiscard]] bool IsValidFieldNumber(uint64_t fieldNumber) noexcept {

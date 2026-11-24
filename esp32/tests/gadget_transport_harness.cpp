@@ -134,17 +134,18 @@ int main() {
     assert(agent_name.empty());
     identity_reply("{\"ok\":true,\"result\":{\"muse_name\":\"Forbidden\"}}", 403);
     assert(agent_name.empty() && noise_session->isEstablished());
-    // Both new enum values round-trip through the real envelope codec; a
-    // service outside the expanded range is still rejected.
+    // The Gadget service round-trips through the real envelope codec; the
+    // services this SDK never uses (4, 5) and anything past 6 are rejected.
     ApplicationRequestView req{}; req.verb = StringView("GET"); req.path = StringView("/test");
-    for (ServiceType service : {ServiceType::Yolk, ServiceType::Gadget}) {
-        assert(noise_session->StartOutboundApplicationRequest(service, 17, req,
-            ByteSpan(svc_scratch), ByteSpan(env_scratch)).ok());
-        assert(flush_outbound(nullptr, *noise_session, ws_buf));
-        assert(sent.back().service == service);
-    }
-    assert(!noise_session->StartOutboundApplicationRequest(static_cast<ServiceType>(7), 17, req,
+    assert(noise_session->StartOutboundApplicationRequest(ServiceType::Gadget, 17, req,
         ByteSpan(svc_scratch), ByteSpan(env_scratch)).ok());
+    assert(flush_outbound(nullptr, *noise_session, ws_buf));
+    assert(sent.back().service == ServiceType::Gadget);
+    for (int unused : {4, 5, 7}) {
+        assert(!noise_session->StartOutboundApplicationRequest(static_cast<ServiceType>(unused), 17, req,
+            ByteSpan(svc_scratch), ByteSpan(env_scratch)).ok());
+    }
+
     // Exercise the support helper and preserve poisoned-session handling.
     poison_noise_session(); assert(!noise_session->isEstablished());
     puts("Gadget transport routes and identity passed");

@@ -436,7 +436,8 @@ menu "ESP32 Device SDK"
             request gets a stream of its own; a refused or reset one
             doesn't touch Link's control stream. Muse's own boards, and
             boards with display.draw_file, always have it. Costs a few KB
-            of flash and a small queue in RAM.
+            of flash and a small queue in RAM, and on boards with PSRAM
+            104 KB of it for the session's larger inbound buffers.
 
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"
