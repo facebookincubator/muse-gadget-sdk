@@ -229,6 +229,18 @@ class PrinterTest(unittest.TestCase):
             {"type": "done", "messages": 3, "complete": True},
         ]), "One\n" + whole + "\n" + whole + "\n")
 
+    def test_failed_turn_still_shows_held_messages(self) -> None:
+        out = io.StringIO()
+        p = chat.Printer(out)
+        for f in ({"type": "text", "msg": 0, "text": "First"},
+                  {"type": "text", "msg": 1, "text": "Second"},
+                  {"type": "error", "text": "CAN'T REACH MUSE"}):
+            p.feed(f)
+        self.assertEqual(out.getvalue(), "First")
+        p.finish()
+        p.finish()
+        self.assertEqual(out.getvalue(), "First\nSecond\n")
+
     def test_cut_off_reply_still_shows_held_messages(self) -> None:
         self.assertEqual(self.shows([
             {"type": "text", "msg": 0, "text": "First"},

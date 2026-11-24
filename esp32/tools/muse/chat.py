@@ -171,14 +171,7 @@ class Printer:
             if msg in self.final:
                 self.text[msg] = self.final.pop(msg)
         elif t == "done":
-            for m, text in self.final.items():
-                self.text[m] = text
-            self.final.clear()
-            while self.current is not None:
-                self._end(self.current)
-            for m in sorted(self.text):
-                if m not in self.shown or self.shown[m] != self.text[m]:
-                    self._end(m)
+            self.finish()
             return
         else:
             return
@@ -190,6 +183,17 @@ class Printer:
             self._end(msg)
         else:
             self._catch_up(msg)
+
+    def finish(self):
+        """Shows what is still held back or unfinished, when a turn ends or fails."""
+        for m, text in self.final.items():
+            self.text[m] = text
+        self.final.clear()
+        while self.current is not None:
+            self._end(self.current)
+        for m in sorted(self.text):
+            if m not in self.shown or self.shown[m] != self.text[m]:
+                self._end(m)
 
 
 class Board:
@@ -410,6 +414,8 @@ def main():
             except KeyboardInterrupt:
                 board.cancel()
                 raise
+            finally:
+                printer.finish()
             if args.out:
                 with open(args.out, "w", encoding="utf-8") as f:
                     f.write(reply.text)
