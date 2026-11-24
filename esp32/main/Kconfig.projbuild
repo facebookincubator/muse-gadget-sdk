@@ -98,6 +98,19 @@ menu "ESP32 Device SDK"
             Password for CONFIG_HOMEHUB_WIFI_SSID. Ignored when the SSID
             override is empty.
 
+    config HOMEHUB_CUSTOM_SERVER_HOSTS
+        bool "Accept any server host (development only)"
+        default n
+        help
+            Pairing names the hosts the device sends its account and VM
+            credentials to (api_url, api_url_v2 and noise_host), and so does
+            the Muse host setting on boards with the full UI. Without this
+            option the device takes only the Muse app's own
+            (components/muse/muse_server_hosts.h): it refuses another and
+            uses the default in place of another it has saved. Turn it on
+            only to point a development build at your own servers; never
+            ship it.
+
     config HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS
         int "Proactive device token refresh interval (days, 0 = disabled)"
         range 0 365

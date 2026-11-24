@@ -1296,6 +1296,25 @@ static bool start_wifi_join_ota_if_requested(const char *url, bool force,
     return true;
 }
 
+// Save and apply the endpoints setup sent. on_provision calls this only once
+// that setup's credentials are stored, so the device never holds one pairing's
+// tokens with another's hosts; a failure here wipes both (setup_fail_for_session).
+static bool save_setup_endpoints(const char *api_url, const char *api_url_v2,
+                                 const char *noise_host) {
+    // Only older firmware reads api_url. Keep it current so a device flashed
+    // back to that firmware still reaches the API it was paired with.
+    bool api_saved = api_url && *api_url
+        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
+    bool api_v2_saved = api_url_v2 && *api_url_v2
+        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
+    bool noise_saved = noise_host && *noise_host
+        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
+    if (!api_saved || !api_v2_saved || !noise_saved) return false;
+    vm_api_set_base_url(api_url_v2);
+    noise_ctrl_set_host(noise_host);
+    return true;
+}
+
 static void on_provision(const char *ssid, const char *password,
                          const char *access_token,
                          const char *refresh_token,
@@ -1343,25 +1362,14 @@ static void on_provision(const char *ssid, const char *password,
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 
-    // Only older firmware reads api_url. Keep it current so a device flashed
-    // back to that firmware still reaches the API it was paired with.
-    bool api_saved = api_url && *api_url
-        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
-    bool api_v2_saved = api_url_v2 && *api_url_v2
-        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
-    bool noise_saved = noise_host && *noise_host
-        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
-    if (!api_saved || !api_v2_saved || !noise_saved) {
-        setup_fail_for_session("storage", "error_storage", session_generation);
-        goto done;
-    }
-    vm_api_set_base_url(api_url_v2);
-    noise_ctrl_set_host(noise_host);
-
     if (!require_provisioning_pairing_session(session_generation)) goto done;
     setup_stage_set("auth");
     if (!accept_pairing_credentials(access_token, refresh_token, username)) {
         setup_fail_for_session("auth", "auth_failed", session_generation);
+        goto done;
+    }
+    if (!save_setup_endpoints(api_url, api_url_v2, noise_host)) {
+        setup_fail_for_session("storage", "error_storage", session_generation);
         goto done;
     }
 

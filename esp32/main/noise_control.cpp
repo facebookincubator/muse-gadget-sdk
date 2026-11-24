@@ -21,6 +21,7 @@
 #endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
+#include "muse_server_hosts.h"
 #include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
 #include "link_events.h"
@@ -2999,8 +3000,10 @@ extern "C" void noise_ctrl_set_node_id(const char *node_id) {
 }
 
 extern "C" void noise_ctrl_set_host(const char *host) {
+    bool allowed = muse_server_noise_allowed(host);
+    if (!allowed) ESP_LOGW(TAG, "Noise host not allowed in this build; using the default");
     snprintf(s_noise_host, sizeof(s_noise_host), "%s",
-             host && *host ? host : NOISE_DEFAULT_HOST);
+             allowed && host && *host ? host : NOISE_DEFAULT_HOST);
 }
 
 extern "C" bool noise_ctrl_connect(const char *vm_id, const char *auth_token,
