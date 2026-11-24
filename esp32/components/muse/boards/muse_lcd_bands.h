@@ -82,3 +82,9 @@ void muse_lcd_bands_set_te(int gpio);
 void muse_lcd_bands_set_gap(int x, int y);
 typedef void (*muse_lcd_fill_fn)(uint8_t *dst, int stride, int row, int rows, void *arg);
 void muse_lcd_bands_frame(int x1, int y1, int x2, int y2, int rows, muse_lcd_fill_fn fill, void *arg);
+
+/* LVGL submits bands in order, with at most one in flight. Read the ticket
+ * at RENDER_READY and poll for the actual panel transfer to finish. */
+uint32_t muse_lcd_bands_submitted(void);
+uint32_t muse_lcd_bands_completed(void);
+uint32_t muse_lcd_bands_failures(void);

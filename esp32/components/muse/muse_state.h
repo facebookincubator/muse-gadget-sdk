@@ -110,4 +110,5 @@ float muse_state_flash_level(void);   /* 0..1, 0 when no flash is running */
 
 /* Touch/pet reaction. */
 void muse_state_make_happy(void);
+uint32_t muse_state_pet_event(void);  /* distinguishes repeated taps during one reaction */
 float muse_state_happiness(void);

@@ -39,6 +39,7 @@ static volatile float s_level;
 static volatile float s_progress;
 static volatile int64_t s_last_poke_us;
 static volatile int64_t s_happy_until_us;
+static uint32_t s_pet_event;
 #if CONFIG_MUSE_REPLY_NOTIFY
 static volatile int64_t s_flash_start_us;   /* 0 = no reply flash */
 #endif
@@ -326,9 +327,15 @@ float muse_state_flash_level(void)
 }
 #endif
 
+uint32_t muse_state_pet_event(void)
+{
+    return __atomic_load_n(&s_pet_event, __ATOMIC_ACQUIRE);
+}
+
 void muse_state_make_happy(void)
 {
     s_happy_until_us = esp_timer_get_time() + (int64_t)(HAPPY_SECS * 1e6f);
+    __atomic_add_fetch(&s_pet_event, 1, __ATOMIC_RELEASE);
     muse_state_poke();
 }
 

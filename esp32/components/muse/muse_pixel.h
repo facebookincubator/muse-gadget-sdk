@@ -21,14 +21,7 @@
 
 #include "muse_state.h"
 
-/*
- * Procedural pixel-art renderer for the Muse character.
- *
- * Muse is drawn on a coarse MUSE_PX_W x MUSE_PX_H grid with a small palette,
- * ordered dithering and hard outlines, then blown up to the screen with
- * nearest-neighbour blocks so the pixels stay chunky.
- */
-
+/* Grid dimensions for procedural and custom pixel renderers. */
 #define MUSE_PX_W 64
 #define MUSE_PX_H 64
 
