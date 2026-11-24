@@ -32,8 +32,9 @@ command.
 - **A Raspberry Pi with Bluetooth**: a 3B+, 4, 5 or Zero 2 W. Other Linux
   computers work too, as long as they have Bluetooth LE.
 - **Raspberry Pi OS Bullseye or later**, Debian 11 or later, Ubuntu 22.04
-  or later, Arch, or [Fedora](docs/fedora.md), already on your network.
-  Debian/Ubuntu support 32-bit and 64-bit; Arch/Fedora require x86_64 or aarch64.
+  or later, Arch, [Fedora](docs/fedora.md), or openSUSE Tumbleweed or Leap 16,
+  already on your network. Debian/Ubuntu support 32-bit and 64-bit;
+  Arch/Fedora/openSUSE require x86_64 or aarch64.
 - **Python 3.9 or later**, using the distro's Python and Bluetooth bindings.
 - **An account with sudo** on the machine.
 - **An SDK token** from [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens)
@@ -592,6 +593,8 @@ linked to eMudhra:
   `FAIL`, while the store can't be read or still trusts either. Update the
   `ca-certificates` package, then restart musegadget. The installer updates
   that package, and stops if the store still trusts one of these roots.
+  openSUSE's store still includes Comodo AAA Services root (for email), so
+  on openSUSE put it in the blocklist, as described below, before installing.
 - **Retired:** emSign Root CA - C1 and emSign ECC Root CA - C3, which Mozilla
   removed at eMudhra's request as it retires its dual-purpose roots, not
   because of a compromise. Some distros' `ca-certificates` packages still
@@ -612,8 +615,9 @@ sudo update-ca-certificates
 instead. On Fedora and Arch, put a copy of each certificate in the p11-kit
 blocklist (`/etc/pki/ca-trust/source/blocklist/` on Fedora,
 `/etc/ca-certificates/trust-source/blocklist/` on Arch), then run
-`sudo update-ca-trust`. The PEM block for each root, under its name, is in
-[`tests/vectors/distrusted_roots.pem`](tests/vectors/distrusted_roots.pem).
+`sudo update-ca-trust`. On openSUSE, put them in `/etc/pki/trust/blocklist/`
+and run `sudo update-ca-certificates`. The PEM block for each root, under its
+name, is in [`tests/vectors/distrusted_roots.pem`](tests/vectors/distrusted_roots.pem).
 
 ## Develop
 

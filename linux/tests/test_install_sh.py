@@ -527,6 +527,14 @@ def test_installer_only_warns_about_retired_roots(tmp_path, family, hint):
     assert "musegadget still connects" in result.stderr and hint in result.stderr
 
 
+def test_installer_points_suse_at_the_blocklist(tmp_path):
+    problem = "the system trust store still trusts Comodo AAA Services root"
+    result = check_trust_store_in_installer(tmp_path, problem, "", "suse")
+    assert result.returncode != 0
+    assert "carried on" not in result.stdout
+    assert "/etc/pki/trust/blocklist/" in result.stderr and '"Root CAs"' in result.stderr
+
+
 @pytest.mark.parametrize("problem,warning", [
     ("the system trust store still trusts emSign ECC Root CA - G3", RETIRED_WARNING),
     ("the system trust store still trusts emSign ECC Root CA - G3", ""),

@@ -41,7 +41,9 @@ DEFAULT_SOURCE="git+https://github.com/facebookincubator/muse-gadget-sdk@main#su
 APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca-certificates)
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
 FEDORA_PACKAGES=(bluez python3 python3-dbus python3-gobject python3-cryptography curl ca-certificates)
-SUSE_PACKAGES=(bluez python313 python313-dbus-python python313-gobject python313-cryptography curl ca-certificates)
+# python3-* are provided by the packages for the interpreter that owns
+# /usr/bin/python3 (python313-* today), so they follow its version.
+SUSE_PACKAGES=(bluez python3 python3-dbus-python python3-gobject python3-cryptography curl ca-certificates)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -195,8 +197,12 @@ check_system() {
             DISTRO_FAMILY=arch ;;
         fedora)
             DISTRO_FAMILY=fedora ;;
-        opensuse-tumbleweed|opensuse-leap)
+        opensuse-tumbleweed)
             DISTRO_FAMILY=suse ;;
+        opensuse-leap)
+            DISTRO_FAMILY=suse
+            [ "${major:-0}" -ge 16 ] 2>/dev/null ||
+                die "$PRETTY_NAME is too old. Upgrade to openSUSE Leap 16 or later." ;;
         *)
             case " ${ID_LIKE:-} " in
                 *" fedora "*|*" rhel "*)
@@ -272,7 +278,7 @@ install_packages() {
         done
     elif [ "$DISTRO_FAMILY" = suse ]; then
         for pkg in "${SUSE_PACKAGES[@]}"; do
-            rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+            rpm -q --whatprovides "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
         done
     else
         for pkg in "${APT_PACKAGES[@]}"; do
@@ -305,7 +311,9 @@ update_ca_certificates() {
             as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade \
                 ca-certificates >/dev/null 2>&1 && updated=1
     elif [ "$DISTRO_FAMILY" = suse ]; then
-        as_root zypper --non-interactive update ca-certificates >/dev/null 2>&1 && updated=1
+        # The root CAs themselves are in ca-certificates-mozilla on SUSE.
+        as_root zypper --non-interactive update ca-certificates ca-certificates-mozilla \
+            >/dev/null 2>&1 && updated=1
     else
         # Upgrading one package without the rest is a partial upgrade on Arch.
         say "ca-certificates: left to pacman -Syu, which keeps it current on Arch."
@@ -483,6 +491,9 @@ check_trust_store() {
     # An earlier install's service would keep restarting the new code, which refuses to run.
     if systemd_running && [ -e "$UNIT" ]; then
         as_root systemctl stop musegadget.service >/dev/null 2>&1 || true
+    fi
+    if [ "$DISTRO_FAMILY" = suse ]; then
+        die "musegadget won't connect: $problem. Update ca-certificates-mozilla, or put the root in /etc/pki/trust/blocklist/ and run 'sudo update-ca-certificates' (see \"Root CAs\" in the musegadget README), then run this installer again."
     fi
     die "musegadget won't connect: $problem. Update your ca-certificates package, then run this installer again."
 }
