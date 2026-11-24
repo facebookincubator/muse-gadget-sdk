@@ -59,7 +59,7 @@ static void heap_caps_free(void *p) { if (p) live_allocations--; free(p); }
             manifest = json.loads((gen.ART/"manifest.json").read_text())
             sources = {n:gen.load(n) for n in (*gen.POSES, "closed-eyes")}
             offset = 0
-            for size in (320,173):
+            for size in (320, 256, 128, 173):
                 for name in reversed(gen.POSES):
                     base, stages = gen.expressions(name,sources,manifest)
                     if name == "idle" and size == 320:

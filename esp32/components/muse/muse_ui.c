@@ -1311,11 +1311,11 @@ static void build_answer(lv_obj_t *face, int ring_in)
     int pitch = lv_font_get_line_height(font) + CAPTION_LINE_SPACE;
 
     answer_layout_t *l = &s_answers[ANSWER_HEARD];
-    int cell = s_canvas_px / LAYOUT_GRID - 1;
+    int cell = s_canvas_px / MUSE_PX_W - 1;
     cell = cell > MINI_CELL_PX ? cell : MINI_CELL_PX;
     l->font = font;
     l->scale = 1;
-    l->px = LAYOUT_GRID * cell;
+    l->px = MUSE_PX_W * cell;
     l->y = s_big_y;
     l->align = LV_TEXT_ALIGN_CENTER;
     int h = 3 * pitch - CAPTION_LINE_SPACE;
@@ -1335,7 +1335,7 @@ static void build_answer(lv_obj_t *face, int ring_in)
     s_ring_in = ring_in;
     l = &s_answers[ANSWER_READ];
     int status_bottom = (muse_board->rim_controls ? 40 : 20 + s_dy) + 16 - s_h / 2;
-    l->px = LAYOUT_GRID * MINI_CELL_PX;
+    l->px = MUSE_PX_W * MINI_CELL_PX;
     l->y = status_bottom + 2 + l->px / 2;   /* its sparkles clear of the status line */
     l->align = LV_TEXT_ALIGN_CENTER;
     art_bottom = l->y + l->px / 2 - ART_BLANK_ROWS * MINI_CELL_PX;

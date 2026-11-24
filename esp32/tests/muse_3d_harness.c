@@ -48,8 +48,9 @@ int main(int argc, char **argv)
     /* The abandoned partial boot must never appear on the glass. */
     assert(!muse_3d_update(wanted).count);
     muse_3d_prepare_slice();
-    for (int layout = 0; layout < 2; layout++) {
-        int size = layout ? 173 : 320;
+    const int sizes[] = {320, 256, 128, 173};
+    for (size_t layout = 0; layout < sizeof(sizes) / sizeof(sizes[0]); layout++) {
+        int size = sizes[layout];
         muse_pixel_set_size(size);
         for (int p = POSE_COUNT-1; p >= 0; p--) {
             wanted = (muse_expression_t){p,0};
