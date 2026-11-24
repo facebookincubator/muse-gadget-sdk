@@ -132,8 +132,8 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 #else
 #define TEXT_MAX CAPTION_TEXT
 #endif
-/* The part of a message's kept text the automatic captions pace and show. */
-#define CAPTION_LEN(text) strnlen((text), CAPTION_TEXT - 1)
+/* Pace and caption all text retained for this message, up to TEXT_MAX. */
+#define CAPTION_LEN(text) strnlen((text), TEXT_MAX - 1)
 #define SPEECH_CHARS_PER_S 14              /* until the speech's length is known */
 #define TEXT_CHARS_PER_S 16                /* speaker off: reading pace, a little over speech */
 #define TEXT_HOLD_S 2                      /* speaker off: how long a message's last lines stay up */
@@ -2158,9 +2158,7 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
-        /* Paced to the text kept: a reply longer than CAPTION_TEXT shows what
-         * was kept at reading pace, not stretched over the whole reply's time
-         * (the Watcher keeps the rest for review). */
+        /* The reply and its captions advance together across all retained text. */
         size_t shown = s_turn.texts ? CAPTION_LEN(s_turn.texts + i * TEXT_MAX) : m.len;
         m.pcm_frames = (uint32_t)(shown * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
