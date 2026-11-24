@@ -1,8 +1,8 @@
 # Muse poses for the Waveshare 1.75C
 
-The bundled renderer displays eight 320 × 320 RGB565 poses. Listening, working,
-error and goodbye hold still. Boot opens its eyes, idle blinks, thinking reveals
-thought dots, and speaking cycles its mouth on a fixed timer. A pet reaction
+The bundled renderer displays eight 320 × 320 RGB565 poses. Listening, thinking,
+working, error and goodbye hold still. Boot opens its eyes, idle blinks, and
+speaking cycles its mouth on a fixed timer. A pet reaction
 temporarily replaces the face on eligible poses. The UI draws the activity ring
 on its own schedule.
 
