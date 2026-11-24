@@ -255,6 +255,12 @@ int main(void) {{
         ble = (ROOT / "components/muse/muse_ble.c").read_text()
         self.assertRegex(ble, r'"hatch\.host"\)\) \{\s*if \(!muse_settings_set_hatch_host\(v\)\) '
                               r'\{\s*res = "error: server not allowed";')
+        # The on-device editors say so too, as they do for an SDK token.
+        for name in ("muse_settings_ui.c", "eink/muse_eink_settings.cpp"):
+            ui = (ROOT / "components/muse" / name).read_text()
+            self.assertRegex(ui, r"s_host_bad_us = muse_settings_set_hatch_host\(text\) "
+                                 r"\? 0 : esp_timer_get_time\(\);")
+            self.assertIn('(s_hatch_host, "Not allowed");', ui)
         cc = compiler("CC", "cc")
         for custom in (0, 1):
             with self.subTest(custom_hosts=custom), tempfile.TemporaryDirectory() as tmp:

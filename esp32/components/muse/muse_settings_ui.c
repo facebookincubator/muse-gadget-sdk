@@ -137,6 +137,7 @@ static lv_obj_t *s_hatch_status, *s_hatch_host, *s_hatch_vm, *s_hatch_token, *s_
 static lv_obj_t *s_link_status, *s_link_reset_lbl;
 static int64_t s_link_reset_armed_us;
 static int64_t s_sdk_token_bad_us;   /* when an invalid SDK token was entered */
+static int64_t s_host_bad_us;        /* when a server this build refuses was entered */
 
 /* Bluetooth page. */
 static lv_obj_t *s_ble_sw, *s_ble_status;
@@ -1186,7 +1187,10 @@ static void tick_wifi(void)
 
 /* ---------- Muse ---------- */
 
-static void on_hatch_host_done(const char *text) { muse_settings_set_hatch_host(text); }
+static void on_hatch_host_done(const char *text)
+{
+    s_host_bad_us = muse_settings_set_hatch_host(text) ? 0 : esp_timer_get_time();
+}
 static void on_hatch_vm_done(const char *text) { muse_settings_set_hatch_vm(text); }
 
 static void on_hatch_token_done(const char *text)
@@ -1297,7 +1301,12 @@ static void tick_hatch(void)
     char host[MUSE_HOST_MAX + 1], vm[MUSE_VM_MAX + 1];
     muse_settings_hatch_host(host);
     muse_settings_hatch_vm(vm);
-    set_text(s_hatch_host, host);
+    if (s_host_bad_us && esp_timer_get_time() - s_host_bad_us < 5000000) {
+        set_text(s_hatch_host, "Not allowed");
+    } else {
+        s_host_bad_us = 0;
+        set_text(s_hatch_host, host);
+    }
     /* One set here, else the one it connected to. */
     set_text(s_hatch_vm, vm[0] ? vm : h.vm_id[0] ? h.vm_id : "Not set");
     /* The device token is a credential, so none of it shows. Pairing stores one
