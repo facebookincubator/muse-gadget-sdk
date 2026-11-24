@@ -21,7 +21,6 @@ void muse_expression_presented(muse_expression_clock_t *c, muse_expression_t sho
         case POSE_BOOT:     hold = c->step < 4 ? 150 : 0; break;
         case POSE_IDLE:     hold = (unsigned[]){4000, 80, 100, 80}[c->step]; break;
         case POSE_SPEAKING: hold = 250; break;
-        case POSE_THINKING: hold = 400; break;
         default: break;
         }
     }

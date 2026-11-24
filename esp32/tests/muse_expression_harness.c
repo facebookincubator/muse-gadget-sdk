@@ -25,9 +25,6 @@ int main(void)
                 holds[i] = mode == MUSE_MODE_IDLE ? blink[i] : 250;
             }
             steps = 4;
-        } else if (mode == MUSE_MODE_THINKING) {
-            for (int i = 0; i < 4; i++) { expected[i] = (i+1)%4; holds[i] = 400; }
-            steps = 4;
         }
         for (int i = 0; i < steps; i++) {
             muse_expression_presented(&c, expr, now);
@@ -41,6 +38,12 @@ int main(void)
         if (!steps || mode == MUSE_MODE_BOOT) {
             muse_expression_presented(&c, expr, now);
             assert(!c.due);
+            for (int tick = 0; tick < 10; tick++) {
+                now += 400;
+                assert(muse_expression_tick(&c, mode, false, pet, false, now).variant == expr.variant);
+                muse_expression_presented(&c, expr, now);
+                assert(!c.due);
+            }
         }
         expr = muse_expression_tick(&c, mode, false, ++pet, true, now);
         assert(expr.variant == (mode == MUSE_MODE_ERROR || mode == MUSE_MODE_OFF ? 0 : MUSE_EXPRESSION_HAPPY));
