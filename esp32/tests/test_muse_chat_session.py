@@ -890,10 +890,19 @@ int main(int argc, char **argv) {
         break;
     }
     case 42: {
-        char caption[EV_TEXT];
-        assert(visible_caption_at("What do you want for lunch?\n\n[[hatch_widget:meal]]", 32,
-                                  caption, sizeof(caption)));
-        assert(!strstr(caption, "hatch_widget"));
+        s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+        begin(false);
+        event("delta.message_start", "lunch", "note");
+        event("delta.text_append", "lunch", "", "Lunch?");
+        for (const char *p = "[[hatch_widget:very_long_lunch_selection_identifier_1234567890]]"; *p; p++) {
+            char one[] = {*p, 0};
+            event("delta.text_append", "lunch", "", one);
+            assert(!strcmp(s_turn.texts, "Lunch?") && !strcmp(s_turn.msgs[0].tail, "Lunch?"));
+        }
+        event("delta.text_append", "lunch", "", " Pasta selected.");
+        assert(!strcmp(s_turn.texts, "Lunch? Pasta selected."));
+        puts(s_turn.texts);
+        free(s_turn.texts);
         break;
     }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
@@ -969,6 +978,9 @@ int main(int argc, char **argv) {
         binary = self.watcher_binary if watcher else self.binary
         result = subprocess.run([str(binary), str(case)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_widget_split_at_every_byte(self):
+        self.run_case(42)
 
     def test_idle_widget_and_phone_selection_use_the_real_adapter(self):
         self.run_case(31)
@@ -1087,7 +1099,7 @@ int main(int argc, char **argv) {
         self.run_case(29)
 
     def test_latest_reply_capture_and_caption_pace(self):
-        for case in (0, 1, 2, 18, 19, 20, 35):
+        for case in (0, 1, 2, 18, 19, 20, 35, 41):
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

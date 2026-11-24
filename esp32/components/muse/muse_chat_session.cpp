@@ -246,6 +246,8 @@ enum tts_t : uint8_t { TTS_NONE, TTS_QUEUED, TTS_ACTIVE, TTS_FINISHED };
 struct msg_t {
     char id[80];
     size_t len;              /* reply text length so far */
+    uint8_t marker_prefix;   /* potential opening delimiter held across deltas */
+    bool inside_marker, closing_bracket;
     char tail[128];          /* its last characters, for the caption */
     bool done;
     tts_t tts;
@@ -1611,9 +1613,8 @@ static size_t whole_chars(const char *s, size_t n)
     return c >= 0xc0 && n - (lead - 1) < need ? lead - 1 : n;
 }
 
-static void append_text(msg_t &m, const char *text)
+static void append_visible(msg_t &m, const char *text, size_t add)
 {
-    size_t add = strlen(text);
     if (s_turn.texts) {
         char *full = s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX;
         if (!m.len) {
@@ -1632,21 +1633,53 @@ static void append_text(msg_t &m, const char *text)
     m.len += add;
     size_t have = strlen(m.tail);
     if (add >= sizeof(m.tail) - 1) {
-        strlcpy(m.tail, text + add - (sizeof(m.tail) - 1), sizeof(m.tail));
+        memcpy(m.tail, text + add - (sizeof(m.tail) - 1), sizeof(m.tail) - 1);
+        m.tail[sizeof(m.tail) - 1] = 0;
         return;
     }
     if (have + add >= sizeof(m.tail)) {
         size_t drop = have + add - (sizeof(m.tail) - 1);
         memmove(m.tail, m.tail + drop, have - drop + 1);
     }
-    strlcat(m.tail, text, sizeof(m.tail));
+    have = strlen(m.tail);
+    memcpy(m.tail + have, text, add);
+    m.tail[have + add] = 0;
 }
 
-/*
- * Shows a reply that hasn't started speaking: its opening lines, which the
- * speech starts with, so they can be read while the audio is on its way.
- * The spoken captions carry on from there.
- */
+static constexpr char widget_open[] = "[[hatch_widget:";
+
+/* Only visible spans enter the caption buffer, its fallback tail and its timing. */
+static void append_text(msg_t &m, const char *p)
+{
+    while (*p) {
+        if (m.inside_marker) {
+            bool end = m.closing_bracket && *p == ']';
+            m.closing_bracket = *p++ == ']';
+            if (end) m.inside_marker = m.closing_bracket = false;
+        } else if (*p == widget_open[m.marker_prefix]) {
+            p++;
+            if (++m.marker_prefix == sizeof(widget_open) - 1) {
+                m.marker_prefix = 0;
+                m.inside_marker = true;
+            }
+        } else if (m.marker_prefix) {
+            /* In "[[[", the last two brackets can still open a marker. */
+            if (m.marker_prefix == 2 && *p == '[') {
+                append_visible(m, widget_open, 1);
+                p++;
+            } else {
+                append_visible(m, widget_open, m.marker_prefix);
+                m.marker_prefix = 0;
+            }
+        } else {
+            size_t n = strcspn(p, "[");
+            append_visible(m, p, n);
+            p += n;
+        }
+    }
+}
+
+#if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 static void remove_widget_marker(char *text)
 {
     static const char marker[] = "[[hatch_widget:";
@@ -1665,20 +1698,18 @@ static void remove_widget_marker(char *text)
     }
 }
 
-static bool visible_caption_at(const char *text, size_t at, char *out, size_t cap)
-{
-    if (!muse_hatch_caption_at(text, at, out, cap)) {
-        return false;
-    }
-    remove_widget_marker(out);
-    return out[0] != '\0';
-}
+#endif
 
+/*
+ * Shows a reply that hasn't started speaking: its opening lines, which the
+ * speech starts with, so they can be read while the audio is on its way.
+ * The spoken captions carry on from there.
+ */
 static void show_reply_start(const msg_t &m)
 {
     char line[EV_TEXT];
     if (s_turn.texts) {
-        if (!visible_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
+        if (!muse_hatch_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
             return;
         }
     } else {
@@ -1696,6 +1727,13 @@ static void message_done(int i, const char *final_text)
     if (m.done) {
         return;
     }
+    if (!s_turn.text && !m.len && !m.marker_prefix && !m.inside_marker && final_text && *final_text) {
+        append_text(m, final_text);
+    }
+    if (m.marker_prefix) {
+        append_visible(m, widget_open, m.marker_prefix);
+        m.marker_prefix = 0;
+    }
     m.done = true;
     mark(M_DONE);
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
@@ -1711,8 +1749,8 @@ static void message_done(int i, const char *final_text)
             if (visible) {
                 strlcpy(visible, review, strlen(review) + 1);
                 remove_widget_marker(visible);
-                review = visible;
             }
+            review = visible;
         }
         muse_review_store_complete(s_turn.review, review,
             review_truncated);
@@ -1729,9 +1767,6 @@ static void message_done(int i, const char *final_text)
         muse_hatch_console("message_done", nullptr, "\"msg\":%d,\"bytes\":%u", i, (unsigned)n);
         ESP_LOGI(TAG, "message %s done (%u chars)", m.id, (unsigned)n);
         return;
-    }
-    if (!m.len && final_text && final_text[0]) {
-        append_text(m, final_text);
     }
     if (m.len && m.tts == TTS_NONE) {
         m.tts = TTS_QUEUED;
@@ -3167,7 +3202,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         /* Nothing said yet: the reply's opening page, to read while the speech is on its way. */
         for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
             if (s_turn.msgs[i].len) {
-                return visible_caption_at(s_turn.texts + i * TEXT_MAX, 0, out, cap);
+                return muse_hatch_caption_at(s_turn.texts + i * TEXT_MAX, 0, out, cap);
             }
         }
         return false;
@@ -3179,7 +3214,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         at = len ? len - 1 : 0;
     }
 
-    return visible_caption_at(text, at, out, cap);
+    return muse_hatch_caption_at(text, at, out, cap);
 }
 
 extern "C" size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)
