@@ -12,6 +12,24 @@ and [expression variants](../avatar/3d/expressions.png).
 
 ![Eight poses captured from the Waveshare framebuffer](3d-avatar-device-states.png)
 
+## Pet and mid-reply layout regressions
+
+On a physical 1.75C, the framebuffer showed the following sequence with
+the corrected assets and layout at `db044d1`. From left to right, the
+captures show idle, pet, a reply with the speaker enabled, and the same
+reply with the speaker muted. The bench fixture selected the expression
+and supplied the caption and speaker setting. The pet changes only the
+mouth. The reply canvas measures 256 px with the speaker enabled and
+128 px in reading mode. Restoring the speaker restored the 256 px layout.
+
+![Physical 1.75C framebuffer captures of the idle face, pet smile, and both reply layouts](3d-avatar-reply-layouts.png)
+
+| Hands-on regression check | Expected behavior |
+| --- | --- |
+| Tap the idle avatar, then start recording while it smiles. | The mouth opens into a grin and Listening replaces the grin. |
+| During a long reply, hold the speaker icon to mute, then unmute. | The reading layout makes room for the large caption. The larger avatar returns on unmute. |
+| During another reply, swipe the volume down to zero, then back up. | Crossing zero has the same layout effect as the speaker control. The reply continues. |
+
 ## Original renderer baseline
 
 Validated on a physical Waveshare ESP32-S3-Touch-AMOLED-1.75C over USB on
