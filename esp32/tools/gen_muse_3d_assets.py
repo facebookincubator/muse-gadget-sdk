@@ -56,6 +56,24 @@ def rgb565(rgb):
                     for r, g, b in zip(rgb[::3], rgb[1::3], rgb[2::3]))
 
 
+def background_mask(packed):
+    """Mark black pixels reachable from the edge, preserving enclosed facial blacks."""
+    mask = bytearray(SIZE * SIZE // 8)
+    pending = list(range(SIZE)) + list(range(SIZE * (SIZE-1), SIZE*SIZE))
+    pending += [y*SIZE+x for y in range(SIZE) for x in (0, SIZE-1)]
+    while pending:
+        at = pending.pop()
+        if mask[at//8] & (1 << (at%8)) or packed[2*at:2*at+2] != b"\0\0":
+            continue
+        mask[at//8] |= 1 << (at%8)
+        x, y = at % SIZE, at // SIZE
+        if x: pending.append(at-1)
+        if x+1 < SIZE: pending.append(at+1)
+        if y: pending.append(at-SIZE)
+        if y+1 < SIZE: pending.append(at+SIZE)
+    return mask
+
+
 def patch(base, changed):
     # Compare final quantized pixels; all crops share the base's exact sampling grid.
     changed = rgb565(changed)
@@ -169,8 +187,10 @@ def generate():
                 blob.extend(data)
                 used += len(data)
             max_patch_bytes = max(max_patch_bytes, used)
+            mask_offset = len(blob)
+            blob.extend(background_mask(packed))
             tables.append(f"[POSE_{name.upper()}] = {{\n    {{{', '.join(map(str, blocks))}}},\n    " +
-                          ("{" + ",\n     ".join(entries) + "}" if entries else "{{{0}, 0}}") + "\n},")
+                          ("{" + ",\n     ".join(entries) + "}" if entries else "{{{0}, 0}}") + f",\n    {mask_offset}\n}},")
             for stage in range(6):
                 thumb = Path(tmp) / f"{name}-{stage}.png"
                 args = ["magick", "-size", "320x320", "-depth", "8", "rgb:-", "-resize", "160x160"]

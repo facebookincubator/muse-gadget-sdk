@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     uint32_t blocks[BLOCKS + 1];
     patch_t patches[MUSE_EXPRESSION_COUNT];
+    uint32_t background_mask;
 } pose_art_t;
 
 #include "3d/muse3d_assets.inc"
@@ -37,6 +38,12 @@ static int requested_size, shown_variant, capacity;
 static int next_block;
 static bool preparing, ready, failed;
 static uint16_t *scratch;
+static uint16_t background;
+
+void muse_pixel_set_background(uint32_t rgb)
+{
+    background = ((rgb >> 8) & 0xf800) | ((rgb >> 5) & 0x07e0) | ((rgb >> 3) & 0x001f);
+}
 static const char *TAG = "muse_art";
 
 uint32_t muse_pixel_accent(muse_mode_t mode)
@@ -242,6 +249,20 @@ void muse_pixel_scale(uint16_t *dst, int stride, int x0, int x1, int y0, int y1)
                 bool overlay = sx >= r.x && sx < r.x+r.w && sy >= r.y && sy < r.y+r.h;
                 dst[x-x0] = overlay ? front->patch_pixels[p->offset+(sy-r.y)*r.w+sx-r.x]
                                     : front->pixels[sy*size+sx];
+            }
+        }
+        if (background) {
+            for (int x = x0; x <= x1; x++) {
+                if (!size) {
+                    dst[x-x0] = background;
+                    continue;
+                }
+                int sx = (x * size / requested_size) * ART_SIZE / size;
+                int sy = (y * size / requested_size) * ART_SIZE / size;
+                unsigned at = sy * ART_SIZE + sx;
+                uint32_t mask = assets[front->pose].background_mask + at / 8;
+                if (mask < (size_t)(art_end-art) && (art[mask] & (1u << (at % 8))))
+                    dst[x-x0] = background;
             }
         }
     }

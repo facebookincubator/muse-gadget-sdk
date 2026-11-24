@@ -6,6 +6,7 @@
 #include "muse_3d.h"
 #include "muse_pixel.h"
 
+void muse_pixel_set_background(uint32_t rgb);
 int allocations, fail_at, live_allocations;
 static uint16_t before[320*320], after[320*320], full[320*320];
 static void read_frame(uint16_t *out, int size)
@@ -82,6 +83,12 @@ int main(int argc, char **argv)
                 if (p != POSE_ERROR && p != POSE_OFF) assert(changed);
                 /* Python compares every composited pixel against compiled source art. */
                 assert(fwrite(after,sizeof(*after),size*size,stdout) == (size_t)(size*size));
+                muse_pixel_set_background(0xffffff);
+                read_frame(full, size);
+                assert(fwrite(full,sizeof(*full),size*size,stdout) == (size_t)(size*size));
+                muse_pixel_set_background(0);
+                read_frame(full, size);
+                assert(!memcmp(full, after, size*size*2));
                 memcpy(before,after,size*size*2);
                 assert(!muse_3d_update(wanted).count);
             }

@@ -70,6 +70,7 @@ static void heap_caps_free(void *p) { if (p) live_allocations--; free(p); }
                         self.assertGreaterEqual(h, 8)
                         self.assertTrue(cx-20 <= x <= cx < x+w <= cx+21)
                         self.assertTrue(cy-12 <= y <= cy < y+h <= cy+13)
+                    mask = gen.background_mask(gen.rgb565(base))
                     for image in [*stages.values(),base]:
                         native = gen.rgb565(image)
                         expected = native
@@ -79,6 +80,14 @@ static void heap_caps_free(void *p) { if (p) live_allocations--; free(p); }
                         with self.subTest(name=name,size=size,offset=offset):
                             self.assertTrue(out[offset:offset+len(expected)] == expected)
                         offset += len(expected)
+                        light = bytearray(expected)
+                        for y in range(size):
+                            for x in range(size):
+                                at = (y*320//size)*320+x*320//size
+                                if mask[at//8] & (1 << (at%8)):
+                                    light[2*(y*size+x):2*(y*size+x)+2] = b"\xff\xff"
+                        self.assertEqual(out[offset:offset+len(light)], light)
+                        offset += len(light)
             self.assertEqual(offset,len(out))
             with blob.open("r+b") as f:
                 f.write(bytes(2))  # illegal zero-length packet in boot; idle is still valid
