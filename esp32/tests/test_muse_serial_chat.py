@@ -18,6 +18,7 @@ the host's (tools/muse/chat.py), and how tools/muse/avatar.py reads Muse's reply
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shlex
@@ -162,6 +163,63 @@ class ReplyTest(unittest.TestCase):
         r.feed({"type": "text", "msg": 0, "text": "Hel"})
         r.feed({"type": "message_done", "msg": 0, "bytes": 5})
         self.assertFalse(r.intact())
+
+
+class PrinterTest(unittest.TestCase):
+    """What a typed turn shows on screen while its reply streams in."""
+
+    def shows(self, frames) -> str:
+        out = io.StringIO()
+        p = chat.Printer(out)
+        for f in frames:
+            p.feed(f)
+        return out.getvalue()
+
+    def test_one_message_streams_as_it_comes(self) -> None:
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "Hi "},
+            {"type": "text", "msg": 0, "text": "there"},
+            {"type": "message_done", "msg": 0, "bytes": 8},
+            {"type": "done", "messages": 1, "complete": True},
+        ]), "Hi there\n")
+
+    def test_messages_streaming_together_dont_interleave(self) -> None:
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "all this time, and to"},
+            {"type": "text", "msg": 1, "text": "Hi Hassan, "},
+            {"type": "text", "msg": 0, "text": " finally catch up"},
+            {"type": "text", "msg": 1, "text": "good to hear from you!"},
+            {"type": "message_done", "msg": 1, "bytes": 33},
+            {"type": "text", "msg": 0, "text": " the way you hoped."},
+            {"type": "message_done", "msg": 0, "bytes": 57},
+            {"type": "done", "messages": 2, "complete": True},
+        ]), "all this time, and to finally catch up the way you hoped.\n"
+            "Hi Hassan, good to hear from you!\n")
+
+    def test_held_message_streams_once_its_turn_comes(self) -> None:
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "One"},
+            {"type": "text", "msg": 1, "text": "Tw"},
+            {"type": "message_done", "msg": 0, "bytes": 3},
+            {"type": "text", "msg": 1, "text": "o"},
+            {"type": "message_done", "msg": 1, "bytes": 3},
+            {"type": "done", "messages": 2, "complete": True},
+        ]), "One\nTwo\n")
+
+    def test_final_shows_only_what_the_stream_missed(self) -> None:
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "Hel"},
+            {"type": "final", "msg": 0, "text": "Hello"},
+            {"type": "message_done", "msg": 0, "bytes": 5},
+            {"type": "done", "messages": 1, "complete": True},
+        ]), "Hello\n")
+
+    def test_cut_off_reply_still_shows_held_messages(self) -> None:
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "First"},
+            {"type": "text", "msg": 1, "text": "Second"},
+            {"type": "done", "messages": 2, "complete": False},
+        ]), "First\nSecond\n")
 
 
 class ExtractTest(unittest.TestCase):
