@@ -1647,11 +1647,38 @@ static void append_text(msg_t &m, const char *text)
  * speech starts with, so they can be read while the audio is on its way.
  * The spoken captions carry on from there.
  */
+static void remove_widget_marker(char *text)
+{
+    static const char marker[] = "[[hatch_widget:";
+    char *start;
+    while ((start = strstr(text, marker))) {
+        char *end = strstr(start + sizeof(marker) - 1, "]]");
+        if (end) {
+            memmove(start, end + 2, strlen(end + 2) + 1);
+        } else {
+            *start = '\0';
+        }
+    }
+    size_t n = strlen(text);
+    while (n && (text[n - 1] == ' ' || text[n - 1] == '\t' || text[n - 1] == '\r' || text[n - 1] == '\n')) {
+        text[--n] = '\0';
+    }
+}
+
+static bool visible_caption_at(const char *text, size_t at, char *out, size_t cap)
+{
+    if (!muse_hatch_caption_at(text, at, out, cap)) {
+        return false;
+    }
+    remove_widget_marker(out);
+    return out[0] != '\0';
+}
+
 static void show_reply_start(const msg_t &m)
 {
     char line[EV_TEXT];
     if (s_turn.texts) {
-        if (!muse_hatch_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
+        if (!visible_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
             return;
         }
     } else {
@@ -1676,9 +1703,20 @@ static void message_done(int i, const char *final_text)
      * turn_detach()'s own "working on it" notice isn't an answer: keep the last one. */
     const char *review = final_text && final_text[0] ? final_text
         : m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+    bool review_truncated = !(final_text && final_text[0]) && review && m.len > strlen(review);
     if (strcmp(m.id, "local-notice")) {
+        char *visible = nullptr;
+        if (review && strstr(review, "[[hatch_widget:")) {
+            visible = static_cast<char *>(psram_alloc(strlen(review) + 1));
+            if (visible) {
+                strlcpy(visible, review, strlen(review) + 1);
+                remove_widget_marker(visible);
+                review = visible;
+            }
+        }
         muse_review_store_complete(s_turn.review, review,
-            !(final_text && final_text[0]) && review && m.len > strlen(review));
+            review_truncated);
+        free(visible);
     }
 #endif
     if (s_turn.text) {
@@ -3129,7 +3167,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         /* Nothing said yet: the reply's opening page, to read while the speech is on its way. */
         for (int i = 0; i < s_turn.nmsgs && s_turn.texts; i++) {
             if (s_turn.msgs[i].len) {
-                return muse_hatch_caption_at(s_turn.texts + i * TEXT_MAX, 0, out, cap);
+                return visible_caption_at(s_turn.texts + i * TEXT_MAX, 0, out, cap);
             }
         }
         return false;
@@ -3141,7 +3179,7 @@ extern "C" bool muse_hatch_turn_caption(size_t played, char *out, size_t cap)
         at = len ? len - 1 : 0;
     }
 
-    return muse_hatch_caption_at(text, at, out, cap);
+    return visible_caption_at(text, at, out, cap);
 }
 
 extern "C" size_t muse_hatch_turn_read(int16_t *pcm, size_t frames, int wait_ms)
