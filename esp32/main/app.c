@@ -1297,8 +1297,9 @@ static bool start_wifi_join_ota_if_requested(const char *url, bool force,
 }
 
 // Save and apply the endpoints setup sent. on_provision calls this only once
-// that setup's credentials are stored, so the device never holds one pairing's
-// tokens with another's hosts; a failure here wipes both (setup_fail_for_session).
+// that setup's credentials are stored, so hosts are saved only with stored
+// credentials and refused ones never bring in new hosts. A failure here wipes
+// the credentials and any hosts saved (setup_fail_for_session).
 static bool save_setup_endpoints(const char *api_url, const char *api_url_v2,
                                  const char *noise_host) {
     // Only older firmware reads api_url. Keep it current so a device flashed

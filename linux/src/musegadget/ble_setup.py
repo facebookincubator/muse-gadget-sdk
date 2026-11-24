@@ -29,6 +29,7 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
+from musegadget import server_hosts
 from musegadget.ble_framing import ChunkAssembler, encode_chunks
 from musegadget.identity import Identity
 from musegadget.pairing import PairingError, PairingSession
@@ -247,6 +248,15 @@ class SetupController:
             or text("token_type") != "device"
         ):
             self.send_status("error_missing_credentials")
+            return
+        # Setup may name the servers the device sends its credentials to; one
+        # this client doesn't allow (server_hosts) refuses the whole command
+        # before any of it is applied.
+        if not (server_hosts.api_allowed(text("api_url"))
+                and server_hosts.api_allowed(text("api_url_v2"))
+                and server_hosts.noise_allowed(text("noise_host"))):
+            log.warning("setup named a server this client doesn't allow")
+            self.send_status("error_invalid_host")
             return
         generation = 0
         with self._state_lock:
