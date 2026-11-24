@@ -35,7 +35,8 @@ DOCUMENTED_EXAMPLE = {
         "version": "1.0.9",
         "build_sha": "a1b2c3d4e5f60718",
         "uptime_seconds": 5321,
-        "fault": {"address": "0x42012345", "cause": "Load access fault"},
+        "fault": {"address": "0x42012345", "return_address": "0x4200a1b2",
+                  "cause": "Load access fault"},
     },
 }
 

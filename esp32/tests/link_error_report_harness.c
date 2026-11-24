@@ -75,7 +75,8 @@ static void expect_nothing_queued(void) {
 
 static void test_reset_without_a_record(void) {
     // Nothing armed yet: a panic before the first init must not fabricate one.
-    error_report_note_panic((const void *)(uintptr_t)0x1234, "early", NULL);
+    error_report_note_panic((const void *)(uintptr_t)0x1234, NULL, "early",
+                            NULL);
     boot(ESP_RST_BROWNOUT);
     emit_report("no_record");
 }
@@ -115,9 +116,11 @@ static void test_panic_summary(void) {
     boot(ESP_RST_POWERON);
     g_now_us = 5321999999LL;
     error_report_note_panic((const void *)(uintptr_t)0x42012345u,
+                            (const void *)(uintptr_t)0x4200a1b2u,
                             "Load access fault", NULL);
     // A fault inside the panic handler must not replace the first one.
     error_report_note_panic((const void *)(uintptr_t)0x40000000u,
+                            (const void *)(uintptr_t)0x40000004u,
                             "Illegal instruction", NULL);
 
     // The bootloader rolled back: the report still names what crashed.
@@ -139,7 +142,7 @@ static void test_abort_detail_is_bounded_and_printable(void) {
 
     boot(ESP_RST_POWERON);
     g_now_us = 7 * 1000000LL;
-    error_report_note_panic(NULL, "abort", detail);
+    error_report_note_panic(NULL, NULL, "abort", detail);
     boot(ESP_RST_PANIC);
     emit_report("abort");
 }

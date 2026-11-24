@@ -34,6 +34,9 @@
 #include "esp_attr.h"
 #include "esp_private/panic_internal.h"
 #include "sdkconfig.h"
+#if CONFIG_IDF_TARGET_ARCH_RISCV
+#include "riscv/rvruntime-frames.h"
+#endif
 #if CONFIG_SOC_RTC_FAST_MEM_SUPPORTED || CONFIG_SOC_RTC_SLOW_MEM_SUPPORTED
 #define RETAINED_ATTR RTC_NOINIT_ATTR
 #else
@@ -49,6 +52,7 @@
 #define RECORD_MAGIC 0x4c455231u
 #define RECORD_FLAG_PANIC 0x1u
 #define RECORD_FLAG_ADDRESS 0x2u
+#define RECORD_FLAG_RETURN_ADDRESS 0x4u
 
 // All-uint32 header and char arrays: no padding, so the checksum covers every
 // byte before it.
@@ -58,6 +62,7 @@ typedef struct {
     uint32_t flags;
     uint32_t uptime_seconds;
     uint32_t fault_address;
+    uint32_t return_address;
     char version[32];
     char build_sha[20];
     char cause[48];
@@ -145,14 +150,16 @@ void error_report_init(void) {
     arm_record(count);
 }
 
-void error_report_note_panic(const void *address, const char *cause,
-                             const char *detail) {
+void error_report_note_panic(const void *address, const void *return_address,
+                             const char *cause, const char *detail) {
     // A panic inside the panic handler re-enters here: keep the first one.
     if (!record_is_valid(&s_record) || (s_record.flags & RECORD_FLAG_PANIC)) {
         return;
     }
-    s_record.flags = RECORD_FLAG_PANIC | (address ? RECORD_FLAG_ADDRESS : 0);
+    s_record.flags = RECORD_FLAG_PANIC | (address ? RECORD_FLAG_ADDRESS : 0)
+                     | (return_address ? RECORD_FLAG_RETURN_ADDRESS : 0);
     s_record.fault_address = (uint32_t)(uintptr_t)address;
+    s_record.return_address = (uint32_t)(uintptr_t)return_address;
     s_record.uptime_seconds = (uint32_t)(esp_timer_get_time() / 1000000LL);
     copy_printable(s_record.cause, sizeof(s_record.cause), cause);
     copy_printable(s_record.detail, sizeof(s_record.detail), detail);
@@ -177,6 +184,14 @@ static bool add_fault(cJSON *report) {
         snprintf(address, sizeof(address), "0x%08" PRIx32,
                  s_pending.fault_address);
         if (!cJSON_AddStringToObject(fault, "address", address)) return false;
+    }
+    if (s_pending.flags & RECORD_FLAG_RETURN_ADDRESS) {
+        char address[11];
+        snprintf(address, sizeof(address), "0x%08" PRIx32,
+                 s_pending.return_address);
+        if (!cJSON_AddStringToObject(fault, "return_address", address)) {
+            return false;
+        }
     }
     if (s_pending.cause[0]
         && !cJSON_AddStringToObject(fault, "cause", s_pending.cause)) {
@@ -225,14 +240,27 @@ void error_report_mark_sent(void) {
 #ifdef ESP_PLATFORM
 void __real_esp_panic_handler(panic_info_t *info);
 
+// The caller, when the faulting function calls nothing itself; otherwise a
+// point in the faulting function just after the last call it made.
+static const void *frame_return_address(const panic_info_t *info) {
+#if CONFIG_IDF_TARGET_ARCH_RISCV
+    const RvExcFrame *frame = info->frame;
+    return frame ? (const void *)frame->ra : NULL;
+#else
+    (void)info;
+    return NULL;
+#endif
+}
+
 // Linked in place of esp_panic_handler (see main/CMakeLists.txt). An abort
 // reaches here through a deliberate fault inside panic_abort, so its address
 // and exception name say nothing; its message does.
 void __wrap_esp_panic_handler(panic_info_t *info) {
     if (g_panic_abort) {
-        error_report_note_panic(NULL, "abort", g_panic_abort_details);
+        error_report_note_panic(NULL, NULL, "abort", g_panic_abort_details);
     } else {
-        error_report_note_panic(info->addr, info->reason, NULL);
+        error_report_note_panic(info->addr, frame_return_address(info),
+                                info->reason, NULL);
     }
     __real_esp_panic_handler(info);
 }

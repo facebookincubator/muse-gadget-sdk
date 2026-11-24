@@ -32,9 +32,10 @@ char *error_report_pending_json(void);
 void error_report_mark_sent(void);
 
 // Panic-handler entry: stores into retained RAM without locking, logging or
-// allocating. `address` may be NULL when the faulting instruction is unknown.
-void error_report_note_panic(const void *address, const char *cause,
-                             const char *detail);
+// allocating. `address` is the faulting instruction and `return_address` the
+// return-address register at the fault; either may be NULL when unknown.
+void error_report_note_panic(const void *address, const void *return_address,
+                             const char *cause, const char *detail);
 
 #ifdef __cplusplus
 }

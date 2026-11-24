@@ -29,7 +29,7 @@ contract for it. The ESP32 firmware (`../esp32`) and the Linux client
 ## The message
 
 ```json
-{"method":"link.error_report","report":{"schema_version":1,"kind":"crash","reason":"panic","consecutive_count":1,"version":"1.0.9","build_sha":"a1b2c3d4e5f60718","uptime_seconds":5321,"fault":{"address":"0x42012345","cause":"Load access fault"}}}
+{"method":"link.error_report","report":{"schema_version":1,"kind":"crash","reason":"panic","consecutive_count":1,"version":"1.0.9","build_sha":"a1b2c3d4e5f60718","uptime_seconds":5321,"fault":{"address":"0x42012345","return_address":"0x4200a1b2","cause":"Load access fault"}}}
 ```
 
 It goes on `/link-control` like `link.register`, as one length-prefixed JSON
@@ -47,6 +47,7 @@ reply.
 | `uptime_seconds` | Optional. How long the crashed run had been up, in whole seconds. |
 | `fault` | Optional. What is known about the fault itself, each part optional. |
 | `fault.address` | The instruction that faulted: `0x` and eight hex digits. |
+| `fault.return_address` | The return-address register at the fault, in the same form: the caller when the faulting function calls nothing itself, otherwise a point in that function after its last call. It is one address, not a backtrace. The ESP32 firmware sends it on RISC-V chips only. |
 | `fault.cause` | The fault's name, such as `Load access fault`, `abort` or `ValueError`: 1 to 47 printable ASCII characters. |
 | `fault.detail` | Where or why, from the program's own text: an assertion's message, or `file.py:372 in function`. 1 to 95 printable ASCII characters. |
 
