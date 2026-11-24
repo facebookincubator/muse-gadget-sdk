@@ -246,6 +246,7 @@ enum tts_t : uint8_t { TTS_NONE, TTS_QUEUED, TTS_ACTIVE, TTS_FINISHED };
 struct msg_t {
     char id[80];
     size_t len;              /* reply text length so far */
+    size_t console_bytes;    /* raw text sent to the typed chat reader */
     uint8_t marker_prefix;   /* potential opening delimiter held across deltas */
     bool inside_marker, closing_bracket;
     char tail[128];          /* its last characters, for the caption */
@@ -1707,6 +1708,7 @@ static void remove_widget_marker(char *text)
  */
 static void show_reply_start(const msg_t &m)
 {
+    if (!m.len) return;
     char line[EV_TEXT];
     if (s_turn.texts) {
         if (!muse_hatch_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
@@ -1750,7 +1752,12 @@ static void message_done(int i, const char *final_text)
                 strlcpy(visible, review, strlen(review) + 1);
                 remove_widget_marker(visible);
             }
-            review = visible;
+            if (visible) {
+                review = visible;
+            } else {
+                review = m.len && s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr;
+                review_truncated = true;
+            }
         }
         muse_review_store_complete(s_turn.review, review,
             review_truncated);
@@ -1759,8 +1766,8 @@ static void message_done(int i, const char *final_text)
 #endif
     if (s_turn.text) {
         /* The whole text if the pieces didn't add up to it (a line skipped, say): the reader uses it instead. */
-        size_t n = m.len;
-        if (final_text && final_text[0] && strlen(final_text) != m.len) {
+        size_t n = m.console_bytes;
+        if (final_text && final_text[0] && strlen(final_text) != n) {
             n = strlen(final_text);
             muse_hatch_console("final", final_text, "\"msg\":%d", i);
         }
@@ -2143,6 +2150,7 @@ static void on_message(const char *event, cJSON *payload, cJSON *line)
             mark(M_TEXT);
             /* Retain typed text too: a later widget may need its question. */
             append_text(m, text);
+            m.console_bytes += strlen(text);
             muse_hatch_console("text", text, "\"msg\":%d", i);
         } else if (text && text[0]) {
             add_reply_text(i, text);

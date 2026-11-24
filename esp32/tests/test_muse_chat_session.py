@@ -901,7 +901,17 @@ int main(int argc, char **argv) {
         }
         event("delta.text_append", "lunch", "", " Pasta selected.");
         assert(!strcmp(s_turn.texts, "Lunch? Pasta selected."));
-        puts(s_turn.texts);
+        begin(false);
+        event("delta.message_start", "next", "note");
+        event("delta.text_append", "next", "", "[");
+        assert(!captions);
+        event("delta.text_append", "next", "", "[hatch_widget:other]]Done");
+        assert(captions == 1 && !strcmp(last_caption, "Done"));
+        begin(true);
+        event("delta.message_start", "typed", "note");
+        event("delta.text_append", "typed", "", "[[hatch_widget:x]]OK");
+        event("delta.message_done", "typed");
+        assert(!strcmp(console_fields, R"("msg":0,"bytes":20)"));
         free(s_turn.texts);
         break;
     }
