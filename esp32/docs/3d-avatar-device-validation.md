@@ -104,6 +104,22 @@ and 128 px avatars. Reference comparisons cover 320, 256, 128 and 173 px sizes.
 The tests exercise allocation failure, malformed art, canceled pose preparation,
 clipped drawing and expression timing with address/undefined behavior sanitizers.
 
+## Final review regressions
+
+Thinking holds one pose with no dot timer. Its presentation-clock test repeats
+presentation and elapsed-time cycles while checking that the expression stays
+fixed. The progress ring remains driven by the existing UI timer.
+
+The renderer supports nonblack theme backgrounds using an edge-connected mask
+stored with each pose. Enclosed dark facial details retain their original
+pixels. Reference tests cover every base and facial patch at all four sizes,
+white backgrounds, and returning to black. Theme appearance has host reference
+coverage; the physical tests above used the default dark theme.
+
+A separate 5,000-byte reply regression verifies that the shared voice deadline
+ends the turn as incomplete, retains the answer for review, and permits a new
+turn. The successful 1,400-byte case still verifies full live-caption pacing.
+
 ## Earlier cached renderer build and test coverage
 
 ESP-IDF v6.0.3 built both 1.75C profiles, the Waveshare 1.75 legacy pixel

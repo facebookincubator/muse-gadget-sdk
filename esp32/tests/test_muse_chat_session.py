@@ -451,6 +451,19 @@ static void review_keeps_caption_pace() {
     assert((int64_t)m.pcm_frames * 1000000 / MIC_RATE < TURN_CAP_US);
     assert(!strcmp(reviewed(), reply));
     s_turn.texts = nullptr;
+    static char very_long[5001];
+    memset(very_long, 'b', sizeof(very_long)-1);
+    voice_reply({very_long});
+    start_tts();
+    assert((int64_t)s_turn.msgs[0].pcm_frames * 1000000 / MIC_RATE > TURN_CAP_US);
+    clock_us = s_turn.start_us + TURN_CAP_US + 1;
+    check_turn();
+    assert(s_turn.phase == P_IDLE && done_events == 1);
+    assert(!strcmp(done_text, "REPLY INCOMPLETE"));
+    assert(!strcmp(reviewed(), very_long));
+    begin();
+    assert(s_turn.phase == P_WAIT_REPLY);
+    s_turn.texts = nullptr;
 }
 #endif
 static void status(const char *code) {
