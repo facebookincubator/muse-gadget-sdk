@@ -214,6 +214,21 @@ class PrinterTest(unittest.TestCase):
             {"type": "done", "messages": 1, "complete": True},
         ]), "Hello\n")
 
+    def test_long_final_comes_in_several_lines(self) -> None:
+        whole = "x" * 300 + "y" * 300
+        finals = [{"type": "final", "msg": 1, "text": whole[i:i + 240]} for i in range(0, len(whole), 240)]
+        self.assertEqual(self.shows([
+            {"type": "text", "msg": 0, "text": "One"},
+            {"type": "text", "msg": 1, "text": "x" * 10},
+            *finals,
+            {"type": "message_done", "msg": 1, "bytes": len(whole)},
+            {"type": "message_done", "msg": 0, "bytes": 3},
+            {"type": "text", "msg": 2, "text": "x" * 10},
+            *[dict(f, msg=2) for f in finals],
+            {"type": "message_done", "msg": 2, "bytes": len(whole)},
+            {"type": "done", "messages": 3, "complete": True},
+        ]), "One\n" + whole + "\n" + whole + "\n")
+
     def test_cut_off_reply_still_shows_held_messages(self) -> None:
         self.assertEqual(self.shows([
             {"type": "text", "msg": 0, "text": "First"},

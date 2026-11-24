@@ -127,6 +127,7 @@ class Printer:
     def __init__(self, out):
         self.out = out
         self.text = collections.defaultdict(str)    # msg -> what has arrived
+        self.final = collections.defaultdict(str)   # msg -> its whole text, until its message_done
         self.shown = {}                             # msg -> how much of it is on screen
         self.ended = set()                          # messages whose message_done arrived
         self.current = None                         # the message being shown live
@@ -163,10 +164,16 @@ class Printer:
         if t == "text":
             self.text[msg] += f.get("text", "")
         elif t == "final":
-            self.text[msg] = f.get("text", "")
+            self.final[msg] += f.get("text", "")    # a long one comes in several lines
+            return
         elif t == "message_done":
             self.ended.add(msg)
+            if msg in self.final:
+                self.text[msg] = self.final.pop(msg)
         elif t == "done":
+            for m, text in self.final.items():
+                self.text[m] = text
+            self.final.clear()
             while self.current is not None:
                 self._end(self.current)
             for m in sorted(self.text):
