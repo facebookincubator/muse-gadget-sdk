@@ -246,7 +246,8 @@ static volatile size_t s_seed_frames;
 static int16_t *s_rec;   /* MAX_FRAMES */
 static size_t s_rec_n, s_sent;
 static bool s_live = true;
-static bool s_fail_caption;   /* the idle caption is a turn failure */
+static bool s_fail_caption;   /* the idle caption is a failed turn's */
+static bool s_fail_away;      /* and Muse has been out of reach since */
 static bool s_tried;     /* it went to Muse */
 
 typedef struct {
@@ -696,9 +697,10 @@ static bool hatch_reply(bool *delivered, const char *opening)
                 ESP_LOGW(TAG, "muse: %s", text);
                 atomic_store(&s_reply_waiting, false);
                 muse_state_set_level(0);
-                s_fail_caption = true;   /* v4.5: cleared on recovery (idle loop) */
                 muse_wakeword_set_playback(false);
                 go_idle(text);
+                s_fail_caption = true;   /* cleared once Muse is back (voice_task) */
+                s_fail_away = false;
                 return false;
             default:
                 break;
@@ -802,6 +804,7 @@ static void go_idle(const char *caption)
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
+    s_fail_caption = false;   /* a newer caption replaces a failed turn's */
 }
 
 /* Errors and status stay up; a press too short to count only needs a hint. */
@@ -1783,15 +1786,16 @@ static void voice_task(void *arg)
                 pre_reset();
             }
             if (s_fail_caption && muse_state_mode(NULL) == MUSE_MODE_IDLE) {
-                /* v4.5: a turn-failure caption outlives the outage
-                 * (recur3: READY beside LOST CONNECTION minutes
-                 * after the resubscribe). Clear it once Hatch is
-                 * reachable again; while down it stays up. */
+                /* A turn that failed as Muse went out of reach keeps its
+                 * caption until Muse is back. One that failed with Muse
+                 * still connected (no reply, say) keeps it. */
                 muse_hatch_status_t hst;
                 muse_hatch_status(&hst);
-                if (hst.state == MUSE_HATCH_REACHABLE) {
+                if (hst.state != MUSE_HATCH_REACHABLE) {
+                    s_fail_away = true;
+                } else if (s_fail_away) {
                     s_fail_caption = false;
-                    go_idle("");
+                    muse_state_set_caption("%s", "");
                 }
             }
             /* A press goes first (a waking one too: it may only wake Muse). */

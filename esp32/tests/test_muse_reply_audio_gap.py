@@ -50,6 +50,7 @@ class ReplyAudioGap(unittest.TestCase):
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 static atomic_bool s_reply_waiting;
+static bool s_fail_caption, s_fail_away;
 static bool muse_voice_reply_waiting(void) { return atomic_load(&s_reply_waiting); }
 static int step, scenario, captions, silence_writes;
 static int64_t now;
