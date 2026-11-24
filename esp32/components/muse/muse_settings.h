@@ -134,7 +134,9 @@ void muse_settings_set_wakeword_on(bool on);
 /* A network name is remembered first among the saved ones and joined now;
  * an empty ssid forgets every saved network. */
 void muse_settings_set_wifi(const char *ssid, const char *pass);
-void muse_settings_set_hatch_host(const char *host);
+/* False, changing nothing, for a server this build doesn't allow
+ * (muse_server_hosts.h); empty means the default. */
+bool muse_settings_set_hatch_host(const char *host);
 void muse_settings_set_hatch_vm(const char *vm);
 /* append=true adds to the stored token (for chunked BLE writes). */
 esp_err_t muse_settings_set_hatch_token(const char *token, bool append);

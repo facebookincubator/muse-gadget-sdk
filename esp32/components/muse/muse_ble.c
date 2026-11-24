@@ -152,7 +152,9 @@ static void run_command(char *cmd)
             muse_settings_set_wifi("", "");   /* every saved network */
         }
     } else if (!strcmp(cmd, "hatch.host")) {
-        muse_settings_set_hatch_host(v);
+        if (!muse_settings_set_hatch_host(v)) {
+            res = "error: server not allowed";
+        }
     } else if (!strcmp(cmd, "hatch.vm")) {
         muse_settings_set_hatch_vm(v);
     } else if (!strcmp(cmd, "hatch.token") || !strcmp(cmd, "hatch.token+")) {

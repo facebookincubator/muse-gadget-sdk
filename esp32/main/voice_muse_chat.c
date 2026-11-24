@@ -29,6 +29,7 @@
 #include "app.h"
 #include "config_store.h"
 #include "identity.h"
+#include "muse_server_hosts.h"
 #include "wifi_mgr.h"
 
 #include "muse_link.h"
@@ -47,7 +48,9 @@ static char s_host[MUSE_HOST_MAX + 1];
 
 void voice_hatch_refresh(void) {
     char host[MUSE_HOST_MAX + 1];
-    if (!config_get_str("noise_host", host, sizeof(host))) host[0] = '\0';
+    if (!config_get_str("noise_host", host, sizeof(host)) || !muse_server_noise_allowed(host)) {
+        host[0] = '\0';
+    }
     portENTER_CRITICAL(&s_lock);
     strlcpy(s_host, host, sizeof(s_host));
     portEXIT_CRITICAL(&s_lock);
