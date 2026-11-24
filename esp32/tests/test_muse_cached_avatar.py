@@ -62,6 +62,14 @@ static void heap_caps_free(void *p) { if (p) live_allocations--; free(p); }
             for size in (320,173):
                 for name in reversed(gen.POSES):
                     base, stages = gen.expressions(name,sources,manifest)
+                    if name == "idle" and size == 320:
+                        # Petting must produce a visibly open smile, confined to the mouth.
+                        (x, y, w, h), _ = gen.patch(gen.rgb565(base), stages[5])
+                        cx, cy = manifest["poses"][name]["mouth"]
+                        self.assertGreaterEqual(w, 20)
+                        self.assertGreaterEqual(h, 8)
+                        self.assertTrue(cx-20 <= x <= cx < x+w <= cx+21)
+                        self.assertTrue(cy-12 <= y <= cy < y+h <= cy+13)
                     for image in [*stages.values(),base]:
                         native = gen.rgb565(image)
                         expected = native

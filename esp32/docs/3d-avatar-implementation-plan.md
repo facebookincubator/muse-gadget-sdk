@@ -22,7 +22,7 @@ cache layout, tuning decisions and measurements are recorded in
 | Speaking | Friendly speaking pose with stationary hands | Fixed timer cycles closed, slightly open, open, slightly open, closed mouth. No audio-level or pause detection. |
 | Error | Worried face with red accents | Entirely still; no shaking or bobbing. |
 | Off or goodbye | One hand raised in goodbye | Hold the pose until the existing shutdown sequence switches off. |
-| Happy or pet reaction | Retain the current body's pose | Temporarily show smiling mouth and happy eyes, then restore the current state's expression. |
+| Happy or pet reaction | Retain the current body's pose | Temporarily show a wide smiling mouth, then restore the current state's expression. |
 
 Use a fixed head tilt rather than animated sideways sway. Happy is a temporary
 facial override, and working is a variation of thinking; neither needs a new
@@ -87,7 +87,7 @@ previous feature cleanly without transparent blending or erasing trails.
 - Idle: open, half-closed and closed eyes.
 - Speaking: closed, slightly open and open mouths; ordinary eyes stay still.
 - Thinking: a clean empty-dot background and each visible dot stage.
-- Happy: smiling mouth and happy-eye patches matching each eligible base.
+- Happy: smiling mouth patches matching each eligible base.
   Use a static expression; reuse variants where the base geometry matches.
 
 Error and goodbye take precedence over happy. If a state changes during a

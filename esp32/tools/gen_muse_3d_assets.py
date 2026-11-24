@@ -78,13 +78,10 @@ def expressions(name, art, manifest):
         for center, src in zip(spec["eyes"], source["eyes"]):
             paste_feature(img, center, art[source.get("file", "idle")], src, (14, 12), height)
 
-    def smile(img, wide=1):
-        paste_feature(img, spec["mouth"], art["idle"], idle["mouth"], (14, 10), scale_x=wide)
-
     if name == "boot":
         eyes(base, shut=True)
     if name == "speaking":
-        smile(base)
+        paste_feature(base, spec["mouth"], art["idle"], idle["mouth"], (14, 10))
     variants = {}
     if name in ("boot", "idle"):
         heights = (0.25, 0.50, 0.75, 1.0) if name == "boot" else (0.50, 0)
@@ -113,8 +110,9 @@ def expressions(name, art, manifest):
             variants[stage] = frame.copy()
     if "eyes" in spec:
         frame = base.copy()
-        eyes(frame, shut=True)
-        smile(frame, 1.35)
+        # Widen the open mouth so the grin stays legible in the compact reply layout.
+        paste_feature(frame, spec["mouth"], art["speaking"], manifest["poses"]["speaking"]["mouth"],
+                      (20, 12), scale_y=0.85, scale_x=1.7)
         variants[5] = frame
     return base, variants
 
