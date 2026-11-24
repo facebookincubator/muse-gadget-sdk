@@ -37,6 +37,7 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `server_hosts.py` | The only server hosts pairing may name: the Muse app's `api_url`, `api_url_v2` and `noise_host` |
 | `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
 | `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
@@ -167,6 +168,11 @@ never has a command's parameters, output or error message.
 - `provision_v2` carries `api_url`, which only older firmware reads (it adds
   `/hatch/`). This client ignores it and uses `api_url_v2` when newer apps
   send it, or `https://api.muse.ai`, with bare API paths either way.
+- Setup takes only the hosts the Muse app sends (`server_hosts.py`):
+  `provision_v2` naming another gets `error_invalid_host` before anything is
+  saved, and a saved one the client doesn't take falls back to the default.
+  `MUSEGADGET_CUSTOM_SERVER_HOSTS=1` in the pairing's and the service's
+  environment accepts any, for development only.
 - The Android app writes `negotiatedMtu - 3` bytes with no cap, and Android
   rejects writes over 512 bytes. BlueZ must have `[GATT] ExchangeMTU = 256` in
   `/etc/bluetooth/main.conf`; the installer sets it. Symptom if it's missing:

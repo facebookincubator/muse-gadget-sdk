@@ -34,7 +34,9 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, device_guide, error_report, muse_api, reaper, tls
+from musegadget import (
+    __version__, config, device_guide, error_report, muse_api, reaper, server_hosts, tls,
+)
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
@@ -45,7 +47,7 @@ from musegadget.muse_turn import MuseTurn, _acknowledged_message_ids
 
 log = logging.getLogger(__name__)
 
-DEFAULT_NOISE_HOST = "hatch.metaaivm.com"
+DEFAULT_NOISE_HOST = server_hosts.NOISE_HOST
 BACKOFF_BASE_S = 2.0
 BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
@@ -205,7 +207,7 @@ class Service:
 
     async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
         session = LinkSession(
-            noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
+            noise_host=server_hosts.noise_host(pairing.get("noise_host")),
             vm_id=vm["vm_id"] or vm["vm_name"],
             vm_auth_token=vm["vm_auth_token"],
             device=self.describe(),
