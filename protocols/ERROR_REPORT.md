@@ -29,7 +29,7 @@ contract for it. The ESP32 firmware (`../esp32`) and the Linux client
 ## The message
 
 ```json
-{"method":"link.error_report","report":{"schema_version":1,"kind":"crash","reason":"panic","consecutive_count":1,"version":"1.0.9","uptime_seconds":5321,"fault":{"address":"0x42012345","cause":"Load access fault"}}}
+{"method":"link.error_report","report":{"schema_version":1,"kind":"crash","reason":"panic","consecutive_count":1,"version":"1.0.9","build_sha":"a1b2c3d4e5f60718","uptime_seconds":5321,"fault":{"address":"0x42012345","cause":"Load access fault"}}}
 ```
 
 It goes on `/link-control` like `link.register`, as one length-prefixed JSON
@@ -43,6 +43,7 @@ reply.
 | `reason` | How the previous run ended, from the table below. |
 | `consecutive_count` | How many runs in a row ended badly, this one included: 1 or more. A run that ends normally resets it. |
 | `version` | Optional. The version that crashed, which is not always the one that registered: a bootloader can roll back to an older build. 1 to 31 printable ASCII characters. |
+| `build_sha` | Optional. Which binary crashed, for builds that share a version: 8 to 64 lowercase hex digits. The ESP32 sends the first 16 hex digits of its ELF file's SHA-256, which `get_device_info` reports under the same name and ESP-IDF logs at boot as `ELF file SHA256`. Linux sends none. |
 | `uptime_seconds` | Optional. How long the crashed run had been up, in whole seconds. |
 | `fault` | Optional. What is known about the fault itself, each part optional. |
 | `fault.address` | The instruction that faulted: `0x` and eight hex digits. |

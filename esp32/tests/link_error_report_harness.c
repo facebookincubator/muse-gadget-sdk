@@ -108,7 +108,10 @@ static void test_abnormal_resets_in_a_row(void) {
 }
 
 static void test_panic_summary(void) {
+    static const uint8_t elf_sha[] = {0xa1, 0xb2, 0xc3, 0xd4,
+                                      0xe5, 0xf6, 0x07, 0x18, 0x99};
     snprintf(g_app.version, sizeof(g_app.version), "1.0.9");
+    memcpy(g_app.app_elf_sha256, elf_sha, sizeof(elf_sha));
     boot(ESP_RST_POWERON);
     g_now_us = 5321999999LL;
     error_report_note_panic((const void *)(uintptr_t)0x42012345u,
@@ -119,6 +122,7 @@ static void test_panic_summary(void) {
 
     // The bootloader rolled back: the report still names what crashed.
     snprintf(g_app.version, sizeof(g_app.version), "1.0.8");
+    g_app.app_elf_sha256[0] = 0x0f;
     boot(ESP_RST_PANIC);
     emit_report("panic");
 

@@ -59,6 +59,7 @@ typedef struct {
     uint32_t uptime_seconds;
     uint32_t fault_address;
     char version[32];
+    char build_sha[20];
     char cause[48];
     char detail[96];
     uint32_t checksum;
@@ -114,8 +115,12 @@ static void arm_record(uint32_t consecutive_count) {
     memset(&s_record, 0, sizeof(s_record));
     s_record.magic = RECORD_MAGIC;
     s_record.consecutive_count = consecutive_count;
-    copy_printable(s_record.version, sizeof(s_record.version),
-                   esp_app_get_description()->version);
+    const esp_app_desc_t *app = esp_app_get_description();
+    copy_printable(s_record.version, sizeof(s_record.version), app->version);
+    // The same 16 hex digits get_device_info reports as build_sha.
+    for (size_t i = 0; i < 8; i++) {
+        snprintf(s_record.build_sha + i * 2, 3, "%02x", app->app_elf_sha256[i]);
+    }
     s_record.checksum = record_checksum(&s_record);
 }
 
@@ -201,6 +206,9 @@ char *error_report_pending_json(void) {
               && (!s_pending.version[0]
                   || cJSON_AddStringToObject(report, "version",
                                              s_pending.version))
+              && (!s_pending.build_sha[0]
+                  || cJSON_AddStringToObject(report, "build_sha",
+                                             s_pending.build_sha))
               && (!panic
                   || (cJSON_AddNumberToObject(report, "uptime_seconds",
                                               s_pending.uptime_seconds)

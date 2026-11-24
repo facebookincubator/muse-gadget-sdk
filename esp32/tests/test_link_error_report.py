@@ -33,6 +33,7 @@ DOCUMENTED_EXAMPLE = {
         "reason": "panic",
         "consecutive_count": 1,
         "version": "1.0.9",
+        "build_sha": "a1b2c3d4e5f60718",
         "uptime_seconds": 5321,
         "fault": {"address": "0x42012345", "cause": "Load access fault"},
     },
@@ -75,8 +76,8 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
             self.assertEqual(message["method"], "link.error_report")
             reports.setdefault(label, []).append(message["report"])
 
-        # The crashed version survives a rollback to 1.0.8, uptime rounds
-        # down, and the first of two nested panics is the one reported.
+        # The crashed version and binary survive a rollback to 1.0.8, uptime
+        # rounds down, and the first of two nested panics is the one reported.
         self.assertEqual(
             {"method": "link.error_report", "report": reports["panic"][0]},
             DOCUMENTED_EXAMPLE,
@@ -84,7 +85,8 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
         self.assertEqual(
             reports["after_panic"],
             [{"schema_version": 1, "kind": "crash", "reason": "watchdog",
-              "consecutive_count": 2, "version": "1.0.8"}],
+              "consecutive_count": 2, "version": "1.0.8",
+              "build_sha": "0fb2c3d4e5f60718"}],
         )
         self.assertEqual(
             reports["no_record"],
