@@ -402,7 +402,8 @@ static size_t caption_page_end(size_t from)
     if (from < s_caption_response && s_caption_response < end) end = s_caption_response;
     if (end - from <= 32) return end;
     size_t cut = from + 32;
-    while ((s_caption_text[cut] & 0xc0) == 0x80) --cut;
+    while (cut > from && (s_caption_text[cut] & 0xc0) == 0x80) --cut;
+    if (cut == from) cut = from + 32;   /* not UTF-8: cut at 32 bytes */
     size_t word = cut;
     while (word > from && s_caption_text[word] != ' ' && s_caption_text[word] != '\n') --word;
     return word > from ? word : cut;

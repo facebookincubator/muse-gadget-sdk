@@ -3014,6 +3014,27 @@ static void caption_waits_for_speaker(void)
     expect_event(MUSE_VOICE_CALL_EV_ENDED);
 }
 
+/* Transcript bytes that aren't UTF-8 still page within the caption's 32 bytes. */
+static void caption_not_utf8(void)
+{
+    int64_t id = live_call();
+    char text[96];
+    line(id, R"({"type":"response.created","response":{"id":"r1"}})");
+    line(id, R"({"type":"response.output_audio_transcript.done","transcript":" )" + std::string(40, '\x80') + R"("})");
+    expect_event(MUSE_VOICE_CALL_EV_REPLY_START);
+    int pages = 0;
+    for (int i = 0; i < 20; ++i) {
+        poll(1, 400000);
+        if (next_event(text, sizeof(text)) != MUSE_VOICE_CALL_EV_REPLY) continue;
+        assert(strlen(text) <= 32);
+        ++pages;
+    }
+    assert(pages);
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 static void hands_free_playout(void)
 {
     int64_t id = live_call();
@@ -3060,7 +3081,8 @@ int main(int argc, char **argv)
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
                                     ptt_stop_paced_interrupts, hands_free_working,
-                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap, long_call_captions, hands_free_playout, caption_waits_for_speaker };
+                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap, long_call_captions, hands_free_playout, caption_waits_for_speaker,
+                                    caption_not_utf8 };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

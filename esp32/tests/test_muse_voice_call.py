@@ -346,7 +346,8 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
              'ptt_stop_paced_ack_only', 'ptt_stop_paced_ack_eof', 'ptt_stop_paced_eof_ack', 'ptt_stop_paced_output_only',
              'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts', 'hands_free_working',
-             'hands_free_interrupted_settle', 'hands_free_early_media_and_keep_cap', 'long_call_captions', 'hands_free_playout', 'caption_waits_for_speaker']
+             'hands_free_interrupted_settle', 'hands_free_early_media_and_keep_cap', 'long_call_captions', 'hands_free_playout', 'caption_waits_for_speaker',
+             'caption_not_utf8']
 
     @classmethod
     def setUpClass(cls):
@@ -442,6 +443,9 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_long_streamed_and_final_only_captions(self):
         self.run_case('long_call_captions')
+
+    def test_captions_that_arent_utf8_stay_within_a_page(self):
+        self.run_case('caption_not_utf8')
 
     def test_early_media_answers_its_turn_and_a_lost_reply_keeps_it_once(self):
         self.run_case('hands_free_early_media_and_keep_cap')
