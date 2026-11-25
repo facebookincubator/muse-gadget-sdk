@@ -9,7 +9,20 @@
  * limitations under the License.
  */
 #pragma once
+#include <stdbool.h>
 #include <stddef.h>
+/* The VM's Gadget API: the identity, and the prefix of every avatar file URL
+ * it hands out. Both are requested on ServiceType::Gadget. */
+#define AVATAR_IDENTITY_PATH "/api/gadget/identity"
+#define AVATAR_IDENTITY_FILE_PREFIX "/api/gadget/identity/avatar?"
+/* path: the still's Gadget API URL; revision: the identity's updated_ms, which
+ * changes whenever the identity or any avatar file does. */
 typedef struct { char path[512]; char revision[128]; } avatar_identity_t;
 /* 1: available; 0: explicitly absent; -1: invalid/unknown, retain last good. */
 int avatar_identity_parse(const char *json, size_t len, avatar_identity_t *out);
+/* True for an avatar file URL from the Gadget API that fits in cap bytes. */
+bool avatar_identity_url_ok(const char *url, size_t cap);
+struct cJSON;
+/* A {"light": URL, "dark": URL} object's light URL, else its dark one; only a
+ * URL avatar_identity_url_ok accepts. NULL when neither is. */
+const char *avatar_identity_pick_url(const struct cJSON *urls, size_t cap);

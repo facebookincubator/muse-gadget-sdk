@@ -672,7 +672,10 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 
 Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
 (`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
-`/api/gadget/me`). The requests below go to the VM's daemon.
+`/api/gadget/me`), and avatar sync and its clip export read
+`/api/gadget/identity` and its avatar files through
+`noise_ctrl_req_open_gadget()`. The requests below go to the VM's
+daemon.
 
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon

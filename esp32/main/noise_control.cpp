@@ -1133,13 +1133,23 @@ struct req_op {
     size_t len;
     noise_ctrl_req_cb cb;
     void *ctx;
+    bool gadget;  // Open: the request goes to the Gadget API, not the daemon
 };
 
 struct req_stream {
     int64_t id;  // 0: free
     noise_ctrl_req_cb cb;
     void *ctx;
+    bool gadget;  // every frame of the stream names the service its open did
 };
+
+static ServiceType req_service(bool gadget) {
+    return gadget ? ServiceType::Gadget : ServiceType::Daemon;
+}
+
+static int64_t req_open_on(bool gadget, const char *verb, const char *path,
+                           const char *const *headers, bool end_body,
+                           noise_ctrl_req_cb cb, void *ctx);
 
 static QueueHandle_t s_req_q = nullptr;
 static std::atomic<uint32_t> s_req_next_id{REQ_STREAM_BASE};
@@ -1217,7 +1227,7 @@ static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
     req.headers = Span<const HeaderView>(hdrs, nh);
     req.end_body = op.end_body;
     auto sws = session.StartOutboundApplicationRequest(
-        ServiceType::Daemon, op.id, req,
+        req_service(op.gadget), op.id, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1227,7 +1237,7 @@ static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
         return true;
     }
     ESP_LOGD(TAG, "request %lld: %s %s", (long long)op.id, verb, path);
-    *slot = {op.id, op.cb, op.ctx};
+    *slot = {op.id, op.cb, op.ctx, op.gadget};
     free(op.data);
     return flush_outbound(tls, session, ws_buf);
 }
@@ -1258,7 +1268,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
         chunk.data = ConstByteSpan(op.data, op.len);
         chunk.end_body = op.end_body;
         auto sws = session.StartOutboundBodyChunk(
-            ServiceType::Daemon, op.id, chunk,
+            req_service(s->gadget), op.id, chunk,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) {
@@ -1269,10 +1279,11 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
             req_fail(s);
         }
     } else if (s) {
+        ServiceType service = req_service(s->gadget);
         *s = {};
         ResetView rv{ResetCode::Cancelled, StringView("cancelled")};
         auto sws = session.StartOutboundReset(
-            ServiceType::Daemon, op.id, rv,
+            service, op.id, rv,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) ok = flush_outbound(tls, session, ws_buf);
@@ -3174,6 +3185,18 @@ extern "C" void noise_ctrl_send_command_result(
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
+    return req_open_on(false, verb, path, headers, end_body, cb, ctx);
+}
+
+extern "C" int64_t noise_ctrl_req_open_gadget(const char *verb, const char *path,
+                                              const char *const *headers, bool end_body,
+                                              noise_ctrl_req_cb cb, void *ctx) {
+    return req_open_on(true, verb, path, headers, end_body, cb, ctx);
+}
+
+static int64_t req_open_on(bool gadget, const char *verb, const char *path,
+                           const char *const *headers, bool end_body,
+                           noise_ctrl_req_cb cb, void *ctx) {
     if (!s_req_q || !s_connected || !verb || !path || !cb) return 0;
     size_t n = 0, len = strlen(verb) + strlen(path) + 3;
     for (const char *const *h = headers; h && *h; h++, n++) len += strlen(*h) + 1;
@@ -3195,7 +3218,7 @@ extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
     *p = '\0';
     int64_t id = s_req_next_id.fetch_add(1);
     req_op op = {req_op_kind::Open, end_body, id,
-                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx};
+                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, gadget};
     if (!req_put(op, 0)) {
         free(blob);
         return 0;
@@ -3209,7 +3232,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
     uint8_t *copy = static_cast<uint8_t *>(malloc(len ? len : 1));
     if (!copy) return false;
     if (len) memcpy(copy, data, len);
-    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr};
+    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr, false};
     int64_t deadline = esp_timer_get_time() + (int64_t)wait_ms * 1000;
     while (s_req_queued_bytes > 0
            && s_req_queued_bytes + (int32_t)len > REQ_QUEUE_BYTES) {
@@ -3230,7 +3253,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 
 extern "C" void noise_ctrl_req_cancel(int64_t id) {
     if (!s_req_q || id < REQ_STREAM_BASE) return;
-    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr};
+    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr, false};
     req_put(op, pdMS_TO_TICKS(100));
 }
 

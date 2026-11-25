@@ -21,14 +21,33 @@ static bool stop(void *ctx) { return --*(int *)ctx > 0; }
 int main(int argc, char **argv) {
     assert(argc == 2);
     avatar_identity_t id = {0};
-    const char *valid = "{\"ok\":true,\"result\":{\"name\":\"fixture\",\"avatar\":{\"image_exists\":true,\"image_path\":\"avatars/today.webp\",\"assets_revision\":\"r1\",\"future_field\":[1,2]}}}";
-    assert(parse(valid, &id) == 1 && !strcmp(id.path, "avatars/today.webp") && !strcmp(id.revision,"r1"));
+#define STILL "/api/gadget/identity/avatar?variant=base&media=image&appearance="
+    /* GET /api/gadget/identity: the still's light URL, and updated_ms as the revision. */
+    const char *valid = "{\"ok\":true,\"result\":{\"name\":\"fixture\",\"updated_ms\":1795625000123,\"avatar\":{\"image\":{\"light\":\"" STILL "light\",\"dark\":\"" STILL "dark\"},\"future_field\":[1,2]}}}";
+    assert(parse(valid, &id) == 1 && !strcmp(id.path, STILL "light") && !strcmp(id.revision,"1795625000123"));
     avatar_identity_t original = id;
-    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image_path\":\"x\"}}}", &id) == -1);
+    /* Not an avatar URL from the Gadget API: refused, and the last good stays. */
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image\":{\"light\":\"/fs/raw/x.webp\"}}}}", &id) == -1);
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image\":{\"light\":\"" STILL "a b\"}}}}", &id) == -1);
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image\":{\"light\":42}}}}", &id) == -1);
     assert(!memcmp(&id, &original, sizeof(id)));
-    assert(parse("{\"ok\":false,\"result\":{\"avatar\":{\"image_exists\":false}}}",&id) == -1);
-    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image_exists\":false}}}",&id) == 0 && !id.path[0]);
-    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image_exists\":true,\"image_path\":\"a\\u0000b\"}}}",&id) == -1);
+    /* A bad light URL falls back to a good dark one; a negative updated_ms
+     * leaves the revision empty, and the largest exact one is kept whole. */
+    assert(parse("{\"ok\":true,\"result\":{\"updated_ms\":-5,\"avatar\":{\"image\":{\"light\":\"/fs/raw/x\",\"dark\":\"" STILL "dark\"}}}}", &id) == 1 &&
+           !strcmp(id.path, STILL "dark") && !id.revision[0]);
+    assert(parse("{\"ok\":true,\"result\":{\"updated_ms\":9007199254740991,\"avatar\":{\"image\":{\"light\":\"" STILL "light\"}}}}", &id) == 1 &&
+           !strcmp(id.revision, "9007199254740991"));
+    assert(parse("{\"ok\":true,\"result\":{\"updated_ms\":0,\"avatar\":{\"image\":{\"light\":\"" STILL "light\"}}}}", &id) == 1 &&
+           !strcmp(id.revision, "0"));
+    /* Only a dark still; no updated_ms leaves the revision empty. */
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image\":{\"dark\":\"" STILL "dark\"}}}}", &id) == 1 &&
+           !strcmp(id.path, STILL "dark") && !id.revision[0]);
+    assert(parse("{\"ok\":false,\"result\":{}}",&id) == -1);
+    assert(parse("{\"ok\":true,\"result\":{\"updated_ms\":\"soon\"}}",&id) == -1);
+    /* No avatar yet, or no still yet: absent, not invalid. */
+    assert(parse("{\"ok\":true,\"result\":{\"name\":\"fixture\"}}",&id) == 0 && !id.path[0]);
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"video_variants\":{}}}}",&id) == 0 && !id.path[0]);
+    assert(parse("{\"ok\":true,\"result\":{\"avatar\":{\"image\":{\"light\":\"a\\u0000b\"}}}}",&id) == -1);
     assert(parse("{} trailing",&id) == -1);
     assert(avatar_identity_parse(valid, 8193, &id) == -1);
     char many[1024]; memset(many, '[', 13); memset(many+13, ']', 13); many[26]=0;
@@ -76,10 +95,10 @@ int main(int argc, char **argv) {
     assert(avatar_cache_identity_read(metadata,&read) && !strcmp(read.identity.revision,"r2"));
     avatar_cache_header_init(&read,2,16,16,binding,&id,pixels);
     assert(!avatar_cache_identity_read(metadata,&read));
-    assert(!strcmp(read.identity.revision,"r1"));
+    assert(!strcmp(read.identity.revision,"1795625000123"));
     assert(truncate(metadata,8)==0);
     read=h;assert(!avatar_cache_identity_read(metadata,&read));
-    assert(!strcmp(read.identity.revision,"r1") && avatar_cache_read(path,binding,&read,out,sizeof(out)));
+    assert(!strcmp(read.identity.revision,"1795625000123") && avatar_cache_read(path,binding,&read,out,sizeof(out)));
     assert(avatar_cache_write(candidate,&h,pixels));
     assert(truncate(candidate,sizeof(h)+8)==0);
     assert(!avatar_cache_read(candidate,binding,&read,out,sizeof(out)));

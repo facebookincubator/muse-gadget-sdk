@@ -84,11 +84,25 @@ static bool noise_tx_has_dma_headroom_reclaiming(size_t) { return s_headroom; }
 static bool noise_tx_has_contiguous_dma_headroom(void) { return s_headroom; }
 
 static std::string s_wire;   // plaintext of everything sent (TestCrypto seals as identity)
+struct sent_frame { ServiceType service; int64_t stream; ServiceFrameKind kind; };
+static std::vector<sent_frame> s_sent;   // each whole message, through the real decoders
+static void record_sent(const uint8_t *data, size_t len) {
+    DecodedTransportFrame transport;
+    if (len <= Transport::kTagSize ||
+        !DecodeTransportFrame(ConstByteSpan(data, len - Transport::kTagSize), transport).ok()) return;
+    DecodedServiceRequestEnvelope envelope;
+    HeaderView headers[8];
+    DecodedServiceFrame frame;
+    if (DecodeServiceRequestEnvelopeDetailed(transport.payload, envelope).ok() &&
+        DecodeServiceFrameDetailed(envelope.payload, Span<HeaderView>(headers, 8), frame).ok())
+        s_sent.push_back({envelope.service, frame.stream_id, frame.kind});
+}
 static bool flush_outbound(esp_tls_t *, ClientSession &session, uint8_t *buf) {
     while (session.HasOutboundWebSocketPayload()) {
         auto r = session.WriteNextOutboundWebSocketPayload(ByteSpan(buf, ClientSession::kMaxOutboundWebSocketPayloadSize));
         if (!r.ok()) return false;
         s_wire.append(reinterpret_cast<const char *>(buf), r.size());
+        record_sent(buf, r.size());
     }
     return true;
 }
@@ -146,6 +160,7 @@ static void reset_frame(int64_t id) {
 static void fresh() {
     reset_noise_session();
     s_wire.clear();
+    s_sent.clear();
     s_events.clear();
     s_connected = true;
     s_headroom = true;
@@ -284,6 +299,30 @@ int main() {
     int64_t z = noise_ctrl_req_open("GET", "/chat/history", nullptr, true, on_event, &a);
     pump_all();
     assert(z && s_events.size() == 1 && s_events[0].status == -1 && s_events[0].end);
+
+    // A Gadget API request names ServiceType::Gadget on its open, its body and
+    // its cancel's reset; a daemon request beside it keeps the daemon.
+    fresh();
+    int64_t g = noise_ctrl_req_open_gadget("GET", "/api/gadget/identity/events", nullptr, false, on_event, &a);
+    int64_t dmn = noise_ctrl_req_open("GET", "/chat/history", nullptr, true, on_event, &b);
+    assert(g >= REQ_STREAM_BASE && dmn > g);
+    assert(noise_ctrl_req_send(g, "{}", 2, false, 0));
+    pump_all();
+    noise_ctrl_req_cancel(g);
+    pump_all();
+    int gadget_frames = 0, daemon_frames = 0;
+    bool reset = false;
+    for (const sent_frame &f : s_sent) {
+        if (f.stream == g) {
+            assert(f.service == ServiceType::Gadget);
+            gadget_frames++;
+            reset = reset || f.kind == ServiceFrameKind::Reset;
+        } else if (f.stream == dmn) {
+            assert(f.service == ServiceType::Daemon);
+            daemon_frames++;
+        }
+    }
+    assert(gadget_frames == 3 && reset && daemon_frames == 1);
 
     printf("ok\n");
     return 0;

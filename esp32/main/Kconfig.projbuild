@@ -450,7 +450,8 @@ menu "ESP32 Device SDK"
         help
             Lets firmware code open its own HTTP requests to the VM's
             daemon on Link's Noise session (noise_ctrl_req_open() and
-            friends in main/noise_control.h): reading the chat history,
+            friends in main/noise_control.h), or to its Gadget API
+            (noise_ctrl_req_open_gadget()): reading the chat history,
             or reading and writing files on the user's VM, say. Each
             request gets a stream of its own; a refused or reset one
             doesn't touch Link's control stream. Muse's own boards, and

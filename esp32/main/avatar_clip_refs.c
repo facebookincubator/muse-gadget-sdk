@@ -19,11 +19,13 @@ bool avatar_clip_refs_parse(const char *json,size_t len,avatar_clip_refs_t *out)
     static const char *const names[]={"idle","waking","working","making_something","waiting_for_subagents","milestone_level_up"};
     bool valid=cJSON_IsObject(v);
     memset(out->path,0,sizeof(out->path));
+    /* Each clip is {"light": URL, "dark": URL} of Gadget API avatar URLs. */
     for (unsigned i=0;valid && i<MUSE_AVATAR_CLIPS;i++) {
         const cJSON *p=cJSON_GetObjectItemCaseSensitive(v,names[i]);
         if (!p || cJSON_IsNull(p)) continue;
-        valid=cJSON_IsString(p) && p->valuestring[0] && strlen(p->valuestring)<512;
-        if (valid) strcpy(out->path[i],p->valuestring);
+        const char *url=cJSON_IsObject(p)?avatar_identity_pick_url(p,sizeof(out->path[i])):NULL;
+        valid=url!=NULL;
+        if (valid) strcpy(out->path[i],url);
     }
     cJSON_Delete(root); return valid && out->path[MUSE_CLIP_IDLE][0];
 }

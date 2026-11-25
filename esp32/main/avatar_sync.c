@@ -30,7 +30,6 @@
 #include "avatar_request.h"
 #include "avatar_webp.h"
 #include "avatar_cache.h"
-#include "vm_file_path.h"
 #include "config_store.h"
 #include "image_fetch.h"
 #include "noise_tunnel_internal.h"
@@ -143,9 +142,9 @@ static cJSON *schema(const cJSON *v, int depth) {
 static void probe_task(void *arg) {
     (void)arg;
     /* Bounded by the request's 10 s deadline; a timeout frees the buffer. */
-    const avatar_request_ops_t ops = {noise_ctrl_req_open, noise_ctrl_req_cancel, request_alloc,
+    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget, noise_ctrl_req_cancel, request_alloc,
                                       heap_caps_free, esp_timer_get_time, request_yield, probe_stop};
-    avatar_response_t *r = avatar_request_get("/identity", NULL, IDENTITY_MAX, 0, &ops);
+    avatar_response_t *r = avatar_request_get(AVATAR_IDENTITY_PATH, NULL, IDENTITY_MAX, 0, &ops);
     cJSON *root = r && r->status == 200 ? cJSON_ParseWithLength((const char *)r->body, r->len) : NULL;
     cJSON *shape = root ? schema(root, 0) : NULL;
     char *json = shape ? cJSON_PrintUnformatted(shape) : NULL;
@@ -251,13 +250,16 @@ static bool cancelled(unsigned generation) {
 static void *request_alloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
 static bool request_stop(uintptr_t generation) { return cancelled((unsigned)generation) || muse_state_asleep() || busy(); }
 static void request_yield(void) { vTaskDelay(pdMS_TO_TICKS(20)); }
+/* Every avatar request goes to the VM's Gadget API. */
 static avatar_response_t *get(const char *path, const char *const *headers, size_t cap, unsigned generation) {
-    const avatar_request_ops_t ops = {noise_ctrl_req_open, noise_ctrl_req_cancel, request_alloc,
+    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget, noise_ctrl_req_cancel, request_alloc,
                                       heap_caps_free, esp_timer_get_time, request_yield, request_stop};
     return avatar_request_get(path, headers, cap, generation, &ops);
 }
+/* path is the still's Gadget API URL, checked by avatar_identity_parse. */
 static uint8_t *fetch_webp(const char *path, unsigned generation, size_t *len) {
-    char *url = vm_file_request_path(path);
+    if (!avatar_identity_url_ok(path, sizeof(s_identity.path))) return NULL;
+    char *url = strdup(path);
     if (!url) return NULL;
     size_t chunk = noise_ctrl_req_max_body(); if (chunk > 4096) chunk = 4096;
     uint8_t *encoded = NULL;
@@ -381,13 +383,13 @@ static bool sync_once(unsigned generation) {
     uint32_t content_epoch = atomic_load(&s_content_epoch);
     int64_t started = esp_timer_get_time();
     atomic_fetch_add(&s_identity_reads, 1);
-    avatar_response_t *r = get("/identity", NULL, 8192, generation);
+    avatar_response_t *r = get(AVATAR_IDENTITY_PATH, NULL, 8192, generation);
     if (!r) return false;
     avatar_identity_t identity;
     int available = avatar_identity_parse((const char *)r->body, r->len, &identity);
     avatar_request_release(r);
     if (cancelled(generation)) return false;
-    /* image_exists can be false while an asset is being generated. It does
+    /* No avatar or no still can mean an asset is being generated. It does
      * not prove that the person chose the built-in character. */
     if (available == 0) return false;
     if (available != 1) return false;

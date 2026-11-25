@@ -82,12 +82,16 @@ without the encoder, tools, or worker threads. See the
 
 ## Data and refresh behavior
 
-The verified daemon response uses
-`result.avatar.image_exists`, `image_path`, and `assets_revision`. The parser
-accepts unknown fields and bounds the body to 8 KiB, the path to 511 bytes, and
-the revision to 127 bytes. Invalid or missing metadata leaves the current image
-intact. `image_exists: false` can describe a pending asset; it does not establish
-that the person chose the gadget's Built-in source.
+Avatar sync reads the VM's Gadget API on `ServiceType::Gadget`
+(`noise_ctrl_req_open_gadget`): `GET /api/gadget/identity`, which needs the
+credential's `gadget.identity.read` scope. It uses `result.avatar.image` (the
+still's `light` URL, else its `dark` one) and `result.updated_ms`, which
+changes whenever the identity or any avatar file does, as the revision. The
+parser accepts unknown fields and bounds the body to 8 KiB and the URL to 511
+bytes, and takes only URLs under `/api/gadget/identity/avatar?`. Invalid
+metadata leaves the current image intact. No `avatar`, or no `image` in it, can
+describe a pending asset; it does not establish that the person chose the
+gadget's Built-in source.
 
 The worker refreshes after connection, when a wake finds the previous check
 stale, and every 15 minutes while awake. It coalesces manual requests and backs
@@ -97,12 +101,14 @@ wakes the display or continues a download solely for polling.
 
 An unchanged path and nonempty revision skip the image download. Without a
 revision, the worker revalidates the bytes. A changed revision may require a
-validation download even if only animation assets changed. Identical decoded
+validation download even if only animation assets or other identity fields,
+such as the name, changed. Identical decoded
 pixels avoid an image rewrite; a small metadata checkpoint preserves the newer
 reference across reboot.
 
-Files use authenticated `/fs/raw/` Range requests over the existing Noise
-session. Each range is at most 4 KiB and respects the board's response limit.
+Files are the URLs the identity hands out, fetched as given with Range
+requests on the Gadget API over the existing Noise session. Each range is at
+most 4 KiB and respects the board's response limit.
 The loader accepts static WebP, at most 512 KiB encoded and 2048 pixels on either
 source edge. It scales directly into bounded output rather than allocating a
 full source-sized RGBA image. Opaque output is at most 466 × 466 RGB565. Images
@@ -247,7 +253,8 @@ canvas and strip ownership protocol.
 **This is not full My Muse interaction parity.** The observed identity API
 supplies idle and work-family MP4s. The phone's internal manifest names more
 behaviors, but those names do not supply rigs, geometry, or corresponding
-video assets through `/identity`.
+video assets through `/api/gadget/identity`, whose `video_variants` name each
+clip's `light` and `dark` URLs.
 
 | Home state | Preview behavior |
 | --- | --- |
@@ -304,7 +311,10 @@ clips, 240 frames per clip, 32 KiB per access unit, and 1 MiB total. Dimensions
 are macroblock aligned and at most 240 pixels. The runtime separately limits
 H.264 dimensions and reference frames before picture allocation.
 
-A pack records its exact image-path/asset-revision SHA-256. The cache adds the
+A pack records the SHA-256 of the still's URL and the identity's
+`updated_ms`. Packs installed before avatar sync moved to the Gadget API, and
+any pack after an identity change such as a rename, report stale and need
+installing again. The cache adds the
 paired-VM binding. All header, payload, clip, and frame lengths and checksums
 must validate before publication. A changed identity invalidates old animation
 content and falls back to the current personal still when available. A failed or

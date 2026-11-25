@@ -67,8 +67,17 @@ class GadgetTransportTest(unittest.TestCase):
 
     def test_daemon_requests_and_control_rejection_policy_are_preserved(self):
         source = (ROOT / "main/noise_control.cpp").read_text()
-        for name in ("static bool req_open(", "static bool req_pump_tx("):
-            self.assertIn("ServiceType::Daemon, op.id", function_source(source, name))
+        # A request names the service its open chose on every frame: the daemon
+        # for noise_ctrl_req_open, the Gadget API for noise_ctrl_req_open_gadget.
+        self.assertIn("return gadget ? ServiceType::Gadget : ServiceType::Daemon;",
+                      function_source(source, "static ServiceType req_service("))
+        self.assertIn("req_service(op.gadget), op.id", function_source(source, "static bool req_open("))
+        pump = function_source(source, "static bool req_pump_tx(")
+        self.assertIn("req_service(s->gadget), op.id", pump)
+        self.assertIn("ServiceType service = req_service(s->gadget);", pump)
+        self.assertIn("return req_open_on(false,", function_source(source, 'extern "C" int64_t noise_ctrl_req_open('))
+        self.assertIn("return req_open_on(true,",
+                      function_source(source, 'extern "C" int64_t noise_ctrl_req_open_gadget('))
         self.assertNotIn('"/link-control"', source)
         self.assertNotIn('"/link-tunnel"', source)
         self.assertNotIn('"/identity"', source)
