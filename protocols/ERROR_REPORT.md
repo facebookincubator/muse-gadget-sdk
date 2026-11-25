@@ -32,7 +32,7 @@ contract for it. The ESP32 firmware (`../esp32`) and the Linux client
 {"method":"link.error_report","report":{"schema_version":1,"kind":"crash","reason":"panic","consecutive_count":1,"version":"1.0.9","build_sha":"a1b2c3d4e5f60718","uptime_seconds":5321,"fault":{"address":"0x42012345","return_address":"0x4200a1b2","cause":"Load access fault"}}}
 ```
 
-It goes on `/link-control` like `link.register`, as one length-prefixed JSON
+It goes on the control stream like `link.register`, as one length-prefixed JSON
 message, after Muse has accepted the registration. It has no `id` and gets no
 reply.
 
