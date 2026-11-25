@@ -53,7 +53,7 @@ KILL_GRACE_S = 2
 DRAIN_S = 0.5
 # Give all three pipes a turn, even if one output stream stays readable.
 READ_SLICE_S = 0.01
-# /link-control accepts at most 256 KiB per message from the device; leave
+# The control stream accepts at most 256 KiB per message from the device; leave
 # room for the JSON envelope and escaping.
 MAX_OUTPUT_BYTES = 96 * 1024
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

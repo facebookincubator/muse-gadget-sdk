@@ -46,6 +46,7 @@ SERVICE_MAP = {
     "sentinel": ServiceType.SERVICE_SENTINEL,
     "vault": ServiceType.SERVICE_VAULT,
     "authd": ServiceType.SERVICE_AUTHD,
+    "gadget": ServiceType.SERVICE_GADGET,
 }
 
 

@@ -140,7 +140,7 @@ def test_register_invoke_result_and_unpair():
         await vm.handshake()
         request = await vm.accept_control_stream()
         assert (request.kind, request.value.verb, request.value.path, request.value.end_body) == (
-            "request", "POST", "/link-control", False)
+            "request", "POST", "/api/gadget/control", False)
 
         register = await vm.next_message()
         assert register["method"] == "link.register"
