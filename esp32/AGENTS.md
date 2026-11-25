@@ -670,6 +670,10 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 
 ## Requests to Muse's VM from your code
 
+Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
+(`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
+`/api/gadget/me`). The requests below go to the VM's daemon.
+
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
 on Link's Noise session, with `noise_ctrl_req_open()`, `noise_ctrl_req_send()`
@@ -1052,6 +1056,9 @@ Users never see the name Hatch.
   base the app sends during pairing, with bare API paths. They ignore
   `api_url`: only older firmware reads it, and that firmware adds `/hatch/`
   itself. Keep saving it so a device flashed back to older firmware still works.
+  Pairing and the Muse host setting take only the hosts the Muse app sends
+  (`components/muse/muse_server_hosts.h`); `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS`
+  accepts others in development builds.
 - `hatch` stays only where the server or the Muse app depends on it. Don't
   rename these:
   - the VM host `hatch.metaaivm.com`

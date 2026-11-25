@@ -152,7 +152,9 @@ static void run_command(char *cmd)
             muse_settings_set_wifi("", "");   /* every saved network */
         }
     } else if (!strcmp(cmd, "hatch.host")) {
-        muse_settings_set_hatch_host(v);
+        if (!muse_settings_set_hatch_host(v)) {
+            res = "error: server not allowed";
+        }
     } else if (!strcmp(cmd, "hatch.vm")) {
         muse_settings_set_hatch_vm(v);
     } else if (!strcmp(cmd, "hatch.token") || !strcmp(cmd, "hatch.token+")) {
@@ -184,7 +186,8 @@ static void run_command(char *cmd)
     }
 
     /* Never echo secrets back. */
-    bool secret = !strcmp(cmd, "wifi.pass") || !strncmp(cmd, "hatch.token", 11);
+    bool secret = !strcmp(cmd, "wifi.pass") || !strncmp(cmd, "hatch.token", 11) ||
+                  !strcmp(cmd, "sdk_token") || !strcmp(cmd, "wifi_proxy");
     snprintf(s_last, sizeof(s_last), "%s: %s", cmd, res);
     ESP_LOGI(TAG, "cmd %s%s%s -> %s", cmd, secret ? "" : "=", secret ? "" : v, res);
     muse_state_poke();
