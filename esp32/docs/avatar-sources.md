@@ -83,8 +83,8 @@ without the encoder, tools, or worker threads. See the
 ## Data and refresh behavior
 
 Avatar sync reads the VM's Gadget API on `ServiceType::Gadget`
-(`noise_ctrl_req_open_gadget`): `GET /api/gadget/identity`, which needs the
-credential's `gadget.identity.read` scope. It uses `result.avatar.image` (the
+(`noise_ctrl_req_open_gadget_api`): `GET /api/gadget/identity`, which needs
+the credential's `gadget.identity.read` scope. It uses `result.avatar.image` (the
 still's `light` URL, else its `dark` one) and `result.updated_ms`, which
 changes whenever the identity or any avatar file does, as the revision. The
 parser accepts unknown fields and bounds the body to 8 KiB and the URL to 511

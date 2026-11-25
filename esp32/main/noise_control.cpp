@@ -1133,21 +1133,21 @@ struct req_op {
     size_t len;
     noise_ctrl_req_cb cb;
     void *ctx;
-    bool gadget;  // Open: the request goes to the Gadget API, not the daemon
+    bool gadget_api;  // Open: the request goes to the Gadget API, not the daemon
 };
 
 struct req_stream {
     int64_t id;  // 0: free
     noise_ctrl_req_cb cb;
     void *ctx;
-    bool gadget;  // every frame of the stream names the service its open did
+    bool gadget_api;  // every frame of the stream names the service its open did
 };
 
-static ServiceType req_service(bool gadget) {
-    return gadget ? ServiceType::Gadget : ServiceType::Daemon;
+static ServiceType req_service(bool gadget_api) {
+    return gadget_api ? ServiceType::Gadget : ServiceType::Daemon;
 }
 
-static int64_t req_open_on(bool gadget, const char *verb, const char *path,
+static int64_t req_open_on(bool gadget_api, const char *verb, const char *path,
                            const char *const *headers, bool end_body,
                            noise_ctrl_req_cb cb, void *ctx);
 
@@ -1227,7 +1227,7 @@ static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
     req.headers = Span<const HeaderView>(hdrs, nh);
     req.end_body = op.end_body;
     auto sws = session.StartOutboundApplicationRequest(
-        req_service(op.gadget), op.id, req,
+        req_service(op.gadget_api), op.id, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1237,7 +1237,7 @@ static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
         return true;
     }
     ESP_LOGD(TAG, "request %lld: %s %s", (long long)op.id, verb, path);
-    *slot = {op.id, op.cb, op.ctx, op.gadget};
+    *slot = {op.id, op.cb, op.ctx, op.gadget_api};
     free(op.data);
     return flush_outbound(tls, session, ws_buf);
 }
@@ -1268,7 +1268,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
         chunk.data = ConstByteSpan(op.data, op.len);
         chunk.end_body = op.end_body;
         auto sws = session.StartOutboundBodyChunk(
-            req_service(s->gadget), op.id, chunk,
+            req_service(s->gadget_api), op.id, chunk,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) {
@@ -1279,7 +1279,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
             req_fail(s);
         }
     } else if (s) {
-        ServiceType service = req_service(s->gadget);
+        ServiceType service = req_service(s->gadget_api);
         *s = {};
         ResetView rv{ResetCode::Cancelled, StringView("cancelled")};
         auto sws = session.StartOutboundReset(
@@ -3188,13 +3188,13 @@ extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
     return req_open_on(false, verb, path, headers, end_body, cb, ctx);
 }
 
-extern "C" int64_t noise_ctrl_req_open_gadget(const char *verb, const char *path,
-                                              const char *const *headers, bool end_body,
-                                              noise_ctrl_req_cb cb, void *ctx) {
+extern "C" int64_t noise_ctrl_req_open_gadget_api(const char *verb, const char *path,
+                                                  const char *const *headers, bool end_body,
+                                                  noise_ctrl_req_cb cb, void *ctx) {
     return req_open_on(true, verb, path, headers, end_body, cb, ctx);
 }
 
-static int64_t req_open_on(bool gadget, const char *verb, const char *path,
+static int64_t req_open_on(bool gadget_api, const char *verb, const char *path,
                            const char *const *headers, bool end_body,
                            noise_ctrl_req_cb cb, void *ctx) {
     if (!s_req_q || !s_connected || !verb || !path || !cb) return 0;
@@ -3218,7 +3218,7 @@ static int64_t req_open_on(bool gadget, const char *verb, const char *path,
     *p = '\0';
     int64_t id = s_req_next_id.fetch_add(1);
     req_op op = {req_op_kind::Open, end_body, id,
-                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, gadget};
+                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, gadget_api};
     if (!req_put(op, 0)) {
         free(blob);
         return 0;

@@ -142,8 +142,9 @@ static cJSON *schema(const cJSON *v, int depth) {
 static void probe_task(void *arg) {
     (void)arg;
     /* Bounded by the request's 10 s deadline; a timeout frees the buffer. */
-    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget, noise_ctrl_req_cancel, request_alloc,
-                                      heap_caps_free, esp_timer_get_time, request_yield, probe_stop};
+    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget_api, noise_ctrl_req_cancel,
+                                      request_alloc, heap_caps_free, esp_timer_get_time,
+                                      request_yield, probe_stop};
     avatar_response_t *r = avatar_request_get(AVATAR_IDENTITY_PATH, NULL, IDENTITY_MAX, 0, &ops);
     cJSON *root = r && r->status == 200 ? cJSON_ParseWithLength((const char *)r->body, r->len) : NULL;
     cJSON *shape = root ? schema(root, 0) : NULL;
@@ -252,8 +253,9 @@ static bool request_stop(uintptr_t generation) { return cancelled((unsigned)gene
 static void request_yield(void) { vTaskDelay(pdMS_TO_TICKS(20)); }
 /* Every avatar request goes to the VM's Gadget API. */
 static avatar_response_t *get(const char *path, const char *const *headers, size_t cap, unsigned generation) {
-    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget, noise_ctrl_req_cancel, request_alloc,
-                                      heap_caps_free, esp_timer_get_time, request_yield, request_stop};
+    const avatar_request_ops_t ops = {noise_ctrl_req_open_gadget_api, noise_ctrl_req_cancel,
+                                      request_alloc, heap_caps_free, esp_timer_get_time,
+                                      request_yield, request_stop};
     return avatar_request_get(path, headers, cap, generation, &ops);
 }
 /* path is the still's Gadget API URL, checked by avatar_identity_parse. */

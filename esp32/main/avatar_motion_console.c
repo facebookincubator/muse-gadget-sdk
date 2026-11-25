@@ -40,7 +40,7 @@ static bool stop(uintptr_t unused) {
         mode==MUSE_MODE_LISTENING || mode==MUSE_MODE_SPEAKING || mode==MUSE_MODE_THINKING;
 }
 static void yield(void) {vTaskDelay(pdMS_TO_TICKS(20));}
-static const avatar_request_ops_t ops={noise_ctrl_req_open_gadget,noise_ctrl_req_cancel,alloc,heap_caps_free,esp_timer_get_time,yield,stop};
+static const avatar_request_ops_t ops={noise_ctrl_req_open_gadget_api,noise_ctrl_req_cancel,alloc,heap_caps_free,esp_timer_get_time,yield,stop};
 static bool source_key(const avatar_identity_t *id,uint8_t key[32]) {
     mbedtls_md_context_t ctx;mbedtls_md_init(&ctx);
     bool ok=!mbedtls_md_setup(&ctx,mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),0) && !mbedtls_md_starts(&ctx) &&

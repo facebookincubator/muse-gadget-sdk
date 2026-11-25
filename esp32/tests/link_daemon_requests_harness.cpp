@@ -303,7 +303,7 @@ int main() {
     // A Gadget API request names ServiceType::Gadget on its open, its body and
     // its cancel's reset; a daemon request beside it keeps the daemon.
     fresh();
-    int64_t g = noise_ctrl_req_open_gadget("GET", "/api/gadget/identity/events", nullptr, false, on_event, &a);
+    int64_t g = noise_ctrl_req_open_gadget_api("GET", "/api/gadget/identity/events", nullptr, false, on_event, &a);
     int64_t dmn = noise_ctrl_req_open("GET", "/chat/history", nullptr, true, on_event, &b);
     assert(g >= REQ_STREAM_BASE && dmn > g);
     assert(noise_ctrl_req_send(g, "{}", 2, false, 0));
