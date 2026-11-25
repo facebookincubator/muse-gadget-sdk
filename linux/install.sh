@@ -42,8 +42,9 @@ APT_PACKAGES=(bluez python3 python3-dbus python3-gi python3-cryptography curl ca
 ARCH_PACKAGES=(bluez python python-dbus python-gobject python-cryptography curl ca-certificates)
 FEDORA_PACKAGES=(bluez python3 python3-dbus python3-gobject python3-cryptography curl ca-certificates)
 # python3-* are provided by the packages for the interpreter that owns
-# /usr/bin/python3 (python313-* today), so they follow its version.
-SUSE_PACKAGES=(bluez python3 python3-dbus-python python3-gobject python3-cryptography curl ca-certificates)
+# /usr/bin/python3 (python313-* today), so they follow its version. The root
+# CAs are in ca-certificates-mozilla, only a recommendation of ca-certificates.
+SUSE_PACKAGES=(bluez python3 python3-dbus-python python3-gobject python3-cryptography curl ca-certificates ca-certificates-mozilla)
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
