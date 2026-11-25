@@ -168,6 +168,23 @@ menu "ESP32 Device SDK"
             profiles enable this explicitly; the Kconfig fallback remains off
             for custom builds that bypass the supported sdkconfig defaults.
 
+    config HOMEHUB_ERROR_REPORT
+        bool "Report abnormal resets to the VM automatically"
+        default n
+        # The fault is recorded by code in flash, which the stock panic handler
+        # makes reachable first; the IRAM handler can run with the cache off.
+        depends on !ESP_PANIC_HANDLER_IRAM
+        help
+            After a panic, watchdog or brownout reset, send one small
+            link.error_report message once the device has registered with its
+            VM: the reset reason, the firmware version that was running, how
+            many abnormal resets happened in a row and, for a panic, the
+            uptime, fault address and cause. It carries no logs, network
+            names, addresses or device identifiers. The record lives in
+            retained RAM; nothing is written to flash. Supported profiles
+            enable this explicitly; the Kconfig fallback remains off for
+            custom builds that bypass the supported sdkconfig defaults.
+
     config HOMEHUB_SHOW_AGENT_NAME
         bool "Show the agent's name on the display"
         default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306

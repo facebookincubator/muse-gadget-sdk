@@ -405,6 +405,8 @@ VP8, the board decodes and draws it, 30 fps on the round 466 px boards. [`../pro
 
 [`../protocols/DEVICE.md`](../protocols/DEVICE.md) says how a gadget describes
 itself to Muse: its family, its model and its usage guide.
+[`../protocols/ERROR_REPORT.md`](../protocols/ERROR_REPORT.md) says what a
+board tells Muse after it crashed, and how to turn that off.
 
 To let Muse run a small app of its own on a board's screen,
 build it with `MUSE_APPS=1 tools/muse/board.sh build <board>`: Muse writes a

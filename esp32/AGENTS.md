@@ -853,6 +853,14 @@ For app authoring and the guide to send Muse, see
   `cmake/validate_config.cmake` enforces both.
 - `sdkconfig.defaults.esp32` keeps ESP-IDF's 64 KB internal DMA reserve on
   the classic ESP32, which isn't offered `CONFIG_HOMEHUB_DMA_RESERVE_KB`.
+- `CONFIG_HOMEHUB_ERROR_REPORT` (on in `sdkconfig.defaults`) sends Muse one
+  `link.error_report` after a panic, watchdog or brownout reset
+  (`../protocols/ERROR_REPORT.md`). `main/error_report.c` keeps the record in
+  RTC memory that survives a reset, writes nothing to flash, and is linked in
+  front of ESP-IDF's panic handler (`--wrap=esp_panic_handler`) to note the
+  fault. Anything added to the report must stay within that document's "What
+  it must never carry". It needs the stock panic handler, so it is unavailable
+  with `CONFIG_ESP_PANIC_HANDLER_IRAM`.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,

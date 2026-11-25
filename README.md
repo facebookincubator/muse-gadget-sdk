@@ -53,7 +53,8 @@ prefixed with "MuseGadget".
 Each SDK directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 [`protocols/DEVICE.md`](protocols/DEVICE.md) says how a gadget describes itself
-to Muse.
+to Muse, and [`protocols/ERROR_REPORT.md`](protocols/ERROR_REPORT.md) what it
+tells Muse after a crash.
 
 For battery-input power profiling, see the [porting recipe](esp32/docs/power/README.md).
 The opt-in diagnostic core is board-neutral; boards supply its hooks and state
