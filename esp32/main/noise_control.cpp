@@ -1318,7 +1318,7 @@ struct identity_fetch {
     size_t len;
 };
 
-// Ask the daemon for the agent identity. Returns false only if the transport
+// Ask the VM for the agent's name. Returns false only if the transport
 // failed; a refused request just leaves the name unknown.
 static bool identity_request(esp_tls_t *tls, ClientSession &session,
                              uint8_t *svc_scratch, uint8_t *env_scratch,
@@ -2092,7 +2092,7 @@ static void reconnect_delay(uint32_t delay_ms) {
 
 // ---- Session loop -----------------------------------------------------------
 
-// A /link-control message cut across BodyChunks, held for its session until
+// A control-stream message cut across BodyChunks, held for its session until
 // the rest arrives. Bytes of one message held at most: one longer is skipped
 // whole (logged), so the stream stays in step.
 static constexpr uint32_t kCtrlRxMaxHeld = 32 * 1024;
