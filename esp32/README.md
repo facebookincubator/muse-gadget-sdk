@@ -696,6 +696,17 @@ their upstream licenses:
   the opt-in wake word model, was trained for this SDK on public-domain, CC0
   and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)
   credits it as CC BY requires.
+- [`../xplat/libsbc`](../xplat/libsbc), the SBC codec built by
+  [`components/libsbc`](components/libsbc) for the BLE gadgets (they come in
+  a later change), is Google's libsbc, Apache-2.0
+  under Google's copyright. See [`LICENSE`](../xplat/libsbc/LICENSE).
+- [`../xplat/liblc3`](../xplat/liblc3), the LC3 codec built by
+  [`components/liblc3`](components/liblc3) for the same BLE gadgets, is Google's liblc3, Apache-2.0
+  under Google's copyright. See [`LICENSE`](../xplat/liblc3/LICENSE).
+- [`../xplat/lc3fx`](../xplat/lc3fx), the fixed-point LC3 codec built by
+  [`components/liblc3`](components/liblc3) for chips without an FPU, is a
+  derivative of Google's liblc3, Apache-2.0. See
+  [`LICENSE`](../xplat/lc3fx/LICENSE).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses. For the opt-in wake word these are the ExecuTorch

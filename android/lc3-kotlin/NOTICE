@@ -1,0 +1,10 @@
+lc3-kotlin
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+This product is a Kotlin translation of liblc3 v1.1.3 (https://github.com/google/liblc3,
+commit 8e1e722cda8dbdcc4b3cb9ba559d11c236c33d07), Copyright 2022 Google LLC, licensed under
+the Apache License, Version 2.0 (see LICENSE). Every source file derived from liblc3 carries
+Google's copyright and names the liblc3 files it translates; the codec tables in Lc3Tables.kt
+and Lc3Consts.kt are generated from liblc3's sources (tools/gen_tables.c, tools/gen_consts.py).
+Meta's changes: translation to Kotlin, restriction to 16 kHz mono at 7.5 and 10 ms, data layout
+and loop restructuring for the Android runtime, with arithmetic kept operation-for-operation.
