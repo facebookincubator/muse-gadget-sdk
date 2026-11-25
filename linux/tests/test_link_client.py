@@ -34,7 +34,8 @@ from musegadget.noise import (
     ApplicationResponse, BodyChunk, Header, NoiseFrameDecoder, NoiseXXResponder, ServiceFrame,
     encode_noise_frames,
 )
-from musegadget.noise.transport import decode_request_envelope, encode_response_envelope
+from musegadget.noise.envelope import ServiceType, decode_service_frame, decode_service_request
+from musegadget.noise.transport import encode_response_envelope
 
 DEVICE = DeviceDescription(
     node_id="homelink-abcdef", display_name="pi", version="0.1.0",
@@ -62,13 +63,18 @@ class Pipe:
 
 
 class FakeVm:
-    """Just enough of the Muse VM: Noise responder plus the control stream."""
+    """Just enough of the Muse VM: Noise responder plus the control stream.
+
+    It answers the session's GET /api/gadget/me with ``muse_name`` on its own,
+    as the VM does, so tests that don't look for it never see it.
+    """
 
     def __init__(self, ws: Pipe) -> None:
         self.ws = ws
         self.decoder = NoiseFrameDecoder()
         self.messages = MessageDecoder()
         self.stream_id = 0
+        self.muse_name = "Muse"
 
     async def handshake(self) -> None:
         responder = NoiseXXResponder()
@@ -77,12 +83,30 @@ class FakeVm:
         responder.read_message3(await self.ws.recv())
         self.send_cipher, self.recv_cipher = responder.split()
 
-    async def next_frame(self) -> ServiceFrame:
+    async def next_request(self) -> tuple[ServiceType, ServiceFrame]:
+        """The next frame the device sent, with the service it addressed."""
         while True:
             plain = self.recv_cipher.decrypt_with_ad(b"", await self.ws.recv())
             assembled = self.decoder.decode(plain)
             if assembled is not None:
-                return decode_request_envelope(assembled)
+                request = decode_service_request(assembled)
+                return request.service, decode_service_frame(request.payload)
+
+    async def next_frame(self) -> ServiceFrame:
+        while True:
+            _, frame = await self.next_request()
+            if frame.kind == "request" and frame.value.path == "/api/gadget/me":
+                await self.answer_me(frame)
+                continue
+            return frame
+
+    async def answer_me(self, request: ServiceFrame, status: int = 200) -> None:
+        body = json.dumps({"ok": True, "result": {
+            "api_version": 1, "device_node_id": "homelink-abcdef", "muse_name": self.muse_name,
+        }}).encode() if status == 200 else b'{"ok":false}'
+        await self.send_frame(ServiceFrame.response(
+            request.stream_id, ApplicationResponse(status=status, body=body, end_body=True),
+        ))
 
     async def next_message(self) -> dict:
         while True:
@@ -677,6 +701,31 @@ async def registered_session():
 
 async def bounded_scenario(scenario):
     await asyncio.wait_for(scenario, 5)
+
+
+@pytest.mark.parametrize("status, muse_name", [(200, "Juniper"), (403, None)])
+def test_the_session_reads_the_muses_name_once_it_registers(status, muse_name, caplog):
+    async def scenario():
+        session, vm, stop, task = await registered_session()
+        service, request = await vm.next_request()
+        assert service == ServiceType.SERVICE_GADGET
+        assert (request.kind, request.value.verb, request.value.path) == (
+            "request", "GET", "/api/gadget/me")
+        vm.muse_name = "Juniper"
+        await vm.answer_me(request, status)
+        # The name is read by a task of its own; wait for its outcome.
+        while session.muse_name is None and "could not read the Muse's name" not in caplog.text:
+            await asyncio.sleep(0.01)
+        await vm.send_message({"method": "link.invoke", "id": "inv-1", "command": "system.run",
+                               "params": {}})
+        assert (await vm.next_message())["id"] == "inv-1"  # the session carries on either way
+        assert session.muse_name == muse_name
+        stop.set()
+        assert await task == Outcome.STOPPED
+
+    asyncio.run(bounded_scenario(scenario()))
+    if status != 200:
+        assert "could not read the Muse's name: HTTP 403" in caplog.text
 
 
 @pytest.mark.parametrize("rejection", [{"error": "unauthorized"}, {"ok": False}])

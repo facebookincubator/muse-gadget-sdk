@@ -311,6 +311,10 @@ class Service:
         NDJSON stream of ``type: ready``, ``type: chat_event`` (with ``event``)
         and terminal ``type: error`` (with ``error``) records. The session ID
         is optional. A subscription ends on client or transport disconnect.
+
+        ``{"op": "muse_name"}`` gets ``{"ok": true, "muse_name": "..."}``: the
+        name the user gave their Muse, read once per connection, or null
+        until it is known.
         """
         path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if path.exists():
@@ -337,7 +341,10 @@ class Service:
                 if isinstance(request, dict) and request.get("op") == "subscribe_chat":
                     await self._local_subscribe(request, reader, writer)
                     return
-                reply = await self._local_request(line)
+                if isinstance(request, dict) and request.get("op") == "muse_name":
+                    reply = self._local_muse_name()
+                else:
+                    reply = await self._local_request(line)
         except Exception as exc:
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         writer.write(json.dumps(reply).encode() + b"\n")
@@ -425,6 +432,12 @@ class Service:
             pending = [task for task in tasks + closing if not task.done()]
             if pending:
                 await asyncio.wait(pending, timeout=CLEANUP_S)
+
+    def _local_muse_name(self) -> dict:
+        session = self._current
+        if session is None or session.registered_at is None:
+            return {"ok": False, "error": "not connected to the Muse"}
+        return {"ok": True, "muse_name": session.muse_name}
 
     async def _local_request(self, line: bytes) -> dict:
         request = json.loads(line)

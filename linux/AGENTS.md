@@ -137,6 +137,9 @@ State lives in `/var/lib/musegadget` (mode 0700): `identity.json` survives
 unpairing, `pairing.json` holds the device tokens, and `error_report.json`
 exists only while the service runs or a crash report waits to be sent. The local socket is
 `/run/musegadget/musegadget.sock`, owned by root and the run-as account's group.
+Besides messages, a local client can send `{"op": "muse_name"}` to get
+`{"ok": true, "muse_name": "..."}`: the name the user gave their Muse, or null
+until the service has read it.
 
 A healthy start logs `commands run as <user>`, `Noise session established`,
 `sent link.register` and `registered with the Muse`.
@@ -426,6 +429,13 @@ run_command=...)` is one encrypted session with a Muse VM.
   the same threading and result contract as `Service.run_command`.
 - `registered` is an `asyncio.Event` that is set once Muse accepts the device.
   It clears when the session ends.
+- `muse_name` is the name the user gave their Muse, or `None`. The session
+  reads it once after it registers, from the Gadget API's `GET /api/gadget/me`
+  (`SERVICE_GADGET`), as the ESP32 firmware does; a refusal leaves it `None`.
+  A rename shows up on the next connection.
+- `await request(method, path, body=b"", *, headers=None, timeout=60,
+  service="daemon")` sends one buffered request and returns a dict with `ok`,
+  `status` and `response`. `service="gadget"` addresses the Gadget API.
 - `send_chat(message, session_id=None, *, output_modality="text",
   device=None)` sends a user message as coming from this device. Without
   `session_id` it goes to the main chat.
