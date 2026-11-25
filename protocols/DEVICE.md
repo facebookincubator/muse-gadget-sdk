@@ -32,19 +32,35 @@ Beside the node id, display name, version and commands, `params` carry:
 
 | Field | Value |
 |---|---|
-| `device_family` | `"gadget"`, always. Every device built with this SDK registers it; other families are reserved for Muse's own devices. |
+| `device_family` | `"gadget"`. Every device built with this SDK registers it (Family, below); other families are reserved for Muse's own devices. |
 | `model_id` | The hardware model: 1 to 64 lowercase letters, digits and hyphens (`[a-z0-9-]{1,64}`). |
 | `metadata.model_name` | The hardware's name as people know it, such as `Seeed SenseCAP Watcher`: 1 to 128 printable ASCII characters (space to `~`), without `"` or `\`, so it never needs escaping. |
+
+Family:
+
+- Every device built with this SDK registers `"gadget"`, its Wi-Fi-only
+  builds and the C5 DevKitC-1 build included, and so does the Linux client.
+- Only Muse's own Home Link firmware (no capability bit 1, not a
+  `MuseGadget-*` device) registers `"link"`.
+- A set-up device keeps its node id.
+
+The Muse apps tell gadgets from Muse's own devices by the family, never by
+`model_id`.
 
 `model_id`:
 
 - Names the hardware, not the build. Every firmware profile for the same
-  board sends the same id, such as a full-UI build and a status-light build.
+  board sends the same id, such as a full-UI build and a status-light
+  build, or a board's Wi-Fi-only and Bluetooth builds.
 - Is stable: Muse may rely on it, so a board keeps its id. Hardware that works
   differently, such as a new revision with other controls, gets a new one.
 - Ids that start with `muse-` or `esp-link` are reserved for Muse and for the
-  boards in this SDK, which use `muse-gadget-<board>`. Use a prefix of your
+  boards in this SDK, which use `muse-gadget-<board>`; `esp-link` is the id
+  ESP32 firmware built before this contract registers. Use a prefix of your
   own for your hardware, such as `acme-robot`.
+- A product code from the Muse Gadget catalog (the `<PRODUCT>` of an
+  advertised name such as `MuseGadget-XN54-1A2B3C`, `README.md`) names the
+  product in its advertised name only; it isn't a `model_id`.
 - A device that doesn't set one reports the SDK's default: `muse-gadget`
   (`Muse Gadget`) on ESP32, `muse-gadget-linux` (`Linux gadget`) on Linux.
 
@@ -140,5 +156,6 @@ heading on the first line, and the size.
 - Both clients refuse values outside these rules: the ESP32 build fails, and
   Linux's `DeviceDescription` raises `ValueError`.
 - Firmware built before this contract may register another family and model
-  id, and no `metadata.model_name` or `device.guide`, until it's reflashed.
+  id (ESP32: `"link"` and `esp-link` on every board), and no
+  `metadata.model_name` or `device.guide`, until it's reflashed.
 - `device.guide` is an ordinary command, so it works wherever commands do.

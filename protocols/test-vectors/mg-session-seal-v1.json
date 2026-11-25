@@ -1,0 +1,1489 @@
+{
+  "one_session_per_proof": {
+    "name": "one sealed session per token proof",
+    "steps": [
+      {
+        "step": "proof 1 matched",
+        "client": null,
+        "device": null
+      },
+      {
+        "step": "unsealed hello: insecure, the nonces untouched",
+        "client": "890001001000000010000000",
+        "device": "1989010700"
+      },
+      {
+        "step": "sealed hello 1",
+        "client": "890001001000000010000001",
+        "device": "890001001000000010000001"
+      },
+      {
+        "step": "sealed hello 2, same proof",
+        "client": "890001001000000010000001",
+        "device": "1989010600"
+      },
+      {
+        "step": "proof 2 matched",
+        "client": null,
+        "device": null
+      },
+      {
+        "step": "sealed hello 3, new proof",
+        "client": "890001001000000010000001",
+        "device": "890001001000000010000001"
+      }
+    ]
+  },
+  "access_expires_at": {
+    "name": "access_expires_at kept with the pair",
+    "K": "d65efa8e9196bd8989f42221ee63c495b372a82a2bd6f0a04097b9a71f72bc3f",
+    "node_id": "homelink-1a2b3c",
+    "sessions": [
+      {
+        "client_nonce": "8a818bc10dfb54319ce3fcb9a517fc8b",
+        "device_nonce": "9660c9b8e5687bfc824cdc58ed9f6f66"
+      },
+      {
+        "client_nonce": "1aafd47cd5066e6b1301d734c3e02580",
+        "device_nonce": "ef24a6e29dd081004f01dfffdbb1db25"
+      },
+      {
+        "client_nonce": "b3a77e26caa9c13e0e40a47487d06673",
+        "device_nonce": "6d1e0e0aa4ed9f8ba6ffe8ef10b516b2"
+      }
+    ],
+    "steps": [
+      {
+        "step": "session 1: the credentials (none kept)",
+        "session": 0,
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "{\"node_id\":\"homelink-1a2b3c\",\"access_token\":\"mga_exp_access_0\",\"refresh_token\":\"mgr_exp_refresh_0\"}",
+        "sealed": "000000000067248556f3de041ff55f82f3fb1ee2d029edeb9376b278cd74ca0e574bd7db0d43853a77ac5a0d4556995ec92386c6c0592051354f3f9c3544d9abbe640a8e6c1e206f7e7f3ea99d7986acf3ca113821d7c5dcb2390758357b6a0d7285abb92b748011db4365b33467c60ab2207a81b0061c",
+        "device": null,
+        "stored": 0
+      },
+      {
+        "step": "an update carrying access_expires_at: kept with the pair",
+        "session": 0,
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "{\"access_token\":\"mga_exp_access_1\",\"refresh_token\":\"mgr_exp_refresh_1\",\"access_expires_at\":1893456000}",
+        "sealed": "000000008dffa933b23968c267f71edc3f55ea1a1e4586bf02126baaa4e5952c7e2c8853cb380da21fa6b6159374cd3348eece440ea917471d0f0dbf35e3e99c5d75bb8b2c641b148bc3c771001e0cba2c24a4e27a4080fa416596d36eb790e131c1adca3818247c9ef21aafb7133f9683f37e1437c328b88d30",
+        "device": "890801",
+        "stored": 1893456000
+      },
+      {
+        "step": "session 2: the credentials (access_expires_at handed back)",
+        "session": 1,
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "{\"node_id\":\"homelink-1a2b3c\",\"access_token\":\"mga_exp_access_1\",\"refresh_token\":\"mgr_exp_refresh_1\",\"access_expires_at\":1893456000}",
+        "sealed": "00000000e01d5603bb9beb1c5ca4c9e6018a02738f6a3cad55cdaf27e0225818ddd6790a842f6aa62524a2e64840669a1c7da2e915b6f12a98457f4c0985085f3a609b92679a86cc183db4b9e28358925c7ec654c7a296adf9b60933dacd82a8f29ac64833824944ec31265b94d5999c20127cc6bb591cf68006fc17ba0e2cf6286a3b96b1f6aea943f2768852a4cdd31dd9a74f57b1",
+        "device": null,
+        "stored": 1893456000
+      },
+      {
+        "step": "an update without it: the stored one is cleared",
+        "session": 1,
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "{\"access_token\":\"mga_exp_access_2\",\"refresh_token\":\"mgr_exp_refresh_2\"}",
+        "sealed": "000000001c23e6e890260089760f6d7ddd8f14759ff6ead3c01bd1f77de26087300c221b698d56047f978cec05d92e485b60155256226f705e33e229b3eb34e16ab4343bbcd5a3115063970938b4fd4d5196e81e2935731c74b7fb",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "a string: stored as none",
+        "session": 1,
+        "direction": 2,
+        "counter": 1,
+        "plaintext": "{\"access_token\":\"mga_exp_access_3\",\"refresh_token\":\"mgr_exp_refresh_3\",\"access_expires_at\":\"1893456000\"}",
+        "sealed": "000000015369a62f60d4c4ff784096a9216da419a2483f349cf0b5b87e5ad29f963099e64a24188a8c43cc134d7fc1f4268438e5fa9bc8f323f0c2a78b73d6c296ab893c84072abf167202d7a89b9afa0e09af135cb5b2eba48870924b937f17513d07ed158d7b30a0c11737a56c9338ac65d66306fa29bb45768fbc",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "a fraction: stored as none",
+        "session": 1,
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "{\"access_token\":\"mga_exp_access_4\",\"refresh_token\":\"mgr_exp_refresh_4\",\"access_expires_at\":1.5}",
+        "sealed": "000000023f06d946ed1747b83b14aabc85a4a3391aa2606dba59d0c6c1eb292602a4ae14f176690a6c5bc1fab541df9dbbac0b2044e7e857635d5de4b1dbe77da6b957ede2a01bbbc368b9b2b8a93497db07494a31ba2282e5f61b7446abd300b79d55bf23f87492b658969813dd6b4b8d2510",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "negative: stored as none",
+        "session": 1,
+        "direction": 2,
+        "counter": 3,
+        "plaintext": "{\"access_token\":\"mga_exp_access_5\",\"refresh_token\":\"mgr_exp_refresh_5\",\"access_expires_at\":-5}",
+        "sealed": "00000003f4f0a9f06119221f59f1ee967e30e9359590d1954c0eb39a96bd589f384a2ba75bf8ec2813699852f1548887c27d00c62bc360330f7a86f596cd3b47545baeecd02187ea112b3eafa8c6213bd227534c4d0b2cc7c63289da84be7235ccf547a411cfae53a787f9a4e15478af22d1",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "null: stored as none",
+        "session": 1,
+        "direction": 2,
+        "counter": 4,
+        "plaintext": "{\"access_token\":\"mga_exp_access_6\",\"refresh_token\":\"mgr_exp_refresh_6\",\"access_expires_at\":null}",
+        "sealed": "00000004e6575be410489b6a8bec80cf358c8b462036f2588e960b7d80886fe744852e7aa40b73b86d33e9bfa6dabf613fe6b46c5fa28254effd9a632cb6066acf5208b157777305f386e0d3cda3a56b55869301274ce80b93836afae982287e90c36b85c5a02a98aa7dc091da5852df78c4c7bf",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "2^64, past 64 bits: stored as none",
+        "session": 1,
+        "direction": 2,
+        "counter": 5,
+        "plaintext": "{\"access_token\":\"mga_exp_access_7\",\"refresh_token\":\"mgr_exp_refresh_7\",\"access_expires_at\":18446744073709551616}",
+        "sealed": "0000000574ef8547d174d63f3960051261d4351d6a28ebb4860720c5334a69373b425bef2bab74b4e9d10396e21cd44c8d3307653078ade31f3a187338e3c919feb08eb70b33ff07997c533a63744448432a0b7356325f0e90b03ba83c59accd406455a7e587586950214457b794c2ee2f9b627e51cf293b735170e06ffd6749f2eacbb4",
+        "device": "890801",
+        "stored": 0
+      },
+      {
+        "step": "the largest that fits (2^64 - 1): kept",
+        "session": 1,
+        "direction": 2,
+        "counter": 6,
+        "plaintext": "{\"access_token\":\"mga_exp_access_8\",\"refresh_token\":\"mgr_exp_refresh_8\",\"access_expires_at\":18446744073709551615}",
+        "sealed": "000000061588f5b08fd53528827cae5429b6c50a48305fec0eaa0bfd4c51dabe28b4b8bbb35acb0970e75ffdbf4d7baf4a0771ece4ca0f1d7cb7242ebfcc8677e18aa3b68552efcadc713c51c75f2b473ad5cb57bab9f1b5f2051bcdc142e8d4ae86bb87b32a2c9e6ea5e9432ef29d0e8027f6ef6c33ae1f14ce99a6c64818dd84df24ac",
+        "device": "890801",
+        "stored": 18446744073709551615
+      },
+      {
+        "step": "a duplicate access_expires_at: invalid_value, nothing stored",
+        "session": 1,
+        "direction": 2,
+        "counter": 7,
+        "plaintext": "{\"access_token\":\"mga_exp_access_9\",\"refresh_token\":\"mgr_exp_refresh_9\",\"access_expires_at\":1,\"access_expires_at\":2}",
+        "sealed": "000000070ed9fcc4fcbc7ba01ea94b73d1b08a05a63da65630383bfbe2d01fd1e8b400e5c80298b335e1f8381772203e33825893dadcf7343da654c5614364a3cbef767c35ec234ded53528058f3875baa0a08ba515303e7012a01d0959b3cdfd9ef2d87594627b475cbe1468d9eacd8b693199cf6090d30733a4a0bacf403730bbadf531308d7",
+        "device": "1989010300",
+        "stored": 18446744073709551615
+      },
+      {
+        "step": "a space before the object (the first byte must be '{'): invalid_value, nothing stored",
+        "session": 1,
+        "direction": 2,
+        "counter": 8,
+        "plaintext": " {\"access_token\":\"mga_exp_access_10\",\"refresh_token\":\"mgr_exp_refresh_10\",\"access_expires_at\":1}",
+        "sealed": "00000008248503de88eab2217494236ee3298c53cf863e99974e34545b49119fb21937adb6e630796815e91013b0ef3f2428bb81e4c70812ce5f3c77b1f3df43a4eb7b3994d7f9e3aed6f62b593dcd8ce1fc94444000af145388d98cf9d3a1fd51d5ece3c0a95043a1c4c810becbaf229704ab87",
+        "device": "1989010300",
+        "stored": 18446744073709551615
+      },
+      {
+        "step": "session 3: the credentials (access_expires_at handed back)",
+        "session": 2,
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "{\"node_id\":\"homelink-1a2b3c\",\"access_token\":\"mga_exp_access_8\",\"refresh_token\":\"mgr_exp_refresh_8\",\"access_expires_at\":18446744073709551615}",
+        "sealed": "00000000beeb91acd6fa71f85a11fa665fdc462164e9bba5c0e8a79c2c496ec54cbe6af3f458ff357e882d6882e01064cba425c9f38963aa673cb30e897a6e42ef94530a96db216dc7900b09dd985302fcb9ff472ecf4d068c7a20af6dabfe196f605ffd0af303214e1333992d702b0459730b8663aeb1f697f8481bb0ef83fbaa8ff6bf99a4ce54f98aaaf99ba34d107c8a51a1dcd853e883edb44fb0680508",
+        "device": null,
+        "stored": 18446744073709551615
+      }
+    ]
+  },
+  "sealed_data": {
+    "name": "sealed data in a sealed session",
+    "K": "b1f698c75b61116a1eb00fd4901f6acd5f9839befdcf400702faa6c53a69c7ae",
+    "client_nonce": "79f432b442fe2cf416ec94944fd74d4a",
+    "device_nonce": "30445df2662ba78ddc4326fc9a14a7a7",
+    "node_id": "homelink-d47a00",
+    "max_write": 97,
+    "note": "This receiver keeps the session after a refusal to show the counter rules; a device may end it instead, and a client stops using a session after any refusal (re-prove, one sealed hello).",
+    "steps": [
+      {
+        "step": "device: credentials (counter 0)",
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "7b226e6f64655f6964223a22686f6d656c696e6b2d643437613030222c226163636573735f746f6b656e223a226d67615f646174615f616363657373222c22726566726573685f746f6b656e223a226d67725f646174615f72656672657368227d",
+        "sealed": "00000000759d3e37f5a8af6e83f4061e8b0ffa0e38eca8dc666311785db316fdc1aaa96b8960d7cfa345ae80bd8f7f6e67b89f6b276459ea3918fb5d7568144f852cbeb2b7efebdeea6f49ec57429c86c346eb31bdde8512387255f94a7d4be63b89c1b9653b5c8ad14ee0c9b0a33815b593bfc398",
+        "frames": [
+          "8906057500000000000000759d3e37f5a8af6e83f4061e8b0ffa0e38eca8dc666311785db316fdc1aaa96b8960d7cfa345ae80bd8f7f6e67b89f6b276459ea3918fb5d7568144f852cbeb2b7efebdeea6f49ec57429c86c346eb31bdde85123872",
+          "89060655f94a7d4be63b89c1b9653b5c8ad14ee0c9b0a33815b593bfc398"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "device: data, its link.register (counter 1, 3 writes)",
+        "direction": 1,
+        "counter": 1,
+        "plaintext": "0a0d2f6c696e6b2d636f6e74726f6c129601053f4fadf5ff871b72f60901c586cfac5015a56be1a5597364d2de05b40a9d85125a0de131682ac3b9bd3b4c729b7671fe0173c6e13b874de047a607084258927c4431a8131b29b43325ca7b38d84612299cba52cedfa979a22a21901e1719e53c2ba319bfca7465260a132c52de03bf131d4049df42f858c8983ad2385b62674b17c792534818d5d0a6dd897e4513e90795f0e07d8c",
+        "sealed": "00000001bc549aca4e566cb4113d22fe60db8418f9333c6f4e90f777d4eb0bb08ceecbf694935bb7e61e81c13d2d0edb52dec6b3d8dacc7d48a810aec185336a723bfd7df873eb5998f742468f986eb79fbeaa0b5f0ab717adcd8e25c6c7cf094f0dfaa4a60a7d94b9866c6fb6d6fa2e5fe447dc519794eae8cae170900782b061bd1a7b9598a4e5bbb68acfd97985c3312c34a3646b950686db90d85abeee54831056a210eccb4dbe3a12034a33456f7f8e29cb83fa2f352896939b",
+        "frames": [
+          "890305bc00000000000001bc549aca4e566cb4113d22fe60db8418f9333c6f4e90f777d4eb0bb08ceecbf694935bb7e61e81c13d2d0edb52dec6b3d8dacc7d48a810aec185336a723bfd7df873eb5998f742468f986eb79fbeaa0b5f0ab717adcd",
+          "8903048e25c6c7cf094f0dfaa4a60a7d94b9866c6fb6d6fa2e5fe447dc519794eae8cae170900782b061bd1a7b9598a4e5bbb68acfd97985c3312c34a3646b950686db90d85abeee54831056a210eccb4dbe3a12034a33456f7f8e29cb83fa2f35",
+          "8903062896939b"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data, the VM's answer (counter 0, 4 writes)",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "0ab402080322af020aac02dafe01152f3e6f3750dce00e3749333ef9ae3ef0ff57e676077e13583dc545cf11833ace30e32f3540eb4d4d7603ac035b1dbf76e2d3cdd0980fd440aca4b0aef1af8453689d99ec4730b8f2e91261d43b7b8f21dda684d11583ea55379e9b1d3606eb454aeb9c33d10cc9b4614154af21597c68fd704c003a2be29eea9543a6ca785f0935f6515482e22b0b816bd4d8d68a58b8d19e11ef73f8df3334ac6abbe7c84840d72be87db2be46ce15d9b46dd665194146b86e05248caac118ef1b37d3e399d7e519d1682a3e3c5c8f054c2a98cda7f31d00ca4a229ab7c87836e62c0358c7db4d0111c698820e219541c1ef34e9aab85da216df55d83390dc3495d7c408d92f632d57650176fea423b78b98ecd02be496bb22b5504464106347ed8005f574435954db8073c0f160",
+        "sealed": "00000000516adbc5f5df7362dd91d26962c55f407d2bea0fed47f1c771d94ca5acbad9898e04a388ff0073963c110c578fe4ef45445db9ede8bc425c1d6960aadc4ba09b861c89ac7dc67e1c95d4899676e423eb074453ceb5229c5a1e06121be5abe7e84092fea78982f6cf18779eb37b7d0e27efedd95988e8c383ceb7416e49b50e5e55072595071274ba838acacda003b7811d5d8dff52582a7e4ff0202d388f0191070ece452b2d8a0c75f4e28d677ac87a87e19ed9ae304f739b821d138807118b2861483ba71fd087f0f37a01b3b2ef980b9d7826144f01b5be92dbd6a95cbdd161b4296c5e238788123642ef192585d2d43cad033317bc462afe1414a55a29031465fda18988fa992a9661b3fa77661793e55a19d17ba7d44344643abf086cfd9532410af09bd1e9e465525f17f8c40669465f67fd6d0320dbdc8c3e48a4738db9f01548fa1a70",
+        "frames": [
+          "8903054b01000000000000516adbc5f5df7362dd91d26962c55f407d2bea0fed47f1c771d94ca5acbad9898e04a388ff0073963c110c578fe4ef45445db9ede8bc425c1d6960aadc4ba09b861c89ac7dc67e1c95d4899676e423eb074453ceb522",
+          "8903049c5a1e06121be5abe7e84092fea78982f6cf18779eb37b7d0e27efedd95988e8c383ceb7416e49b50e5e55072595071274ba838acacda003b7811d5d8dff52582a7e4ff0202d388f0191070ece452b2d8a0c75f4e28d677ac87a87e19ed9",
+          "890304ae304f739b821d138807118b2861483ba71fd087f0f37a01b3b2ef980b9d7826144f01b5be92dbd6a95cbdd161b4296c5e238788123642ef192585d2d43cad033317bc462afe1414a55a29031465fda18988fa992a9661b3fa77661793e5",
+          "8903065a19d17ba7d44344643abf086cfd9532410af09bd1e9e465525f17f8c40669465f67fd6d0320dbdc8c3e48a4738db9f01548fa1a70"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: credentials_update (counter 1)",
+        "direction": 2,
+        "counter": 1,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f646174615f6163636573735f32222c22726566726573685f746f6b656e223a226d67725f646174615f726566726573685f32222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "sealed": "0000000125daed6a8d7116b9e18a13042cd241c44b6421a3d354793d58bf31b6220037df0ac5bd59664cef6ce17e5071b057a06e9ce401dd0ec36fc4198a8d0d984b315e954502fb7570c63f55d8a3c74760c28c9e9df2b4ba74179a9a5d8a9f76b21c63e268098fcb0e1414c86a2de8952e24006f6758571d6a018e",
+        "frames": [
+          "8907057c0000000000000125daed6a8d7116b9e18a13042cd241c44b6421a3d354793d58bf31b6220037df0ac5bd59664cef6ce17e5071b057a06e9ce401dd0ec36fc4198a8d0d984b315e954502fb7570c63f55d8a3c74760c28c9e9df2b4ba74",
+          "890706179a9a5d8a9f76b21c63e268098fcb0e1414c86a2de8952e24006f6758571d6a018e"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data (counter 2)",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a2e0803222a0a2832e89d72bb5e6cdef7bb4a96fb685ddbb090c0f85060921a9ed58f2f2c6cc4e77e09dc7ea7bcaa2d",
+        "sealed": "00000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7",
+        "frames": [
+          "8903074400000000000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: counter 2 replayed: refused",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a2e0803222a0a2832e89d72bb5e6cdef7bb4a96fb685ddbb090c0f85060921a9ed58f2f2c6cc4e77e09dc7ea7bcaa2d",
+        "sealed": "00000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7",
+        "frames": [
+          "8903074400000000000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "client: unsealed data in a sealed session: refused",
+        "direction": 2,
+        "counter": null,
+        "plaintext": "0a1a080322160a14ed706cd3a93de18a48329cf5a1a1a6c465a0dcd9",
+        "sealed": null,
+        "frames": [
+          "8903031c0000000a1a080322160a14ed706cd3a93de18a48329cf5a1a1a6c465a0dcd9"
+        ],
+        "outcome": "refused",
+        "answer": "1989010700"
+      },
+      {
+        "step": "device: data (counter 2)",
+        "direction": 1,
+        "counter": 2,
+        "plaintext": "0c2dd88ccc0d3364d98ff0c358252e2d30aa9d3319f79f8139a1f998cd53",
+        "sealed": "00000002b140732cb0afd897487f46f888e36a1dd04ff24fb3883052cc2e5da716bc017e514eb386138b7eab45b7c1d99be2",
+        "frames": [
+          "8903073200000000000002b140732cb0afd897487f46f888e36a1dd04ff24fb3883052cc2e5da716bc017e514eb386138b7eab45b7c1d99be2"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data counter 3, first write then abort",
+        "direction": 2,
+        "counter": 3,
+        "plaintext": "0ad001080322cb010ac80173eb8ec35282efb890ab1e94a69279603cd05cba9d9fa8d4a1c96eae3e2ca8217e125256b78d8747a2ff080408b411db60ec1a846fb99baf3b07aa0c805192e05d8e93271a5180c0075c8ec5ff5a115a35a2ae4dda82fd075ccf0d20e7864bb53386984628119c458793aa767e897e20e94dd4d2fc0e61361606f3605c38269fc302800145084c1a9ff134e1bba2e8ffc3fdd737c443241dd704440a1dedc8309c03691955687b1a6503e2b773ae8e79e337f5ec23dc77c8c58dbaa142dd9d0f975324c38eca769e",
+        "sealed": null,
+        "frames": [
+          "890305e700000000000003fbaf7279d4b1b2a1760ef2b2af59768d20398af5a5023793ee0f197d0071706fb8312433dc4e0589bf9ca0961226ff286335bca81047bb17e408f5038fbbc7c4333d188a3c0b64245d9a50d7add1f4703136265fb31f",
+          "8905"
+        ],
+        "outcome": "aborted",
+        "answer": null
+      },
+      {
+        "step": "client: data (counter 4, after the abort)",
+        "direction": 2,
+        "counter": 4,
+        "plaintext": "0a1f0803221b0a19fe367725ebb021be3ba30c51a692fdda69ceda43d943e18c77",
+        "sealed": "00000004f2cf72084db6a8734bbb4140faac5e439f49edb93f816d4294090f6b09b7d5a05db98b7e921fe1bbd8973adf9ec9077578",
+        "frames": [
+          "8903073500000000000004f2cf72084db6a8734bbb4140faac5e439f49edb93f816d4294090f6b09b7d5a05db98b7e921fe1bbd8973adf9ec9077578"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data counter 5 with a bad tag: refused, counter not used",
+        "direction": 2,
+        "counter": 5,
+        "plaintext": "0a24080322200a1ec6583dacc70a401fa5b3b6aec736e40879483c8042599cd4f577aa2786fa",
+        "sealed": "000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49108",
+        "frames": [
+          "8903073a000000000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49108"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "client: the real data counter 5: accepted",
+        "direction": 2,
+        "counter": 5,
+        "plaintext": "0a24080322200a1ec6583dacc70a401fa5b3b6aec736e40879483c8042599cd4f577aa2786fa",
+        "sealed": "000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49109",
+        "frames": [
+          "8903073a000000000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49109"
+        ],
+        "outcome": "message",
+        "answer": null
+      }
+    ]
+  },
+  "sealed_interleaved": {
+    "name": "two sealed messages in flight, the earlier refused at its tag",
+    "K": "b1f698c75b61116a1eb00fd4901f6acd5f9839befdcf400702faa6c53a69c7ae",
+    "client_nonce": "2278fab9741544fe1fc9f39e902fb8fb",
+    "device_nonce": "618a2f4416ed206adbed1e7d9f2d9b12",
+    "node_id": "homelink-d47a00",
+    "max_write": 97,
+    "steps": [
+      {
+        "step": "update counter 0 (bad tag): first write",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f696e7465726c65617665645f616363657373222c22726566726573685f746f6b656e223a226d67725f696e7465726c65617665645f72656672657368222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "frames": [
+          "89070586000000000000003b90eebc759cd8cc43984e89c94b04867cfdf43ad6de85accceae8bf381012e37194186478eb464ae71faa5a48a1a47f5f0c8a31c7a6f87a22a4a4c358c92f10ab63dd2786dc2904967439f40c932dd2fd8ee4cdd353"
+        ],
+        "outcome": "partial",
+        "answer": null
+      },
+      {
+        "step": "data counter 1, whole, while the update is in flight",
+        "direction": 2,
+        "counter": 1,
+        "plaintext": "0a1e0803221a0a18968b9fcde80933d10d934c415983257ba86c749378f12415",
+        "frames": [
+          "890307340000000000000114694183a4328448286e0a521723a20627904712d84f9a7d8aa5792f41e320ea3aa241a1f74ad2fdb4914dbda8c7ecf2"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "the rest of the update: refused at its tag, counter 0 left open once",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f696e7465726c65617665645f616363657373222c22726566726573685f746f6b656e223a226d67725f696e7465726c65617665645f72656672657368222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "frames": [
+          "8907067b319a41588b50112e5056eb511f1492941af7d05f0cd0696c8de3cfa5e37b45034debf6b2f73fde3171314e"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "the real update counter 0: accepted (the hole)",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f696e7465726c65617665645f616363657373222c22726566726573685f746f6b656e223a226d67725f696e7465726c65617665645f72656672657368222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "frames": [
+          "89070586000000000000003b90eebc759cd8cc43984e89c94b04867cfdf43ad6de85accceae8bf381012e37194186478eb464ae71faa5a48a1a47f5f0c8a31c7a6f87a22a4a4c358c92f10ab63dd2786dc2904967439f40c932dd2fd8ee4cdd353",
+          "8907067b319a41588b50112e5056eb511f1492941af7d05f0cd0696c8de3cfa5e37b45034debf6b2f73fde3171314f"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "the real update counter 0 replayed: refused",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f696e7465726c65617665645f616363657373222c22726566726573685f746f6b656e223a226d67725f696e7465726c65617665645f72656672657368222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "frames": [
+          "89070586000000000000003b90eebc759cd8cc43984e89c94b04867cfdf43ad6de85accceae8bf381012e37194186478eb464ae71faa5a48a1a47f5f0c8a31c7a6f87a22a4a4c358c92f10ab63dd2786dc2904967439f40c932dd2fd8ee4cdd353",
+          "8907067b319a41588b50112e5056eb511f1492941af7d05f0cd0696c8de3cfa5e37b45034debf6b2f73fde3171314f"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "data counter 2: accepted, counters continue",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a1e0803221a0a186cae77551b93b99135010571dd80ddb418d65681a6c9040f",
+        "frames": [
+          "8903073400000000000002c7f48c0aab56967b114ebb4148876bdd63e75f929b81f2c0ebe5bab54fbb7586f6966601999d6c70544cf8af2a7f2e1b"
+        ],
+        "outcome": "message",
+        "answer": null
+      }
+    ]
+  },
+  "receiver_limits": {
+    "name": "the receiver's limits (client to device)",
+    "K": "b1f698c75b61116a1eb00fd4901f6acd5f9839befdcf400702faa6c53a69c7ae",
+    "node_id": "homelink-d47a00",
+    "direction": 2,
+    "max_write": 97,
+    "max_message": 4096,
+    "note": "Each case is a session of its own (its nonces), the receiver's counter from 0; a step's outcome is its last frame's. A refusal before the counter is taken leaves it for the next message; one after it (a malformed fragment) uses it, like an abort.",
+    "cases": [
+      {
+        "name": "a first write without the whole counter",
+        "client_nonce": "43ba7d2f6fd69804027aaa368d756095",
+        "device_nonce": "fa87702082d2a75229dc2dab7bc2f531",
+        "steps": [
+          {
+            "step": "data counter 0, its first write with 3 of the counter's 4 bytes: invalid_length, the counter not taken",
+            "frames": [
+              "890305b5000000000000"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010200"
+          },
+          {
+            "step": "data counter 0, whole: accepted",
+            "frames": [
+              "890305b500000000000000edd6e2756a6e0684e4d5e30f03c748580ec8079c25db731bd26c9c6fdd4cf4e0daa952a49b888594716536bba04ed0a3df742d7e161821192c57150128a80ce4d4d8f3534f7014d2dbb9d4703c4c4312c0c01df8f667",
+              "8903061e4cb9581eb26fd8e6f79591d1c20cd2715ed483599767768d4484ba77c7b8d57068d0a5234e5d2880890ef32d3c20e48f6a9451c8896d6debc20612c0ad8de9ade6a7032fbd1d5a54e287ccac8b0b0cb9beab7d96161ecb2625c3"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a96012370ec93391bc18c5303d6f1274db2453bd1825b8d7cafb65784fb5357603dce2447865f83dd31a9802c961fe2aec6f70e2dad54415c750649228b6c98eb6d79a820453d6aafa59095c08ba0ba42b91f47467207087949f3f56a15d87a9ba023a38f1daea294baad14897911c5100a4327e5dad7543ea20072d4404f75f3ab192536abef0bbb09dfc1c8bb94559048736db5ae4338cb",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "total_len over max_message",
+        "client_nonce": "3239dbf03013930343354ac73b8a47bb",
+        "device_nonce": "ca5081596d962883b14befb92ce23bfa",
+        "steps": [
+          {
+            "step": "data counter 0, its first write with total_len 4097 (over max_message 4096): invalid_value, the counter not taken",
+            "frames": [
+              "890305011000000000000099b4ce8b0f1f04862a83399fd48d1b1a0468e6e6a4bd339df1b62f425be2472ed38804199bfd12f115d3d842c84983cc72d3d7e5d1002435e5d35b919649b2a30df97368e31f66e4ca22aa70a676810725111d38c5e7"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 0, whole: accepted",
+            "frames": [
+              "890305b50000000000000099b4ce8b0f1f04862a83399fd48d1b1a0468e6e6a4bd339df1b62f425be2472ed38804199bfd12f115d3d842c84983cc72d3d7e5d1002435e5d35b919649b2a30df97368e31f66e4ca22aa70a676810725111d38c5e7",
+              "8903065a41b8621c663f1e6e83bde7596b5006cf4afa0914aead99f2f081f96e0534eb9177ef2c472de2f650be360e301a3e1d273b6a5902ca4a374a31f31615cb35cc780986732c65234ebc39ec6ee7bf7180cc600b90f25b2ab50aa74a"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a9601ecae5aea46c7faea768c34c01cd16df25bed549850ded67d86686389aeb73776e4b6c5de757cb7dda828bc24eb7cd5b5b14f867d16bc16a1c8a7d3563929566980759ef84a0080b7af57b3a7a3e99396cfd89e829b4a57a2e07a70b3d2ae2f6797d0d080b186dd99aec0682017389c0395feae18d2450e30387de82dc4df21cda37b97b27aa00fedebffecfb76e1c90942c95fe7216c",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "total_len 20: no plaintext",
+        "client_nonce": "95d819eca3f7acb007dabad456ede7bc",
+        "device_nonce": "e9e5e997450e4af733984825435f6dfa",
+        "steps": [
+          {
+            "step": "data counter 0 with no plaintext, total_len 20: invalid_value, the counter not taken",
+            "frames": [
+              "89030714000000000000001e095420734f9883a2c14b1a8b5a6af9"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 0, whole: accepted",
+            "frames": [
+              "890305b500000000000000dc5f17d2423ea61e5889a33966c2873c2e807e3eafde2308d40a189069a68ab7eaacd8442d669d08c24478bd0166ee04412d057925b8058cdc7fe41f81c831cdeb3199723abe403e2ab3d235479518c838acc092313f",
+              "8903067dc34cb4e0c32b3e46256de4d95ee682ba370de53e25123d6939ddf6ff08ad4602631f0cb2e8582a823b2a1cd12a5a65b80cc07c91f85a4dd492d3c93998d0c5d71f7f13d33139621bb38fc4f78990c70b19efb187c84c6cae5a7a"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a960173d8fcca3d807743315c112c7d6ddb0f355fd02a8be3a0e3dbb46f548e2700f93a4e829e90996e71dd96a4cee9530c5d1207ac51e5b30e334403bfc48a5ec09c9f0c335d20850f04d7320e15fa2734a04c9c64d647903a5f1c4fd3b23eebfdf245bbe38d91c9d5a75fee6ab7b73bf34b00823f8ec48dcd3ec0c1956933848461a3cb4dff862b52c0a4ce5ee052287b4bf9386f9e93cf",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "a write marked last short of total_len",
+        "client_nonce": "82f9f55c1acf0cf940761fbd04017fb5",
+        "device_nonce": "59badc05289544db85ed1de12c0f73bb",
+        "steps": [
+          {
+            "step": "data counter 0 in one write marked last, total_len 5 more than it carries: invalid_value, the counter used",
+            "frames": [
+              "890307490000000000000064d3796189c6fd776a017b6041e1fb7fffcbf02692664e4cfd300239d638e694f08cdbb967f51326d75694081006f8101280cbe3dabaf1c2853721db3cf5034d"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 1, whole: accepted",
+            "frames": [
+              "890305b50000000000000195423741601a908f1038076b8e73573e06a89d7352118bc19c622e701223d6731c4dcd650aae5eadeb556d5e8150499c3b690063413cc8ee8309f5e71487f8a0c177b1de91141a8e954c18dbbf8ee09e19976943e6d0",
+              "890306336aa727655ba4fe3635ba9812615cfb324dd2e93ecf5eefae5159f37bb2ae5002c2986c353d9ccc39e689693a6f0ad7bd60adbe709a70b17919baa1b0a184bb7f91fcaed24b2b72083b05edb5cd2f14085873ef5f7b55b514c946"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a96012f8ff36fe71c31ffa0cc6b357674af4169ac662be5297a97f8b5a537d9c851c4a1c5c375e48a293442e57976b3c9670992bccc9f7aaf6149aa8751421243e033ff67412409ae47aabbf11fb7651e89f4c0cf172008d93f7ba785ba5fac99ed456cf72b806c3ed97f56f7738cccece1ecfaa993c9991bb50120d2a3e5f17731f501938de300c419e09a83bed5e09e23dfe8e5b99d0b13",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "bytes past total_len",
+        "client_nonce": "34c071162a338bf3b80713c3ffe31b7d",
+        "device_nonce": "350ae18789c7e1512cf85fbed37da3c5",
+        "steps": [
+          {
+            "step": "data counter 0, its first write",
+            "frames": [
+              "890305b500000000000000a9e027e54de5bc6888c4f56235ce1bddadd0e790b20dfbb183c821dcb744e03712afd77ae00bcf78f828bebf015e2c8cf531128692297f00de3a3a2faf9c086a452b8d6028d66b05d2d10f908a2eb10ac0f923f64e11"
+            ],
+            "outcome": "partial",
+            "plaintext": null,
+            "answer": null
+          },
+          {
+            "step": "the rest with one byte past total_len: invalid_value, the counter used",
+            "frames": [
+              "8903060c6d1b9445cb6861c41f0d5e1fb5bcd26c6bcaa4346c6ed157f0c64c8ba92a892f2ae30b3db9e461d6be4b89b5f365834c6f4f414b1f8ff84dd454f886e7e907c34d73a399bcefcb14e4a90add450384005f629c3df3a35ffbf2c100"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 0 again, whole: refused (used)",
+            "frames": [
+              "890305b500000000000000a9e027e54de5bc6888c4f56235ce1bddadd0e790b20dfbb183c821dcb744e03712afd77ae00bcf78f828bebf015e2c8cf531128692297f00de3a3a2faf9c086a452b8d6028d66b05d2d10f908a2eb10ac0f923f64e11",
+              "8903060c6d1b9445cb6861c41f0d5e1fb5bcd26c6bcaa4346c6ed157f0c64c8ba92a892f2ae30b3db9e461d6be4b89b5f365834c6f4f414b1f8ff84dd454f886e7e907c34d73a399bcefcb14e4a90add450384005f629c3df3a35ffbf2c1"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 1, whole: accepted",
+            "frames": [
+              "890305b5000000000000015730833c73d2287acaec986ab91811a8d84547a81240c3707ac338aeeb4c8f8637388a501f6e010ede4824f538ef6d90b9fadaa156cfc1c074f8dccd27a2dc59105077ae85773aaa19e7a5f66cd08f013c90698ae1c4",
+              "89030622372b733427c60d74b466647b7d47a526438a3ea918ad5f674b32aa1709de587dca019dbce2d6d021a87d1279c7c91cd3efaa54149b1060acb2aad8d923fb96cb516438d99c082301579d961b1c8ea844a69607a6fc1f318f3f39"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a9601c96e96a7b70c24ff29ce18bb824445f60489a62fce247ec635a77f181761079474b88a91297f6bbbfb44bca3e954656f2baa265656a49fc32b1fc8ffadda64bbf639d71029d612e178e0fbeacb62c3b626be66d7576550892e5170511bff7c8a7148e197145ed26b50ebc71607a970a80a3fbff455e1e451e0dde4988213348b858676795f946331e8104b367c7847c1ff8758b6809c",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "a first write while a message is open",
+        "client_nonce": "e343ab8e1ce1b561c485ed60ae011ec4",
+        "device_nonce": "523e4b9b49ab84fb3bef8b1448126df6",
+        "steps": [
+          {
+            "step": "data counter 0, its first write",
+            "frames": [
+              "890305b500000000000000879bc73a07f1bd349d64524013fa147cdd7da6f5985336ec134f165ebda2d2d6fc15708d0362d302de0d9a130b771b69191a3d233d06a59e52a345ec3403cde8b696a6bf9bbdd1178a71fb485276e3925c4fdbb55bb0"
+            ],
+            "outcome": "partial",
+            "plaintext": null,
+            "answer": null
+          },
+          {
+            "step": "data counter 1, a first write while counter 0's is open: invalid_value, both dropped, counter 1 not taken",
+            "frames": [
+              "890305b5000000000000018bdf46de02886bf7445045224c239440a6e342061f4aecf5cdf9a8a010049c9cff631587f0adf9f44214e5ea62f60fffb3fbe19038a6f39f0bcdd1999c1a65e2607e8ed170bb6b4fa6bfdc4a8a958830f5f2d701b2d4"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 1, whole: accepted",
+            "frames": [
+              "890305b5000000000000018bdf46de02886bf7445045224c239440a6e342061f4aecf5cdf9a8a010049c9cff631587f0adf9f44214e5ea62f60fffb3fbe19038a6f39f0bcdd1999c1a65e2607e8ed170bb6b4fa6bfdc4a8a958830f5f2d701b2d4",
+              "890306ca3c2014400af945e9aa737332ea6da7df55874f7d21708387d970771d92c7bf568aa1cda4c9562c0ccac1400ef435f30fbcbf48bd8ee747a2c741c5d37c058508d5abb03df64b8d742e8514b991b0ff0aa31dac56f189391f4fe1"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a96015eed63383f56ee74323e832b5425c2777729ef3f12da0b2b44870b5f73f53596301837439108b70a227d2f4e475a06a373b70b3dd8648a8e290774599e46fbb79725994763c76a8fc986c27de246a439c4f14afb180e8907a737ec6781b4db7c648b370ee8f12783ed40933f667e6b38705485fc4607d0bd30dff1541766c2db2e9df474e4573cdaebd3a558e9ae635031c27b3ba179",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "a continuation without the sealed flag",
+        "client_nonce": "2764db6834480dad895118909bbddb02",
+        "device_nonce": "33ce0eecc241a40688e8da8c0ac212b0",
+        "steps": [
+          {
+            "step": "data counter 0, its first write",
+            "frames": [
+              "890305b500000000000000e4a1e754687416532c7bd16d446f7117f113693e11834d2def850080ec25590d2859cbb44424473293fd17b1d744cd1a5a834f91ad8b878d4e0797d81168986962070731528220a013d735ce46afcb2f155480b287c8"
+            ],
+            "outcome": "partial",
+            "plaintext": null,
+            "answer": null
+          },
+          {
+            "step": "the rest without the sealed flag: invalid_value, the counter used",
+            "frames": [
+              "89030217958bc20a6d2f78fc5e2fa52dffb094a22c1001cba372c15143e566e247bb9ea6c9e5ca5fe303d0836ee24d73a81ff71bc4151031a02c4b8e21eea5fd884ca96b4fe548c38324c26760f5c77bc488ab21ec9dfa3e6335fb85bad8"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 1, whole: accepted",
+            "frames": [
+              "890305b5000000000000016dc20f7ccfff5dee585a2b1d79b7815954742061daac7b877ced9df345ff24105f817ff61428b4f0b6642662ab7cb8cb1a823efaa7ac81597727ab6a3b2234eb3e8da9d7c4c2e261580e373b2569e161cf44292657d2",
+              "890306b0adcf571cbbe3e71048cf3ac5b32f74b4f55de29f7d7af283c03a4562c0353b5fe86b45e52c348c22e44e504e529e29d4c167e125b8122d348ccea5259fad7394fe6949d20bf9f7fbbe6b69e41a63282b3068692fee1a6fa9a8cc"
+            ],
+            "outcome": "message",
+            "plaintext": "0a9e0108032299010a96012b4761450e0ac7d40b82f4062fa1f00404be2d22e23b84cec7b787509c9292ed944aceaaff94e34eec7e1b56bb12348cbb95a8203cacc57b0cce548f048c58f3defeeffc45ca7f82ebfc65412c11e8892f31378a9e0caba01da6633bfd8e5613ba05ddccce2d94dd41d1dafeb2d66efaccdf331ce6f8dc35508b996f3687d96351c0c20883ef87e467bd195159a6fd0a16dcaa65c521",
+            "answer": null
+          }
+        ]
+      },
+      {
+        "name": "a hole more than 255 counters back",
+        "client_nonce": "69478aa80c8860875144107a8561092a",
+        "device_nonce": "3db896e6890cd7573b008a141cf5d0a9",
+        "steps": [
+          {
+            "step": "credentials_update counter 0 (bad tag): its first write",
+            "frames": [
+              "8907057c00000000000000e64f26bcb1263d55f645ec0854798b0da41644000977d134fa361c5272c0570adad04a9f740e3fd12c55ccbaac87144725eef929f15042f1df2c9822f9e36b70170067c4439f95f97017a8257fcb09074456dcd3871e"
+            ],
+            "outcome": "partial",
+            "plaintext": null,
+            "answer": null
+          },
+          {
+            "step": "data counters 1 to 254, one write each: each accepted",
+            "frames": [
+              "8903071d000000000000010c7545a8ff5422009ef6b425c5a37b8e9d7dd2d99eb5af3cc8",
+              "8903071d0000000000000214a318f9f3193ccdc9929696b46f48127f956a6af2e0c2a9d1",
+              "8903071d000000000000034dd4563f651ee6d3fe0d8dd790927db8d778cf13740f8bdc49",
+              "8903071d000000000000041b387b1ad32d9b1d436a2e0ea59d03ed0c19fbf88bb8918968",
+              "8903071d00000000000005f393e28acfdd078dabb7f984f6fe2a765d6d2661d41d679aa3",
+              "8903071d0000000000000692f20c08eba01419c79f18ae8a1c8a57c58e836ceeb1f8b2ff",
+              "8903071d000000000000077c422cc602451f23fcd520f50c3ad02f3a9de15aded7612b61",
+              "8903071d00000000000008051b0caf8901bcfece0642b6b7dfb693a5d1dcaa84e8f31069",
+              "8903071d000000000000098c83c760a9ea520133fa13e702aa9dea6f5dbb622b469d0750",
+              "8903071d0000000000000a28ff482bc23d0f3c9347bfac12dc600817591fcf764b62d042",
+              "8903071d0000000000000be8e7fd75964a8e7649c7fe332be968acafbd86371733e9d593",
+              "8903071d0000000000000c2d5117735d1bc4ed7bcb83525b9523558ab5e43733c3f6bd3c",
+              "8903071d0000000000000db95f6ff7d1cd68198448f5a65d60e948cd78d1661bea884042",
+              "8903071d0000000000000e6fd918ace350ab2b8d2131b766d4eb4efc5842e1c667e3e0a7",
+              "8903071d0000000000000f06bec8e015691508f034b17f9d4f21e2d3c53b0c15fd084b09",
+              "8903071d000000000000107428f090565a633f3f6d757d424833dcc629d3fe2ff654a848",
+              "8903071d0000000000001100d0606023b9f2a9f653813d42dd0170b453e8cf1e9a9d9958",
+              "8903071d00000000000012a19f0facc8a802d1d8aa105150276ba60026d0380d06e97331",
+              "8903071d0000000000001342f4a6693d8815ac6004256189f6255bb5ed059d5853fa7c56",
+              "8903071d000000000000148805cf60365bd85899833abea68a8ac5961f216a88a3cbb7c1",
+              "8903071d00000000000015cf86ba3ec8458751e179bcf4b687787d4accfd14e7c9929334",
+              "8903071d00000000000016758848ed66a1fe657c3960888c557a77543afc68fcf83e17e1",
+              "8903071d00000000000017b5fdb1036d2e5ba3b2743e22d83c9247a7d304a5eef362e559",
+              "8903071d00000000000018696a0f786c20cd1763243a4625eb8b58f741da8d241b44a5ce",
+              "8903071d00000000000019e1e07c1aea9836b449c296ec631ab586f29a4013566abfdf01",
+              "8903071d0000000000001ae6887a63d8e80cfbebf83018b333de9a041ccbbf04a1127af4",
+              "8903071d0000000000001b814560ef51b3d5171c86487b0e0677bf5d21bcf66147797811",
+              "8903071d0000000000001c9dc552ea78b34091d64a5eb2eadb40194596691596f045a38b",
+              "8903071d0000000000001dc82787c41004d4565b6b3def36d45a26d10a63bd4fea48183e",
+              "8903071d0000000000001ea059c393b39a75c42630d4abb29fe5ee8574c19d19986c7c85",
+              "8903071d0000000000001f0bc6edf5eb2f8ca7d325a73756a09890ae29229ac34505e525",
+              "8903071d00000000000020e53721ac75cb117440c83c0ad1f5bf1dcc935318e43a5a299a",
+              "8903071d000000000000219a2ad3fe01a2ee93b35ddffcb22035d21af46d2aeb4008be88",
+              "8903071d00000000000022b1ef6c05bcfa9bb8a0dd36c6e711525bcd041424a79aaff337",
+              "8903071d00000000000023d91ea17bf78fb5689e629dc2cbe11d3d020a10e59d768389af",
+              "8903071d00000000000024e900485fb0d9318a2b40d611a5f7b89bffcc8995710533d1e2",
+              "8903071d00000000000025f9541bfb60552c2a78e5f693c80c434a4152433ecac14ae4cf",
+              "8903071d000000000000269e75b379852f7c27ba9333b3dc1302dc0e5192fca0e4637b7b",
+              "8903071d0000000000002731e5cd398d6026ea37b2c8ad172a3b32d7baf7f6505b7bd3d8",
+              "8903071d0000000000002857389faca6e60804fda5c00d6458047d33ad056b653b86827c",
+              "8903071d00000000000029b83dbc18586dc9034cb00ced8016941cd0a18f5416b983b9e4",
+              "8903071d0000000000002a823343efef23a7d4f9e173c1936de456a490f9ef6b03a7cff4",
+              "8903071d0000000000002b603ef5c50f5a4b234c2f6b2ce1447b2d5fa9b3c000123f012f",
+              "8903071d0000000000002cef0567f992b8636b412a5883459ec3814459370d54c1072f7c",
+              "8903071d0000000000002d70774d6677f57b0593383e77b0f14eb93896ed67318b6d5f67",
+              "8903071d0000000000002e26d1c859a9fdedc367c9dd3edb0d55079eb286362c55286e8d",
+              "8903071d0000000000002f85a622dcad410344216a49bf5ff82171e57b663a2b9a3d2dda",
+              "8903071d00000000000030ff5215f645aa9b568bc1f3ed0b7190ce1f0bb49b926adf9a26",
+              "8903071d00000000000031233f02434f2e045c2f923b61f49b2fdb4c30987665ad89cb6b",
+              "8903071d00000000000032697806629acec7330ad7fed4fb5f2774e05d3bfdabdbbcedbf",
+              "8903071d00000000000033f1b8b4a3c9c191b3f86d3379f65cadb41e934dc0aca7acdb86",
+              "8903071d000000000000342e54fdd96fef064de3fd2823258008bbae101c1c5350adcbce",
+              "8903071d00000000000035d71b1b7b4fd65c4125ea93d4f7e7ffbd1b367cd2b7c404bf4c",
+              "8903071d00000000000036647017daede020eccc720e30d63345c56d07af03d93e62d412",
+              "8903071d0000000000003721ea6ef8dfe6e56cf7cc9037394213aa264e0cc3c549d66c7b",
+              "8903071d000000000000389784233742a5c3f56a71e6c38c2819e24f511410cb18df5d71",
+              "8903071d0000000000003950555a7cf610b2708863f1a6b7ec392562258c3cd6374ceced",
+              "8903071d0000000000003ace0e7b6f535aa5fbdd9d7cbbab3456ba21e7c6dd03b15c49ad",
+              "8903071d0000000000003b0b417fe4977c90026e93a27e9bf3e507ebb84b03a2fc4ab1f3",
+              "8903071d0000000000003c064a28761a796aba65f164725d7b261511851f682704ded4ff",
+              "8903071d0000000000003d8dc5bca4b1242baf16e7eab9cf83605c4c349bee6baf339fb4",
+              "8903071d0000000000003e4a4aaef4e6536ffe3e50f215db7331c2d6deebf5c7bd92f839",
+              "8903071d0000000000003fd67f79aa938998dcb7818bfb43f86fa58dbc290f6c3e479139",
+              "8903071d00000000000040d54c4ee83199fb688fbd529620875578185d821f35768dde26",
+              "8903071d00000000000041f4db58154d2f9631bbccc35e292d4413ed478cccbf94ee3b8c",
+              "8903071d00000000000042352bfb604e9f6652e485ed04e8a4ef05e421101b54a32abe94",
+              "8903071d00000000000043ef6279705508fc79b5382dcbadeb5f075eff84bb272e465fc8",
+              "8903071d00000000000044cea7a6adb1bf0ae2c88a4a1e16120b03691e190419c7bbb8c6",
+              "8903071d0000000000004500e6ed88997ea23e100a0cf79ce2d3a81099593c57c676ae5d",
+              "8903071d000000000000465b2e5cf299d9d68b13dcb64a4e345f63c6c968e55a852dd9af",
+              "8903071d000000000000477f657aca78ddd2e32231c01db7f1b4462be58751c935665715",
+              "8903071d0000000000004804e52d4ba116886793c26ed4f222ff804b14a7e138a2ff5ed1",
+              "8903071d00000000000049f429a0ed4b46cd98dae7963606b549eeff5a0af613deb9bc08",
+              "8903071d0000000000004a562d207184adbff9ee57118a0e55e3cdc72fb9fd7308e6f21e",
+              "8903071d0000000000004b31a06dc8f42d7a422dcb804293f92538602469cc4242b6b0dd",
+              "8903071d0000000000004cfde7c8f1a364332238ca0f282f4e778d526b7e3c7f1e2bd71e",
+              "8903071d0000000000004d5b6f84e02971c87ecd17ff763017a0655f37f6019bcb6d61f3",
+              "8903071d0000000000004e33d826bd13cb8979663acfaa6b83a3da26157cfd4d52ce3ac3",
+              "8903071d0000000000004fcfe0a100e43e0c0aa256a94f47aa814585920911449767676c",
+              "8903071d0000000000005059e066992e6e528c5de8a354f15c3f7986e35d960ccc4a5a13",
+              "8903071d0000000000005156e73ba55139c0561b06970f0f570246e8471bec878bcaf7f8",
+              "8903071d000000000000524a919ad2e7242af5dad16a6b38a01c3b2b5a1827b1ae64ead9",
+              "8903071d000000000000530d74654ce3bb334da8587aac475c421444a3e67cc078271f7c",
+              "8903071d000000000000543d7717aab351f692a773701927d781c0f18b6c5c179abb9d81",
+              "8903071d000000000000554ff81c7e882d2bad9e9047f4e44431ecfb0646420f6a3efb05",
+              "8903071d00000000000056d8df4989a3c4400ff7193c8782aabe8b5823819695401255b2",
+              "8903071d0000000000005797f9d5980ca9dd2b9b0e5c5810c90394d32f49ce58b593edf1",
+              "8903071d000000000000586ba26223a93131a463ef9493b68021516a5c6bbd2379f18603",
+              "8903071d00000000000059c32485eb9d4d03bb0ebf65d630c5d3555fbec86c31e55e66d8",
+              "8903071d0000000000005a83501be540e585e711966e280a30d0848fbcd6ba3f8ef448c9",
+              "8903071d0000000000005bcb131056f9344d9a6f108707953eaddbbd022be34a7ab7eb91",
+              "8903071d0000000000005c682589e289c5d417713e42a383276eb0b5888fe5c699d04314",
+              "8903071d0000000000005d190e370b5b66b8edf77d087a42144d6688822cabdafc73b2fa",
+              "8903071d0000000000005e60af01b9cf871e7780ed2ba0369ef0315aedb01f7fd3fb5e26",
+              "8903071d0000000000005f485266bed2c1a8a6317b853d7ce2dd6140f82ef4553f224b10",
+              "8903071d000000000000600776972a6a6a4a9a49bf41c8ff4e1bb6c0e45fcd473066b809",
+              "8903071d000000000000611a39993b31988accd7754b23d5602cea1129d85c603197a003",
+              "8903071d00000000000062624ef95cbd2ac6f87fde8703dff0d7475401f9f00a18b6872d",
+              "8903071d00000000000063ac1a4d8feffea4b0a60125e1f57a41706bb33bec5a855e81b8",
+              "8903071d00000000000064321ef8c27d211d6b961e489bedbced0d0372b4b55c3fae30ac",
+              "8903071d00000000000065bbf062592faa222232cc79769e78b1d4aaa8463917a2b1df31",
+              "8903071d0000000000006667d9a9e6cf6ccb40c968073eec5f89a5686d5a8b4c5c96a339",
+              "8903071d00000000000067a04ed2d19385dc7ff8b0115382f17511ecdf9f0c68095a3875",
+              "8903071d0000000000006803fe4ef0d1f4b3006d5b2e580fe4266e9d04f0d03920a0d553",
+              "8903071d000000000000698dc302b852d90c3d6e624c07b453c05d4056a8bebfc43cf765",
+              "8903071d0000000000006a6f30addd40caff1bcefc69b024f4525a8d352f31ce73a3c517",
+              "8903071d0000000000006bcd04a43968354a7d146851ff9c2f483621f8ab295a5950ebcd",
+              "8903071d0000000000006ce1960a70e3f1eaf6f9f1e06ba4a56c67c8ea7e20beddb4d329",
+              "8903071d0000000000006dd84f80e8313e728e765ed352275886e612f4af11fd59e0be1e",
+              "8903071d0000000000006e43b987d816945d4ec248fb5d7367cc0a23ca812fd1b875c817",
+              "8903071d0000000000006fe3644bb7b759783a374bda083b8dd15b1b31d64c4667412f4f",
+              "8903071d00000000000070e1dea41a6e816b7c6956a993b0dcd2d92bfa95de8cc2350f9b",
+              "8903071d00000000000071c17d97beeed8a65603bd5f37197d2396544c60de7ea20b075e",
+              "8903071d00000000000072500f867a616eccfc158983b3c93d3baaef2be41b032e3deb1b",
+              "8903071d00000000000073a8956bdd7130dcb1de2ae3a4d8d572baf2d8b0cb1fe47a6304",
+              "8903071d000000000000741afa874208d710569e25b45c32ca710abe972d73d181add00b",
+              "8903071d0000000000007594f3516609463fb3687d6e2b22b07e922addbcb30090115642",
+              "8903071d000000000000762b867ec64794b250c7c5dcd4f490f00070590815cd8b1e41f3",
+              "8903071d000000000000774ebbf9c2c05b4cf34d74eb45355af2165f8c837f3a72292aaf",
+              "8903071d000000000000787d96b1d27afec832ecf0b3f584d0836dc279d74da017643aca",
+              "8903071d000000000000798c7ff35536022280b2ee7d0f75bae8b14ec13f15e4205bd2c0",
+              "8903071d0000000000007a396cef7a42296cfe215450584c6f095df3cf638cd2c456a88a",
+              "8903071d0000000000007bd3c701cfc98d5a37b1874015f114288761a65ad98ae1348d84",
+              "8903071d0000000000007c09b8daef251eb0ed23d0baf3ce4b1dacc9b6cc6cbf9e82add0",
+              "8903071d0000000000007d1a8a5ca30a72d55b5429e253af69ee10f6d3e2b077f8ec2ef3",
+              "8903071d0000000000007e31f915b9888db97b729c3a24ca1478d6c06eaa490a622a2274",
+              "8903071d0000000000007f513104cef9cc8a2475680dc4d140538f45f6335c82f11f17a2",
+              "8903071d00000000000080dd68c30583dcbe56c912cfe52066c57ed04d38a49a55856101",
+              "8903071d0000000000008198c2ec20b9edfeb4607323a153d10c5ff3e09d4e5fa84dd832",
+              "8903071d00000000000082e2f84c58bb2b0d849313b2b3d3ca1a9c58c3e996650a5e6d27",
+              "8903071d00000000000083076384dc31e5b243d2fecec47159ba43f938f2a9640044bdcd",
+              "8903071d0000000000008406924c512094a8cafef3db2562a8ee41fe6079182414ef1b11",
+              "8903071d00000000000085ae7563d4a857e7e0a9d136da0f906b4681a9be0c688c3f5f31",
+              "8903071d000000000000867e545fab23b3fe1666b2c7e0beae4346e8cfc9dbed67fbe995",
+              "8903071d0000000000008729171143ca71dff6225675fcf10c4ad9e4d04154bd0fa02a7a",
+              "8903071d00000000000088ce3668820ebec9d007b25d296b2efc00be6b58ff545135853e",
+              "8903071d000000000000894f28552007b4f00ded11bd46257e1bb3770fdb1e64d12b2d57",
+              "8903071d0000000000008a40b5b64378b6ec8f6f1bf1c857b5df9a1995c472d834c7570d",
+              "8903071d0000000000008bff67c37c07839623a76364090d115fd5302755b81d07a810db",
+              "8903071d0000000000008cd7df467f6473c430181475786805433668f585d05e4f935bee",
+              "8903071d0000000000008dc7c4898e83040bb3a24629928fd34a39659b23436b8f6abfde",
+              "8903071d0000000000008e48251a8c3641d18afb5d46b3eba7e9a9d9ec556b99c934add1",
+              "8903071d0000000000008f9d4887dd3c21780133848202a8f5f900b58fc467588c1cd1f1",
+              "8903071d00000000000090fe65c57536ac6095a7df93483f0c88e568a34ea7831fdeea51",
+              "8903071d000000000000914c1e7d9fc29d6498b8d57bd5b6289a8816053d1da1cbabdc50",
+              "8903071d00000000000092463133e89c363b251dbdd8f9783bb31fa0d71786153dd998df",
+              "8903071d00000000000093aacabc192e5d1c6883586faa72848e6fdbe3675d69de06ab9a",
+              "8903071d000000000000947fe22a6bb49b3d1426ab02633e1d58507621e785a7f73ebde0",
+              "8903071d00000000000095d19ebafd2d2f258a7c21c20bb3b08cd39426ee2afa9808c9fa",
+              "8903071d0000000000009694a973fce7b1a672d000b60949e07ef79a4e84cf0e42b24502",
+              "8903071d0000000000009737aa645c0c58e4cd8b7977cccffe10a066439d7e948b828c45",
+              "8903071d00000000000098d036d00657049294825a6f2ebeb16ebdd4a6ab728f33345a7a",
+              "8903071d000000000000994e2655f8efe3c3f12cdecc8da7a8014a2dd34ee6062e5672d7",
+              "8903071d0000000000009a6e907729bb550357062031a29787852d54b6e9fa969be736aa",
+              "8903071d0000000000009bca1c4ded304a746aba432151c0ca5201f9979344693fe7aa47",
+              "8903071d0000000000009c354379e29c0fe70905d61f8c621cfa200453ea16825d24e2a7",
+              "8903071d0000000000009d353bdc4398e97fb84dad0e4f30adb145cbcaf827aee54b5ce1",
+              "8903071d0000000000009eb68fa0c60d44b0fc626fc41aa6cff2ad8b5da433d4a0b73dcb",
+              "8903071d0000000000009fb7d47fb0a90fd5269927827c923e537618d7186ed4166b5260",
+              "8903071d000000000000a030cb60749378e94876f36a31f501d65f8dbc7091ae879f976c",
+              "8903071d000000000000a1524779e8b73581d0e02f661613d5f2f33e2d2d1a457495f317",
+              "8903071d000000000000a2f1d279d1df0219b1abc131646995ddf0f22cbf0f026ceadab2",
+              "8903071d000000000000a35c8883e7af535808319e4b7fd1cd928a56c40196ad134aea43",
+              "8903071d000000000000a458b00bfa454c1d2ac194be8b3c5a7c22975231acf1b844bb43",
+              "8903071d000000000000a596d5244153fbba87aa3a3b515d04747948dfbadea3b27a2685",
+              "8903071d000000000000a634031d90fd7208491a89657b1dfa754808ef10b049ca6d73ae",
+              "8903071d000000000000a753d023af0f7f24c897b65d38d51d16c0504ca8c9a005ca2238",
+              "8903071d000000000000a8828a9d8bea49a507f36ac1d09effa6f67c55725af48eec29f1",
+              "8903071d000000000000a990730df64a99def67d1c4d258b6599f81cf7860dfaa6b8d846",
+              "8903071d000000000000aa0aea653eb0d31c2984d74433ec9b40f35fde3759d52ca47bf5",
+              "8903071d000000000000ab8dcaac87256b8cf59a152b0a53a6efde7e9baf5dd523b211e8",
+              "8903071d000000000000acfb66a1602eb96ff09a0cea2a66ca4f167dda56e40fb5abc346",
+              "8903071d000000000000ad3262d431424156a5cc8e56b0ce28034a08493b6d0b8cce9d57",
+              "8903071d000000000000ae57b37dab77d51fa3c61182136d0459f264e0815c6afb034fb5",
+              "8903071d000000000000af418ebffc0ca8d97b27384df15908694dbc1be4ff866ffd3516",
+              "8903071d000000000000b0cf299ab5acbf72f153a4de0599a918adbd0b64a78b3a893a0e",
+              "8903071d000000000000b152f685956b0b74afb40c1767c94ef862dbfd4f0a827d1a0e25",
+              "8903071d000000000000b28f246d98295453779c3e4a2eb96ad3e83528c38eae53f32ea8",
+              "8903071d000000000000b36321d123d1952d3177568bd2c76b0eaa7b0a91d873b6ffd2e0",
+              "8903071d000000000000b420a2340e1ab5c62d5eea0a8b77dac3dc0c5320d079c1e30563",
+              "8903071d000000000000b58e36d0366dfa7fad2a1fe22b346bf2384950b857cdf8fb3da2",
+              "8903071d000000000000b6a8a316d112638c070506b0ab8fc5598b13708132c4863cd752",
+              "8903071d000000000000b786a014ac66bfa4c4a6701a6525dbe61adfb3c9eb253474faa4",
+              "8903071d000000000000b8f37d5086f09a1d0e5532f6e68408d397e65f8f38d40a218de6",
+              "8903071d000000000000b9b40ffe4324b58981291b2fe8e3dc43cf92ad887892e2260b3b",
+              "8903071d000000000000baba90adeee10608951ec2759ed531564487351189fb1747bfd4",
+              "8903071d000000000000bb4f44eaf3c1d12df2aae4e97047c1add51769b401121123522c",
+              "8903071d000000000000bc64143196c27eb6d4fa1c23101eccf305043eb2b8bb80cf53e9",
+              "8903071d000000000000bd727f727c65978ffb725ceb554b7b0e37f8a579605294af6af2",
+              "8903071d000000000000be511b883113317b9b0627bace26e1fdac596b649a303352c90b",
+              "8903071d000000000000bfbf71885ff18810c0093a95b0ed16beb0359e082f668f76e273",
+              "8903071d000000000000c0aaaab943c20e94bfff4ba2e38ae4832522ab1da6cc8ea0f63d",
+              "8903071d000000000000c1775c6080734d7622ece6b1ce36aaaac8ae8ea6c249a6482a95",
+              "8903071d000000000000c2f11b91539eb6df374ba8ee23f03739f55c98a5fc8cc0aae7e1",
+              "8903071d000000000000c3770411109b4cfe9fcc5c03701680c154f85b6e640fadcc84b6",
+              "8903071d000000000000c4745ca02211f15bd6dbff3756edd273cd29829fc16fbf209763",
+              "8903071d000000000000c576759348a5d69f0c81b6e607248c70e3da1579eb436459916f",
+              "8903071d000000000000c699ed50244ab108495262be04d8250baa2d83753f13361f2742",
+              "8903071d000000000000c762936826983f8d4418292ff8686c4d904ad430b3cd8781015a",
+              "8903071d000000000000c8a98935313d73ee0fcf007acd728ee1e9ef79df4cd9b85e895c",
+              "8903071d000000000000c9454b3e78beee4b948f31e0c5f418bedf3cd37c4bd3dbc44f54",
+              "8903071d000000000000ca20ad5ec54e8d43a05429977a9ae7ec2392a8c498cd2d8542da",
+              "8903071d000000000000cb9f8458741a78033dabf579d312b0792cfb9e5a756c7b5209b6",
+              "8903071d000000000000cc0296fe32c1f61b514e932d7616dd053c4e9b35cde1ed04e46f",
+              "8903071d000000000000cdabc5365f00dc6404fc44bf7aaca9f9d4ccf12020d230f5a5f5",
+              "8903071d000000000000ce79ab48b8c0c541140fea9ee882f37dde82daecaeeb34469449",
+              "8903071d000000000000cf9eb13f3d1fcf5cf37adf2ee16e26ab10f7c5770900ad629fa8",
+              "8903071d000000000000d04647edab70fe645cffff50ac95fa92cabe233b69e3016e1e90",
+              "8903071d000000000000d1316c121a2206b1b792bb70509f41cced11fa9a93e05c32bf5b",
+              "8903071d000000000000d2e12bc3f78c5c80113c4ba4d3689c1f0d04d3812848558e711c",
+              "8903071d000000000000d314f53730ac91f181af03f0fbcce79228a2fd0d8a972dd19b34",
+              "8903071d000000000000d4eae261ccd9e2932928ab9de178deca7d80c95453c3dd8086f6",
+              "8903071d000000000000d59e0382c6170e383e10b61f96375c56c714b44c9070b725c9cc",
+              "8903071d000000000000d66f57fc8497afe065907b4f4da64c18e9fedbd23ce7af7e6295",
+              "8903071d000000000000d77c3ae7b0198d462ce27ac422d88c6da34bb21f6162bac7e1bb",
+              "8903071d000000000000d8b0aaefbdfd591c8e9c4f377e430403c9b59738f7fbf590cb2c",
+              "8903071d000000000000d97a61a41bb4087fabb2d3159daafbcfcda884beba8c64ee7ab5",
+              "8903071d000000000000da1b153483724a9d4d8214c28d753997999f82e1a94b34fbb65d",
+              "8903071d000000000000dbfc5c4622745b3c11ae9eac5610722cd426dc7a38b4575fd4b3",
+              "8903071d000000000000dcd3079923a074bbcb16a97374cdbb58c637f5163bc2dd7ebd63",
+              "8903071d000000000000dd8fc42145e23f19dbd13860eb113b591cf8b9bb8581dfa8506d",
+              "8903071d000000000000dede2b1b83d20befbb0ce8f2df73de2d17d122a556dd54b72f84",
+              "8903071d000000000000df6eff8488524d70e6f331cdd78bb73e9474f3b349ea9de774df",
+              "8903071d000000000000e0a88429b9c16ec2337a186f3d945929dfa77ff3420eb98d1045",
+              "8903071d000000000000e104c75a73f3767e6d1c16efb1d91df67a2e208f91f05d2954c0",
+              "8903071d000000000000e2be3be4bf1972bc175b4bc155c89037318e65b8b12de2d417b1",
+              "8903071d000000000000e3b0e8aa14a5ec52ce824f8447fdd19ef80530bc385d81d8710a",
+              "8903071d000000000000e4a400f8aad90533e2d6c9fb4c439ec621af3f13384bb75e1d33",
+              "8903071d000000000000e5f0a7d4ac20a66416f4f1e386094127ec5d162258a4985a8126",
+              "8903071d000000000000e61a6dd38f72189c1b80e8b6f5148105bd8a431d9a721c1e1881",
+              "8903071d000000000000e768100eee305d4edd6beb6198c1783424de677fdca266a9906d",
+              "8903071d000000000000e897b8ff2f630f7a0c1fff8946b3d450c7cde9dae6f17a2328a1",
+              "8903071d000000000000e9fe9675899353fdfda72f1571addf487bcf2e66c6d3b5cb20e8",
+              "8903071d000000000000eaae98eca4633ddc130c813910f41d516e9e55126d69a1b32e7c",
+              "8903071d000000000000eb05945708cb4b324f8a10b7f5b30f8e3958f8ccafd34c712d7c",
+              "8903071d000000000000ecbcc7291aeb526e2df1fe0169550851f4c95ee6b85d92ae73a7",
+              "8903071d000000000000ed1110fb5365b15ab4fd28584ede4a812ae29c386a492ba58482",
+              "8903071d000000000000eef2c24a75280d2ffabb437f4cb32ec7ee129d5acde500ba95eb",
+              "8903071d000000000000ef62ef50ba748d599f17482b30312d81e2c1ea1626af4b61b2d7",
+              "8903071d000000000000f0a9cc519aff885097aa68af6933986777ea35d4c7a30b4ac235",
+              "8903071d000000000000f1da278ebe491e4145de84e591800e739d801d5532e47b465ff1",
+              "8903071d000000000000f207c111f4725aba8af0480283d4dbdaa53244c0ddce58d4c87c",
+              "8903071d000000000000f3bc382d4875964021f5c7d45c977beaf56aad3d0e4e3117a5a7",
+              "8903071d000000000000f479d184581a47eb45ad1aa1bb69f7650a10541feb3d1f06fa92",
+              "8903071d000000000000f5f3981ba80a86c584207809c34d68325d9c43367a77f42a0ff4",
+              "8903071d000000000000f6789b54dcb8554989c5ea65ddd1e72c854d308e74d1cd72837e",
+              "8903071d000000000000f71616adb54508d3f5e7865cf994600ad3ac42841282111771d6",
+              "8903071d000000000000f8106a0ee31d18c1a9a9e6884b34c2485cd1980b6aabc7f1d3ea",
+              "8903071d000000000000f91898e10b6829306355b7070022340ff11dfaac8e5a3e8b1e1f",
+              "8903071d000000000000fadb6f69d885c6897aa9fc75fbb14b931d795a3af95d8a10892c",
+              "8903071d000000000000fb77969c5cefd70434543cfb435d97e10f3b2f08225ec328eb70",
+              "8903071d000000000000fc5e58738987f0a628690fad4eaa5b83352511a0f95700d4f0d1",
+              "8903071d000000000000fd53765e7f34ef60ea88247c3561edc0e18403b91f4ac7dab407",
+              "8903071d000000000000fe2a9ae42d2ce7392a8225614fe35dc52fbdfe6f84e16acac642"
+            ],
+            "outcome": "message",
+            "plaintext": "0a07080322030a013b",
+            "answer": null
+          },
+          {
+            "step": "the rest of the update: refused at its tag, counter 0 left open once (255 back)",
+            "frames": [
+              "8907066365b56e68da2990f8570aa0440babc57789abcb77bd5a63fcd0ced1be18699c77b8"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 255: accepted; counter 0 is now 256 back, so it closes",
+            "frames": [
+              "8903071d000000000000ff32585a1cb50f12800d97da1aea41580254fe640a54b9a610e2"
+            ],
+            "outcome": "message",
+            "plaintext": "0a07080322030a0187",
+            "answer": null
+          },
+          {
+            "step": "the real update counter 0: refused (no hole any more)",
+            "frames": [
+              "8907057c00000000000000e64f26bcb1263d55f645ec0854798b0da41644000977d134fa361c5272c0570adad04a9f740e3fd12c55ccbaac87144725eef929f15042f1df2c9822f9e36b70170067c4439f95f97017a8257fcb09074456dcd3871e",
+              "8907066365b56e68da2990f8570aa0440babc57789abcb77bd5a63fcd0ced1be18699c77b9"
+            ],
+            "outcome": "refused",
+            "plaintext": null,
+            "answer": "1989010300"
+          },
+          {
+            "step": "data counter 256: accepted",
+            "frames": [
+              "8903071d0000000000010004b62043040979619855b2d4bd43d2dbfc92dafcf26c61879b"
+            ],
+            "outcome": "message",
+            "plaintext": "0a07080322030a0192",
+            "answer": null
+          }
+        ]
+      }
+    ]
+  },
+  "sealed_credentials_saved": {
+    "name": "sealed credentials_saved",
+    "K": "240d03d85e0fab853288d6fcf4c87afc5e19f148fcede426d640e73c8cff950c",
+    "client_nonce": "4c68e64946c3f70011292e4415558d87",
+    "device_nonce": "9cdd88d4c0ac8b6d039b218041ccf736",
+    "node_id": "homelink-5a7e00",
+    "app_timeout_s": 35,
+    "note": "Plaintext = result || SHA-256(refresh_token)[:8] (zeros when not saved), sealed under the next device-to-client counter and fragmented as data in one write. The client counts only a sealed [1] with the matching hash as saved; with no sealed answer within 35 s while the link stays up it assumes saved (older firmware answers unsealed); a dropped link keeps the pair pending.",
+    "steps": [
+      {
+        "step": "device: credentials (counter 0)",
+        "client": null,
+        "update_counter": null,
+        "device": [
+          "8906077b00000000000000af1dc36cf70eac4e18dd76510ddacdd230ffc773bad4cb1edc4c8e497f2c113d58d9dd884cf25455a520a8757e0d1798c8c90c863a001c61bd29e9ac64010b39e2e4b980c20774a3a86c6320b362de7c0c5a39b8feccaaaf72590ffad7e0ebbeaac8e3e7fa587e21a225e9e4f3edcf727e125bc5d2842f"
+        ],
+        "verdicts": null
+      },
+      {
+        "step": "saved: sealed [1] with the hash of this pair",
+        "client": [
+          "8907077e000000000000009de840acc86a9291e52a69a5bfb540c901de934d36a14bc8b6bcdf5dd37884ca3cb42c6152b78ae007e7b0c025e1f931cb310c4146683f364ca822ea73b1397dd40b2d2973d562d453bab5ad65b0d8b6d0ed62c8c4fee6271fc48a2fed7f7560b4d541af83ce5515062f037dc924128ea4ed6ff5dcaca3166244"
+        ],
+        "update_counter": 0,
+        "update_plaintext": "{\"access_token\":\"mga_saved_access_1\",\"refresh_token\":\"mgr_saved_refresh_1\",\"access_expires_at\":1893456000}",
+        "device": [
+          "8908071d0000000000000186eb0634d3d958430dcf3e6bf6c0c46f7c83a78385929c0e6b"
+        ],
+        "verdicts": [
+          "saved"
+        ]
+      },
+      {
+        "step": "not saved: sealed [0] (also a deferred write-back that gave up)",
+        "client": [
+          "8907077e00000000000001c53883f0ab9d1dba3af76ae8a7a9a7c09f2e1e4613e69cf0dd3482bfd5f624d3513d03381afba6705c3871ebe6c27f9fc1145c664dd1195b8fe422deaec99c89848f9011c17eab6015b7af11a6b286e5b565a16210e18370dc2a6e6d46492111efe86f2b34f50669812872f058bec1bde2ea9ee584d419bbfef1"
+        ],
+        "update_counter": 1,
+        "update_plaintext": "{\"access_token\":\"mga_saved_access_2\",\"refresh_token\":\"mgr_saved_refresh_2\",\"access_expires_at\":1893456000}",
+        "device": [
+          "8908071d000000000000029236c87bb5a08053e378299997417a10eb903f379d5c04d150"
+        ],
+        "verdicts": [
+          "not saved"
+        ]
+      },
+      {
+        "step": "a sealed [1] with another pair's hash: not saved",
+        "client": [
+          "8907077e000000000000025ab6f6a305b5743ed055c69c8f0ad304e33aec8b1ebf4b90aefff3393d558fae66f5c0342609d032c29629c678a963204984a83d3194975c954512f86b5af9845cd33236b425f1af5b9b0381d2830ba1556e045aaff44920a3e5d68c52b53d64afb6a17fafed3e8ded85b02fc6341243435647032f1eb51cfc08"
+        ],
+        "update_counter": 2,
+        "update_plaintext": "{\"access_token\":\"mga_saved_access_3\",\"refresh_token\":\"mgr_saved_refresh_3\",\"access_expires_at\":1893456000}",
+        "device": [
+          "8908071d00000000000003490b1934f0dec736f0b7045d052e4277b724581d83934e5779"
+        ],
+        "verdicts": [
+          "not saved"
+        ]
+      },
+      {
+        "step": "an unsealed [1] confirms nothing and uses no counter; the sealed [1] after it decides",
+        "client": [
+          "8907077e00000000000003d0fe3e2bdf52d8de0428939cda22b72fd4060dacf4ee8d7b54df89d97ea2282bef12533544aae84c52eab4076428cb5720f4ffec3844261e71569fa5938066e9822ebf18a93578cf60eb1da6741b1fe9d8a450d190ff8e08e02012ff95a2ddbb8e5fc40ae20e8acd646e2ee750797c1dda44f6d7304b9793d59b"
+        ],
+        "update_counter": 3,
+        "update_plaintext": "{\"access_token\":\"mga_saved_access_4\",\"refresh_token\":\"mgr_saved_refresh_4\",\"access_expires_at\":1893456000}",
+        "device": [
+          "890801",
+          "8908071d0000000000000466e27bb894b29fb21954d26c36ee8a1f5f6d0b781e9b9495c1"
+        ],
+        "verdicts": [
+          "confirms nothing",
+          "saved"
+        ]
+      },
+      {
+        "step": "an unsealed [0]: not saved (it can only cause a resend)",
+        "client": [
+          "8907077e000000000000041bb4628590829ebc56f9d5a1f7b72c4eba7cbe59d2da4175e23042b22adc09a1eb523b02be740a7ba41c4a247e26c04d12679fdf4532070d6d3aa6759b815c9cd347e76dc1f72961e5f047bff8808875b346f480db2e4e84ee4fec0d0ed9cc51adf4212047f6edb1bf4c0d7255b3f4d71a1af50b388849834048"
+        ],
+        "update_counter": 4,
+        "update_plaintext": "{\"access_token\":\"mga_saved_access_5\",\"refresh_token\":\"mgr_saved_refresh_5\",\"access_expires_at\":1893456000}",
+        "device": [
+          "890800"
+        ],
+        "verdicts": [
+          "not saved"
+        ]
+      }
+    ]
+  },
+  "sealed_data_large": {
+    "name": "sealed data in a sealed session, with a sealed credentials_saved",
+    "K": "b1f698c75b61116a1eb00fd4901f6acd5f9839befdcf400702faa6c53a69c7ae",
+    "client_nonce": "79f432b442fe2cf416ec94944fd74d4a",
+    "device_nonce": "30445df2662ba78ddc4326fc9a14a7a7",
+    "node_id": "homelink-d47a00",
+    "max_write": 97,
+    "note": "This receiver keeps the session after a refusal to show the counter rules; a device may end it instead, and a client stops using a session after any refusal (re-prove, one sealed hello).",
+    "steps": [
+      {
+        "step": "device: credentials (counter 0)",
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "7b226e6f64655f6964223a22686f6d656c696e6b2d643437613030222c226163636573735f746f6b656e223a226d67615f646174615f616363657373222c22726566726573685f746f6b656e223a226d67725f646174615f72656672657368227d",
+        "sealed": "00000000759d3e37f5a8af6e83f4061e8b0ffa0e38eca8dc666311785db316fdc1aaa96b8960d7cfa345ae80bd8f7f6e67b89f6b276459ea3918fb5d7568144f852cbeb2b7efebdeea6f49ec57429c86c346eb31bdde8512387255f94a7d4be63b89c1b9653b5c8ad14ee0c9b0a33815b593bfc398",
+        "frames": [
+          "8906057500000000000000759d3e37f5a8af6e83f4061e8b0ffa0e38eca8dc666311785db316fdc1aaa96b8960d7cfa345ae80bd8f7f6e67b89f6b276459ea3918fb5d7568144f852cbeb2b7efebdeea6f49ec57429c86c346eb31bdde85123872",
+          "89060655f94a7d4be63b89c1b9653b5c8ad14ee0c9b0a33815b593bfc398"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "device: data, its link.register (counter 1, 3 writes)",
+        "direction": 1,
+        "counter": 1,
+        "plaintext": "0a0d2f6c696e6b2d636f6e74726f6c129601053f4fadf5ff871b72f60901c586cfac5015a56be1a5597364d2de05b40a9d85125a0de131682ac3b9bd3b4c729b7671fe0173c6e13b874de047a607084258927c4431a8131b29b43325ca7b38d84612299cba52cedfa979a22a21901e1719e53c2ba319bfca7465260a132c52de03bf131d4049df42f858c8983ad2385b62674b17c792534818d5d0a6dd897e4513e90795f0e07d8c",
+        "sealed": "00000001bc549aca4e566cb4113d22fe60db8418f9333c6f4e90f777d4eb0bb08ceecbf694935bb7e61e81c13d2d0edb52dec6b3d8dacc7d48a810aec185336a723bfd7df873eb5998f742468f986eb79fbeaa0b5f0ab717adcd8e25c6c7cf094f0dfaa4a60a7d94b9866c6fb6d6fa2e5fe447dc519794eae8cae170900782b061bd1a7b9598a4e5bbb68acfd97985c3312c34a3646b950686db90d85abeee54831056a210eccb4dbe3a12034a33456f7f8e29cb83fa2f352896939b",
+        "frames": [
+          "890305bc00000000000001bc549aca4e566cb4113d22fe60db8418f9333c6f4e90f777d4eb0bb08ceecbf694935bb7e61e81c13d2d0edb52dec6b3d8dacc7d48a810aec185336a723bfd7df873eb5998f742468f986eb79fbeaa0b5f0ab717adcd",
+          "8903048e25c6c7cf094f0dfaa4a60a7d94b9866c6fb6d6fa2e5fe447dc519794eae8cae170900782b061bd1a7b9598a4e5bbb68acfd97985c3312c34a3646b950686db90d85abeee54831056a210eccb4dbe3a12034a33456f7f8e29cb83fa2f35",
+          "8903062896939b"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data, the VM's answer (counter 0, 4 writes)",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "0ab402080322af020aac02dafe01152f3e6f3750dce00e3749333ef9ae3ef0ff57e676077e13583dc545cf11833ace30e32f3540eb4d4d7603ac035b1dbf76e2d3cdd0980fd440aca4b0aef1af8453689d99ec4730b8f2e91261d43b7b8f21dda684d11583ea55379e9b1d3606eb454aeb9c33d10cc9b4614154af21597c68fd704c003a2be29eea9543a6ca785f0935f6515482e22b0b816bd4d8d68a58b8d19e11ef73f8df3334ac6abbe7c84840d72be87db2be46ce15d9b46dd665194146b86e05248caac118ef1b37d3e399d7e519d1682a3e3c5c8f054c2a98cda7f31d00ca4a229ab7c87836e62c0358c7db4d0111c698820e219541c1ef34e9aab85da216df55d83390dc3495d7c408d92f632d57650176fea423b78b98ecd02be496bb22b5504464106347ed8005f574435954db8073c0f160",
+        "sealed": "00000000516adbc5f5df7362dd91d26962c55f407d2bea0fed47f1c771d94ca5acbad9898e04a388ff0073963c110c578fe4ef45445db9ede8bc425c1d6960aadc4ba09b861c89ac7dc67e1c95d4899676e423eb074453ceb5229c5a1e06121be5abe7e84092fea78982f6cf18779eb37b7d0e27efedd95988e8c383ceb7416e49b50e5e55072595071274ba838acacda003b7811d5d8dff52582a7e4ff0202d388f0191070ece452b2d8a0c75f4e28d677ac87a87e19ed9ae304f739b821d138807118b2861483ba71fd087f0f37a01b3b2ef980b9d7826144f01b5be92dbd6a95cbdd161b4296c5e238788123642ef192585d2d43cad033317bc462afe1414a55a29031465fda18988fa992a9661b3fa77661793e55a19d17ba7d44344643abf086cfd9532410af09bd1e9e465525f17f8c40669465f67fd6d0320dbdc8c3e48a4738db9f01548fa1a70",
+        "frames": [
+          "8903054b01000000000000516adbc5f5df7362dd91d26962c55f407d2bea0fed47f1c771d94ca5acbad9898e04a388ff0073963c110c578fe4ef45445db9ede8bc425c1d6960aadc4ba09b861c89ac7dc67e1c95d4899676e423eb074453ceb522",
+          "8903049c5a1e06121be5abe7e84092fea78982f6cf18779eb37b7d0e27efedd95988e8c383ceb7416e49b50e5e55072595071274ba838acacda003b7811d5d8dff52582a7e4ff0202d388f0191070ece452b2d8a0c75f4e28d677ac87a87e19ed9",
+          "890304ae304f739b821d138807118b2861483ba71fd087f0f37a01b3b2ef980b9d7826144f01b5be92dbd6a95cbdd161b4296c5e238788123642ef192585d2d43cad033317bc462afe1414a55a29031465fda18988fa992a9661b3fa77661793e5",
+          "8903065a19d17ba7d44344643abf086cfd9532410af09bd1e9e465525f17f8c40669465f67fd6d0320dbdc8c3e48a4738db9f01548fa1a70"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: credentials_update (counter 1)",
+        "direction": 2,
+        "counter": 1,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f646174615f6163636573735f32222c22726566726573685f746f6b656e223a226d67725f646174615f726566726573685f32222c226163636573735f657870697265735f6174223a313839333435363030307d",
+        "sealed": "0000000125daed6a8d7116b9e18a13042cd241c44b6421a3d354793d58bf31b6220037df0ac5bd59664cef6ce17e5071b057a06e9ce401dd0ec36fc4198a8d0d984b315e954502fb7570c63f55d8a3c74760c28c9e9df2b4ba74179a9a5d8a9f76b21c63e268098fcb0e1414c86a2de8952e24006f6758571d6a018e",
+        "frames": [
+          "8907057c0000000000000125daed6a8d7116b9e18a13042cd241c44b6421a3d354793d58bf31b6220037df0ac5bd59664cef6ce17e5071b057a06e9ce401dd0ec36fc4198a8d0d984b315e954502fb7570c63f55d8a3c74760c28c9e9df2b4ba74",
+          "890706179a9a5d8a9f76b21c63e268098fcb0e1414c86a2de8952e24006f6758571d6a018e"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "device: credentials_saved, sealed (counter 2)",
+        "direction": 1,
+        "counter": 2,
+        "plaintext": "018e79d8171a6f56c6",
+        "sealed": "00000002bce3d2786bb884a55752be4b0be3c4c25df5e55eabf60901f6",
+        "frames": [
+          "8908071d00000000000002bce3d2786bb884a55752be4b0be3c4c25df5e55eabf60901f6"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data (counter 2)",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a2e0803222a0a2832e89d72bb5e6cdef7bb4a96fb685ddbb090c0f85060921a9ed58f2f2c6cc4e77e09dc7ea7bcaa2d",
+        "sealed": "00000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7",
+        "frames": [
+          "8903074400000000000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: counter 2 replayed: refused",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a2e0803222a0a2832e89d72bb5e6cdef7bb4a96fb685ddbb090c0f85060921a9ed58f2f2c6cc4e77e09dc7ea7bcaa2d",
+        "sealed": "00000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7",
+        "frames": [
+          "8903074400000000000002e3a0585a73e8f4082ae3dcd0850d0902a092b61b6c02bbe3f16bd91761d79946a17048f2988a34eb0dec5a3d85fae84f08dbdee047bef03705cd1583a2d935c7"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "client: unsealed data in a sealed session: refused",
+        "direction": 2,
+        "counter": null,
+        "plaintext": "0a1a080322160a14ed706cd3a93de18a48329cf5a1a1a6c465a0dcd9",
+        "sealed": null,
+        "frames": [
+          "8903031c0000000a1a080322160a14ed706cd3a93de18a48329cf5a1a1a6c465a0dcd9"
+        ],
+        "outcome": "refused",
+        "answer": "1989010700"
+      },
+      {
+        "step": "device: data (counter 3)",
+        "direction": 1,
+        "counter": 3,
+        "plaintext": "0c2dd88ccc0d3364d98ff0c358252e2d30aa9d3319f79f8139a1f998cd53",
+        "sealed": "000000034e1128b19ce4af09699bcde9b68bb9ab9e9789a4aa39853c54f0dea6002ed300d1aa76cc155099fc4c35babfbd43",
+        "frames": [
+          "89030732000000000000034e1128b19ce4af09699bcde9b68bb9ab9e9789a4aa39853c54f0dea6002ed300d1aa76cc155099fc4c35babfbd43"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data counter 3, first write then abort",
+        "direction": 2,
+        "counter": 3,
+        "plaintext": "0ad001080322cb010ac80173eb8ec35282efb890ab1e94a69279603cd05cba9d9fa8d4a1c96eae3e2ca8217e125256b78d8747a2ff080408b411db60ec1a846fb99baf3b07aa0c805192e05d8e93271a5180c0075c8ec5ff5a115a35a2ae4dda82fd075ccf0d20e7864bb53386984628119c458793aa767e897e20e94dd4d2fc0e61361606f3605c38269fc302800145084c1a9ff134e1bba2e8ffc3fdd737c443241dd704440a1dedc8309c03691955687b1a6503e2b773ae8e79e337f5ec23dc77c8c58dbaa142dd9d0f975324c38eca769e",
+        "sealed": null,
+        "frames": [
+          "890305e700000000000003fbaf7279d4b1b2a1760ef2b2af59768d20398af5a5023793ee0f197d0071706fb8312433dc4e0589bf9ca0961226ff286335bca81047bb17e408f5038fbbc7c4333d188a3c0b64245d9a50d7add1f4703136265fb31f",
+          "8905"
+        ],
+        "outcome": "aborted",
+        "answer": null
+      },
+      {
+        "step": "client: data (counter 4, after the abort)",
+        "direction": 2,
+        "counter": 4,
+        "plaintext": "0a1f0803221b0a19fe367725ebb021be3ba30c51a692fdda69ceda43d943e18c77",
+        "sealed": "00000004f2cf72084db6a8734bbb4140faac5e439f49edb93f816d4294090f6b09b7d5a05db98b7e921fe1bbd8973adf9ec9077578",
+        "frames": [
+          "8903073500000000000004f2cf72084db6a8734bbb4140faac5e439f49edb93f816d4294090f6b09b7d5a05db98b7e921fe1bbd8973adf9ec9077578"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data counter 5 with a bad tag: refused, counter not used",
+        "direction": 2,
+        "counter": 5,
+        "plaintext": "0a24080322200a1ec6583dacc70a401fa5b3b6aec736e40879483c8042599cd4f577aa2786fa",
+        "sealed": "000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49108",
+        "frames": [
+          "8903073a000000000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49108"
+        ],
+        "outcome": "refused",
+        "answer": "1989010300"
+      },
+      {
+        "step": "client: the real data counter 5: accepted",
+        "direction": 2,
+        "counter": 5,
+        "plaintext": "0a24080322200a1ec6583dacc70a401fa5b3b6aec736e40879483c8042599cd4f577aa2786fa",
+        "sealed": "000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49109",
+        "frames": [
+          "8903073a000000000000051764866ca7dafc069de37a6cef64092d796732ecf386f37e3de4c955a4008a952aed25b1c4b49fe698e722e7e76bb3eaac4f53b49109"
+        ],
+        "outcome": "message",
+        "answer": null
+      }
+    ]
+  },
+  "sealed_stream_restart": {
+    "name": "the VM stream restarted in the same sealed session after a message cut by an error",
+    "K": "b1f698c75b61116a1eb00fd4901f6acd5f9839befdcf400702faa6c53a69c7ae",
+    "client_nonce": "602be81e35ea95e3eb9f47c83de8343c",
+    "device_nonce": "0487f6966ffce2dba4e56320f9cb854d",
+    "node_id": "homelink-d47a00",
+    "max_write": 97,
+    "steps": [
+      {
+        "step": "device: credentials (counter 0)",
+        "direction": 1,
+        "counter": 0,
+        "plaintext": "7b226e6f64655f6964223a22686f6d656c696e6b2d643437613030222c226163636573735f746f6b656e223a226d67615f726573746172745f616363657373222c22726566726573685f746f6b656e223a226d67725f726573746172745f72656672657368227d",
+        "sealed": "00000000c30a9aaaac0ecde301b952a3166ce42404b274a6ff1cb3f6bfa3351297557467cba5207a53b5b19604a012bd8578aeb09b67cd9c8f9fa87170916cc91c63f414398c61cffa7fa92d6f4315aa56b01d0b752f5b593c437d59e88397006ab304b6952d29a75afb9c2372e34b0103b8c1aedaedc3c0fdd629",
+        "frames": [
+          "8906057b00000000000000c30a9aaaac0ecde301b952a3166ce42404b274a6ff1cb3f6bfa3351297557467cba5207a53b5b19604a012bd8578aeb09b67cd9c8f9fa87170916cc91c63f414398c61cffa7fa92d6f4315aa56b01d0b752f5b593c43",
+          "8906067d59e88397006ab304b6952d29a75afb9c2372e34b0103b8c1aedaedc3c0fdd629"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: state open (epoch 1)",
+        "direction": 2,
+        "counter": null,
+        "plaintext": "",
+        "sealed": null,
+        "frames": [
+          "8901020100"
+        ],
+        "outcome": "control",
+        "answer": null
+      },
+      {
+        "step": "device: data, its link.register (counter 1)",
+        "direction": 1,
+        "counter": 1,
+        "plaintext": "fff741e4e0ff963734305064ada61abc003dc48e41e98fcea18c09af9449ce75ecbdc77c80ced7d9a87f2cf5850055744b74c693d3c202ba401a4949650a9b67b175dd3a2eed9338f921aed00996a88c8c875ae3fb3c2f95be4424c0fcf32872211d0149f6974f976770217d0f4f4df0fb90874a4f1b2ddff90f30f604f149286b0bf5cd2f92aa3a73775fc187febfb6ec29deb510f0",
+        "sealed": "000000013183a9b147c6279de7873f2c501d4fb1c6e2ce1c3241897db546b1ed36cd1a8ccb28824e134e87a073054a0f3929979b7974edb5f9c1bd6466fec9ea06f7dad3803a707f47391a8493b7c709f2c80cd7c288df38905a29ce01448093a18c4b89963974da1b610c6eb9f07ebff0598c174cc26d2d05e3d4b5ed1e7efd1a74df715a3b570914ecb4a07dda0a85983d62d1fc5173cfd3c756ab2aa1e653e760f588364e2939ec3d",
+        "frames": [
+          "890305aa000000000000013183a9b147c6279de7873f2c501d4fb1c6e2ce1c3241897db546b1ed36cd1a8ccb28824e134e87a073054a0f3929979b7974edb5f9c1bd6466fec9ea06f7dad3803a707f47391a8493b7c709f2c80cd7c288df38905a",
+          "89030629ce01448093a18c4b89963974da1b610c6eb9f07ebff0598c174cc26d2d05e3d4b5ed1e7efd1a74df715a3b570914ecb4a07dda0a85983d62d1fc5173cfd3c756ab2aa1e653e760f588364e2939ec3d"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data, the VM's answer (counter 0)",
+        "direction": 2,
+        "counter": 0,
+        "plaintext": "0a7e0803227a0a787d24288c8ee46e78ecc59832dc12b54ec03a1405bfa226d8e01b680751ff8988d7dcb7bf531150bc641f42f2feaab92d1795c7ced451159285ad07e45cd1f0b165feaf122a09fe9f7873916184444cdb7c081bc1e9ad643b2256d14c08d0a34d56acbceeea035aab0e5666db1c6b3d959b3a0ffa9087199f",
+        "sealed": "00000000ad11faaf9c0e4aff6c1fb30855b1d59ad33f0d8d5a9ac372aeefed6af9967b81597b3a167e45f4a19933044d7458ce2f1dc1c190843637ee12f759408b82112c690c603c7ca2cea017d4f0373999c105faffe78aa1b1fcb252b6d11127f22499f4486e7ba48426c8d3ce9ca101f5d01f619c0dc3a2d1211173a360072e3d835c6c0510da992101cd09d513839575860c",
+        "frames": [
+          "8903059400000000000000ad11faaf9c0e4aff6c1fb30855b1d59ad33f0d8d5a9ac372aeefed6af9967b81597b3a167e45f4a19933044d7458ce2f1dc1c190843637ee12f759408b82112c690c603c7ca2cea017d4f0373999c105faffe78aa1b1",
+          "890306fcb252b6d11127f22499f4486e7ba48426c8d3ce9ca101f5d01f619c0dc3a2d1211173a360072e3d835c6c0510da992101cd09d513839575860c"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "device: data (counter 2), its first write only: an error ends the VM stream",
+        "direction": 1,
+        "counter": 2,
+        "plaintext": "3eb8e18aa18487faae677ce7c5e36b526e285c7708a324b89d55346b0c978aecadd3380deb689b16e2ce1e3c3dcdcaa0cd35d1a9b92e2822f811778ffa0cd17f6a90e1679eb5451d5b814e4e1b684156105128be29a6d4b8fe9bc65af8c32d044ea34e7f3a40dcef0b0c62f5d709f95f23442c5a3b64b760029c9da5a259bbaf7848cca0b3500db280edd494a8c734b8a960a1b005cac931c779e366a20d5588f4dc2c9a6368f640c7b6e9bd894d77d4f8dbd44b3e1aeaf181d546bc25f0494be6d095948a484308",
+        "sealed": "000000022d340cdfff9387d27bfe71cbabd02c34ba8285c1317e2186da9a78138a6e2f21733529cff262c8d271d299eb4f3d94760f075dc5792abe6cbca4d401b5864571240bc747109abd04c3c640ee9843077bf080fed719a6728f589ac8be52229b0b4cdcd0d6caf667c453f911b600762e13d564dc8e7b81d432719e0e55be2bd5a6236c8075cb42f13084877b4efa52b8c31afce31446d20d6a8b043108e9b9f6ae79a801846650532686bf66ea54da3666e19a3a2bd86d4b57569aaf7463b47580eb2069391ecd32c49234795384442f6d0bde71cc5f3a58a1",
+        "frames": [
+          "890305dc000000000000022d340cdfff9387d27bfe71cbabd02c34ba8285c1317e2186da9a78138a6e2f21733529cff262c8d271d299eb4f3d94760f075dc5792abe6cbca4d401b5864571240bc747109abd04c3c640ee9843077bf080fed719a6"
+        ],
+        "outcome": "partial",
+        "answer": null
+      },
+      {
+        "step": "device: open_request [0]: only the stream ends, the sealed session stays",
+        "direction": 1,
+        "counter": null,
+        "plaintext": "",
+        "sealed": null,
+        "frames": [
+          "890200"
+        ],
+        "outcome": "control",
+        "answer": null
+      },
+      {
+        "step": "client: credentials_update (counter 1) while the stream ends: saved, its answer held",
+        "direction": 2,
+        "counter": 1,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f726573746172745f6163636573735f32222c22726566726573685f746f6b656e223a226d67725f726573746172745f726566726573685f32227d",
+        "sealed": "0000000181dbe8d699b4ef052030d52b9d60e6a84d97456ed71322fc87d16ccd152cabd00495faa11fda1d72f7cad11a53eb22e0738c5cdfe7762348472d271aaa640fd9b5d2818cd5ea0cf0d26acf2773b7d6bb002ffac5de519bf2ada0e030e524ce",
+        "frames": [
+          "890705630000000000000181dbe8d699b4ef052030d52b9d60e6a84d97456ed71322fc87d16ccd152cabd00495faa11fda1d72f7cad11a53eb22e0738c5cdfe7762348472d271aaa640fd9b5d2818cd5ea0cf0d26acf2773b7d6bb002ffac5de51",
+          "8907069bf2ada0e030e524ce"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: state closed (epoch 1): the cut message is dropped, its counter used",
+        "direction": 2,
+        "counter": null,
+        "plaintext": "",
+        "sealed": null,
+        "frames": [
+          "8901000100"
+        ],
+        "outcome": "control",
+        "answer": null
+      },
+      {
+        "step": "device: credentials_saved, sealed (counter 3), after the state",
+        "direction": 1,
+        "counter": 3,
+        "plaintext": "0136f247155efdf8f7",
+        "sealed": "0000000345aa9323eb44a0733c39fda184647d33ffdf2747a8ddcf3412",
+        "frames": [
+          "8908071d0000000000000345aa9323eb44a0733c39fda184647d33ffdf2747a8ddcf3412"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "device: open_request [1] at once: the stream asked for again",
+        "direction": 1,
+        "counter": null,
+        "plaintext": "",
+        "sealed": null,
+        "frames": [
+          "890201"
+        ],
+        "outcome": "control",
+        "answer": null
+      },
+      {
+        "step": "client: state open (epoch 2): the same sealed session",
+        "direction": 2,
+        "counter": null,
+        "plaintext": "",
+        "sealed": null,
+        "frames": [
+          "8901020200"
+        ],
+        "outcome": "control",
+        "answer": null
+      },
+      {
+        "step": "device: data, the new stream's link.register (counter 4)",
+        "direction": 1,
+        "counter": 4,
+        "plaintext": "fff741e4e0ff963734305064ada61abc003dc48e41e98fcea18c09af9449ce75ecbdc77c80ced7d9a87f2cf5850055744b74c693d3c202ba401a4949650a9b67b175dd3a2eed9338f921aed00996a88c8c875ae3fb3c2f95be4424c0fcf32872211d0149f6974f976770217d0f4f4df0fb90874a4f1b2ddff90f30f604f149286b0bf5cd2f92aa3a73775fc187febfb6ec29deb510f0",
+        "sealed": "0000000478c1fe6d1d8bd2c0a7f2146dea49e97ec095276cebf3cf3c47958268982312c7b3503688d0d72049281a1782e525c7a2eb2ab2cf53509ae4665e4f7bd5918579c2bb71f1ae2f01c6b123582aeadc9054f8b1a9166f4e423bef054070bd4a365fcfe9032439efaf68ef86667d17d6dbb892d770aeaf8526d5a71b1b21d443c53f3e7a4f4ff99642d474d7c68c621a701d52f457f48b8ff204d3a08352de8b9b5e451db8819f47",
+        "frames": [
+          "890305aa0000000000000478c1fe6d1d8bd2c0a7f2146dea49e97ec095276cebf3cf3c47958268982312c7b3503688d0d72049281a1782e525c7a2eb2ab2cf53509ae4665e4f7bd5918579c2bb71f1ae2f01c6b123582aeadc9054f8b1a9166f4e",
+          "890306423bef054070bd4a365fcfe9032439efaf68ef86667d17d6dbb892d770aeaf8526d5a71b1b21d443c53f3e7a4f4ff99642d474d7c68c621a701d52f457f48b8ff204d3a08352de8b9b5e451db8819f47"
+        ],
+        "outcome": "message",
+        "answer": null
+      },
+      {
+        "step": "client: data (counter 2)",
+        "direction": 2,
+        "counter": 2,
+        "plaintext": "0a2e0803222a0a283089e5e04de8f92a8c39ef6586cc8bd92f815f8672c33f33f584cf5a19e106fc9a5a756396827971",
+        "sealed": "000000025af3d18f4697e14e6cb22e782767fd229dd8e7e097873dbda59f9e771a4af52b100ada253bd8124b8d25abe58a620720724041d6404a23029751a01ab3617b8b",
+        "frames": [
+          "89030744000000000000025af3d18f4697e14e6cb22e782767fd229dd8e7e097873dbda59f9e771a4af52b100ada253bd8124b8d25abe58a620720724041d6404a23029751a01ab3617b8b"
+        ],
+        "outcome": "message",
+        "answer": null
+      }
+    ]
+  },
+  "relabelled": {
+    "name": "a sealed message relabelled: seal v1's tag doesn't cover the sub-command",
+    "K": "d9b056a24331a8f4d3a3c03f6507834873525441d0779c869119b24a3c25cc85",
+    "client_nonce": "d7516d876370b68f629cd2d74d698028",
+    "device_nonce": "957b72e5d8c36ff14bd6d642e9146769",
+    "node_id": "homelink-3c5e22",
+    "direction": 2,
+    "note": "Current behaviour, not a wire change: the relabelled frame differs from the sent one in its sub-command byte alone, unseals under the same counter and tag, and its plaintext is valid for the label it arrives under. Seal v2 binds the sub-command and the session epoch into the tag. The plaintexts are the VM's choice and not ServiceResponseEnvelopes: a device that takes a sent frame as data refuses it (sent_as_data: error invalid_value, its counter used); only the relabel gets them taken.",
+    "steps": [
+      {
+        "step": "one byte 0x00 as data, relabelled clear: the gadget erases its tokens",
+        "sent": "89030715000000000000000b849f9840613f569b5a33dc0eb47ed9af",
+        "relabelled": "890c0715000000000000000b849f9840613f569b5a33dc0eb47ed9af",
+        "sub_command": 12,
+        "counter": 0,
+        "plaintext": "00",
+        "sealed": "000000000b849f9840613f569b5a33dc0eb47ed9af",
+        "sent_as_data": "1989010300"
+      },
+      {
+        "step": "a JSON object as data, relabelled credentials_update: the stored pair is replaced",
+        "sent": "8903075f0000000000000070348a777d4530c942370202d66fd2f6117032f1b4fa7a29ffa484866c1cf6a8fd47727a22e26f3fd5bf892e956a1ea79c2149e0adcc96af48781623353318b8abc0c579c18a287241ed6923c579af8d1a424be34bc543a0644b57",
+        "relabelled": "8907075f0000000000000070348a777d4530c942370202d66fd2f6117032f1b4fa7a29ffa484866c1cf6a8fd47727a22e26f3fd5bf892e956a1ea79c2149e0adcc96af48781623353318b8abc0c579c18a287241ed6923c579af8d1a424be34bc543a0644b57",
+        "sub_command": 7,
+        "counter": 0,
+        "plaintext": "7b226163636573735f746f6b656e223a226d67615f72656c6162656c5f616363657373222c22726566726573685f746f6b656e223a226d67725f72656c6162656c5f72656672657368227d",
+        "sealed": "0000000070348a777d4530c942370202d66fd2f6117032f1b4fa7a29ffa484866c1cf6a8fd47727a22e26f3fd5bf892e956a1ea79c2149e0adcc96af48781623353318b8abc0c579c18a287241ed6923c579af8d1a424be34bc543a0644b57",
+        "sent_as_data": "1989010300"
+      }
+    ]
+  },
+  "description": "Sealed device-session credentials (mgcommands.h, Sealed credentials). enc_key||mac_key = HKDF-SHA256(salt, K, client_nonce||device_nonce||node_id, 64); keystream block i = HMAC-SHA256(enc_key, stream_label||dir||counter_be32||i_be32); tag = HMAC-SHA256(mac_key, tag_label||dir||counter_be32||len_be32||ciphertext)[:16]; sealed = counter_be32||ciphertext||tag. dir 1 = device->client, 2 = client->device. One sealed session per token proof: a second sealed hello under the same proof is refused with error [session, proof_required] (one_session_per_proof). access_expires_at: a device that keeps it stores an update's positive integer with the pair (any other form: none; an update without it clears it; a duplicate is invalid_value) and hands it back last in its next credentials (access_expires_at: the sealed steps over three proofs, with the device's answer and what it keeps). sealed_data: in a sealed session every message with a payload (credentials, credentials_update, data) is sealed whole and then fragmented (total_len counts sealed bytes), one counter per direction shared by all of them, the counter read from the first fragment (next only; an aborted message uses its counter, a message refused at its tag does not); a replayed counter or a bad tag is refused with invalid_value, unsealed data with insecure. sealed_interleaved: two sealed messages in flight together; the earlier one refused at its tag after a later counter was taken leaves that counter open once (a hole). receiver_limits: what the receiver refuses (a first fragment without the whole counter, total_len of 20 or less or over max_message, fragments that don't add up to total_len or lose the sealed flag, a first fragment while one is open, a hole over 255 back) and what each does to the counter. sealed_credentials_saved: in a sealed session the device's credentials_saved is sealed too (plaintext: result || SHA-256(refresh_token)[:8], zeros when not saved); the client counts only a sealed [1] with the matching hash as saved, an unsealed [1] confirms nothing, and with no sealed answer in 35 s of link it assumes saved. The access_expires_at steps test the storage rule and keep the legacy one-byte answer; the sealed answer is in sealed_credentials_saved. sealed_data_large: sealed_data as a device that seals credentials_saved (mg_session_hello_flag_sealed_saved) sends it (its sealed credentials_saved takes device counter 2, so its later data is counter 3); an implementation that seals credentials_saved replays sealed_data_large, one that doesn't sealed_data. sealed_stream_restart: an error ends only the VM stream (open_request [0], the client's closed, open_request [1], open) in the same sealed session; a device message cut after its first fragment used its counter on both sides, a sealed credentials_saved owed meanwhile goes after the state that cuts it off, and the next sealed message each way unseals at the next counter. Client data plaintexts are ServiceResponseEnvelopes (a body chunk on stream 3 carrying stand-in bytes), which a device decodes first; client data that isn't one is refused invalid_value, its counter used. relabelled: what seal v1 doesn't cover - the tag is over dir, counter and ciphertext, not the sub-command byte, so the same sealed bytes under another sub-command still unseal and the plaintext parses there (0x00 as a clear, a JSON object as a credentials_update). Generated by mg_session_seal_ref.py.",
+  "version": 1,
+  "salt": "mg session seal v1",
+  "stream_label": "mg session seal v1 stream",
+  "tag_label": "mg session seal v1 tag",
+  "vectors": [
+    {
+      "name": "credentials (device to client)",
+      "K": "f877380d1959a9ae7c16843722ee2262d315a63b7f484d58c45100d44ecb7808",
+      "client_nonce": "000102030405060708090a0b0c0d0e0f",
+      "device_nonce": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "node_id": "homelink-1a2b3c",
+      "direction": 1,
+      "counter": 0,
+      "plaintext": "{\"node_id\":\"homelink-1a2b3c\",\"access_token\":\"mga_test_access_eb540f3a705ff2d1c67f4abbe0b85b8c7e6afbd658b7e249\",\"refresh_token\":\"mga_test_refresh_fef789e652255dc2b14f17be764270e8\"}",
+      "enc_key": "77f7092c8ab903b4a093e74bb90331539fdf42670f859fea48166248f63f4697",
+      "mac_key": "8364c516e33f328f3fc883d4603a05539bb0d0cb43af511609d94d553a19d794",
+      "sealed": "00000000016c32aed4a23ea6131dcdf7b6611afff293277ae3c4e7458646078a3fc09d60668159b40944b141a90678548e9c8da8b29f54c22b5967f4026599e7ca610333206e251d9c3fbf3b4ebd1d18504ef9fb809200b69b9f8e5c7ca6c1f59ea1941110f5dabdf0d86de8a3b97e108672dfb404684b089259dc6d4cbc07f150d63b04e32f7f3dcb90a075d3b84f8ba10301b9859ca390a393dcb24f53fd4e5174137c727f67fb60934b6e6d88ca66ebe1764a94f412b6e61fbb9a350a56bde46388e88e5342"
+    },
+    {
+      "name": "credentials_update (client to device)",
+      "K": "f877380d1959a9ae7c16843722ee2262d315a63b7f484d58c45100d44ecb7808",
+      "client_nonce": "000102030405060708090a0b0c0d0e0f",
+      "device_nonce": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "node_id": "homelink-1a2b3c",
+      "direction": 2,
+      "counter": 0,
+      "plaintext": "{\"access_token\":\"mga_test_access_2_b805eaa93b2bc13b3d25203e239ab584455e704433c71a3b\",\"refresh_token\":\"mga_test_refresh_2_e072bf54b216e1629aef8922fd35ee76\"}",
+      "enc_key": "77f7092c8ab903b4a093e74bb90331539fdf42670f859fea48166248f63f4697",
+      "mac_key": "8364c516e33f328f3fc883d4603a05539bb0d0cb43af511609d94d553a19d794",
+      "sealed": "00000000d03a899e5dcb744bcf434f4c9d88a6b02274e1070d7c0c259ed3b61a75ca8dea13ea271c8d56e97f2a5611d3e78594540463eaf21e11ce6fc216e38687ae7b7e5c82049b11e4017232b8f77ba62bfe18550862b8651f997f651fa412a79cf73c98cc7879d7393aeebc309b346b73af6ba3072869fb75a03222db4c0f291008cb8f4ab7387c293d392145e9159f77cf084d4676c06998519db25861e54261a9d724e8c9887c5d168892c27e"
+    },
+    {
+      "name": "token-sized credentials, second message",
+      "K": "c33e33feb241f1cc34fd57b1b8a5058e082334b8bc5cffb76913061662e3afec",
+      "client_nonce": "f8e068abd6b570ed5ddfa4c7ce1dedcf",
+      "device_nonce": "7f9e12af2a1fb9ddb71cfcb86ebf08f0",
+      "node_id": "homelink-a7f5b4",
+      "direction": 1,
+      "counter": 1,
+      "plaintext": "{\"node_id\":\"homelink-a7f5b4\",\"access_token\":\"eyJ497a71e129ce0bfdd13ef17d7b77ff415b1ab5f1c4ad7db93136bfdeff250465dce3d36aa594943b669caa273877c0995381d47a75d47c404427daee8d80df65ee494f650cb810314c9ebd6d7f4830a62d01a1a76b9bcd888999563e6bc8548622679a3b35f970f9d45055690917690d2c111816c7f17a20b8ede15d156181942f2bd8912b4fb872a0286eb1b133e610c27cf435c4e8492d149980cd4a282e95b3a54e63044ac6cd43051a5cb23021181e6b22f87b7499d1ff945396bee47ed6c566107c7af0af36513cdac5e64e3c398f52eb13171e604e63aff036b5de14d1c0314db82bc3b3128ca63015902ea2935666d8d181ff33c26eb03432706712a476c5369d8ebb5f2976ee83297cf3e4ab1a3ea1b8f745f47e6f39883cf8c59dd87f6bca9a6c62c08a6e516db8\",\"refresh_token\":\"89be6505e012afc3942d92a640626116a606daabc2d78bdf0a3caf6040d68b1a2002d6f8a238acc99e35b7bbf520fd85bf8909f02f358acedeb54baaa4d52a1a74dbf27b6c866a0c\"}",
+      "enc_key": "7413aa4ecbe7b4815858161a4c4aac90adac6da2e2d51950b1eec9b9eb5efac8",
+      "mac_key": "03aa0df7b95ad48737a11d9187c62aab391851ef3860a8aa028440803a5bd3bc",
+      "sealed": "00000001235d03db643382f18e8d34fd5977f255a52b590143e83e1bd3e727fd63204719e75ad0abef2d0db76dfe7c65e14c51c798b20989a026883402781ab2ca9ba74511e5142f10dc8f06f13405a53fd8c86255888936648cb2b5dce4b5f44d736617c2224abafa1362da5426a2a544d330c7522d82e3c151c8b97e911e1a074e76040a268f905d112ce63c67fd6850673b615ebaa0f9d0e4878429ebbe988d60fd4eff5953b1f4d827b57249b4c8f5a9965c947ad51892b7c4a88edaeb48bb637fe23db3d3ef7247278d511ee0e4a2af631ab6f201079556083bcf3cad886cafe3675190b83757789e3541672438a82f20a4c3b2dfa5218775165f0fb74a6ad7fc75404e038e651533b00f0df6a83f5a7d5e486314e2992ee97c3abfaa9656ad2b07e780708cb84a051c7851f9a17d9063c576abd8a144ae620e688bd43ca03ec79799e229fda50848bcc7b53fab916cf8364f8c624934a0d6f262a72cead56e7b80a0f9ac58e588d34c20e3cf601a731b853a16fc1ce12307b9ede65789952088bbd44e71e0e51379f59a12143d1e7aca6cf2bc44578d3ffc44843fa9422cce388214d991deea230689af8d6660e676b5a51f86663006932c9c37394b24caa036ced5c309477935bf0eac7a9a8117c9644d38ee0b87628369a49de7bf77bb29765ae969aa4d39ddb1c402cca60babc3fd48d7615ff2dcf72bd441703b675e127901f6a16a7ee605a4d2747b0147f7a2aae52ebdd3144fb1d5ee2e384b8581090471be33bcd4e2a0dfe6aed1f8640826ab12889bf49e28c5e288a42839a10827a0debf179d126d0b27206af4d14d6f35428b721c5f84e0fa3407b51ad63d7512de61c1fab601a191941205e1f513e11c21909ec16fa956fa27df6edbff579e0835c548951a706870987d367560f07ee3f22753b37be48bb502b5962136d3f5487c704a357e3ed48afad74d7d692dc3e990ce5180eab3d27ad926544f33a0a5f248877717cbfca81ae58e4440ca15c20c9295638ccbcb1ccda20ed26096df0c2b8b8cd9965e659d0ada66138ee6281824c0a4224c0675b015cd3c27b6b9507f6237ac2ef8e470594ac2bd8079f1aea12d89bf42c8b9b8ef7901f58cae98cffc4136e45b31b3678efe56b6f8ec9ce00ae6d3763c424863baf9ae75cc6eec824e"
+    }
+  ]
+}
