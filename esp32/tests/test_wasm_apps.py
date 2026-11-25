@@ -48,6 +48,20 @@ def block(text, start, end="#endif"):
     return text[i:text.index(end, i)]
 
 
+def active_guards(source):
+    """Track enclosing branches, including nested conditionals and alternatives."""
+    guards = []
+    for match in re.finditer(r"^\s*#(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)", source, re.M):
+        directive, condition = match.group(1), match.group(2).strip()
+        if directive in ("if", "ifdef", "ifndef"):
+            guards.append((directive, condition))
+        elif directive == "endif":
+            guards.pop()
+        else:
+            guards[-1] = (directive, condition)
+    return guards
+
+
 def function(text, signature):
     i = text.index(signature)
     return text[i:text.index("\n}\n", i)]
@@ -157,7 +171,17 @@ class WasmAppsTest(unittest.TestCase):
             source = read(path)
             self.assertIn(call, source)
             before = source[:source.index(call)]
-            self.assertGreater(before.rfind("#if CONFIG_MUSE_WASM_APPS"), before.rfind("#endif"), path)
+            self.assertIn(("if", "CONFIG_MUSE_WASM_APPS"), active_guards(before), path)
+
+    def test_optional_call_guard_tracks_nested_branches(self):
+        guarded = "#if CONFIG_MUSE_WASM_APPS\n#if CONFIG_GADGET_SDK_TOKEN_CONSOLE\n#endif\n"
+        wanted = ("if", "CONFIG_MUSE_WASM_APPS")
+        self.assertIn(wanted, active_guards(guarded))
+        for alternative in ("#endif\n", "#else\n", "#elif CONFIG_OTHER\n"):
+            with self.subTest(alternative=alternative):
+                self.assertNotIn(wanted, active_guards(guarded + alternative))
+        self.assertNotIn(wanted, active_guards("#ifndef CONFIG_MUSE_WASM_APPS\n"))
+        self.assertNotIn(wanted, active_guards("#if !CONFIG_MUSE_WASM_APPS\n"))
 
     def test_app_view_belongs_to_the_ui(self):
         muse = read("components/muse/CMakeLists.txt")

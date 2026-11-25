@@ -334,7 +334,7 @@ extern "C" bool noise_tunnel_is_connected(void) {
 static bool try_open_stream(const noise_tunnel_emit_t *emit) {
     s_last_open_attempt_us = esp_timer_get_time();
     if (!emit->open_stream(emit->ctx)) {
-        ESP_LOGW(TAG, "failed to open /link-tunnel stream");
+        ESP_LOGW(TAG, "failed to open /api/gadget/tunnel stream");
         return false;
     }
     // Drop any stale batches queued from a previous session/stream.
