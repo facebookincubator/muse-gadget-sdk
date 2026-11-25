@@ -117,6 +117,14 @@ Upgrade through the installer only. It checks `/opt/musegadget/bin/uv`
 against a pinned checksum, and builds a new venv, before running anything there
 as root. Don't run that uv with `sudo` yourself.
 
+Before it downloads uv or musegadget, the installer checks the system trust
+store with the system Python, as `tls.py` does, and stops with exit code 78
+while it can't be read or still has a compromised root CA. Then curl, git and
+root's uv use only the copy of the CA bundle it checked (`CA_FILE`, in
+`/opt/musegadget`). The installer's `COMPROMISED_ROOTS` must match `tls.py`'s;
+`tests/test_install_sh.py` checks that, and that it refuses every store
+`tls.py` refuses.
+
 Installer flags: `--sdk-token TOKEN`, `--run-as USER`, `--no-pair`, `--yes`,
 `--from SOURCE`, `--proxy URL`, `--no-proxy HOSTS`, `--uninstall`, `--purge`. The installer is ShellCheck-clean;
 keep it that way. Root runs everything under `/opt/musegadget`, so the
