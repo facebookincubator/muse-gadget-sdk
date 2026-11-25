@@ -110,6 +110,7 @@ upstream licenses:
 | [`xplat/lc3fx`](xplat/lc3fx) (built by `esp32/components/liblc3` for chips without an FPU; for the same BLE gadgets) | fixed-point port of [google/liblc3](https://github.com/google/liblc3) (the Muse Gadgets copy, see `VENDORED.md`) | Apache-2.0, a derivative of liblc3, see [`LICENSE`](xplat/lc3fx/LICENSE) |
 | [`android/lc3-kotlin`](android/lc3-kotlin) | Kotlin translation of [google/liblc3](https://github.com/google/liblc3) v1.1.3+5 (8e1e722c) | Apache-2.0, a derivative of liblc3 (Google's copyright), see [`LICENSE`](android/lc3-kotlin/LICENSE) and [`NOTICE`](android/lc3-kotlin/NOTICE) |
 | Gradle wrapper in [`android/lc3-kotlin`](android/lc3-kotlin) (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`) | [Gradle](https://github.com/gradle/gradle) 8.13; `gradle-wrapper.jar` SHA-256 `81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f`, Gradle's published checksum, and the wrapper checks the distribution's (`distributionSha256Sum`) | Apache-2.0, the Gradle authors' copyright, in the script headers |
+| [`portable/mg_link_setup/third_party/micro-ecc`](portable/mg_link_setup/third_party/micro-ecc) | [kmackay/micro-ecc](https://github.com/kmackay/micro-ecc) at `541b3a78`, P-256 files only (see its README) | BSD-2-Clause, Kenneth MacKay's copyright, see [`LICENSE.txt`](portable/mg_link_setup/third_party/micro-ecc/LICENSE.txt) |
 
 Dependencies fetched at build time are under their own licenses: ESP-IDF
 components (into `esp32/managed_components/`), and the simulator's LVGL and
