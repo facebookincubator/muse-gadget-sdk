@@ -23,7 +23,7 @@ contract for it. The ESP32 firmware (`../esp32`) and the Linux client
 
 | Where | What sends it | How to turn it off |
 |---|---|---|
-| ESP32 | `main/error_report.c`, after a panic, watchdog or brownout reset | `CONFIG_HOMEHUB_ERROR_REPORT=n` |
+| ESP32 | `main/error_report.c`, after a panic, watchdog, brownout, power-glitch, CPU-lockup or eFuse reset | `CONFIG_HOMEHUB_ERROR_REPORT=n` |
 | Linux | `musegadget/error_report.py`, after `musegadget run` ended in an exception or was killed | `MUSEGADGET_ERROR_REPORT=0` in the service's environment |
 
 ## The message
@@ -86,12 +86,13 @@ For anything more, Muse asks the owner first.
 - Keep it until a send completes. A connection that drops first leaves it for
   the next one.
 - If the gadget crashes again before it could send, the newer crash replaces
-  the older one, and `consecutive_count` says there was more than one.
+  the older one, and `consecutive_count` says there was more than one unless a
+  run in between ended normally.
 - Muse records at most one report per device per minute. A Muse that doesn't
   know the message ignores it, so a gadget needs no version check.
 - The ESP32 keeps its record in memory that survives a reset and nowhere
-  else: nothing is written to flash, and losing power discards it. Linux
-  keeps it in `error_report.json` in the state directory.
+  else: nothing is written to flash, and losing power or a factory reset
+  discards it. Linux keeps it in `error_report.json` in the state directory.
 
 ## Compatibility
 

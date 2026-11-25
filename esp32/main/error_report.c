@@ -175,7 +175,8 @@ void error_report_init(void) {
         }
         pending->magic = PENDING_MAGIC;
         pending->consecutive_count = count;
-        pending->flags |= (uint32_t)reset << RECORD_REASON_SHIFT;
+        pending->flags = (pending->flags & ((1u << RECORD_REASON_SHIFT) - 1))
+                         | ((uint32_t)reset << RECORD_REASON_SHIFT);
         pending->checksum = record_checksum(pending);
         ESP_LOGW(TAG, "previous boot ended in %s (%" PRIu32 " in a row)",
                  reason, count);
@@ -301,9 +302,13 @@ char *error_report_pending_json(void) {
     return json;
 }
 
-void error_report_mark_sent(void) {
+void error_report_discard(void) {
     atomic_store(&s_has_pending, false);
     memset(&s_retained.pending, 0, sizeof(s_retained.pending));
+}
+
+void error_report_mark_sent(void) {
+    error_report_discard();
 }
 
 #ifdef ESP_PLATFORM

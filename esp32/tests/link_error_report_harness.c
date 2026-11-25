@@ -308,6 +308,18 @@ static void test_report_waits_across_restarts(void) {
     }
     started(ESP_RST_PANIC);
     if (started(ESP_RST_POWERON)) expect_nothing_queued();
+
+    // A factory reset drops one before its restart.
+    if (started(ESP_RST_SW)) {
+        error_report_note_panic((const void *)(uintptr_t)0x42008000u, NULL,
+                                "Load access fault", NULL);
+    }
+    if (started(ESP_RST_PANIC)) {
+        expect_queued("before_factory_reset");
+        error_report_discard();
+        expect_nothing_queued();
+    }
+    if (started(ESP_RST_SW)) expect_nothing_queued();
 }
 
 static void run(void (*test)(void)) {
