@@ -592,7 +592,8 @@ linked to eMudhra:
   musegadget won't start or connect (exit code 78), and `doctor` reports
   `FAIL`, while the store can't be read or still trusts either. Update the
   `ca-certificates` package, then restart musegadget. The installer updates
-  that package, and stops if the store still trusts one of these roots.
+  that package, and stops before it downloads uv or musegadget (exit code 78)
+  if the store still trusts one of these roots.
   openSUSE's store still includes Comodo AAA Services root (for email), so
   on openSUSE put it in the blocklist, as described below, before installing.
 - **Retired:** emSign Root CA - C1 and emSign ECC Root CA - C3, which Mozilla

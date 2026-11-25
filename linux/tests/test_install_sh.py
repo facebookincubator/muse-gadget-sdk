@@ -24,6 +24,7 @@ uv archive is a fake served by a fake curl, so no network is needed.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import io
 import os
@@ -36,6 +37,13 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import NameOID
+
+from musegadget import tls
 
 INSTALL_SH = Path(__file__).resolve().parents[1] / "install.sh"
 TARGET = "x86_64-unknown-linux-gnu"
@@ -103,16 +111,19 @@ def env(tmp_path):
     curl = work / "bin" / "curl"
     curl.write_text(
         "#!/bin/sh\n"
-        'out=""; url=""\n'
+        'out=""; url=""; cacert=""; capath=""\n'
         'while [ $# -gt 0 ]; do\n'
         '    case "$1" in\n'
-        '        -o|--proto) [ "$1" = -o ] && out="$2"; shift 2 ;;\n'
+        '        -o|--proto|--cacert|--capath)\n'
+        '            [ "$1" = -o ] && out="$2"; [ "$1" = --cacert ] && cacert="$2"\n'
+        '            [ "$1" = --capath ] && capath="$2"; shift 2 ;;\n'
         '        -*) shift ;;\n'
         '        *) url="$1"; shift ;;\n'
         '    esac\n'
         'done\n'
         f'echo "$url" >> {work}/curl-calls\n'
         f'echo "$out" >> {work}/curl-outs\n'
+        f'echo "$cacert $capath" >> {work}/curl-cas\n'
         'cp "$FAKE_ARCHIVE" "$out"\n'
     )
     curl.chmod(0o755)
@@ -138,7 +149,7 @@ install -d -m 1777 /mnt/marks
 (
 export PATH="{work}/bin:$PATH" TMPDIR="{work}/tmp" FAKE_ARCHIVE="{env[archive]}"
 source "{INSTALL_SH}"
-ARCH=amd64 UV_TMP=""
+ARCH=amd64 UV_TMP="" CA_FILE=/checked/ca-bundle.crt
 uv_release() {{ UV_ARCHIVE_SHA256={env["archive_sha"]}; UV_BINARY_SHA256={env["binary_sha"]}; }}
 as_other() {{ setpriv --reuid={OTHER_UID} --regid={OTHER_UID} --clear-groups "$@"; }}
 show() {{ stat -c '%n uid=%u mode=%a ino=%i type=%F' "$@"; }}
@@ -198,14 +209,18 @@ echo "sha=$(sha256sum /opt/musegadget/bin/uv | cut -d' ' -f1)"
 
 @needs_namespace
 def test_fresh_install_is_root_owned_and_never_run(env):
-    result = run(env, "prepare_prefix\ninstall_uv\nshow /opt/musegadget /opt/musegadget/bin\n" + AFTER)
+    result = run(env, "prepare_prefix\ninstall_uv\nshow /opt/musegadget /opt/musegadget/bin /opt/musegadget/no-ca-dir\n"
+                 "echo \"no-ca-dir entries: $(ls -A /opt/musegadget/no-ca-dir | wc -l)\"\n" + AFTER)
     assert_installed_uv(env, result)
-    for path in ("/opt/musegadget", "/opt/musegadget/bin"):
+    for path in ("/opt/musegadget", "/opt/musegadget/bin", "/opt/musegadget/no-ca-dir"):
         made = stat_of(result.stdout, path)
         assert made["uid"] == "0" and made["mode"] == "755" and made["type"] == "directory"
     assert curl_calls(env) == [
         f"https://github.com/astral-sh/uv/releases/download/0.9.9/uv-{TARGET}.tar.gz"
     ]
+    # It uses only the bundle check_trust_store_before_downloads checked: no CA directory.
+    assert (env["work"] / "curl-cas").read_text().split() == ["/checked/ca-bundle.crt", "/opt/musegadget/no-ca-dir"]
+    assert re.search(r"no-ca-dir entries: *0\n", result.stdout)
     assert ran(result, "good-uv") == []
 
 
@@ -542,7 +557,7 @@ def test_installer_points_suse_at_the_blocklist(tmp_path):
 ])
 def test_installer_stops_on_a_compromised_root_or_an_unreadable_store(tmp_path, problem, warning):
     result = check_trust_store_in_installer(tmp_path, problem, warning)
-    assert result.returncode != 0
+    assert result.returncode == 78
     assert "carried on" not in result.stdout
     assert f"musegadget won't connect: {problem}. Update your ca-certificates package" in result.stderr
     assert "still connects" not in result.stderr
@@ -553,6 +568,345 @@ def test_installer_stops_when_the_trust_store_check_fails(tmp_path):
     assert result.returncode != 0
     assert "carried on" not in result.stdout
     assert "couldn't check the system trust store" in result.stderr
+
+
+# --- Trust store before downloading ------------------------------------------
+
+VECTORS = Path(__file__).parent / "vectors" / "distrusted_roots.pem"
+
+
+def published_roots() -> dict[str, str]:
+    """Each root in tests/vectors/distrusted_roots.pem, by name, as PEM."""
+    text = VECTORS.read_text()
+    return dict(re.findall(r"# ([^\n]+)\n(-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n)",
+                           text, re.S))
+
+
+def self_signed_ca(name, public_key=None, *, ca=True):
+    """A CA certificate (or not) as PEM: for its own new key, or for ``public_key`` (signed by a new key)."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject).issuer_name(subject)
+        .public_key(public_key or key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(Encoding.PEM).decode()
+
+
+def check_before_downloads(tmp_path, bundles=None, *, cert_file=True, cert_dir=None, family="debian",
+                           python=None, unit=False):
+    """Run check_trust_store_before_downloads with only these stores, and no network.
+
+    ``bundles`` stand in for CA_BUNDLES. ``cert_file`` and ``cert_dir`` stand
+    in for OpenSSL's default CA file and directory, the store the service
+    uses; ``cert_file`` is a clean CA file by default, and False for none.
+    This test's Python is given them, since the check clears the caller's
+    SSL_CERT_* settings (set to elsewhere here). With ``unit``, an earlier
+    install's service exists. The installer's prefix is ``prefix``. Prints
+    CA_FILE after the check; ``systemctl_calls`` returns the systemctl runs.
+    """
+    bundles = bundles or [tmp_path / "no-such-bundle.crt"]
+    if cert_file is True:
+        cert_file = bundle(tmp_path, "cert.pem", self_signed_ca("Service"))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    if python is None:
+        python = bin_dir / "python-with-store"
+        python.write_text(
+            "#!/bin/sh\n"
+            f"export SSL_CERT_FILE={shlex.quote(str(cert_file or tmp_path / 'no-such-file.pem'))}\n"
+            f"export SSL_CERT_DIR={shlex.quote(str(cert_dir or tmp_path / 'no-such-dir'))}\n"
+            f'exec {shlex.quote(sys.executable)} "$@"\n')
+        python.chmod(0o755)
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text(f'#!/bin/sh\necho "systemctl $*" >> {shlex.quote(str(tmp_path / "systemctl-calls"))}\n')
+    systemctl.chmod(0o755)
+    unit_path = tmp_path / "musegadget.service"
+    if unit:
+        unit_path.write_text("[Service]\n")
+    (tmp_path / "prefix").mkdir(exist_ok=True)
+    script = (
+        f'source "{INSTALL_SH}"; as_root() {{ "$@"; }}; systemd_running() {{ true; }}; '
+        f'DISTRO_FAMILY={family}; SYSTEM_PYTHON={shlex.quote(str(python))}; '
+        f'UNIT={shlex.quote(str(unit_path))}; PREFIX={shlex.quote(str(tmp_path / "prefix"))}; '
+        f'CA_BUNDLES=({" ".join(shlex.quote(str(path)) for path in bundles)}); '
+        'check_trust_store_before_downloads; echo "carried on with CA_FILE=$CA_FILE"'
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "SSL_CERT_FILE": "/elsewhere/cert.pem",
+        "SSL_CERT_DIR": "/elsewhere/certs",
+        "SSL_CERT_URI": "file:///elsewhere",
+    }
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+
+
+def systemctl_calls(tmp_path):
+    path = tmp_path / "systemctl-calls"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def bundle(directory, name, *pems):
+    path = directory / name
+    path.write_text("".join(pems))
+    return path
+
+
+def test_the_installer_refuses_the_roots_musegadget_refuses():
+    script = f'source "{INSTALL_SH}"; printf "%s\\n" "${{COMPROMISED_ROOTS[@]}}"'
+    lines = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.splitlines()
+    pinned = [tuple(line.split(" ", 2)) for line in lines]
+    assert pinned == [(cert, spki, name) for name, cert, spki in tls.COMPROMISED_ROOTS]
+
+
+@pytest.mark.parametrize("name", ["emSign ECC Root CA - G3", "Comodo AAA Services root"])
+@pytest.mark.parametrize("where", ["default file", "default directory", "CRL name"])
+def test_a_compromised_root_stops_the_installer_and_the_service(tmp_path, name, where):
+    pem = published_roots()[name]
+    stores = {"bundles": [bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Fine"))]}
+    if where == "default file":
+        stores["cert_file"] = bundle(tmp_path, "cert.pem", self_signed_ca("Service"), pem)
+    else:
+        (tmp_path / "certs").mkdir()
+        bundle(tmp_path / "certs", "0a1b2c3d.0" if where == "default directory" else "0a1b2c3d.r0", pem)
+        stores["cert_dir"] = tmp_path / "certs"
+    result = check_before_downloads(tmp_path, unit=True, **stores)
+    assert result.returncode == 78, result.stderr
+    assert "carried on" not in result.stdout
+    assert (f"not installing: the system trust store still trusts {name}. "
+            "Update your ca-certificates package, then run this installer again.") in result.stderr
+    assert systemctl_calls(tmp_path) == ["systemctl stop musegadget.service"]
+
+
+def test_a_compromised_root_in_a_ca_bundle_stops_only_the_installer(tmp_path):
+    # Downloads could use that bundle; the service's own store is clean, so it keeps running.
+    pem = published_roots()["emSign ECC Root CA - G3"]
+    result = check_before_downloads(
+        tmp_path, [bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Fine"), pem)], unit=True)
+    assert result.returncode == 78, result.stderr
+    assert "not installing: the system CA bundle still trusts emSign ECC Root CA - G3." in result.stderr
+    assert systemctl_calls(tmp_path) == []
+
+
+def test_the_service_store_is_judged_before_the_ca_bundle(tmp_path):
+    # Its compromised root still stops the service when there's no bundle to download with.
+    (tmp_path / "certs").mkdir()
+    bundle(tmp_path / "certs", "0a1b2c3d.0", published_roots()["Comodo AAA Services root"])
+    result = check_before_downloads(tmp_path, cert_file=False, cert_dir=tmp_path / "certs", unit=True)
+    assert result.returncode == 78, result.stderr
+    assert "still trusts Comodo AAA Services root." in result.stderr
+    assert systemctl_calls(tmp_path) == ["systemctl stop musegadget.service"]
+
+
+def test_the_installer_points_suse_at_the_blocklist_before_downloading(tmp_path):
+    pem = published_roots()["Comodo AAA Services root"]
+    result = check_before_downloads(tmp_path, [bundle(tmp_path, "ca-bundle.pem", pem)], family="suse")
+    assert result.returncode == 78, result.stderr
+    assert "still trusts Comodo AAA Services root." in result.stderr
+    assert "/etc/pki/trust/blocklist/" in result.stderr and '"Root CAs"' in result.stderr
+
+
+@pytest.mark.parametrize("name", ["emSign ECC Root CA - G3", "Comodo AAA Services root"])
+def test_a_reissued_certificate_for_a_compromised_key_stops_the_installer(tmp_path, name):
+    key = x509.load_pem_x509_certificate(published_roots()[name].encode()).public_key()
+    result = check_before_downloads(tmp_path, cert_file=bundle(tmp_path, "ca.pem", self_signed_ca("Reissue", key)))
+    assert result.returncode == 78, result.stderr
+    assert f"still trusts {name}." in result.stderr
+
+
+def test_a_compromised_key_in_a_certificate_that_is_not_a_ca_stops_the_installer(tmp_path):
+    # OpenSSL leaves such a certificate out of its CAs, but uv would take it as a trust anchor.
+    key = x509.load_pem_x509_certificate(published_roots()["emSign ECC Root CA - G3"].encode()).public_key()
+    distro = bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Fine"), self_signed_ca("Leaf", key, ca=False))
+    result = check_before_downloads(tmp_path, [distro])
+    assert result.returncode == 78, result.stderr
+    assert "the system CA bundle still trusts emSign ECC Root CA - G3." in result.stderr
+
+
+def test_a_commented_out_root_in_the_ca_bundle_is_not_a_certificate(tmp_path):
+    commented = "".join("# " + line + "\n" for line in published_roots()["emSign ECC Root CA - G3"].splitlines())
+    result = check_before_downloads(tmp_path, [bundle(tmp_path, "ca.pem", self_signed_ca("Fine"), commented)])
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_rejected_ca_bundle_leaves_the_checked_copy_alone(tmp_path):
+    distro = bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Fine"))
+    assert check_before_downloads(tmp_path, [distro]).returncode == 0
+    checked = (tmp_path / "prefix" / "ca-bundle.crt").read_bytes()
+    distro.write_text(self_signed_ca("Fine") + published_roots()["emSign ECC Root CA - G3"])
+    assert check_before_downloads(tmp_path, [distro]).returncode == 78
+    assert (tmp_path / "prefix" / "ca-bundle.crt").read_bytes() == checked
+    assert [path.name for path in (tmp_path / "prefix").iterdir()] == ["ca-bundle.crt"]
+
+
+def test_a_clean_store_or_retired_roots_let_the_installer_carry_on(tmp_path):
+    # Retired roots are only warned about, by check_trust_store once musegadget is installed.
+    roots = published_roots()
+    (tmp_path / "certs").mkdir()
+    bundle(tmp_path / "certs", "0a1b2c3d.0", roots["emSign Root CA - C1"])
+    bundle(tmp_path / "certs", "not-a-hash.pem", roots["emSign ECC Root CA - G3"])   # never read
+    distro = bundle(tmp_path, "ca.pem", self_signed_ca("Fine"), roots["emSign ECC Root CA - C3"])
+    result = check_before_downloads(tmp_path, [tmp_path / "missing.crt", distro],
+                                    cert_dir=tmp_path / "certs", unit=True)
+    assert result.returncode == 0, result.stderr
+    # Downloads use a copy of the distro's bundle, which was checked, where only root can change it.
+    copy = tmp_path / "prefix" / "ca-bundle.crt"
+    assert f"carried on with CA_FILE={copy}\n" in result.stdout
+    assert copy.read_bytes() == distro.read_bytes() and copy.stat().st_mode & 0o777 == 0o644
+    assert [path.name for path in (tmp_path / "prefix").iterdir()] == ["ca-bundle.crt"]
+    assert result.stderr == ""
+    assert systemctl_calls(tmp_path) == []
+
+
+def test_downloads_use_openssls_default_file_without_a_distro_bundle(tmp_path):
+    cert_file = bundle(tmp_path, "cert.pem", self_signed_ca("Fine"))
+    result = check_before_downloads(tmp_path, cert_file=cert_file)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "prefix" / "ca-bundle.crt").read_bytes() == cert_file.read_bytes()
+
+
+@pytest.mark.parametrize("case", ["no CA file or directory", "unreadable CA file", "unreadable hashed file"])
+def test_an_unreadable_service_store_stops_the_installer_and_the_service(tmp_path, case):
+    stores = {"bundles": [bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Fine"))]}
+    if case == "no CA file or directory":
+        stores["cert_file"] = False
+        reason = "found no CA file or CA directory"
+    elif case == "unreadable CA file":
+        stores["cert_file"] = bundle(tmp_path, "cert.pem", "not a certificate\n")
+        reason = "can't read"
+    else:
+        (tmp_path / "certs").mkdir()
+        bundle(tmp_path / "certs", "0a1b2c3d.0", "not a certificate\n")
+        stores["cert_dir"] = tmp_path / "certs"
+        reason = "can't read"
+    result = check_before_downloads(tmp_path, unit=True, **stores)
+    assert result.returncode == 78
+    assert "carried on" not in result.stdout
+    assert f"not installing: can't read the system trust store: {reason}" in result.stderr
+    assert "Update your ca-certificates package" in result.stderr
+    assert systemctl_calls(tmp_path) == ["systemctl stop musegadget.service"]
+
+
+@pytest.mark.parametrize("case", ["no bundle", "unreadable bundle"])
+def test_a_missing_or_unreadable_ca_bundle_stops_only_the_installer(tmp_path, case):
+    if case == "no bundle":   # the service reads its CA directory alone
+        (tmp_path / "certs").mkdir()
+        bundle(tmp_path / "certs", "0a1b2c3d.0", self_signed_ca("Fine"))
+        result = check_before_downloads(tmp_path, cert_file=False, cert_dir=tmp_path / "certs", unit=True)
+        reason = "found no CA bundle"
+    else:
+        bad = bundle(tmp_path, "ca.pem", "not a certificate\n")
+        result = check_before_downloads(tmp_path, [bad], unit=True)
+        reason = f"can't read {bad}"
+    assert result.returncode == 78
+    assert f"not installing: can't read the system CA bundle: {reason}." in result.stderr
+    assert systemctl_calls(tmp_path) == []
+
+
+def test_a_check_that_cannot_run_blames_neither_the_store_nor_the_service(tmp_path):
+    python = tmp_path / "broken-python"
+    python.write_text("#!/bin/sh\necho 'Traceback (most recent call last):' >&2\nexit 1\n")
+    python.chmod(0o755)
+    result = check_before_downloads(tmp_path, [bundle(tmp_path, "ca.pem", self_signed_ca("Fine"))],
+                                    python=python, unit=True)
+    assert result.returncode == 1
+    assert "couldn't check the system trust store." in result.stderr
+    assert "ca-certificates" not in result.stderr
+    assert systemctl_calls(tmp_path) == []
+
+
+def parity_store(tmp_path, case):
+    """A store for the parity test: (default CA file or None, default CA directory)."""
+    roots = published_roots()
+    cert_file = bundle(tmp_path, "cert.pem", self_signed_ca("Fine"))
+    certs = tmp_path / "certs"
+    certs.mkdir()
+    if case == "compromised in the file":
+        cert_file.write_text(self_signed_ca("Fine") + roots["emSign ECC Root CA - G3"])
+    elif case == "compromised in a hash-named file":
+        bundle(certs, "0a1b2c3d.0", roots["Comodo AAA Services root"])
+    elif case == "compromised in a CRL-named file":
+        bundle(certs, "0a1b2c3d.r1", roots["emSign ECC Root CA - G3"])
+    elif case == "compromised in another file":
+        bundle(certs, "notes.pem", roots["emSign ECC Root CA - G3"])
+    elif case == "compromised key in a certificate that is not a CA":
+        key = x509.load_pem_x509_certificate(roots["emSign ECC Root CA - G3"].encode()).public_key()
+        bundle(certs, "0a1b2c3d.0", self_signed_ca("Leaf", key, ca=False))
+    elif case == "retired only":
+        bundle(certs, "0a1b2c3d.0", roots["emSign Root CA - C1"])
+    elif case == "unreadable hash-named file":
+        bundle(certs, "0a1b2c3d.0", "not a certificate\n")
+    elif case == "directory is a file":
+        certs.rmdir()
+        bundle(tmp_path, "certs", self_signed_ca("Fine"))
+    elif case == "directory only":
+        cert_file.unlink()
+        bundle(certs, "0a1b2c3d.0", self_signed_ca("Fine"))
+        cert_file = None
+    elif case == "nothing":
+        cert_file.unlink()
+        cert_file = None
+    return cert_file, certs
+
+
+@pytest.mark.parametrize("case", [
+    "clean", "compromised in the file", "compromised in a hash-named file",
+    "compromised in a CRL-named file", "compromised in another file",
+    "compromised key in a certificate that is not a CA", "retired only",
+    "unreadable hash-named file", "directory is a file", "directory only", "nothing",
+])
+def test_the_installer_refuses_the_stores_musegadget_refuses(tmp_path, monkeypatch, case):
+    """With a clean distro bundle, the check before downloading refuses exactly the stores musegadget refuses."""
+    cert_file, cert_dir = parity_store(tmp_path, case)
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert_file or tmp_path / "no-such-file.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", str(cert_dir))
+    monkeypatch.delenv("SSL_CERT_URI", raising=False)
+    # As tls.trust_store_problem(), which conftest.py stubs out here.
+    found = tls.check_trust_store()
+    compromised = {name for name, _, _ in tls.COMPROMISED_ROOTS}
+    musegadget_refuses = found is None or bool(compromised & set(found))
+    distro = bundle(tmp_path, "ca-certificates.crt", self_signed_ca("Distro"))
+    result = check_before_downloads(tmp_path, [distro], cert_file=cert_file or False, cert_dir=cert_dir)
+    assert result.returncode in (0, 78), result.stderr
+    assert (result.returncode == 78) == musegadget_refuses, result.stderr
+
+
+def test_uv_and_git_use_only_the_checked_bundle(tmp_path):
+    """uv's root CAs and insecure hosts, git's CA settings and generic sslVerify, and SSL_CERT_DIR are overridden."""
+    uv = tmp_path / "bin" / "uv"
+    uv.parent.mkdir()
+    uv.write_text('#!/bin/sh\necho "file=$SSL_CERT_FILE git=$GIT_SSL_CAINFO gitdir=$GIT_SSL_CAPATH '
+                  'dir=${SSL_CERT_DIR-unset} noverify=${GIT_SSL_NO_VERIFY-unset} '
+                  'insecure=${UV_INSECURE_HOST-unset} '
+                  '$GIT_CONFIG_COUNT $GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0"\n')
+    uv.chmod(0o755)
+    script = (f'source "{INSTALL_SH}"; as_root() {{ "$@"; }}; PREFIX="{tmp_path}"; NO_CA_DIR=/empty; '
+              'export SSL_CERT_DIR=/elsewhere GIT_SSL_NO_VERIFY=1 UV_INSECURE_HOST=github.com; '
+              'CA_FILE=/checked/ca.crt; run_uv pip install x')
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+    assert result.stdout.strip() == ("file=/checked/ca.crt git=/checked/ca.crt gitdir=/empty dir=unset "
+                                     "noverify=unset insecure=unset 1 http.sslVerify=true"), result.stderr
+    unchecked = subprocess.run(["bash", "-c", f'source "{INSTALL_SH}"; PREFIX="{tmp_path}"; run_uv pip'],
+                               capture_output=True, text=True, timeout=60)
+    assert unchecked.returncode != 0 and "the trust store is not checked" in unchecked.stderr
+    assert "file=" not in unchecked.stdout
+
+
+def test_main_checks_the_trust_store_before_downloading():
+    """Before the check, only the package manager, which checks package signatures, downloads."""
+    main = INSTALL_SH.read_text().split("\nmain() {", 1)[1]
+    steps = ("install_packages", "update_ca_certificates", "prepare_prefix",
+             "check_trust_store_before_downloads", "install_uv", "install_musegadget", "check_trust_store")
+    order = [main.index(f"\n    {step}\n") for step in steps]
+    assert order == sorted(order)
 
 
 # --- Proxy -------------------------------------------------------------------
