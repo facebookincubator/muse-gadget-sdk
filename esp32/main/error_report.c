@@ -42,7 +42,8 @@
 #else
 #define RETAINED_ATTR __NOINIT_ATTR
 #endif
-#else
+#elif !defined(RETAINED_ATTR)
+// Host tests may supply it to keep these across simulated resets.
 #define RETAINED_ATTR
 #endif
 
@@ -50,6 +51,7 @@
 
 #define ERROR_REPORT_SCHEMA_VERSION 1
 #define RECORD_MAGIC 0x4c455231u
+#define PENDING_MAGIC 0x4c455232u
 #define RECORD_FLAG_PANIC 0x1u
 #define RECORD_FLAG_ADDRESS 0x2u
 #define RECORD_FLAG_RETURN_ADDRESS 0x4u
@@ -63,6 +65,7 @@ typedef struct {
     uint32_t uptime_seconds;
     uint32_t fault_address;
     uint32_t return_address;
+    uint32_t reset_reason;  // s_pending's esp_reset_reason_t
     char version[32];
     char build_sha[20];
     char cause[48];
@@ -70,10 +73,16 @@ typedef struct {
     uint32_t checksum;
 } crash_record_t;
 
+// This boot's record, which a panic fills in.
 static RETAINED_ATTR crash_record_t s_record;
+// The report waiting to be sent. It is retained too, so a restart before the
+// device registers (Muse boards restart right after pairing) keeps it.
+static RETAINED_ATTR crash_record_t s_pending;
 
-static crash_record_t s_pending;
-static const char *s_pending_reason;
+// Ordinary RAM, which ESP-IDF clears first thing at every boot: set once
+// error_report_init() has armed s_record in this boot. Until then s_record
+// is whatever an earlier boot left.
+static atomic_bool s_armed = ATOMIC_VAR_INIT(false);
 static atomic_bool s_has_pending = ATOMIC_VAR_INIT(false);
 
 static uint32_t record_checksum(const crash_record_t *record) {
@@ -85,9 +94,8 @@ static uint32_t record_checksum(const crash_record_t *record) {
     return hash;
 }
 
-static bool record_is_valid(const crash_record_t *record) {
-    return record->magic == RECORD_MAGIC
-           && record->checksum == record_checksum(record);
+static bool record_is_valid(const crash_record_t *record, uint32_t magic) {
+    return record->magic == magic && record->checksum == record_checksum(record);
 }
 
 // Keeps printable ASCII and zero-fills the rest of dst, so a stored string is
@@ -130,30 +138,50 @@ static void arm_record(uint32_t consecutive_count) {
 }
 
 void error_report_init(void) {
-    const char *reason = abnormal_reset_name(esp_reset_reason());
-    bool valid = record_is_valid(&s_record);
+    esp_reset_reason_t reset = esp_reset_reason();
+    const char *reason = abnormal_reset_name(reset);
+    bool valid = record_is_valid(&s_record, RECORD_MAGIC);
     uint32_t count = 0;
     if (reason) {
         uint32_t previous = valid ? s_record.consecutive_count : 0;
         count = previous < UINT32_MAX ? previous + 1 : previous;
+        // Replaces a report still waiting from an earlier crash.
         if (valid) {
             s_pending = s_record;
         } else {
             memset(&s_pending, 0, sizeof(s_pending));
         }
+        s_pending.magic = PENDING_MAGIC;
         s_pending.consecutive_count = count;
-        s_pending_reason = reason;
-        atomic_store(&s_has_pending, true);
+        s_pending.reset_reason = (uint32_t)reset;
+        s_pending.checksum = record_checksum(&s_pending);
         ESP_LOGW(TAG, "previous boot ended in %s (%" PRIu32 " in a row)",
                  reason, count);
+    } else if (reset == ESP_RST_POWERON) {
+        // Retained RAM doesn't keep its contents without power.
+        memset(&s_pending, 0, sizeof(s_pending));
     }
+    atomic_store(&s_has_pending,
+                 record_is_valid(&s_pending, PENDING_MAGIC)
+                     && abnormal_reset_name(
+                         (esp_reset_reason_t)s_pending.reset_reason));
     arm_record(count);
+    atomic_store(&s_armed, true);
 }
 
 void error_report_note_panic(const void *address, const void *return_address,
                              const char *cause, const char *detail) {
+    if (!atomic_load(&s_armed)) {
+        // Too early in this boot: s_record still describes an earlier one,
+        // which this fault doesn't belong to, and services such as esp_timer
+        // may not be up yet. Drop the record: the next boot reports the reset
+        // without a version, binary or fault rather than misattribute it.
+        s_record.magic = 0;
+        return;
+    }
     // A panic inside the panic handler re-enters here: keep the first one.
-    if (!record_is_valid(&s_record) || (s_record.flags & RECORD_FLAG_PANIC)) {
+    if (!record_is_valid(&s_record, RECORD_MAGIC)
+        || (s_record.flags & RECORD_FLAG_PANIC)) {
         return;
     }
     s_record.flags = RECORD_FLAG_PANIC | (address ? RECORD_FLAG_ADDRESS : 0)
@@ -215,7 +243,10 @@ char *error_report_pending_json(void) {
               && cJSON_AddNumberToObject(report, "schema_version",
                                          ERROR_REPORT_SCHEMA_VERSION)
               && cJSON_AddStringToObject(report, "kind", "crash")
-              && cJSON_AddStringToObject(report, "reason", s_pending_reason)
+              && cJSON_AddStringToObject(report, "reason",
+                                         abnormal_reset_name(
+                                             (esp_reset_reason_t)
+                                                 s_pending.reset_reason))
               && cJSON_AddNumberToObject(report, "consecutive_count",
                                          s_pending.consecutive_count)
               && (!s_pending.version[0]
@@ -235,6 +266,7 @@ char *error_report_pending_json(void) {
 
 void error_report_mark_sent(void) {
     atomic_store(&s_has_pending, false);
+    memset(&s_pending, 0, sizeof(s_pending));
 }
 
 #ifdef ESP_PLATFORM
