@@ -36,8 +36,9 @@ void error_report_mark_sent(void);
 // Panic-handler entry: stores into retained RAM without locking, logging or
 // allocating. `address` is the faulting instruction and `return_address` the
 // return-address register at the fault; either may be NULL when unknown.
-// Before error_report_init() in this boot it records nothing and discards the
-// record an earlier boot left.
+// Before error_report_init() in this boot it notes only that the boot crashed:
+// the next report has the reset and its count, but no version, binary or
+// fault.
 void error_report_note_panic(const void *address, const void *return_address,
                              const char *cause, const char *detail);
 

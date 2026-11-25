@@ -23,7 +23,9 @@
 //     if (started(ESP_RST_PANIC)) { ...code that runs during this boot... }
 //
 // Code outside a boot's braces is what happens between boots (flashing
-// another image) and runs in the parent.
+// another image). What counts is that it runs in the parent; the previous
+// boot's process also runs it on its way to the next boot() call, where it
+// ends.
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -243,18 +245,47 @@ static void test_panic_before_init(void) {
     if (started(ESP_RST_PANIC)) emit_report("startup_panic");
 }
 
+static void test_crashes_before_init_still_count(void) {
+    started(ESP_RST_POWERON);
+    if (started(ESP_RST_SW)) {
+        error_report_note_panic((const void *)(uintptr_t)0x42006000u, NULL,
+                                "Load access fault", NULL);
+    }
+    // The next boot faults before error_report_init(), twice over (a fault
+    // inside the panic handler), and the one after that does too.
+    if (boot(ESP_RST_PANIC)) {
+        error_report_note_panic(NULL, NULL, "abort", "PSRAM init failed");
+        error_report_note_panic(NULL, NULL, "abort", "again");
+    }
+    if (started(ESP_RST_PANIC)) emit_report("crash_then_early");
+    if (started(ESP_RST_SW)) {
+        error_report_note_panic((const void *)(uintptr_t)0x42007000u, NULL,
+                                "Load access fault", NULL);
+    }
+    if (boot(ESP_RST_PANIC)) {
+        error_report_note_panic(NULL, NULL, "abort", "PSRAM init failed");
+    }
+    if (boot(ESP_RST_PANIC)) {
+        error_report_note_panic(NULL, NULL, "abort", "PSRAM init failed");
+    }
+    if (started(ESP_RST_PANIC)) emit_report("crash_then_two_early");
+}
+
 static void test_report_waits_across_restarts(void) {
+    static const uint8_t elf_sha[] = {0x12, 0x34, 0x56, 0x78,
+                                      0x9a, 0xbc, 0xde, 0xf0};
     snprintf(g_app.version, sizeof(g_app.version), "1.0.9");
+    memcpy(g_app.app_elf_sha256, elf_sha, sizeof(elf_sha));
     if (started(ESP_RST_POWERON)) {
         g_now_us = 42 * 1000000LL;
         error_report_note_panic((const void *)(uintptr_t)0x42002000u, NULL,
                                 "Store access fault", NULL);
     }
-    // Setup completes and the board restarts before it registers, then is
-    // reset by hand, still before sending.
+    // Setup completes and the board restarts before it registers, then
+    // sleeps and wakes, still before sending.
     if (started(ESP_RST_PANIC)) expect_queued("before_pairing_restart");
     if (started(ESP_RST_SW)) expect_queued("after_pairing_restart");
-    if (started(ESP_RST_EXT)) emit_report("unsent");
+    if (started(ESP_RST_DEEPSLEEP)) emit_report("unsent");
     if (started(ESP_RST_SW)) expect_nothing_queued();
 
     // Those restarts ended the run of crashes, and a newer crash replaces a
@@ -298,6 +329,7 @@ int main(void) {
     run(test_panic_summary);
     run(test_abort_detail_is_bounded_and_printable);
     run(test_panic_before_init);
+    run(test_crashes_before_init_still_count);
     run(test_report_waits_across_restarts);
     return 0;
 }

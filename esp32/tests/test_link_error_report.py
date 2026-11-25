@@ -127,14 +127,22 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
                   "consecutive_count": 1}],
                 label,
             )
+        # It still counts toward a run of crashes, without the details of the
+        # earlier crash it replaces.
+        self.assertEqual(
+            [(r["consecutive_count"], set(r)) for r in
+             reports["crash_then_early"] + reports["crash_then_two_early"]],
+            [(n, {"schema_version", "kind", "reason", "consecutive_count"})
+             for n in (2, 3)],
+        )
 
-        # Restarts before registering (pairing, a reset button) keep the report
-        # until it is sent, and still end the run of crashes.
+        # Restarts before registering (pairing, a deep-sleep wake) keep the
+        # report until it is sent, and still end the run of crashes.
         self.assertEqual(
             reports["unsent"],
             [{"schema_version": 1, "kind": "crash", "reason": "panic",
               "consecutive_count": 1, "version": "1.0.9",
-              "build_sha": "0fb2c3d4e5f60718", "uptime_seconds": 42,
+              "build_sha": "123456789abcdef0", "uptime_seconds": 42,
               "fault": {"address": "0x42002000", "cause": "Store access fault"}}],
         )
         (replaced,) = reports["replaced"]

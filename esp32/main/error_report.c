@@ -55,6 +55,10 @@
 #define RECORD_FLAG_PANIC 0x1u
 #define RECORD_FLAG_ADDRESS 0x2u
 #define RECORD_FLAG_RETURN_ADDRESS 0x4u
+// The boot crashed before error_report_init(), so nothing else is known.
+#define RECORD_FLAG_EARLY 0x8u
+// A pending report keeps its esp_reset_reason_t in the flags' upper bits.
+#define RECORD_REASON_SHIFT 8
 
 // All-uint32 header and char arrays: no padding, so the checksum covers every
 // byte before it.
@@ -65,7 +69,6 @@ typedef struct {
     uint32_t uptime_seconds;
     uint32_t fault_address;
     uint32_t return_address;
-    uint32_t reset_reason;  // s_pending's esp_reset_reason_t
     char version[32];
     char build_sha[20];
     char cause[48];
@@ -73,16 +76,24 @@ typedef struct {
     uint32_t checksum;
 } crash_record_t;
 
-// This boot's record, which a panic fills in.
-static RETAINED_ATTR crash_record_t s_record;
-// The report waiting to be sent. It is retained too, so a restart before the
-// device registers (Muse boards restart right after pairing) keeps it.
-static RETAINED_ATTR crash_record_t s_pending;
+// Retained RAM. `record` is this boot's, which a panic fills in. It comes
+// first and keeps its layout, so an image a rollback returns to still reads
+// it. `pending` is the report waiting to be sent: retained too, so a restart
+// before the device registers (Muse boards restart right after pairing)
+// keeps it.
+typedef struct {
+    crash_record_t record;
+    crash_record_t pending;
+} retained_t;
+_Static_assert(sizeof(crash_record_t) == 224 && offsetof(retained_t, record) == 0,
+               "older images read the record here, in this layout");
+static RETAINED_ATTR retained_t s_retained;
 
-// Ordinary RAM, which ESP-IDF clears first thing at every boot: set once
-// error_report_init() has armed s_record in this boot. Until then s_record
-// is whatever an earlier boot left.
+// Ordinary RAM, which ESP-IDF clears first thing at every boot. s_armed is
+// set once error_report_init() has armed the record in this boot; until then
+// the record is whatever an earlier boot left.
 static atomic_bool s_armed = ATOMIC_VAR_INIT(false);
+static bool s_noted_early;
 static atomic_bool s_has_pending = ATOMIC_VAR_INIT(false);
 
 static uint32_t record_checksum(const crash_record_t *record) {
@@ -96,6 +107,10 @@ static uint32_t record_checksum(const crash_record_t *record) {
 
 static bool record_is_valid(const crash_record_t *record, uint32_t magic) {
     return record->magic == magic && record->checksum == record_checksum(record);
+}
+
+static uint32_t one_more(uint32_t count) {
+    return count < UINT32_MAX ? count + 1 : count;
 }
 
 // Keeps printable ASCII and zero-fills the rest of dst, so a stored string is
@@ -124,74 +139,97 @@ static const char *abnormal_reset_name(esp_reset_reason_t reason) {
     }
 }
 
+static const char *pending_reason(void) {
+    return abnormal_reset_name(
+        (esp_reset_reason_t)(s_retained.pending.flags >> RECORD_REASON_SHIFT));
+}
+
 static void arm_record(uint32_t consecutive_count) {
-    memset(&s_record, 0, sizeof(s_record));
-    s_record.magic = RECORD_MAGIC;
-    s_record.consecutive_count = consecutive_count;
+    crash_record_t *record = &s_retained.record;
+    memset(record, 0, sizeof(*record));
+    record->magic = RECORD_MAGIC;
+    record->consecutive_count = consecutive_count;
     const esp_app_desc_t *app = esp_app_get_description();
-    copy_printable(s_record.version, sizeof(s_record.version), app->version);
+    copy_printable(record->version, sizeof(record->version), app->version);
     // The same 16 hex digits get_device_info reports as build_sha.
     for (size_t i = 0; i < 8; i++) {
-        snprintf(s_record.build_sha + i * 2, 3, "%02x", app->app_elf_sha256[i]);
+        snprintf(record->build_sha + i * 2, 3, "%02x", app->app_elf_sha256[i]);
     }
-    s_record.checksum = record_checksum(&s_record);
+    record->checksum = record_checksum(record);
 }
 
 void error_report_init(void) {
+    crash_record_t *record = &s_retained.record;
+    crash_record_t *pending = &s_retained.pending;
     esp_reset_reason_t reset = esp_reset_reason();
     const char *reason = abnormal_reset_name(reset);
-    bool valid = record_is_valid(&s_record, RECORD_MAGIC);
+    bool valid = record_is_valid(record, RECORD_MAGIC);
     uint32_t count = 0;
     if (reason) {
-        uint32_t previous = valid ? s_record.consecutive_count : 0;
-        count = previous < UINT32_MAX ? previous + 1 : previous;
+        count = one_more(valid ? record->consecutive_count : 0);
         // Replaces a report still waiting from an earlier crash.
         if (valid) {
-            s_pending = s_record;
+            *pending = *record;
         } else {
-            memset(&s_pending, 0, sizeof(s_pending));
+            memset(pending, 0, sizeof(*pending));
         }
-        s_pending.magic = PENDING_MAGIC;
-        s_pending.consecutive_count = count;
-        s_pending.reset_reason = (uint32_t)reset;
-        s_pending.checksum = record_checksum(&s_pending);
+        pending->magic = PENDING_MAGIC;
+        pending->consecutive_count = count;
+        pending->flags |= (uint32_t)reset << RECORD_REASON_SHIFT;
+        pending->checksum = record_checksum(pending);
         ESP_LOGW(TAG, "previous boot ended in %s (%" PRIu32 " in a row)",
                  reason, count);
     } else if (reset == ESP_RST_POWERON) {
         // Retained RAM doesn't keep its contents without power.
-        memset(&s_pending, 0, sizeof(s_pending));
+        memset(pending, 0, sizeof(*pending));
     }
     atomic_store(&s_has_pending,
-                 record_is_valid(&s_pending, PENDING_MAGIC)
-                     && abnormal_reset_name(
-                         (esp_reset_reason_t)s_pending.reset_reason));
+                 record_is_valid(pending, PENDING_MAGIC) && pending_reason());
     arm_record(count);
     atomic_store(&s_armed, true);
+}
+
+// A fault before error_report_init() in this boot, perhaps before esp_timer
+// has started. The record is the previous boot's, whose version, binary and
+// fault needn't be this one's, so keep only the run of crashes: one longer if
+// that boot crashed too, as its record says, else starting here. The next boot
+// reports the reset and its count, and nothing it can't vouch for.
+static void note_early_panic(void) {
+    if (s_noted_early) return;  // a panic inside the panic handler
+    s_noted_early = true;
+    crash_record_t *record = &s_retained.record;
+    uint32_t count = 0;
+    if (record_is_valid(record, RECORD_MAGIC)
+        && (record->flags & (RECORD_FLAG_PANIC | RECORD_FLAG_EARLY))) {
+        count = one_more(record->consecutive_count);
+    }
+    memset(record, 0, sizeof(*record));
+    record->magic = RECORD_MAGIC;
+    record->consecutive_count = count;
+    record->flags = RECORD_FLAG_EARLY;
+    record->checksum = record_checksum(record);
 }
 
 void error_report_note_panic(const void *address, const void *return_address,
                              const char *cause, const char *detail) {
     if (!atomic_load(&s_armed)) {
-        // Too early in this boot: s_record still describes an earlier one,
-        // which this fault doesn't belong to, and services such as esp_timer
-        // may not be up yet. Drop the record: the next boot reports the reset
-        // without a version, binary or fault rather than misattribute it.
-        s_record.magic = 0;
+        note_early_panic();
         return;
     }
+    crash_record_t *record = &s_retained.record;
     // A panic inside the panic handler re-enters here: keep the first one.
-    if (!record_is_valid(&s_record, RECORD_MAGIC)
-        || (s_record.flags & RECORD_FLAG_PANIC)) {
+    if (!record_is_valid(record, RECORD_MAGIC)
+        || (record->flags & RECORD_FLAG_PANIC)) {
         return;
     }
-    s_record.flags = RECORD_FLAG_PANIC | (address ? RECORD_FLAG_ADDRESS : 0)
-                     | (return_address ? RECORD_FLAG_RETURN_ADDRESS : 0);
-    s_record.fault_address = (uint32_t)(uintptr_t)address;
-    s_record.return_address = (uint32_t)(uintptr_t)return_address;
-    s_record.uptime_seconds = (uint32_t)(esp_timer_get_time() / 1000000LL);
-    copy_printable(s_record.cause, sizeof(s_record.cause), cause);
-    copy_printable(s_record.detail, sizeof(s_record.detail), detail);
-    s_record.checksum = record_checksum(&s_record);
+    record->flags = RECORD_FLAG_PANIC | (address ? RECORD_FLAG_ADDRESS : 0)
+                    | (return_address ? RECORD_FLAG_RETURN_ADDRESS : 0);
+    record->fault_address = (uint32_t)(uintptr_t)address;
+    record->return_address = (uint32_t)(uintptr_t)return_address;
+    record->uptime_seconds = (uint32_t)(esp_timer_get_time() / 1000000LL);
+    copy_printable(record->cause, sizeof(record->cause), cause);
+    copy_printable(record->detail, sizeof(record->detail), detail);
+    record->checksum = record_checksum(record);
 }
 
 static cJSON *add_object(cJSON *parent, const char *name) {
@@ -205,28 +243,29 @@ static cJSON *add_object(cJSON *parent, const char *name) {
 }
 
 static bool add_fault(cJSON *report) {
+    const crash_record_t *pending = &s_retained.pending;
     cJSON *fault = add_object(report, "fault");
     if (!fault) return false;
-    if (s_pending.flags & RECORD_FLAG_ADDRESS) {
+    if (pending->flags & RECORD_FLAG_ADDRESS) {
         char address[11];
         snprintf(address, sizeof(address), "0x%08" PRIx32,
-                 s_pending.fault_address);
+                 pending->fault_address);
         if (!cJSON_AddStringToObject(fault, "address", address)) return false;
     }
-    if (s_pending.flags & RECORD_FLAG_RETURN_ADDRESS) {
+    if (pending->flags & RECORD_FLAG_RETURN_ADDRESS) {
         char address[11];
         snprintf(address, sizeof(address), "0x%08" PRIx32,
-                 s_pending.return_address);
+                 pending->return_address);
         if (!cJSON_AddStringToObject(fault, "return_address", address)) {
             return false;
         }
     }
-    if (s_pending.cause[0]
-        && !cJSON_AddStringToObject(fault, "cause", s_pending.cause)) {
+    if (pending->cause[0]
+        && !cJSON_AddStringToObject(fault, "cause", pending->cause)) {
         return false;
     }
-    if (s_pending.detail[0]
-        && !cJSON_AddStringToObject(fault, "detail", s_pending.detail)) {
+    if (pending->detail[0]
+        && !cJSON_AddStringToObject(fault, "detail", pending->detail)) {
         return false;
     }
     return true;
@@ -234,30 +273,28 @@ static bool add_fault(cJSON *report) {
 
 char *error_report_pending_json(void) {
     if (!atomic_load(&s_has_pending)) return NULL;
+    const crash_record_t *pending = &s_retained.pending;
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
-    bool panic = (s_pending.flags & RECORD_FLAG_PANIC) != 0;
+    bool panic = (pending->flags & RECORD_FLAG_PANIC) != 0;
     cJSON *report = NULL;
     bool ok = cJSON_AddStringToObject(root, "method", "link.error_report")
               && (report = add_object(root, "report"))
               && cJSON_AddNumberToObject(report, "schema_version",
                                          ERROR_REPORT_SCHEMA_VERSION)
               && cJSON_AddStringToObject(report, "kind", "crash")
-              && cJSON_AddStringToObject(report, "reason",
-                                         abnormal_reset_name(
-                                             (esp_reset_reason_t)
-                                                 s_pending.reset_reason))
+              && cJSON_AddStringToObject(report, "reason", pending_reason())
               && cJSON_AddNumberToObject(report, "consecutive_count",
-                                         s_pending.consecutive_count)
-              && (!s_pending.version[0]
+                                         pending->consecutive_count)
+              && (!pending->version[0]
                   || cJSON_AddStringToObject(report, "version",
-                                             s_pending.version))
-              && (!s_pending.build_sha[0]
+                                             pending->version))
+              && (!pending->build_sha[0]
                   || cJSON_AddStringToObject(report, "build_sha",
-                                             s_pending.build_sha))
+                                             pending->build_sha))
               && (!panic
                   || (cJSON_AddNumberToObject(report, "uptime_seconds",
-                                              s_pending.uptime_seconds)
+                                              pending->uptime_seconds)
                       && add_fault(report)));
     char *json = ok ? cJSON_PrintUnformatted(root) : NULL;
     cJSON_Delete(root);
@@ -266,7 +303,7 @@ char *error_report_pending_json(void) {
 
 void error_report_mark_sent(void) {
     atomic_store(&s_has_pending, false);
-    memset(&s_pending, 0, sizeof(s_pending));
+    memset(&s_retained.pending, 0, sizeof(s_retained.pending));
 }
 
 #ifdef ESP_PLATFORM
