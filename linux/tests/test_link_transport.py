@@ -19,11 +19,28 @@ from websockets.asyncio.server import serve
 
 from musegadget import tls
 from musegadget.link_client import LinkSession, Outcome
-from musegadget.noise import ApplicationResponse, ServiceFrame
+from musegadget.noise import ApplicationResponse, NoiseFrameDecoder, ServiceFrame, ServiceType
+from musegadget.noise.envelope import decode_service_frame, decode_service_request
 from test_link_client import DEVICE, FakeVm
 
 
-def test_noise_connection_omits_compression_and_carries_chat(monkeypatch):
+class ServiceTap:
+    """The VM's receive cipher, also recording the services each stream's frames named."""
+
+    def __init__(self, cipher) -> None:
+        self._cipher, self._decoder, self.services = cipher, NoiseFrameDecoder(), {}
+
+    def decrypt_with_ad(self, ad: bytes, data: bytes) -> bytes:
+        plain = self._cipher.decrypt_with_ad(ad, data)
+        assembled = self._decoder.decode(plain)
+        if assembled is not None:
+            request = decode_service_request(assembled)
+            stream_id = decode_service_frame(request.payload).stream_id
+            self.services.setdefault(stream_id, set()).add(request.service)
+        return plain
+
+
+def test_noise_connection_omits_compression_and_carries_control_and_chat(monkeypatch):
     # The loopback peer is plain ws://, which takes no TLS context.
     monkeypatch.setattr(tls, "client_context", lambda: None)
 
@@ -34,7 +51,8 @@ def test_noise_connection_omits_compression_and_carries_chat(monkeypatch):
             try:
                 vm = FakeVm(ws)
                 await vm.handshake()
-                await vm.accept_control_stream()
+                vm.recv_cipher = tap = ServiceTap(vm.recv_cipher)
+                control = await vm.accept_control_stream()
                 registration = await vm.next_message()
                 await vm.send_message({"id": registration["id"], "ok": True})
                 request = await vm.next_frame()
@@ -42,7 +60,8 @@ def test_noise_connection_omits_compression_and_carries_chat(monkeypatch):
                     request.stream_id,
                     ApplicationResponse(status=200, body=b'{"accepted":true}', end_body=True),
                 ))
-                received.set_result((ws.request.headers, ws.protocol.extensions, request))
+                received.set_result(
+                    (ws.request.headers, ws.protocol.extensions, control, request, tap.services))
                 await ws.wait_closed()
             except Exception as exc:
                 if not received.done():
@@ -63,11 +82,15 @@ def test_noise_connection_omits_compression_and_carries_chat(monkeypatch):
                 assert await session.send_chat("porch light on", "side-1") == {
                     "ok": True, "status": 200, "response": {"accepted": True},
                 }
-                headers, extensions, request = await received
+                headers, extensions, control, request, services = await received
                 assert "Sec-WebSocket-Extensions" not in headers
                 assert extensions == []
                 assert headers["Authorization"] == "Bearer synthetic"
+                # Only the control stream is on the Gadget API; chat stays on the daemon.
+                assert control.value.path == "/api/gadget/control"
+                assert services[control.stream_id] == {ServiceType.SERVICE_GADGET}
                 assert (request.value.verb, request.value.path) == ("POST", "/chat/stream")
+                assert services[request.stream_id] == {ServiceType.SERVICE_DAEMON}
                 assert json.loads(request.value.body) == {
                     "message": "porch light on", "session_id": "side-1",
                     "output_modality": "text", "device_id": "homelink-abcdef",

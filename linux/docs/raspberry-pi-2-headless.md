@@ -182,7 +182,7 @@ paired.
   pairing might need to be redone: run `sudo musegadget pair` there, then
   repeat the move and the unpair.
 - Only one host may hold a pairing at a time. Leaving the pairing machine's
-  service enabled gives two live `link-control` sessions for the same device.
+  service enabled gives two live control sessions for the same device.
 - Tested on one board and one image. 1 GB of RAM is sufficient because the
   only PyPI dependency is `websockets`, but heavier models of the same
   generation are untested.
