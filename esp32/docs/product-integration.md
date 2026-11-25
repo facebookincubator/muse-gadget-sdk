@@ -16,7 +16,7 @@ limitations under the License.
 
 # Product integration
 
-An enclosing ESP-IDF project can add private control commands without copying
+An enclosing ESP-IDF project can add its own control commands without copying
 SDK application code. Set these **before** including
 `esp32/cmake/project.cmake` and calling `project()`:
 
@@ -66,10 +66,8 @@ the session task, duplicate core command names, or exceed the 8 KiB registration
 limit. The hook does not add authentication or serialize asynchronous work by
 itself; those remain the command implementation's responsibility.
 
-The SDK still compiles its existing shared `main/ota.c`; the extension mechanism
-does not replace it or introduce another updater. Ordinary public SDK builds do
-not advertise or dispatch remote `device.ota`. Adding a control extension does
-not change public partitions, OTA defaults, BLE protocol or setup policy.
+An extension only adds commands. It doesn't replace `main/ota.c` or change
+partitions, OTA defaults, the BLE protocol or setup.
 
 ## Transport compatibility
 
@@ -78,7 +76,7 @@ Control, tunnel (including in-place batches/resets), and agent identity use
 `/api/gadget/me` (`result.muse_name`). There is no legacy daemon-route fallback.
 A refused control stream reconnects normally; a refused identity fetch only
 leaves the name unknown. Extra `noise_ctrl_req_*` requests still target
-`ServiceType::Daemon`. The `musegadgets::noise` namespace is unchanged.
+`ServiceType::Daemon`.
 
 ## Focused host checks
 

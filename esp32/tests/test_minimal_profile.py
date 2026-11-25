@@ -127,6 +127,23 @@ int main(void) {
                                              str(src), "-o", str(exe)])
                                 self.run_ok([str(exe)])
 
+    def test_console_off_setup_lines_are_not_logged(self):
+        # With the console off, a typed sdk_token= or wifi_proxy= line falls
+        # through to the Muse command handler, whose log must not echo it.
+        ble = (ROOT / "components/muse/muse_ble.c").read_text()
+        start = ble.index("    bool secret = ")
+        predicate = ble[start:ble.index(";", start) + 1]
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / "secret.c", Path(tmp) / "secret"
+            src.write_text("#include <assert.h>\n#include <stdbool.h>\n#include <string.h>\n"
+                           "static bool is_secret(const char *cmd) {\n" + predicate
+                           + "\n    return secret;\n}\nint main(void) {\n"
+                           '    assert(is_secret("sdk_token") && is_secret("wifi_proxy"));\n'
+                           '    assert(is_secret("wifi.pass") && !is_secret("volume"));\n}\n')
+            self.run_ok([*shlex.split(os.environ.get("CC", "cc")), "-std=c11", "-Wall", "-Wextra",
+                         "-Werror", str(src), "-o", str(exe)])
+            self.run_ok([str(exe)])
+
     def test_service_scratch_policy_and_frame_round_trips(self):
         control = (ROOT / "main/noise_control.cpp").read_text()
         sizing = between(control, "#if (CONFIG_MUSE_ENABLED && !CONFIG_SPIRAM && !CONFIG_HOMEHUB_TUNNEL)",

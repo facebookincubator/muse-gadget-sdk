@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Explicit private control component selection, registration and dispatch."""
+"""Explicit product control component selection, registration and dispatch."""
 import os
 from pathlib import Path
 import shlex

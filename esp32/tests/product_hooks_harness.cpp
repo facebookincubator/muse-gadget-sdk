@@ -67,7 +67,7 @@ int main() {
     cJSON *root = cJSON_ParseWithLength(registration, strlen(registration));
     cJSON *commands = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "params"), "commands_v2");
     assert(cJSON_GetObjectItem(commands, "device.health"));
-    assert(!cJSON_GetObjectItem(commands, "device.ota"));  // never implicit public remote OTA
+    assert(!cJSON_GetObjectItem(commands, "device.ota"));
 #ifdef PRODUCT_CONTROL_EXTENSION_HEADER
     assert(cJSON_GetObjectItem(commands, "product.ping"));
     int matches = 0;
