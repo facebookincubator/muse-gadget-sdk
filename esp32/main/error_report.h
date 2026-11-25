@@ -21,9 +21,11 @@ extern "C" {
 #endif
 
 // Call once at boot, before any task that can send. If the previous boot ended
-// in a panic, watchdog or brownout reset, queues one summary of it, then arms
-// the retained record for this boot. The record lives in retained RAM only:
-// nothing is written to flash, and power loss discards it.
+// in a panic, watchdog, brownout, power-glitch, CPU-lockup or eFuse reset,
+// queues one summary of it in place of any still queued, then arms the
+// retained record for this boot. Both live in retained RAM only: a queued
+// report survives restarts until it is sent, nothing is written to flash, and
+// power loss discards it.
 void error_report_init(void);
 
 // The queued link.error_report message as heap JSON the caller frees, or NULL
@@ -34,6 +36,9 @@ void error_report_mark_sent(void);
 // Panic-handler entry: stores into retained RAM without locking, logging or
 // allocating. `address` is the faulting instruction and `return_address` the
 // return-address register at the fault; either may be NULL when unknown.
+// Before error_report_init() in this boot it notes only that the boot crashed:
+// the next report has the reset and its count, but no version, binary or
+// fault.
 void error_report_note_panic(const void *address, const void *return_address,
                              const char *cause, const char *detail);
 

@@ -18,6 +18,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -41,6 +42,13 @@ DOCUMENTED_EXAMPLE = {
 }
 
 
+# The section the harness keeps across its simulated resets, as RTC memory
+# does on the chip (see link_error_report_harness.c).
+RETAINED_SECTION = (
+    "__DATA,__err_retained" if sys.platform == "darwin" else "error_report_retained"
+)
+
+
 class LinkErrorReportHarnessTest(unittest.TestCase):
     def test_crash_summary_across_boots(self) -> None:
         cc = shlex.split(os.environ.get("CC", "cc"))
@@ -51,6 +59,7 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
             compiled = subprocess.run(
                 [
                     *cc, "-std=c11", "-D_GNU_SOURCE", "-DLINK_FAKE_CUSTOM_TIMER=1",
+                    f'-DRETAINED_ATTR=__attribute__((section("{RETAINED_SECTION}")))',
                     "-Wall", "-Wextra", "-Werror", "-g",
                     "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                     "-I", str(ROOT / "tests" / "link_fakes"),
@@ -107,6 +116,39 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
         self.assertEqual(set(abort["fault"]), {"cause", "detail"})
         self.assertEqual(abort["fault"]["cause"], "abort")
         self.assertEqual(abort["fault"]["detail"], 'assert "a"    ' + "x" * 81)
+
+        # A panic before error_report_init() in its boot isn't pinned on the
+        # previous boot's record: the reset is reported, with nothing about a
+        # build or fault the record can't vouch for.
+        for label in ("early_abort", "startup_panic"):
+            self.assertEqual(
+                reports[label],
+                [{"schema_version": 1, "kind": "crash", "reason": "panic",
+                  "consecutive_count": 1}],
+                label,
+            )
+        # It still counts toward a run of crashes, without the details of the
+        # earlier crash it replaces.
+        self.assertEqual(
+            [(r["consecutive_count"], set(r)) for r in
+             reports["crash_then_early"] + reports["crash_then_two_early"]],
+            [(n, {"schema_version", "kind", "reason", "consecutive_count"})
+             for n in (2, 3)],
+        )
+
+        # Restarts before registering (pairing, a deep-sleep wake) keep the
+        # report until it is sent, and still end the run of crashes.
+        self.assertEqual(
+            reports["unsent"],
+            [{"schema_version": 1, "kind": "crash", "reason": "panic",
+              "consecutive_count": 1, "version": "1.0.9",
+              "build_sha": "123456789abcdef0", "uptime_seconds": 42,
+              "fault": {"address": "0x42002000", "cause": "Store access fault"}}],
+        )
+        (replaced,) = reports["replaced"]
+        self.assertEqual(replaced["consecutive_count"], 1)
+        self.assertEqual(replaced["fault"],
+                         {"address": "0x42004000", "cause": "Illegal instruction"})
 
 
 if __name__ == "__main__":
