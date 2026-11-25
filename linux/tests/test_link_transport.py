@@ -19,7 +19,7 @@ from websockets.asyncio.server import serve
 
 from musegadget import tls
 from musegadget.link_client import LinkSession, Outcome
-from musegadget.noise import ApplicationResponse, NoiseFrameDecoder, ServiceFrame, ServiceType
+from musegadget.noise import ApplicationResponse, NoiseFrameDecoder, ServiceFrame
 from musegadget.noise.envelope import decode_service_frame, decode_service_request
 from test_link_client import DEVICE, FakeVm
 
@@ -86,11 +86,12 @@ def test_noise_connection_omits_compression_and_carries_control_and_chat(monkeyp
                 assert "Sec-WebSocket-Extensions" not in headers
                 assert extensions == []
                 assert headers["Authorization"] == "Bearer synthetic"
-                # Only the control stream is on the Gadget API; chat stays on the daemon.
+                # Only the control stream is on the Gadget API (service 6 on the
+                # wire); chat stays on the daemon (service 0).
                 assert control.value.path == "/api/gadget/control"
-                assert services[control.stream_id] == {ServiceType.SERVICE_GADGET}
+                assert services[control.stream_id] == {6}
                 assert (request.value.verb, request.value.path) == ("POST", "/chat/stream")
-                assert services[request.stream_id] == {ServiceType.SERVICE_DAEMON}
+                assert services[request.stream_id] == {0}
                 assert json.loads(request.value.body) == {
                     "message": "porch light on", "session_id": "side-1",
                     "output_modality": "text", "device_id": "homelink-abcdef",
