@@ -246,6 +246,8 @@ static volatile size_t s_seed_frames;
 static int16_t *s_rec;   /* MAX_FRAMES */
 static size_t s_rec_n, s_sent;
 static bool s_live = true;
+static bool s_fail_caption;   /* the idle caption is a failed turn's */
+static bool s_fail_away;      /* and Muse has been out of reach since */
 static bool s_tried;     /* it went to Muse */
 
 typedef struct {
@@ -697,6 +699,8 @@ static bool hatch_reply(bool *delivered, const char *opening)
                 muse_state_set_level(0);
                 muse_wakeword_set_playback(false);
                 go_idle(text);
+                s_fail_caption = true;   /* cleared once Muse is back (voice_task) */
+                s_fail_away = false;
                 return false;
             default:
                 break;
@@ -800,6 +804,7 @@ static void go_idle(const char *caption)
     muse_state_set_progress(0);
     muse_state_set_mode(MUSE_MODE_IDLE);
     muse_state_set_caption("%s", caption);
+    s_fail_caption = false;   /* a newer caption replaces a failed turn's */
 }
 
 /* Errors and status stay up; a press too short to count only needs a hint. */
@@ -1808,6 +1813,19 @@ static void voice_task(void *arg)
                 muse_audio_loopback_test(muse_settings_volume());
                 muse_wakeword_set_playback(false);
                 pre_reset();
+            }
+            if (s_fail_caption && muse_state_mode(NULL) == MUSE_MODE_IDLE) {
+                /* A turn that failed as Muse went out of reach keeps its
+                 * caption until Muse is back. One that failed with Muse
+                 * still connected (no reply, say) keeps it. */
+                muse_hatch_status_t hst;
+                muse_hatch_status(&hst);
+                if (hst.state != MUSE_HATCH_REACHABLE) {
+                    s_fail_away = true;
+                } else if (s_fail_away) {
+                    s_fail_caption = false;
+                    muse_state_set_caption("%s", "");
+                }
             }
             /* A press goes first (a waking one too: it may only wake Muse). */
             muse_input_event_t next;
