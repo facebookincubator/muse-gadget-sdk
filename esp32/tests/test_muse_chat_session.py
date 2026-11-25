@@ -75,6 +75,7 @@ static char s_reply_shown[EV_TEXT];
 static int64_t s_last_seq, s_last_row_seq, s_marks[4];
 static void *psram_alloc(size_t n) { return malloc(n); }
 static int captions, console_events;
+static char last_caption[EV_TEXT];
 static int done_events;
 static int64_t clock_us = 12345;
 static char done_text[EV_TEXT], console_type[32], console_fields[128];
@@ -83,7 +84,10 @@ static void mark(mark_t) {}
 static int64_t now_us() { return clock_us; }
 static void emit(muse_hatch_ev_t type, const char *text) {
     if (s_turn.text) return;
-    if (type == MUSE_HATCH_EV_REPLY) captions++;
+    if (type == MUSE_HATCH_EV_REPLY) {
+        captions++;
+        strlcpy(last_caption, text ? text : "", sizeof(last_caption));
+    }
     if (type == MUSE_HATCH_EV_DONE) {
         done_events++;
         strlcpy(done_text, text ? text : "", sizeof(done_text));
@@ -861,6 +865,10 @@ int main(int argc, char **argv) {
             event("delta.message_start","lunch","note");
             event("delta.text_append","lunch","","What do you want for lunch?");
             event("delta.text_append","lunch","","\n\n[[hatch_widget:meal]]");
+            if (!typed) {
+                assert(strstr(last_caption, "What do you want for lunch?"));
+                assert(!strstr(last_caption, "hatch_widget"));
+            }
             cJSON *line=cJSON_Parse(R"({"type":"event","event":"delta.message_done","payload":{"message_id":"lunch","widgets":[{"kind":"option","widget_id":"meal","data":{"options":["Pasta","Salad"]}}]}})");
             on_event(line); cJSON_Delete(line);
             muse_options_t q;
@@ -881,7 +889,46 @@ int main(int argc, char **argv) {
         assert(muse_options_snapshot(&q) && !strcmp(q.question,"What do you want for lunch?"));
         break;
     }
+    case 42: {
+        s_turn.texts = static_cast<char *>(calloc(MAX_MSGS, TEXT_MAX));
+        begin(false);
+        event("delta.message_start", "lunch", "note");
+        event("delta.text_append", "lunch", "", "Lunch?");
+        for (const char *p = "[[hatch_widget:very_long_lunch_selection_identifier_1234567890]]"; *p; p++) {
+            char one[] = {*p, 0};
+            event("delta.text_append", "lunch", "", one);
+            assert(!strcmp(s_turn.texts, "Lunch?") && !strcmp(s_turn.msgs[0].tail, "Lunch?"));
+        }
+        event("delta.text_append", "lunch", "", " Pasta selected.");
+        assert(!strcmp(s_turn.texts, "Lunch? Pasta selected."));
+        begin(false);
+        event("delta.message_start", "next", "note");
+        event("delta.text_append", "next", "", "[");
+        assert(!captions);
+        event("delta.text_append", "next", "", "[hatch_widget:other]]Done");
+        assert(captions == 1 && !strcmp(last_caption, "Done"));
+        begin(true);
+        event("delta.message_start", "typed", "note");
+        event("delta.text_append", "typed", "", "[[hatch_widget:x]]OK");
+        event("delta.message_done", "typed");
+        assert(!strcmp(console_fields, R"("msg":0,"bytes":20)"));
+        free(s_turn.texts);
+        break;
+    }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
+    case 41: {
+        assert(muse_review_init() == 0);
+        s_turn.texts=static_cast<char *>(calloc(MAX_MSGS,TEXT_MAX));
+        assert(s_turn.texts);
+        begin(false);
+        event("delta.message_start", "lunch", "note");
+        event("delta.text_append", "lunch", "", "What do you want for lunch?\n\n[[hatch_widget:meal]]");
+        event("message.assistant", "lunch", "note", "What do you want for lunch?\n\n[[hatch_widget:meal]]");
+        assert(!strstr(reviewed(), "hatch_widget"));
+        assert(strstr(reviewed(), "What do you want for lunch?"));
+        free(s_turn.texts); s_turn.texts=nullptr;
+        break;
+    }
     case 18: typed_turns_replace_the_review(); break;
     case 19: review_keeps_the_whole_reply(); break;
     case 20: review_keeps_caption_pace(); break;
@@ -941,6 +988,9 @@ int main(int argc, char **argv) {
         binary = self.watcher_binary if watcher else self.binary
         result = subprocess.run([str(binary), str(case)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_widget_split_at_every_byte(self):
+        self.run_case(42)
 
     def test_idle_widget_and_phone_selection_use_the_real_adapter(self):
         self.run_case(31)
@@ -1059,7 +1109,7 @@ int main(int argc, char **argv) {
         self.run_case(29)
 
     def test_latest_reply_capture_and_caption_pace(self):
-        for case in (0, 1, 2, 18, 19, 20, 35):
+        for case in (0, 1, 2, 18, 19, 20, 35, 41):
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary.parent / 'session-latest'), str(case)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
