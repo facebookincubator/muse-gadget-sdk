@@ -39,7 +39,9 @@
 #include "config_store.h"
 #include "identity.h"
 #include "noise_control.h"
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #include "sdk_token_console.h"
+#endif
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
@@ -755,7 +757,9 @@ static void boot_task(void *arg) {
 #if CONFIG_MUSE_WASM_APPS || CONFIG_MUSE_AVATAR_SYNC
 // The console's setup lines: the SDK token, then the app loader (muse_apps.h).
 static bool console_line(const char *line) {
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
     if (sdk_token_console_command(line)) return true;
+#endif
 #if CONFIG_MUSE_AVATAR_SYNC
     if (avatar_sync_console(line)) return true;
 #endif
@@ -777,7 +781,7 @@ void muse_glue_start(void) {
 #if CONFIG_MUSE_WASM_APPS
     muse_apps_start(noise_ctrl_send_command_result);
 #endif
-#else
+#elif CONFIG_GADGET_SDK_TOKEN_CONSOLE
     muse_input_set_console_hook(sdk_token_console_command);
 #endif
     muse_ble_set_name(identity_ble_name());

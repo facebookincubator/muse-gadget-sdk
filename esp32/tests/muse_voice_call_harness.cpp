@@ -511,7 +511,17 @@ static void happy(void)
     line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"Hello \"}");
     line(id, "{\"type\":\"response.output_audio_transcript.delta\",\"event_id\":\"e\",\"delta\":\"there\"}");
     char text[96];
+    expect_event(MUSE_VOICE_CALL_EV_REPLY_START);   /* the pose can start before the speaker */
+    poll();
+    assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+    for (int i = 0; i < 8; ++i) line(id, cavd(8000));
+    read_all();
+    poll();
     expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    assert(!strcmp(text, "Hello"));
+    for (int i = 0; i < 8; ++i) line(id, cavd(8000));
+    read_all();
+    poll();
     expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
     assert(!strcmp(text, "Hello there"));
     line(id, "{\"type\":\"conversation.item.input_audio_transcription.completed\",\"event_id\":\"e\","
@@ -2936,6 +2946,120 @@ static void hands_free_early_media_and_keep_cap(void)
     expect_event(MUSE_VOICE_CALL_EV_ENDED);
 }
 
+/* The final can be the first complete text, or repeat a burst of deltas.
+ * All words are shown in order, including those beyond the old 255-byte cap. */
+static void long_call_captions(void)
+{
+    int64_t id = live_call();
+    const std::string delta = R"({"type":"response.output_audio_transcript.delta","delta":")";
+    const std::string done = R"({"type":"response.output_audio_transcript.done","transcript":")";
+    char text[96];
+    for (bool incremental : {false, true}) {
+        line(id, R"({"type":"response.created","response":{"id":"r1"}})");
+        std::string transcript;
+        for (int i = 0; i < 120; ++i) {
+            std::string word = (i ? " " : "") + std::to_string(i);
+            transcript += word;
+            if (incremental) line(id, delta + word + R"("})");
+        }
+        line(id, done + transcript + R"( fin\u00e9"})");
+        expect_event(MUSE_VOICE_CALL_EV_REPLY_START);
+        std::string shown, page;
+        for (int i = 0; i < 240; ++i) {
+            poll(1, 400000);
+            if (next_event(text, sizeof(text)) != MUSE_VOICE_CALL_EV_REPLY) continue;
+            if (!page.empty() && std::string(text).compare(0, page.size(), page) != 0) shown += page + " ";
+            page = text;
+            if (shown + page == transcript + " finé") break;
+        }
+        assert(shown + page == transcript + " finé");
+    }
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+/* Text for the next words arrives behind 800 ms of already queued PCM.
+ * A wall-clock delay or an audio packet arriving cannot release those words. */
+static void caption_waits_for_speaker(void)
+{
+    int64_t id = live_call();
+    int16_t pcm[640];
+    bool flushed;
+    char text[96];
+    line(id, R"({"type":"response.created","response":{"id":"r1"}})");
+    for (int i = 0; i < 20; ++i) line(id, cavd(8000));
+    line(id, R"({"type":"response.output_audio_transcript.delta","delta":"six seven"})");
+    expect_event(MUSE_VOICE_CALL_EV_REPLY_START);
+    for (int i = 0; i < 16; ++i) line(id, cavd(8000));
+    poll(1, 2000000);
+    assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+    for (int i = 0; i < 22; ++i) {
+        assert(muse_voice_call_read(pcm, 640, &flushed) == 640);
+        poll(1, 40000);
+        assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+    }
+    assert(muse_voice_call_read(pcm, 640, &flushed) == 640);
+    poll(1, 40000);
+    expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    assert(!strcmp(text, "six"));
+    poll(1, 1000000);   /* the speaker stalls while PCM is available */
+    assert(next_event(text, sizeof(text)) == MUSE_VOICE_CALL_EV_NONE);
+    read_all();
+    poll();
+    expect_event(MUSE_VOICE_CALL_EV_REPLY, text);
+    assert(!strcmp(text, "six seven"));
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+/* Transcript bytes that aren't UTF-8 still page within the caption's 32 bytes. */
+static void caption_not_utf8(void)
+{
+    int64_t id = live_call();
+    char text[96];
+    line(id, R"({"type":"response.created","response":{"id":"r1"}})");
+    line(id, R"({"type":"response.output_audio_transcript.done","transcript":" )" + std::string(40, '\x80') + R"("})");
+    expect_event(MUSE_VOICE_CALL_EV_REPLY_START);
+    int pages = 0;
+    for (int i = 0; i < 20; ++i) {
+        poll(1, 400000);
+        if (next_event(text, sizeof(text)) != MUSE_VOICE_CALL_EV_REPLY) continue;
+        assert(strlen(text) <= 32);
+        ++pages;
+    }
+    assert(pages);
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
+static void hands_free_playout(void)
+{
+    int64_t id = live_call();
+    int16_t pcm[640];
+    bool flushed;
+    line(id, cavd_id(5000, "a"));
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 0 && !flushed);
+    line(id, cavd_id(10000, "b"));
+    line(id, cavd_id(15000, "a"));   /* an older reply trails the newer one */
+    auto legacy = b64(std::vector<int16_t>(960, 17000));
+    line(id, R"({"type":"response.output_audio.delta","delta":")" + legacy + R"("})");
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 640);
+    assert(muse_vc_peak(pcm, 640) <= 5100);
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 640);
+    assert(muse_vc_peak(pcm, 640) > 9500);
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 0);
+    line(id, cavd_id(10000, "b"));
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 0);
+    poll(1, 61000);
+    assert(muse_voice_call_read_paced(pcm, 640, &flushed) == 640);   /* isolated final packet */
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -2957,7 +3081,8 @@ int main(int argc, char **argv)
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
                                     ptt_stop_paced_interrupts, hands_free_working,
-                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap };
+                                    hands_free_interrupted_settle, hands_free_early_media_and_keep_cap, long_call_captions, hands_free_playout, caption_waits_for_speaker,
+                                    caption_not_utf8 };
     int which = atoi(argv[1]);
     if (which < 0 || which >= (int)(sizeof(cases) / sizeof(cases[0]))) {
         return 2;

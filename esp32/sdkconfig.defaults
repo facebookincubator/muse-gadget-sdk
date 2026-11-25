@@ -31,6 +31,10 @@ CONFIG_HOMEHUB_OTA_ENABLED=n
 # authenticated support path and never exposed in user-visible chat.
 CONFIG_HOMEHUB_SUPPORT_BUG_REPORT=y
 
+# After an abnormal reset, send the VM one summary of it with no logs or
+# identifiers (link.error_report).
+CONFIG_HOMEHUB_ERROR_REPORT=y
+
 # Optimize for performance (-O2). The default is debug (-Og) which
 # leaves significant throughput on the table for TLS, lwIP, and the
 # tunnel framing path.
@@ -55,11 +59,15 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_BOOT_INIT=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
-# Reserve 64 KB internal SRAM from the PSRAM fallback allocator. With BLE
-# active (~80 KB NimBLE), the default 32 KB reserve left too little contiguous
-# internal SRAM for HW AES DMA buffers under burst TLS ("esp-aes: Failed to
-# allocate memory").
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Keep 64 KB of internal SRAM for DMA and internal-only allocations
+# (CONFIG_HOMEHUB_DMA_RESERVE_KB, main/main.c). With BLE active (~80 KB
+# NimBLE), a 32 KB reserve left too little contiguous internal SRAM for HW AES
+# DMA buffers under burst TLS ("esp-aes: Failed to allocate memory").
+# ESP-IDF's own reserve stays off, except on the classic ESP32
+# (sdkconfig.defaults.esp32): from v6.0.3 it also serves malloc(), and
+# heap_caps_get_minimum_free_size() counts it as empty.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=0
+CONFIG_HOMEHUB_DMA_RESERVE_KB=64
 # Keep GDMA control functions in IRAM. C5 can DMA payloads in PSRAM;
 # AES DMA descriptors still require DMA-capable internal SRAM.
 CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y

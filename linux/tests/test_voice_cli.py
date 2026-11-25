@@ -26,6 +26,8 @@ from test_voice_call import TONE, cavd, line
 
 def test_cli_uses_host_pairing_exact_vm_and_noise_upgrade_app_id(tmp_path, monkeypatch, capsys, caplog):
     monkeypatch.setenv(config.STATE_DIR_ENV, str(tmp_path / "state"))
+    # A development pairing's own hosts (test_server_hosts.py has the default).
+    monkeypatch.setenv(config.CUSTOM_SERVER_HOSTS_ENV, "1")
     ident = identity.load_or_create()
     pairing = {"access_token": "synthetic-device-token", "noise_host": "noise.example",
                "api_url_v2": "https://api.example"}

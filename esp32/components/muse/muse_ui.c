@@ -945,11 +945,11 @@ static int reply_glyph_px(uint32_t letter, uint32_t next)
 
 /* Live captions are a rolling tail, not paged voice-note replies. Keep the
  * latest whole words visible when the larger reading font fills its box. */
-static const char *live_caption_tail(const char *text, const answer_layout_t *layout)
+static const char *live_caption_tail(const char *text, const answer_layout_t *layout, const lv_font_t *font)
 {
     lv_point_t size;
     for (;;) {
-        lv_text_get_size(&size, text, layout->font, 0, CAPTION_LINE_SPACE,
+        lv_text_get_size(&size, text, font, 0, CAPTION_LINE_SPACE,
                          layout->w / layout->scale, LV_TEXT_FLAG_NONE);
         if (size.y * layout->scale <= layout->h || !*text) return text;
         const char *next = text;
@@ -2508,8 +2508,8 @@ static void update_status(muse_mode_t mode, float now)
             lv_obj_set_style_text_font(lbl, caption_font_for(shown), 0);
         }
 #endif
-        if (answer == ANSWER_READ && muse_voice_in_call()) {
-            shown = live_caption_tail(shown, &s_answers[answer]);
+        if (answer >= 0 && muse_voice_in_call()) {
+            shown = live_caption_tail(shown, &s_answers[answer], lv_obj_get_style_text_font(lbl, 0));
         }
         lv_label_set_text(lbl, shown);
         if (answer == ANSWER_READ) {

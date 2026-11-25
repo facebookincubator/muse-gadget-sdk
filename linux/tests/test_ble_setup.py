@@ -149,8 +149,9 @@ PROVISION = {
     "refresh_token": "device-refresh",
     "token_type": "device",
     "username": "someone",
-    "api_url": "https://legacy-api.example",
-    "api_url_v2": "https://api.example",
+    "api_url": "https://hatch-api.meta.ai",
+    "api_url_v2": "https://api.muse.ai",
+    "noise_host": "hatch.metaaivm.com",
 }
 
 
@@ -193,8 +194,8 @@ def test_full_setup_flow():
     saved = h.saved[0]
     assert (saved.access_token, saved.refresh_token, saved.username) == (
         "device-access", "device-refresh", "someone")
-    assert (saved.api_url, saved.api_url_v2) == (
-        "https://legacy-api.example", "https://api.example")
+    assert (saved.api_url, saved.api_url_v2, saved.noise_host) == (
+        "https://hatch-api.meta.ai", "https://api.muse.ai", "hatch.metaaivm.com")
     assert h.pairing.state is PairingState.PROVISIONING
 
 

@@ -32,16 +32,23 @@ class LinkEpaperStatusTest(unittest.TestCase):
         source = (ROOT / "main/epaper_status.c").read_text()
         start = source.index("// ---- Pixels (host-tested)")
         (out / "epaper_pixels.inc").write_text(source[start:source.index("// ---- Panel", start)])
+        it8951 = (ROOT / "main/epd_it8951.c").read_text()
+        pack = it8951[it8951.index("static void pack_gray16_row("):
+                      it8951.index("static esp_err_t load_gray16(")]
+        (out / "it8951_pack.inc").write_text(pack)
+        dither = source[source.index("static void epd_dither("):
+                        source.index("// ---- Status screen")]
+        (out / "epaper_status_dither.inc").write_text(dither)
         cc = shlex.split(os.environ.get("CC", "cc"))
         cmd = [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(out),
-               str(ROOT / "tests/link_epaper_status_harness.c"), "-o", str(out / "epaper")]
+               str(ROOT / "tests/link_epaper_status_harness.c"), "-o", str(out / "epaper.exe")]
         compiled = subprocess.run(cmd, capture_output=True, text=True)
         if compiled.returncode:
             raise AssertionError(compiled.stdout + compiled.stderr)
         cls.out = out
 
     def test_pixels(self):
-        result = subprocess.run([str(self.out / "epaper")], capture_output=True, text=True)
+        result = subprocess.run([str(self.out / "epaper.exe")], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_sticky_board_wiring(self):

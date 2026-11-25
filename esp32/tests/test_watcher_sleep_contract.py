@@ -72,7 +72,7 @@ class WatcherSleepTest(unittest.TestCase):
         option = kconfig[kconfig.index("config MUSE_STATIC_BUFFERS_IN_PSRAM"):]
         option = option[:option.index("\n    config ", 1)]
         self.assertIn("depends on MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY", option)
-        self.assertIn("default n", option)   # other boards keep them internal
+        self.assertIn("default n", option)   # non-voice boards keep them internal
         lf = (MUSE / "linker.lf").read_text()
         self.assertIn("bss -> extern_ram", lf)
         self.assertIn("common -> extern_ram", lf)

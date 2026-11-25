@@ -343,6 +343,7 @@ void muse_vc_reply_gate_init(muse_vc_reply_gate_t *g);
 void muse_vc_reply_gate_press(muse_vc_reply_gate_t *g);
 /* What to do with an audio event's PCM. HOLD: keep it until the wait ends:
  * then it plays if muse_vc_reply_gate_playing, else it's dropped. */
+bool muse_vc_hands_free_audio(muse_vc_reply_gate_t *g, muse_vc_span_t id, bool audible);
 muse_vc_gate_verdict_t muse_vc_reply_gate_audio(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev);
 /* Speech start, turn start, input suppression, response.created. */
 void muse_vc_reply_gate_event(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev);

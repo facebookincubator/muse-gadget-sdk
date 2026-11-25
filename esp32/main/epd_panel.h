@@ -41,6 +41,16 @@ typedef struct {
     // (NULL on colour panels). Both are `row_bytes * height` long.
     esp_err_t (*update)(const uint8_t *frame, const uint8_t *prev, bool full);
     esp_err_t (*update_gray4)(const uint8_t *frame);
+    // UC8179's two packed one-bit planes, each the same size as a mono frame.
+    esp_err_t (*update_gray4_planes)(const uint8_t *old_plane, const uint8_t *new_plane);
+    // One luma byte per pixel, in screen order.
+    esp_err_t (*update_gray16)(const uint8_t *luma);
 } epd_panel_t;
 
 const epd_panel_t *epd_panel_get(void);
+
+// reTerminal grayscale backends only. Start with a white canvas.
+void led_status_draw_gray_begin(void);
+// Finish a reTerminal grayscale image. False if there was no image to
+// show, the panel does not support this depth, or the refresh failed.
+bool led_status_draw_gray_done(int levels);

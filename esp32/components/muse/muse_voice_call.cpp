@@ -153,6 +153,8 @@ static std::atomic<uint32_t> s_in_written{0};      /* bytes the voice task put i
 
 /* Voice task only. */
 static bool v_call, v_ptt, v_talking, v_overflow;   /* v_call: a call, until its ENDED is read */
+static bool v_buffering;
+static int64_t v_first_sample;
 static uint32_t v_press;             /* the last press number */
 static uint32_t v_press_told;        /* the press read() last reported as a flush */
 
@@ -224,6 +226,11 @@ static char s_cancel[MUSE_VC_TURN_ID_MAX];
 static uint32_t s_st;                /* status bits (session's copy) */
 static int64_t s_wall_offset_ms;
 static bool s_wall_known;
+enum class audio_format { unknown, continuous, legacy };
+static audio_format s_format;
+static unsigned s_duplicate_audio, s_retired_audio;
+static uint32_t s_pcm_written;
+static std::atomic<uint32_t> s_spoken_frames{0};
 static uint32_t s_bad_lines, s_bad_audio, s_dropped_audio, s_frames_out;
 
 static int64_t now_us(void)
@@ -240,9 +247,12 @@ static void *big_alloc(size_t n)
 
 static void publish(void);
 
-static void emit(muse_voice_call_ev_t type, const char *text)
+static bool emit(muse_voice_call_ev_t type, const char *text)
 {
     if (type == MUSE_VOICE_CALL_EV_ENDED) {
+#if CONFIG_LV_USE_SNAPSHOT
+        if (!s_ptt) ESP_LOGI(TAG, "playback filtered: alternate=%u retired=%u", s_duplicate_audio, s_retired_audio);
+#endif
         s_st = ST_ENDED;
         s_status.store((s_call_gen << 16) | s_st);
     }
@@ -252,44 +262,203 @@ static void emit(muse_voice_call_ev_t type, const char *text)
     if (text) {
         strlcpy(ev.text, text, sizeof(ev.text));
     }
-    /* Captions are lossy; the end of a call must get through. */
-    xQueueSend(s_events, &ev, type == MUSE_VOICE_CALL_EV_ENDED || type == MUSE_VOICE_CALL_EV_READY ? pdMS_TO_TICKS(200) : 0);
+    /* Live reply pages retry on a full queue. Call boundaries can wait for room. */
+    return xQueueSend(s_events, &ev, type == MUSE_VOICE_CALL_EV_ENDED || type == MUSE_VOICE_CALL_EV_READY ? pdMS_TO_TICKS(200) : 0) == pdTRUE;
 }
 
-static void emit_caption(muse_voice_call_ev_t type, muse_vc_span_t raw)
+/* The audio decoder and transcript decoder run serially on the session task.
+ * A final transcript can occupy almost the entire NDJSON line. */
+static const char *decode_caption(muse_vc_span_t raw)
 {
-    char text[256], line[EV_TEXT];
-    if (!muse_vc_json_unescape(raw, text, sizeof(text))) {
-        return;
-    }
-    muse_hatch_tail_words(text, line, sizeof(line));
-    if (line[0]) {
-        emit(type, line);
-    }
+    char *text = reinterpret_cast<char *>(s_dec);
+    return muse_vc_json_unescape(raw, text, MUSE_VC_LINE_MAX) ? text : "";
 }
 
-/* Appends a transcript piece to the reply's tail. */
-static void reply_append(muse_vc_span_t raw)
+/* Hands-free transcripts can arrive in one burst, well ahead of the audio.
+ * Keep unread text on the session task and send one readable part at a time.
+ * 'response' separates queued earlier words from the response whose final
+ * transcript may replace its deltas. 'skipped' counts reclaimed bytes of it. */
+static char *s_caption_text;   /* one wire line of display backlog, in PSRAM */
+static size_t s_caption_size, s_caption_page, s_caption_read, s_caption_response, s_caption_skipped;
+static int64_t s_caption_due;
+static size_t s_caption_visible;
+static uint32_t s_word_at, s_word_last_spoken;
+static int64_t s_word_changed_us, s_word_due_us, s_last_pcm_us, s_last_text_us;
+static bool s_caption_final, s_caption_started;
+/* Each group of eight transcript bytes carries a position in the 16 kHz
+ * playback FIFO. An extra group covers an unaligned start after compaction. */
+static constexpr size_t CUE_BYTES = 8;
+static constexpr size_t CUE_COUNT = MUSE_VC_LINE_MAX / CUE_BYTES + 1;
+static uint32_t *s_caption_cues;
+static size_t s_cue_origin;
+
+static size_t cue_index(size_t offset)
 {
-    char piece[256];
-    if (!muse_vc_json_unescape(raw, piece, sizeof(piece))) {
-        return;
-    }
-    size_t have = strlen(s_reply), add = strlen(piece);
-    if (add >= sizeof(s_reply) - 1) {
-        strlcpy(s_reply, piece + add - (sizeof(s_reply) - 1), sizeof(s_reply));
-    } else {
-        if (have + add >= sizeof(s_reply)) {
-            size_t drop = have + add - (sizeof(s_reply) - 1);
-            memmove(s_reply, s_reply + drop, have - drop + 1);
+    return ((s_cue_origin + offset) / CUE_BYTES) % CUE_COUNT;
+}
+
+static void clear_captions()
+{
+    s_caption_size = s_caption_page = s_caption_read = s_caption_response = s_caption_skipped = 0;
+    s_caption_due = s_word_due_us = 0;
+    s_caption_started = s_caption_final = false;
+    s_caption_visible = s_cue_origin = 0;
+    s_word_last_spoken = s_word_at = s_spoken_frames.load();
+    s_word_changed_us = now_us();
+}
+
+static void drop_caption_prefix(size_t n)
+{
+    memmove(s_caption_text, s_caption_text + n, s_caption_size - n);
+    s_caption_size -= n;
+    s_cue_origin = (s_cue_origin + n) % (CUE_BYTES * CUE_COUNT);
+    s_caption_visible = s_caption_visible > n ? s_caption_visible - n : 0;
+    s_caption_page = s_caption_page > n ? s_caption_page - n : 0;
+    s_caption_read = s_caption_read > n ? s_caption_read - n : 0;
+    if (n > s_caption_response) s_caption_skipped += n - s_caption_response;
+    s_caption_response = s_caption_response > n ? s_caption_response - n : 0;
+}
+
+static void queue_caption(const char *text, bool final)
+{
+    size_t n = strlen(text);
+    if (!n) return;
+    s_last_text_us = now_us();
+    if (final) {
+        /* Deltas already shown stay shown when the full transcript arrives. */
+        size_t skip = s_caption_skipped < n ? s_caption_skipped : n;
+        text += skip;
+        n -= skip;
+        s_caption_final = true;
+        size_t received = s_caption_size - s_caption_response;
+        if (n >= received && !memcmp(text, s_caption_text + s_caption_response, received)) {
+            /* Preserve audio markers for all the original streaming deltas. */
+            text += received;
+            n -= received;
+        } else {
+            s_caption_size = s_caption_response;
+            if (s_caption_visible > s_caption_size) s_caption_visible = s_caption_size;
+            if (s_caption_read > s_caption_size) s_caption_page = s_caption_read = s_caption_size;
+            s_caption_due = 0;
         }
-        strlcat(s_reply, piece, sizeof(s_reply));
     }
+    if (s_caption_size + n > MUSE_VC_LINE_MAX) {
+        size_t drop = s_caption_size + n - MUSE_VC_LINE_MAX;
+        if (s_caption_read > drop && s_caption_read <= s_caption_size) drop = s_caption_read;
+        while (drop < s_caption_size && (s_caption_text[drop] & 0xc0) == 0x80) ++drop;
+        drop_caption_prefix(drop);
+    }
+    for (size_t pos = s_caption_size; pos < s_caption_size + n;) {
+        s_caption_cues[cue_index(pos)] = s_pcm_written;
+        pos += CUE_BYTES - (s_cue_origin + pos) % CUE_BYTES;
+    }
+    memcpy(s_caption_text + s_caption_size, text, n);
+    s_caption_size += n;
+}
+
+/* Reveal words against samples actually taken for the speaker. The service
+ * supplies transcript deltas, not word timestamps. A short estimated word
+ * duration handles multi-word deltas, and silence cannot advance that clock.
+ * A completed text-only response can still be read when playout is idle. */
+static void reveal_caption(int64_t now)
+{
+    if (s_caption_visible >= s_caption_size) return;
+    uint32_t spoken = s_spoken_frames.load(std::memory_order_relaxed);
+    if (spoken != s_word_last_spoken) {
+        s_word_changed_us = now;
+        s_word_last_spoken = spoken;
+    }
+    size_t queued = xStreamBufferBytesAvailable(s_out) / sizeof(int16_t);
+    uint32_t read = s_pcm_written - queued;
+    size_t from = s_caption_visible, end = from;
+    while (end < s_caption_size && (s_caption_text[end] == ' ' || s_caption_text[end] == '\n')) ++end;
+    size_t word = end;
+    while (end < s_caption_size && end - word < 32 && s_caption_text[end] != ' ' && s_caption_text[end] != '\n') ++end;
+    while (end < s_caption_size && (s_caption_text[end] & 0xc0) == 0x80) ++end;
+    if (end == word) return;
+    uint32_t marker = s_caption_cues[cue_index(end - 1)];
+    const uint32_t lag = MUSE_VC_MIC_RATE * 120 / 1000;
+    bool at_speaker = (int32_t)(read - marker) >= (int32_t)lag ||
+                      (!queued && now - s_last_pcm_us >= 120000);
+    bool fallback = (s_caption_final || now - s_last_text_us >= 2000000) &&
+                    now - s_word_changed_us >= 1200000 &&
+                    (int32_t)(read - marker) >= 0;
+    if (!at_speaker || (int32_t)(spoken - s_word_at) < 0) {
+        if (!fallback || now < s_word_due_us) return;
+    }
+    /* Count letters rather than UTF-8 bytes; split long unspaced runs above. */
+    unsigned letters = 0;
+    for (size_t i = word; i < end; ++i) letters += (s_caption_text[i] & 0xc0) != 0x80;
+    uint32_t duration_ms = 100 + 35 * letters;
+    s_word_at = spoken + duration_ms * (MUSE_VC_MIC_RATE / 1000);
+    s_word_due_us = now + duration_ms * 1000;
+    s_caption_visible = end;
+}
+
+/* Find the next word boundary that fits the round speaker-on caption box. */
+static size_t caption_page_end(size_t from)
+{
+    size_t end = s_caption_visible;
+    if (from < s_caption_response && s_caption_response < end) end = s_caption_response;
+    if (end - from <= 32) return end;
+    size_t cut = from + 32;
+    while (cut > from && (s_caption_text[cut] & 0xc0) == 0x80) --cut;
+    if (cut == from) cut = from + 32;   /* not UTF-8: cut at 32 bytes */
+    size_t word = cut;
+    while (word > from && s_caption_text[word] != ' ' && s_caption_text[word] != '\n') --word;
+    return word > from ? word : cut;
+}
+
+static void pump_caption(int64_t now)
+{
+    if (s_ptt || s_call.state != MUSE_VC_LIVE || s_call.held || s_caption_read >= s_caption_size) return;
+    reveal_caption(now);
+    if (s_caption_read >= s_caption_visible) return;
+    size_t from = s_caption_page;
+    size_t end = caption_page_end(from);
+    if (end <= s_caption_read) {
+        if (now < s_caption_due) return;
+        from = end;
+        while (from < s_caption_visible && (s_caption_text[from] == ' ' || s_caption_text[from] == '\n')) ++from;
+        if (from == s_caption_visible) return;
+        end = caption_page_end(from);
+    }
+    char phrase[33];
+    size_t n = end - from;
+    memcpy(phrase, s_caption_text + from, n);
+    phrase[n] = 0;
+    if (!emit(MUSE_VOICE_CALL_EV_REPLY, phrase)) return;  /* retry without advancing */
+    muse_vc_call_activity(&s_call, now);   /* a text-only reply may span the idle deadline */
+    s_caption_read = end;
+    s_caption_page = from;
+    s_caption_due = now + 160000;  /* keep the last word legible at a page break */
+}
+
+static void reply_caption(muse_vc_span_t raw, bool final)
+{
+    const char *text = decode_caption(raw);
+    if (!s_ptt) {
+        if (*text && !s_caption_started) {
+            s_caption_started = emit(MUSE_VOICE_CALL_EV_REPLY_START, nullptr);
+            s_word_changed_us = now_us();
+        }
+        queue_caption(text, final);
+        return;
+    }
+    size_t n = strlen(text);
+    if (!n) return;
+    if (final || n >= sizeof(s_reply) - 1) s_reply[0] = 0;
+    if (n >= sizeof(s_reply)) text += n - (sizeof(s_reply) - 1);
+    n = strlen(text);
+    size_t have = strlen(s_reply);
+    if (have + n >= sizeof(s_reply)) {
+        size_t drop = have + n + 1 - sizeof(s_reply);
+        memmove(s_reply, s_reply + drop, have - drop + 1);
+    }
+    strlcat(s_reply, text, sizeof(s_reply));
     char line[EV_TEXT];
     muse_hatch_tail_words(s_reply, line, sizeof(line));
-    if (line[0]) {
-        emit(MUSE_VOICE_CALL_EV_REPLY, line);
-    }
+    if (line[0]) emit(MUSE_VOICE_CALL_EV_REPLY, line);
 }
 
 /* ---- Wall clock, for the end-call's timestamps ---- */
@@ -750,7 +919,9 @@ static void publish(void)
 /* From a stream handler: what can't wait (flush, hold) now, the rest at the next poll. */
 static bool take(uint32_t acts)
 {
+    if ((acts & MUSE_VC_ACT_FLUSH) || ((acts & MUSE_VC_ACT_HOLD) && s_call.held)) clear_captions();
     if (acts & MUSE_VC_ACT_FLUSH) {
+        if (!s_ptt) muse_vc_reply_gate_press(s_gate);
         s_flush_req.fetch_add(1);
     }
     if (acts & MUSE_VC_ACT_HOLD) {
@@ -805,13 +976,25 @@ static void play(const muse_vc_event_t &ev, int64_t now)
             return;   /* stale, unattributed, or no new turn to answer */
         }
     }
+    audio_format format = ev.audio_cavd ? audio_format::continuous : audio_format::legacy;
+    if (!s_ptt && s_format != audio_format::unknown && s_format != format) {
+        ++s_duplicate_audio;
+        return;
+    }
+    muse_vc_resampler_t before = s_down;
     bool audible;
     long n = muse_vc_decode_audio(&s_down, ev.audio, s_dec, DEC_BYTES, s_pcm, &audible);
     if (n < 0) {
         s_bad_audio++;
         return;
     }
+    if (!s_ptt && !muse_vc_hands_free_audio(s_gate, ev.response_id, audible)) {
+        s_down = before;   /* no interpolation from a discarded packet */
+        ++s_retired_audio;
+        return;
+    }
     if (audible) {
+        if (!s_ptt) s_format = format;
         muse_vc_call_activity(&s_call, now);
     }
     size_t bytes = (size_t)n * sizeof(int16_t);
@@ -842,7 +1025,8 @@ static void play(const muse_vc_event_t &ev, int64_t now)
         s_dropped_audio++;
         return;
     }
-    xStreamBufferSend(s_out, s_pcm, bytes, 0);
+    s_last_pcm_us = now;
+    s_pcm_written += xStreamBufferSend(s_out, s_pcm, bytes, 0) / sizeof(int16_t);
     s_frames_out++;
 }
 
@@ -864,24 +1048,37 @@ static void on_line(void *ctx, const char *line, size_t len)
     bool captions = !s_ptt || muse_vc_reply_gate_captions(s_gate);
     switch (ev.kind) {
     case MUSE_VC_EV_RESPONSE_CREATED:
+        drop_caption_prefix(s_caption_read);
+        s_caption_response = s_caption_size;
+        s_caption_skipped = 0;
+        s_caption_started = s_caption_final = false;
+        if (!s_caption_size) {
+            s_caption_due = 0;
+            s_word_last_spoken = s_spoken_frames.load();
+            s_word_at = s_word_last_spoken + MUSE_VC_MIC_RATE / 10;
+            s_word_changed_us = now;
+        }
         s_reply[0] = '\0';
         break;
     case MUSE_VC_EV_REPLY_TEXT:
         if (before && captions) {
-            reply_append(ev.text);
+            reply_caption(ev.text, false);
         }
         break;
     case MUSE_VC_EV_REPLY_DONE:
         if (before && captions) {
-            emit_caption(MUSE_VOICE_CALL_EV_REPLY, ev.text);
+            reply_caption(ev.text, true);
         }
         break;
     case MUSE_VC_EV_USER_TEXT:
         if (before) {
-            emit_caption(MUSE_VOICE_CALL_EV_HEARD, ev.text);
+            char heard[EV_TEXT];
+            muse_hatch_tail_words(decode_caption(ev.text), heard, sizeof(heard));
+            if (heard[0]) emit(MUSE_VOICE_CALL_EV_HEARD, heard);
         }
         break;
     case MUSE_VC_EV_RESPONSE_DONE: {
+        s_caption_final = true;
         char status[24] = "";
         if (ev.status.p) {
             muse_vc_json_unescape(ev.status, status, sizeof(status));
@@ -1084,13 +1281,16 @@ static bool begin_call(uint32_t gen)
     muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);
     muse_vc_uplink_init(&s_up);
     s_mic_len = s_mic_off = 0;
+    s_format = audio_format::unknown;
+    s_duplicate_audio = s_retired_audio = s_pcm_written = 0;
+    muse_vc_reply_gate_init(s_gate);
     if (s_ptt) {
-        muse_vc_reply_gate_init(s_gate);
         defer_clear();
         s_cancel[0] = '\0';
         s_st = 0;
         s_quiet_next_us = 0;
     }
+    clear_captions();
     s_reply[0] = s_error[0] = '\0';
     s_acts = 0;
     s_drop = false;
@@ -1134,12 +1334,14 @@ bool muse_voice_call_init(void)
     s_in = xStreamBufferCreateWithCaps(CALL_IN_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_out = xStreamBufferCreateWithCaps(CALL_OUT_BYTES, 1, MALLOC_CAP_SPIRAM);
     s_line_buf = static_cast<char *>(big_alloc(MUSE_VC_LINE_MAX));
-    s_dec = static_cast<uint8_t *>(big_alloc(DEC_BYTES));
+    s_caption_text = static_cast<char *>(big_alloc(MUSE_VC_LINE_MAX));
+    s_caption_cues = static_cast<uint32_t *>(big_alloc(CUE_COUNT * sizeof(*s_caption_cues)));
+    s_dec = static_cast<uint8_t *>(big_alloc(MUSE_VC_LINE_MAX));
     s_pcm = static_cast<int16_t *>(big_alloc(OUT_SAMPLES * sizeof(int16_t)));
     s_gate = static_cast<muse_vc_reply_gate_t *>(big_alloc(sizeof(muse_vc_reply_gate_t)));
     s_defer.buf = static_cast<int16_t *>(big_alloc(DEFER_SAMPLES * sizeof(int16_t)));
     s_wait.buf = static_cast<int16_t *>(big_alloc(DEFER_SAMPLES * sizeof(int16_t)));
-    if (!s_events || !s_in || !s_out || !s_line_buf || !s_dec || !s_pcm || !s_gate || !s_defer.buf || !s_wait.buf) {
+    if (!s_events || !s_in || !s_out || !s_line_buf || !s_caption_text || !s_caption_cues || !s_dec || !s_pcm || !s_gate || !s_defer.buf || !s_wait.buf) {
         ESP_LOGE(TAG, "no memory for calls");
         return false;   /* muse_voice_call_ready() stays false */
     }
@@ -1243,6 +1445,7 @@ bool muse_voice_call_poll(void)
             run(MUSE_VC_ACT_ENDED, false);
         }
     }
+    pump_caption(now_us());
     bool ok = pump_mic(now_us());
     publish();
     return ok;
@@ -1414,6 +1617,8 @@ extern "C" void muse_voice_call_start(void)
         return;
     }
     v_call = true;
+    v_buffering = true;
+    v_first_sample = 0;
     v_ptt = v_talking = v_overflow = false;
     drain_out();
     s_flush_ack.store(s_flush_req.load());
@@ -1524,7 +1729,35 @@ extern "C" size_t muse_voice_call_read(int16_t *pcm, size_t frames, bool *flushe
         v_press_told = press;
         return 0;
     }
-    return xStreamBufferReceive(s_out, pcm, frames * sizeof(int16_t), 0) / sizeof(int16_t);
+    size_t n = xStreamBufferReceive(s_out, pcm, frames * sizeof(int16_t), 0) / sizeof(int16_t);
+    if (!v_ptt && n && muse_vc_peak(pcm, n) >= MUSE_VC_AUDIBLE_PEAK)
+        s_spoken_frames.fetch_add(n, std::memory_order_relaxed);
+    return n;
+}
+
+extern "C" size_t muse_voice_call_read_paced(int16_t *pcm, size_t frames, bool *flushed)
+{
+    if (!s_out || s_flush_req.load() != s_flush_ack.load()) {
+        v_buffering = true;
+        v_first_sample = 0;
+        return muse_voice_call_read(pcm, frames, flushed);
+    }
+    size_t available = xStreamBufferBytesAvailable(s_out) / sizeof(int16_t);
+    if (!available) {
+        v_buffering = true;
+        v_first_sample = 0;
+    } else if (v_buffering) {
+        int64_t now = now_us();
+        if (!v_first_sample) v_first_sample = now;
+        /* Three 20 ms blocks absorb a short delivery gap. A final short
+         * packet is released at the deadline even if nothing follows it. */
+        v_buffering = available < MUSE_VC_MIC_RATE * 60 / 1000 && now - v_first_sample < 60000;
+    }
+    if (v_buffering) {
+        *flushed = false;
+        return 0;
+    }
+    return muse_voice_call_read(pcm, frames, flushed);
 }
 
 extern "C" muse_voice_call_ev_t muse_voice_call_event(char *text, size_t cap)

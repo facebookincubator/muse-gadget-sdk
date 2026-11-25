@@ -28,7 +28,6 @@ set(GADGET_SRCS
     "wifi_known.c"
     "identity.c"
     "token_fp.c"
-    "sdk_token_console.c"
     "config_store.c"
     "vm_api.c"
     "diagnostic_log.c"
@@ -51,6 +50,10 @@ set(GADGET_SRCS
     "pairing_transcript.c"
     "factory_test.c"
 )
+
+if(CONFIG_GADGET_SDK_TOKEN_CONSOLE)
+    list(APPEND GADGET_SRCS "sdk_token_console.c")
+endif()
 
 set(GADGET_REQUIRES
     nvs_flash
@@ -95,6 +98,22 @@ if(CONFIG_MUSE_AVATAR_SYNC)
     list(APPEND GADGET_SRCS "avatar_sync.c")
 endif()
 
+# A product component can add control commands, not replace the shared OTA
+# engine or setup/rollback integration. Validate the complete selection during
+# early requirements expansion too, before component registration returns.
+idf_build_get_property(control_component PRODUCT_CONTROL_COMPONENT)
+idf_build_get_property(control_header PRODUCT_CONTROL_EXTENSION_HEADER)
+idf_build_get_property(control_impl PRODUCT_CONTROL_EXTENSION_IMPL)
+if(control_component OR control_header OR control_impl)
+    if(NOT control_component OR NOT control_header OR NOT control_impl)
+        message(FATAL_ERROR "Product control extension requires COMPONENT, HEADER and IMPL together")
+    endif()
+    if(NOT control_component MATCHES "^[A-Za-z0-9_]+$" OR control_component STREQUAL "main")
+        message(FATAL_ERROR "PRODUCT_CONTROL_COMPONENT must name one external component")
+    endif()
+    list(APPEND GADGET_REQUIRES ${control_component})
+endif()
+
 # E-paper has its own status screen in place of led_status.c, with
 # a per-panel driver behind epd_panel.h; so does a 16x16 LED matrix, which
 # the board supplies as an esp_lcd panel.
@@ -118,6 +137,10 @@ endif()
 
 if(CONFIG_MUSE_ENABLED)
     list(APPEND GADGET_SRCS "muse_glue.c")
+endif()
+
+if(CONFIG_HOMEHUB_ERROR_REPORT)
+    list(APPEND GADGET_SRCS "error_report.c")
 endif()
 
 # image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
@@ -163,6 +186,13 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "../avatar"
     REQUIRES ${GADGET_REQUIRES}
 )
+
+# Apply only to main; the selected component exports the include directories.
+if(control_component)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        "PRODUCT_CONTROL_EXTENSION_HEADER=\"${control_header}\""
+        "PRODUCT_CONTROL_EXTENSION_IMPL=\"${control_impl}\"")
+endif()
 
 # device.guide's Markdown, embedded as muse_device_guide_md (NUL-terminated).
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/device_guide.cmake")
@@ -252,6 +282,14 @@ if(CONFIG_HOMEHUB_FAST_GCM)
         "-Wl,--wrap=esp_aes_gcm_auth_decrypt"
         "-Wl,-u,__wrap_esp_aes_gcm_crypt_and_tag"
         "-Wl,-u,__wrap_esp_aes_gcm_auth_decrypt")
+endif()
+
+# error_report.c records the fault in retained RAM before ESP-IDF's panic
+# handler prints and resets.
+if(CONFIG_HOMEHUB_ERROR_REPORT)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=esp_panic_handler"
+        "-Wl,-u,__wrap_esp_panic_handler")
 endif()
 
 # ble_coex.c sits between the BLE controller and the coexistence scheduler

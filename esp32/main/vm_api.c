@@ -15,6 +15,7 @@
  */
 
 #include "vm_api.h"
+#include "muse_server_hosts.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -102,8 +103,10 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
 }
 
 void vm_api_set_base_url(const char *url) {
+    bool allowed = muse_server_api_allowed(url);
+    if (!allowed) ESP_LOGW(TAG, "API base not allowed in this build; using the default");
     snprintf(s_api_base, sizeof(s_api_base), "%s",
-             url && *url ? url : VM_API_DEFAULT_BASE_URL);
+             allowed && url && *url ? url : VM_API_DEFAULT_BASE_URL);
 }
 
 void vm_api_set_sdk_token(const char *sdk_token) {

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The /link-control stream's framing: process_inbound_body_chunk(), sliced
+"""The control stream's framing: process_inbound_body_chunk(), sliced
 from main/noise_control.cpp, run on the host with messages cut across
 BodyChunks anywhere."""
 
@@ -30,7 +30,7 @@ CONTROL = ROOT / "main/noise_control.cpp"
 class LinkControlStream(unittest.TestCase):
     def test_messages_cut_across_body_chunks(self):
         source = CONTROL.read_text()
-        start = source.index("// A /link-control message cut across BodyChunks")
+        start = source.index("// A control-stream message cut across BodyChunks")
         end = source.index("\n}\n", source.index("static void process_inbound_body_chunk(", start)) + 3
         cc = shlex.split(os.environ.get("CC", "cc"))
         cxx = shlex.split(os.environ.get("CXX", "c++"))

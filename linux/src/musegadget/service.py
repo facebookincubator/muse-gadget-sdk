@@ -34,7 +34,9 @@ import socket
 import time
 from dataclasses import dataclass, field
 
-from musegadget import __version__, config, device_guide, muse_api, reaper, tls
+from musegadget import (
+    __version__, config, device_guide, error_report, muse_api, reaper, server_hosts, tls,
+)
 from musegadget.executor import Executor
 from musegadget.identity import Identity
 from musegadget.link_client import (
@@ -45,7 +47,7 @@ from musegadget.muse_turn import MuseTurn, _acknowledged_message_ids
 
 log = logging.getLogger(__name__)
 
-DEFAULT_NOISE_HOST = "hatch.metaaivm.com"
+DEFAULT_NOISE_HOST = server_hosts.NOISE_HOST
 BACKOFF_BASE_S = 2.0
 BACKOFF_MAX_S = 60.0
 AUTH_BACKOFF_MIN_S = 15.0
@@ -205,7 +207,7 @@ class Service:
 
     async def _session(self, vm: dict, pairing: dict) -> tuple[Outcome, float]:
         session = LinkSession(
-            noise_host=pairing.get("noise_host") or DEFAULT_NOISE_HOST,
+            noise_host=server_hosts.noise_host(pairing.get("noise_host")),
             vm_id=vm["vm_id"] or vm["vm_name"],
             vm_auth_token=vm["vm_auth_token"],
             device=self.describe(),
@@ -215,6 +217,8 @@ class Service:
         log.info("connecting to %s", vm["vm_name"] or vm["vm_id"])
         started = time.monotonic()
         self._current = session
+        crash = error_report.pending_message()
+        reporter = asyncio.ensure_future(self._report_crash(session, crash)) if crash else None
         try:
             outcome = await self.serve(session, vm, self._stop)
         except Exception as exc:
@@ -222,9 +226,27 @@ class Service:
             outcome = Outcome.CLOSED
         finally:
             self._current = None
+            if reporter is not None:
+                reporter.cancel()
+                await asyncio.gather(reporter, return_exceptions=True)
         lasted = time.monotonic() - (session.registered_at or time.monotonic())
         log.info("session ended: %s after %.0fs", outcome.value, time.monotonic() - started)
         return outcome, lasted
+
+    async def _report_crash(self, session: LinkSession, message: dict) -> None:
+        """Send the previous run's crash report once this session registers.
+
+        It stays saved until a send succeeds, so a session that ends first
+        leaves it for the next one.
+        """
+        await session.registered.wait()
+        try:
+            await session.send(message)
+        except Exception as exc:
+            log.info("could not report the previous crash: %s", type(exc).__name__)
+            return
+        error_report.mark_sent()
+        log.info("reported the previous crash to the Muse")
 
     def _warn_if_sdk_token_changed(self, pairing: dict) -> None:
         """Muse records a device's SDK token only when it pairs, so a token set
@@ -724,4 +746,5 @@ def run_service(identity: Identity, executor: Executor, sdk_token: str | None = 
             server.close()
 
     reaper.start_child_reaper()
-    asyncio.run(main())
+    with error_report.watch_run(__version__):
+        asyncio.run(main())

@@ -234,7 +234,7 @@ static bool ws_send_binary(esp_tls_t *, const uint8_t *data, size_t len) {
     assert(transport.total_chunks == 1 && transport.chunk_index == 0);
     DecodedServiceRequestEnvelope envelope;
     assert(DecodeServiceRequestEnvelopeDetailed(transport.payload, envelope).ok());
-    assert(envelope.service == ServiceType::Daemon);
+    assert(envelope.service == ServiceType::Gadget);
     DecodedServiceFrame frame;
     assert(DecodeServiceFrameDetailed(envelope.payload, Span<HeaderView>(), frame).ok());
     assert(frame.stream_id == 1 && frame.kind == ServiceFrameKind::BodyChunk);
