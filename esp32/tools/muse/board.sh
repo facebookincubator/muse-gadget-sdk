@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Build or flash Home Link for one board:
-#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|cores3lite|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
+#   tools/muse/board.sh build|flash <k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|cores3lite|stackchan|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35> [serial|port]
 # Build log: /tmp/muse_build_<board>.log. flash finds the board's port by its
 # USB device (tools/muse/ports.py); with several of a kind attached, pass the
 # one's USB serial number (the MAC on native USB) or its port. Flashing from a
@@ -37,7 +37,7 @@
 # flashes through the board's Vibe Mode firmware with their mosaico.py: an
 # ESP-Iris System Update bundle, never esptool (devices/README.md).
 set -uo pipefail
-cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|cores3lite|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
+cmd=${1:?build|flash}; board=${2:?k10|s3|s3n|s3-18|s3-216|s3-206|185b|185c|143c|143|146|lilygo175|mosaico|aipi|atk-box|atk-box2|box3|c6|c6-206|watcher|sticks3|crowpanel-43|plus2|cardputer-adv|atoms3|stopwatch|triviapod|xiao147|cores3|cores3lite|stackchan|core2|fnk0104b|jc3248w535|lcd7|lcd128|lcd349|spotpear|vn183|ai-passport|echoear|p4lcd35|rorolee|lcd19|smartring-plus|s3lcd35}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 case $board in
     s3)      profile=waveshare-s3-175c;    target=esp32s3 ;;
@@ -73,6 +73,7 @@ case $board in
     xiao147) profile=seeed-xiao-s3-147;    target=esp32s3 ;;
     cores3)  profile=m5stack-cores3;       target=esp32s3 ;;
     cores3lite) profile=m5stack-cores3lite; target=esp32s3 ;;
+    stackchan) profile=m5stack-stackchan;  target=esp32s3 ;;
     fnk0104b) profile=fnk0104b;            target=esp32s3 ;;
     jc3248w535) profile=guition-jc3248w535; target=esp32s3 ;;
     lcd7) profile=waveshare-s3-lcd7; target=esp32s3 ;;
@@ -109,8 +110,10 @@ if [ "$target" = esp32s31 ]; then
     echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
+    [ -d "/opt/homebrew/opt/python@3.11/libexec/bin" ] && export PATH="/opt/homebrew/opt/python@3.11/libexec/bin:$PATH"
     . "$IDF_EXPORT" >/dev/null 2>&1
 elif ! command -v idf.py >/dev/null 2>&1; then
+    [ -d "/opt/homebrew/opt/python@3.11/libexec/bin" ] && export PATH="/opt/homebrew/opt/python@3.11/libexec/bin:$PATH"
     for d in "$HOME/.espressif/esp-idf-v6.0.3" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
         [ -n "$d" ] && [ -f "$d/export.sh" ] && { . "$d/export.sh" >/dev/null 2>&1; break; }
     done

@@ -114,6 +114,7 @@ BOARDS = {
     "Seeed XIAO ESP32-S3 1.47 Touch Display": "xiao147",
     "M5Stack CoreS3": "cores3",
     "M5Stack CoreS3 Lite": "cores3lite",
+    "M5Stack Stack-Chan": "stackchan",
     "M5Stack Core2": "core2",
     "Freenove FNK0104B": "fnk0104b",
     "Guition JC3248W535": "jc3248w535",
