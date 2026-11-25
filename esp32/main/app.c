@@ -76,6 +76,7 @@
 #include "link_pairing.h"
 #include "bug_report.h"
 #include "diagnostic_log.h"
+#include "error_report.h"
 #if CONFIG_HOMEHUB_VOICE
 #include "voice.h"
 #endif
@@ -1574,6 +1575,11 @@ static bool reset_setup_with_gate_held(const char *source,
         ble_server_send_status("error_storage");
         return false;
     }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+    // A factory reset forgets everything, and the device may change hands.
+    // The wipe has stopped the control task, so nothing is sending it.
+    if (scope == SETUP_RESET_FORGET_WIFI) error_report_discard();
+#endif
     finish_setup_reset_with_gate_held();
     return true;
 }

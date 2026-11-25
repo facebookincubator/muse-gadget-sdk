@@ -33,6 +33,10 @@ void error_report_init(void);
 char *error_report_pending_json(void);
 void error_report_mark_sent(void);
 
+// Drops a queued report unsent. A factory reset calls it, since the device may
+// change hands; nothing may be sending the report at the time.
+void error_report_discard(void);
+
 // Panic-handler entry: stores into retained RAM without locking, logging or
 // allocating. `address` is the faulting instruction and `return_address` the
 // return-address register at the fault; either may be NULL when unknown.

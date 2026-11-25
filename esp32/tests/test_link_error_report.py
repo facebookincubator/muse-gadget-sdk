@@ -15,6 +15,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -149,6 +150,25 @@ class LinkErrorReportHarnessTest(unittest.TestCase):
         self.assertEqual(replaced["consecutive_count"], 1)
         self.assertEqual(replaced["fault"],
                          {"address": "0x42004000", "cause": "Illegal instruction"})
+
+
+class LinkErrorReportResetTest(unittest.TestCase):
+    def test_factory_reset_drops_a_waiting_report(self) -> None:
+        source = (ROOT / "main" / "app.c").read_text()
+        start = source.index("static bool reset_setup_with_gate_held(")
+        body = source[start : source.index("\n}\n", start)]
+        # After the wipe, which stops the control task, and only for a reset
+        # that forgets everything: one that keeps something (an unpair keeps
+        # Wi-Fi) leaves the device with its owner.
+        drop = re.search(
+            r"#if CONFIG_HOMEHUB_ERROR_REPORT\n(?:\s*//.*\n)*"
+            r"\s*if \(scope == SETUP_RESET_(?!KEEP_)[A-Z_]+\) error_report_discard\(\);\n"
+            r"#endif\n",
+            body,
+        )
+        self.assertIsNotNone(drop, body)
+        self.assertLess(body.index("setup_wipe_to_clean(scope)"), drop.start())
+        self.assertLess(drop.end(), body.index("finish_setup_reset_with_gate_held()"))
 
 
 if __name__ == "__main__":
