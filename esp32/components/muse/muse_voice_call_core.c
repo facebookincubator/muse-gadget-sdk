@@ -1156,6 +1156,25 @@ static bool gate_add(muse_vc_reply_gate_t *g, const char *id, uint8_t state)
     return true;
 }
 
+/* Hands-free calls admit greetings and untagged legacy PCM. Once a new
+ * provider reply speaks, late packets from its predecessor cannot interleave. */
+bool muse_vc_hands_free_audio(muse_vc_reply_gate_t *g, muse_vc_span_t raw, bool audible)
+{
+    if (!raw.n) return true;
+    char id[MUSE_VC_TURN_ID_MAX];
+    if (!take_id(raw, id, sizeof(id))) return false;
+    muse_vc_gate_id_t *known = gate_find(g, id);
+    if (known) return known->state == GATE_PLAYING;
+    if (!audible) return true;
+    if (g->n_ids == MUSE_VC_GATE_IDS) {
+        /* The call can outlive the history. Evict the oldest retired id. */
+        memmove(g->ids, g->ids + 1, (g->n_ids - 1) * sizeof(g->ids[0]));
+        --g->n_ids;
+    }
+    gate_set(g, GATE_PLAYING, GATE_STALE);
+    return gate_add(g, id, GATE_PLAYING);
+}
+
 muse_vc_gate_verdict_t muse_vc_reply_gate_audio(muse_vc_reply_gate_t *g, const muse_vc_event_t *ev)
 {
     char id[MUSE_VC_TURN_ID_MAX];

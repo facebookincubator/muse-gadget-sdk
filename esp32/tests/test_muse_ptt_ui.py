@@ -384,6 +384,9 @@ class StopWatchPTT(unittest.TestCase):
     def test_consumer_plays_three_seconds_before_delayed_stop_ended_event(self):
         self.run_case('voice', 41)
 
+    def test_hands_free_transcript_starts_speaking_before_audio(self):
+        self.run_case('voice', 49)
+
     def test_hands_free_working_keeps_the_mic_open(self):
         self.run_case('voice', 42)
 

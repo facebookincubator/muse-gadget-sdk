@@ -320,6 +320,9 @@ size_t muse_voice_call_read(int16_t *p,size_t n,bool *flushed) {
     }
     return 0;
 }
+size_t muse_voice_call_read_paced(int16_t *p,size_t n,bool *flushed) {
+    return muse_voice_call_read(p,n,flushed);
+}
 muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     if (!ready_event && frame>=2) { ready_event=true; return MUSE_VOICE_CALL_EV_READY; }
     if(scenario==41) {
@@ -330,6 +333,12 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     }
     if (scenario==1 && frame==11 && !hold_event) { hold_event=true; hold_status=true; return MUSE_VOICE_CALL_EV_HOLD; }
     if (scenario==1 && frame==12 && !resume_event) { resume_event=true; hold_status=false; return MUSE_VOICE_CALL_EV_RESUME; }
+    if(scenario==49 && frame==4 && !resume_event) {
+        resume_event=true; snprintf(p,n,"Hi!"); return MUSE_VOICE_CALL_EV_REPLY;
+    }
+    if(scenario==49 && frame==6 && !hold_event) {
+        hold_event=true; snprintf(p,n,"Next"); return MUSE_VOICE_CALL_EV_HEARD;
+    }
     if(scenario==26 && frame==4 && !hold_event) {
         hold_event=true; hold_status=true; return MUSE_VOICE_CALL_EV_HOLD;
     }
@@ -1295,7 +1304,7 @@ int main(int argc,char **argv) {
         assert(!starts && !muse_voice_in_call());
         return 0;
     }
-    run_call(scenario!=5 && scenario!=42, 0);
+    run_call(scenario!=5 && scenario!=42 && scenario!=49, 0);
     assert(starts==1 && !muse_voice_in_call() && !muse_voice_ptt_call());
     assert(level==0 && !allocations && !notes);
     if(scenario==1) {
@@ -1316,6 +1325,10 @@ int main(int argc,char **argv) {
         assert(!ends); /* remote error/end is terminal */
     } else if(scenario==4 || scenario==5 || scenario==7) {
         assert(ends==1);
+    } else if(scenario==49) {
+        assert(views[4]==MUSE_VOICE_VIEW_SPEAKING && views[5]==MUSE_VOICE_VIEW_SPEAKING);
+        assert(!speaker_at[4] && mic_at[4] && mic_at[5]);
+        assert(views[6]==MUSE_VOICE_VIEW_LISTENING);
     } else if(scenario==42) {
         assert(views[3]==MUSE_VOICE_VIEW_LISTENING && views[4]==MUSE_VOICE_VIEW_WORKING);
         assert(views[5]==MUSE_VOICE_VIEW_WORKING && views[6]==MUSE_VOICE_VIEW_LISTENING && ends==1);
