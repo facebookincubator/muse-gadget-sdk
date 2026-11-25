@@ -29,7 +29,7 @@ extern "C" {
 // The tunnel does NOT open its own TLS/WebSocket/Noise connection. It rides
 // the single Noise session owned by noise_control (same /v1/noise connection
 // through the shared LB), as a second ServiceFrame stream (stream_id = 2)
-// carrying a streaming POST /link-tunnel. IP packet batches flow as BodyChunk
+// carrying a streaming POST /api/gadget/tunnel. IP packet batches flow as BodyChunk
 // frames whose body is the tunnel_netif [u16-LE len][packet]... sub-framing.
 // Noise message boundaries delimit batches, so there is no outer u32 envelope.
 //
@@ -57,6 +57,12 @@ void noise_tunnel_abort_batch(uint8_t *buf);
 
 // True once the tunnel stream is open on the live Noise session.
 bool noise_tunnel_is_connected(void);
+
+// Register a callback run (from the session task) each time a tunnel stream
+// is about to go live, before any of its packets: whatever the previous
+// stream left behind can be cleared there, even when the stream was reopened
+// within one status check.
+void noise_tunnel_set_open_cb(void (*cb)(void));
 
 #ifdef __cplusplus
 }

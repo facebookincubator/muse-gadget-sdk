@@ -415,8 +415,8 @@ def test_voice_only_transport_preserves_running_service_for_same_identity():
                     await voice_session.wait_registered()
                 call = VoiceCall(voice_session, device_id=service._device.node_id)
                 task = asyncio.create_task(call.run(source(TONE), Output()))
-                # The very first request is voice admission, never link-control
-                # or link.register (which would steal the service's live slot).
+                # The very first request is voice admission, never the control
+                # stream or link.register (which would steal the service's live slot).
                 media, start = await admit(voice_vm, device_id=service._device.node_id)
                 await next_event(voice_vm)
                 await next_event(voice_vm)

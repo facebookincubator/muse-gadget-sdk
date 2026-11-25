@@ -43,7 +43,9 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #include "sdk_token_console.h"
+#endif
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
@@ -68,6 +70,7 @@
 #include "led_status.h"
 #include "button.h"
 #include "tunnel_netif.h"
+#include "tunnel_relay.h"
 #include "net_discovery.h"
 #include "ota.h"
 #include "link_pairing.h"
@@ -1295,6 +1298,26 @@ static bool start_wifi_join_ota_if_requested(const char *url, bool force,
     return true;
 }
 
+// Save and apply the endpoints setup sent. on_provision calls this only once
+// that setup's credentials are stored, so hosts are saved only with stored
+// credentials and refused ones never bring in new hosts. A failure here wipes
+// the credentials and any hosts saved (setup_fail_for_session).
+static bool save_setup_endpoints(const char *api_url, const char *api_url_v2,
+                                 const char *noise_host) {
+    // Only older firmware reads api_url. Keep it current so a device flashed
+    // back to that firmware still reaches the API it was paired with.
+    bool api_saved = api_url && *api_url
+        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
+    bool api_v2_saved = api_url_v2 && *api_url_v2
+        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
+    bool noise_saved = noise_host && *noise_host
+        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
+    if (!api_saved || !api_v2_saved || !noise_saved) return false;
+    vm_api_set_base_url(api_url_v2);
+    noise_ctrl_set_host(noise_host);
+    return true;
+}
+
 static void on_provision(const char *ssid, const char *password,
                          const char *access_token,
                          const char *refresh_token,
@@ -1342,25 +1365,14 @@ static void on_provision(const char *ssid, const char *password,
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 
-    // Only older firmware reads api_url. Keep it current so a device flashed
-    // back to that firmware still reaches the API it was paired with.
-    bool api_saved = api_url && *api_url
-        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
-    bool api_v2_saved = api_url_v2 && *api_url_v2
-        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
-    bool noise_saved = noise_host && *noise_host
-        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
-    if (!api_saved || !api_v2_saved || !noise_saved) {
-        setup_fail_for_session("storage", "error_storage", session_generation);
-        goto done;
-    }
-    vm_api_set_base_url(api_url_v2);
-    noise_ctrl_set_host(noise_host);
-
     if (!require_provisioning_pairing_session(session_generation)) goto done;
     setup_stage_set("auth");
     if (!accept_pairing_credentials(access_token, refresh_token, username)) {
         setup_fail_for_session("auth", "auth_failed", session_generation);
+        goto done;
+    }
+    if (!save_setup_endpoints(api_url, api_url_v2, noise_host)) {
+        setup_fail_for_session("storage", "error_storage", session_generation);
         goto done;
     }
 
@@ -1668,10 +1680,24 @@ typedef struct {
     cJSON *params;
 } discover_task_args_t;
 
+// One scan at a time: a second scan's mDNS socket on 5353 would take the
+// replies meant for the first.
+static atomic_bool s_discover_running = ATOMIC_VAR_INIT(false);
+
+static bool discover_try_begin(void) {
+    return !atomic_exchange_explicit(&s_discover_running, true, memory_order_acq_rel);
+}
+
+static void discover_end(void) {
+    atomic_store_explicit(&s_discover_running, false, memory_order_release);
+}
+
 static void discover_task(void *arg) {
     discover_task_args_t *args = (discover_task_args_t *)arg;
     ESP_LOGI(TAG, "starting network discovery scan");
     cJSON *result = net_discovery_run(args->params);
+    // The scan's sockets are closed: a scan sent once this result arrives can run.
+    discover_end();
     cJSON *wrapper = result ? cJSON_CreateObject() : NULL;
     if (!wrapper || !cJSON_AddBoolToObject(wrapper, "ok", true)
         || !cJSON_AddItemToObject(wrapper, "payload", result)) {
@@ -1695,7 +1721,16 @@ static void discover_task(void *arg) {
     if (args->params) cJSON_Delete(args->params);
     free(args);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
+}
+
+// The scan's 8 KB stack in PSRAM where there is any: in internal RAM it was the
+// largest part of the scan's peak. The task writes no flash.
+static bool start_discover_task(discover_task_args_t *args) {
+    return xTaskCreateWithCaps(discover_task, "discover", 8192, args, 4, NULL,
+                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS
+        || xTaskCreateWithCaps(discover_task, "discover", 8192, args, 4, NULL,
+                               MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) == pdPASS;
 }
 #endif
 
@@ -2018,6 +2053,61 @@ static cJSON *bug_report_command(
 }
 #endif
 
+#if CONFIG_HOMEHUB_NET_FORWARD
+// An integer parameter from lo to hi.
+static bool int_param(cJSON *params, const char *key, int lo, int hi, int *out) {
+    cJSON *item = params ? cJSON_GetObjectItem(params, key) : NULL;
+    if (!cJSON_IsNumber(item) || !(item->valuedouble >= lo && item->valuedouble <= hi)
+        || item->valuedouble != (double)(int)item->valuedouble) {
+        return false;
+    }
+    *out = (int)item->valuedouble;
+    return true;
+}
+
+// net.forward (docs/home-link-network.md): a LAN port of this device to a VM
+// port, for ttl_s seconds.
+static cJSON *net_forward_command(cJSON *params) {
+    cJSON *proto = params ? cJSON_GetObjectItem(params, "proto") : NULL;
+    const char *name = cJSON_IsString(proto) ? proto->valuestring : NULL;
+    if (!name || (strcmp(name, "udp") != 0 && strcmp(name, "tcp") != 0)) {
+        return command_error("invalid_params", "proto must be \"udp\" or \"tcp\"");
+    }
+    int port, to_port, ttl_s;
+    if (!int_param(params, "port", 1, 49151, &port)) {
+        return command_error("invalid_params", "port must be an integer from 1 to 49151");
+    }
+    to_port = port;
+    if (cJSON_GetObjectItem(params, "to_port")
+        && !int_param(params, "to_port", 1, 65535, &to_port)) {
+        return command_error("invalid_params", "to_port must be an integer from 1 to 65535");
+    }
+    if (!int_param(params, "ttl_s", 0, 3600, &ttl_s)) {
+        return command_error("invalid_params", "ttl_s must be an integer from 0 to 3600");
+    }
+    // The whole result first: a forward is never left open behind a failure.
+    cJSON *result = cJSON_CreateObject();
+    cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+    cJSON *left = payload ? cJSON_AddNumberToObject(payload, "expires_in_s", 0) : NULL;
+    if (!cJSON_AddBoolToObject(result, "ok", true) || !left
+        || !cJSON_AddStringToObject(payload, "proto", name)
+        || !cJSON_AddNumberToObject(payload, "port", port)
+        || !cJSON_AddNumberToObject(payload, "to_port", to_port)) {
+        cJSON_Delete(result);
+        return command_error("out_of_memory", "failed to build the result");
+    }
+    const char *error = "failed";
+    int seconds = tunnel_relay_forward(name[0] == 't', (uint16_t)port, (uint16_t)to_port,
+                                       (uint32_t)ttl_s, &error);
+    if (seconds < 0) {
+        cJSON_Delete(result);
+        return command_error("forward_failed", error);
+    }
+    cJSON_SetNumberValue(left, seconds);
+    return result;
+}
+#endif
+
 #if CONFIG_HOMEHUB_BLE_COMMANDS
 // ---- BLE commands' hooks (main/ble_commands.c) ----
 
@@ -2069,7 +2159,13 @@ static cJSON *on_ws_command(
 #endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
-    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+    int gray_levels = 0;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+    if (strcmp(command, "display.draw_gray4_url") == 0) gray_levels = 4;
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (strcmp(command, "display.draw_gray16_url") == 0) gray_levels = 16;
+#endif
+    if (draw_file || gray_levels || strcmp(command, "display.draw_url") == 0) {
         // draw_file takes a path on the VM, fetched over this session.
         cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
@@ -2077,15 +2173,28 @@ static cJSON *on_ws_command(
             return command_error("missing_param",
                                  draw_file ? "path is required" : "url is required");
         }
+        if (gray_levels && row && (!cJSON_IsNumber(row) ||
+                                  row->valuedouble != row->valueint)) {
+            return command_error("invalid_params", "row must be an integer");
+        }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
         int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
-        bool started = draw_file
-            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
-            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        bool started;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        if (gray_levels) {
+            started = image_fetch_start_gray(target->valuestring, top, gray_levels,
+                                             draw_url_done, ctx, &code, &message);
+        } else
+#endif
+        {
+            started = draw_file
+                ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+                : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        }
         if (!started) {
             free(ctx);
             return command_error(code, message);
@@ -2153,17 +2262,27 @@ static cJSON *on_ws_command(
         return bug_report_command(request_id, session_generation);
     }
 #endif
+#if CONFIG_HOMEHUB_NET_FORWARD
+    if (strcmp(command, "net.forward") == 0) {
+        return net_forward_command(params);
+    }
+#endif
 #if CONFIG_HOMEHUB_TUNNEL
     if (strcmp(command, "device.discover") == 0) {
+        if (!discover_try_begin())
+            return command_error("busy", "a network scan is already running");
         discover_task_args_t *args = calloc(1, sizeof(*args));
-        if (!args) return command_error("out_of_memory", "failed to allocate");
+        if (!args) {
+            discover_end();
+            return command_error("out_of_memory", "failed to allocate");
+        }
         args->session_generation = session_generation;
         strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
         args->params = params ? cJSON_Duplicate(params, 1) : NULL;
-        if (xTaskCreate(discover_task, "discover", 8192, args, 4, NULL)
-            != pdPASS) {
+        if (!start_discover_task(args)) {
             if (args->params) cJSON_Delete(args->params);
             free(args);
+            discover_end();
             return command_error("out_of_memory", "failed to start task");
         }
         cJSON *async = cJSON_CreateObject();
@@ -2901,7 +3020,7 @@ void app_run(void) {
     link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
-#if !CONFIG_MUSE_ENABLED
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE && !CONFIG_MUSE_ENABLED
     // Muse boards' own console takes the command (muse_glue_start).
     sdk_token_console_start();
 #endif

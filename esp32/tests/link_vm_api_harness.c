@@ -665,10 +665,13 @@ static void test_set_base_url_changes_fetch_target(void) {
         const char *base;
     } cases[] = {
         {"https://api.muse.ai", "https://api.muse.ai"},
-        {"https://custom-api.example.com", "https://custom-api.example.com"},
+        {"https://hatch-api.meta.ai", "https://hatch-api.meta.ai"},
         {NULL, "https://api.muse.ai"},
-        {"https://custom-api.example.com", "https://custom-api.example.com"},
+        {"https://hatch-api.meta.ai", "https://hatch-api.meta.ai"},
         {"", "https://api.muse.ai"},
+        // A base this build doesn't allow (muse_server_hosts.h) gets the default.
+        {"https://custom-api.example.com", "https://api.muse.ai"},
+        {"https://api.muse.ai.example.com", "https://api.muse.ai"},
     };
     const char *paths[] = {
         "/fetch_vms", "/device_token/mint",

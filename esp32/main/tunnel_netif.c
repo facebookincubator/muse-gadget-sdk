@@ -35,6 +35,7 @@
 #include "lwip/lwip_napt.h"
 
 #include "noise_tunnel.h"
+#include "tunnel_relay.h"
 
 static const char *TAG = "link.tun";
 
@@ -226,7 +227,9 @@ static err_t tunnel_netif_init_cb(struct netif *netif) {
 // boundaries delimit batches, so there is no outer envelope to strip). We
 // must own a pbuf the stack can free; copy each packet into its own.
 // PBUF_LINK (not PBUF_RAW) so lwIP can prepend a 14-byte Ethernet header
-// when forwarding through the WiFi STA.
+// when forwarding through the WiFi STA. The relay first takes the UDP lwIP
+// can't forward (broadcast, multicast, sends from a relay port) and drops
+// packets not from the VM.
 static void on_tunnel_packet(const uint8_t *data, size_t len) {
     if (!s_started || len == 0) return;
 
@@ -238,6 +241,10 @@ static void on_tunnel_packet(const uint8_t *data, size_t len) {
             ESP_LOGW(TAG, "rx malformed frame: off=%u plen=%u total=%u",
                      (unsigned)off, plen, (unsigned)len);
             return;
+        }
+        if (!tunnel_relay_from_vm(&data[off], plen)) {
+            off += plen;
+            continue;
         }
 
         struct pbuf *p = pbuf_alloc(PBUF_LINK, plen, PBUF_POOL);
@@ -344,6 +351,8 @@ bool tunnel_netif_start(const ip4_addr_t *ip,
     // Link starts down. Caller raises it via tunnel_netif_set_link(true)
     // once the WS transport is ready.
 
+    tunnel_relay_init(&s_netif, gw);
+    noise_tunnel_set_open_cb(tunnel_relay_reset);   // relay ports and forwards belong to one stream
     noise_tunnel_set_packet_cb(on_tunnel_packet);
     s_started = true;
     ESP_LOGI(TAG, "tunnel netif up: ip=%s mtu=%d idx=%u",
@@ -357,6 +366,7 @@ void tunnel_netif_set_link(bool up) {
         netifapi_netif_set_link_up(&s_netif);
     } else {
         netifapi_netif_set_link_down(&s_netif);
+        tunnel_relay_reset();   // relay ports and forwards end with the tunnel
     }
 }
 

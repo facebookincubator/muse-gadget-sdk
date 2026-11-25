@@ -22,7 +22,7 @@ void net_discovery_init(void);
 
 // Run network discovery probes. Blocking — call from a FreeRTOS task.
 // params (may be NULL):
-//   sources: ["arp","mdns","ssdp","wsd","snmp","netbios"] — default all
+//   sources: ["arp","mdns","ssdp","wsd","snmp","netbios","vendor"] — default all
 // Result sources contains reports for requested probes. found counts emitted
 // observations; listen_ms is the configured window, not elapsed time. complete
 // is false on a count/size/sweep limit or source error, not on normal timeout.

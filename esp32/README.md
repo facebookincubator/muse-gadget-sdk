@@ -217,15 +217,18 @@ The encrypted BLE `provision_v2` object optionally accepts the same `proxy`
 object. An absent field preserves the saved setting for that SSID; an explicit
 `{"type":"off"}` clears it. Invalid fields produce `error_invalid_proxy` before
 Wi-Fi or credentials change. The Muse phone app needs its own change to send
-this field.
+this field. An `api_url`, `api_url_v2` or `noise_host` other than the Muse
+app's produces `error_invalid_host`, also before anything changes, unless the
+build sets `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS` (development only).
 
 Link's WSS channel, the full UI's Noise channel and cloud API token/VM requests
 use the proxy. HTTP CONNECT and SOCKS5 negotiate a TCP tunnel before TLS;
 cloud hostname and certificate verification remain enabled. SOCKS5 resolves
 cloud hostnames at the proxy. A refused or unreachable proxy fails the
 connection. LAN tunnel/discovery traffic keeps its existing direct sockets;
-cloud endpoint overrides using loopback/private IP literals, single-label names,
-`localhost` or `.local` names also connect directly.
+with `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS`, cloud endpoint overrides using
+loopback/private IP literals, single-label names, `localhost` or `.local` names
+also connect directly.
 
 Proxy credentials share the remembered network's NVS storage and reset/forget
 lifecycle. Firmware predating proxy support ignores the added fields; rewriting
@@ -614,8 +617,10 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- [`main/uc8179_gray4_lut.h`](main/uc8179_gray4_lut.h) adapts the Seeed_GFX2
+  UC8179 four-gray waveforms and retains the MIT license and copyright notice.
 - [`main/epd_it8951.c`](main/epd_it8951.c), the reTerminal E1003 IT8951
-  driver with command framing and one-bit mode adapted from Seeed_GFX2, is
+  driver with command framing and one-bit and four-bit modes adapted from Seeed_GFX2, is
   MIT and retains the source's copyright and license notice.
 - The SSD1681 initialization sequence and waveform LUT in
   [`main/epd_ssd1681.c`](main/epd_ssd1681.c), the Waveshare 1.54" V2

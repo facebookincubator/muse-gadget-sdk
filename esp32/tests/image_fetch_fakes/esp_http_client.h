@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef int esp_err_t;
+#include "esp_err.h"
 
 #define ESP_OK 0
 #define ESP_FAIL -1

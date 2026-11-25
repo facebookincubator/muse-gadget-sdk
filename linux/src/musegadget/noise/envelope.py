@@ -43,6 +43,8 @@ class ServiceType(IntEnum):
     SERVICE_SENTINEL = 1
     SERVICE_VAULT = 2
     SERVICE_AUTHD = 3
+    # The VM's Gadget API, the surface meant for device credentials.
+    SERVICE_GADGET = 6
 
 
 class ResetCode(IntEnum):

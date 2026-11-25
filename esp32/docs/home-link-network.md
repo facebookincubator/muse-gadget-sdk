@@ -1,0 +1,226 @@
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+# Home Link network: UDP, forwards and the LAN address
+
+What the VM sees from a Home Link with `CONFIG_HOMEHUB_TUNNEL`. The tunnel is
+the raw L3 stream on the Noise session: the VM is 10.42.0.2, the device
+10.42.0.1/24, IPv4 only. `main/tunnel_netif.c` carries the packets and
+`main/tunnel_relay.c` does everything below that lwIP's NAPT doesn't.
+
+## Tunnel input
+
+- The device takes only packets whose source is 10.42.0.2 and drops the rest.
+- TCP, ICMP and unicast UDP go through lwIP's NAPT to the LAN and the
+  internet, as before, except UDP from a relay port's source port to a LAN
+  host and TCP from a TCP forward's `to_port` (below).
+
+## Unicast UDP
+
+NAPT keeps an idle UDP mapping for `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S` seconds
+(default 120, 120 to 3600; lwIP's own default is 2). NAPT has 512 entries for
+TCP, UDP and ICMP together; when it's full, a new mapping replaces the least
+recently used one, which can be a quiet TCP connection. A reply gets back only
+from the address and port the VM last sent to from that source port, so use
+one source port per peer. Mappings aren't tied to the
+session: one that's still alive when the session ends (TCP's last 30 minutes)
+carries on for the next session's VM until it expires.
+
+ESP-IDF's NAPT rewrites a packet to the station before lwIP checks that its
+TCP, UDP or ICMP header is there, so the device drops a packet to the station
+whose header isn't whole before NAPT sees it, a fragment included (a trailing
+fragment shorter than the header too). It also drops a packet from the LAN
+addressed to the tunnel's subnet (10.42.0.0/24; the station's own address
+passes even on a LAN that overlaps it), which lwIP would otherwise route to
+the VM with whatever source it claims; replies to the VM's own flows arrive
+addressed to the station and still pass. And it keeps TCP forwards (below) to
+devices on the home network. The checks are compiled into lwIP on ESP-IDF
+v6.0.x; on another version the build warns, and NAPT keeps idle UDP for
+lwIP's 2 s, since a live mapping is what lets a short packet reach the
+rewrite.
+
+## Broadcast and multicast
+
+The VM sends UDP to 255.255.255.255, to the LAN's broadcast address (such as
+192.168.7.255 on a /22), or to a group in 224.0.0.0/4. lwIP doesn't forward
+these, so the device sends the payload itself:
+
+- from a relay port: the VM's source port when that port is free on the
+  device and outside NAPT's mapped ports (49152 to 61439), otherwise one of
+  the device's own from 61440 up;
+- to the same address and port (255.255.255.255 is the LAN's limited
+  broadcast), with multicast TTL 1. Multicast with TTL 0 is dropped.
+
+DHCP stays the home network's own: a broadcast or multicast to or from port 67
+or 68 is dropped, and unicast on those ports goes through NAPT. Packets for
+the tunnel's subnet (10.42.0.0/24) stay with lwIP, even on a LAN that overlaps
+it.
+
+A relay port lives for 120 s after the VM's last send through it, and every
+relay port closes when the tunnel goes down or a new tunnel stream opens.
+While it lives:
+
+- the device stays joined to every multicast group the VM sent to from that
+  port (up to 4 per relay port; a join that fails for lack of memory is
+  logged, and replies to that group aren't heard);
+- every datagram that reaches the relay port from a host on the station's
+  subnet (unicast replies, or traffic to its joined groups or to broadcast)
+  goes to the VM as `src = <LAN sender ip:port>`,
+  `dst = 10.42.0.2:<VM source port>`. Anything from another source (the
+  station itself, the tunnel's addresses, a routed address) is dropped;
+- unicast datagrams the VM sends from that source port to a host on the LAN
+  (the station's subnet) go out through the relay port too, so the LAN sees
+  the relay port, not a NAPT port. Unicast elsewhere still goes through NAPT.
+
+Relay ports and UDP forwards share 16 slots. When they are full, a new relay
+port or forward replaces the relay port the VM used least recently; a forward
+is never replaced. Fragmented broadcasts and multicasts are dropped,
+and a fragmented unicast datagram goes through NAPT even from a relay port's
+source port. A LAN datagram larger than the tunnel's 1280-byte MTU reaches the
+VM in IP fragments.
+
+## `net.forward`
+
+A link command, listed in `link.register`'s `commands_v2` (its presence is
+the capability). It's on in every tunnel build (`CONFIG_HOMEHUB_NET_FORWARD`,
+default on); a build with it off neither lists nor accepts it.
+
+```json
+{"proto": "udp", "port": 4002, "to_port": 4002, "ttl_s": 600}
+```
+
+| Parameter | |
+|---|---|
+| `proto` | `"udp"` or `"tcp"`, required |
+| `port` | the device's LAN port, 1 to 49151, required |
+| `to_port` | the VM's port on 10.42.0.2; default `port` |
+| `ttl_s` | seconds, 0 to 3600, required; 0 closes the forward |
+
+The result's payload is `{"proto", "port", "to_port", "expires_in_s"}`; a
+failure is `ok: false` with `error.message` saying why.
+
+- **UDP:** the device binds `port` on the LAN and delivers each datagram,
+  unicast or broadcast, from a host on the station's subnet to
+  `10.42.0.2:to_port` with its LAN source. The VM's datagrams from
+  `10.42.0.2:to_port` to a LAN host leave from `device:port`. A forward and a
+  relay port are the same thing with a different deadline, and the VM's
+  replies don't extend a forward. A broadcast or multicast the VM sends from
+  `to_port` makes it a relay port as well: it then also lives until 120 s
+  after the VM's last send, and its `to_port` can't change meanwhile.
+- **TCP:** lwIP's NAPT port map sends connections to `device:port` on to
+  `10.42.0.2:to_port`; the VM sees the LAN source address and port. Like a
+  UDP forward, it's for devices on the home network: the input check (above)
+  drops TCP to the forwarded port from anywhere but a host on the station's
+  subnet outside the tunnel's (another subnet, a VPN or routed address, the
+  internet through a router's port forward, a spoofed tunnel address).
+  While it lasts, any TCP the VM sends from `10.42.0.2:to_port`, to any
+  destination, leaves as `device:port`, so pick a `to_port` the VM doesn't
+  use for its own connections (outside its ephemeral range).
+  TCP forwards need the NAPT input check (Unicast UDP, above): a build without
+  it refuses them. Closing a TCP forward, letting it expire or changing its
+  `to_port` resets the LAN side of its open connections, but the VM's side
+  gets no reset (its segments are dropped), so close those connections on the
+  VM too. Renew a forward before `ttl_s` runs out.
+- Calling again renews it with the new `ttl_s` (and may change `to_port`).
+  `ttl_s` 0 closes it at once (relay port included) and answers `ok` even if
+  there was none.
+- Every forward closes when the tunnel goes down, and when a new tunnel
+  stream opens: request them again once it is back.
+- A forwarded port is the forward's until it closes: a device service that
+  starts on it meanwhile can't bind it, and forwarding one of the ports
+  `device.discover`'s vendor source listens on keeps that protocol out of
+  its scans.
+
+It is refused while the tunnel is down (including the few seconds after a new
+tunnel stream opens, before the device brings the tunnel's link up: try
+again) or the device has no LAN address; for
+ports 49152 and up (the device's own ephemeral ports and NAPT's); for UDP on
+DHCP's ports (67 or 68, as `port` or `to_port`); for a TCP or UDP port a
+device socket holds; when `to_port` already relays (UDP) or forwards (TCP)
+another device port; and beyond 8 TCP forwards or 16 UDP forwards.
+
+## The LAN address
+
+`link.register`'s `metadata` carries `"lan_ipv4"` (dotted quad) and
+`"lan_prefix"` (prefix length), both strings because the VM keeps only string
+metadata; neither is sent without a station address. A new station address
+aborts the session's TCP connection, so the next session registers the new
+one, and its forwards are gone with the tunnel.
+
+## `device.discover`'s vendor source
+
+`"vendor"` joins the other sources (in `sources`, and in the default of all
+of them). For 6 s after the other sources it listens, sending each vendor's
+read-only discovery packet at the start and again 1.5 s in:
+
+| `protocol` | Sends | Fields |
+|---|---|---|
+| `kasa` | XOR `get_sysinfo`, broadcast to 9999 | `model`, `name`, `mac` |
+| `tplink` | TP-Link discovery, broadcast to 20002 | `model`, `type`, `mac`, `encryption` |
+| `govee` | `scan` to 239.255.255.250:4001, answered on 4002 | `model` (SKU), `id` |
+| `miio` | hello, broadcast to 54321 | `id` (device id) |
+| `wiz` | `getPilot`, broadcast to 38899 | `mac` |
+| `lifx` | GetService, broadcast to 56700 | `mac` |
+| `yeelight` | M-SEARCH to 239.255.255.250:1982 | `model`, `id`, `name` |
+| `cs2` | CS2/PPPP LAN search, broadcast to 32108 | `id_prefix` |
+| `tuya` | nothing: hears broadcasts on 6666, 6667 and 7000 | on 6666: `id`, `model` (product key), `version` |
+| `bambu` | nothing: hears broadcasts on 2021 | `model`, `name` |
+
+Each observation is `{"source": "vendor", "protocol", "ip", "port", ...fields}`,
+once per device and protocol; `port` is the device's port for the protocol
+(the one a heard broadcast went to). Up to 128 observations, inside the
+result's 256 KiB budget. Tuya's 6667 and 7000 broadcasts are encrypted and
+reported by port alone: a `net.forward` of UDP 6667 brings them to the VM
+whole. An answer counts only when it carries its protocol's
+fields (Tuya's encrypted broadcasts: its frame), so other traffic on these
+ports is ignored. Kasa's location, the miIO token field, a camera's serial
+and check code and TP-Link's owner hash are never reported.
+
+While it listens the vendor source holds UDP 4002, 6666, 6667, 7000 and 2021.
+A relay port the VM opens meanwhile from one of those ports gets another port,
+and one already open on them keeps that protocol out of the scan, which then
+reports itself truncated (as it does when any of its listeners can't open).
+Any source, this one included, whose query couldn't be sent reports itself
+truncated too.
+The mDNS source shares 5353 the same way: with a relay port there, the scan's
+mDNS queries go from another port and it still hears unicast answers. While a
+VM relay holds 5353, the scan relies on unicast replies to its own queries.
+One scan runs at a time: a `device.discover` sent while another runs fails
+with "a network scan is already running".
+
+## `device.discover`'s host hints
+
+Once the sources have run, an ARP observation can carry hints worked out from
+the scan's own observations (nothing more is sent):
+
+| Field | When |
+|---|---|
+| `maker: "espressif"` | its MAC is in one of Espressif's IEEE MA-L blocks (OUIs): the host is built on an Espressif chip |
+| `silent: true` | nothing but ARP answered and no scan socket received anything from it (no other source reported its address). Only in a scan in which every source ran and none but ARP was cut short or failed (a host ARP didn't reach has no observation to mark), and not in one that heard from more distinct senders than it keeps (256), had no memory for that list, or held 5353 but couldn't join the mDNS group |
+| `mac_batch` | its MAC shares its first three bytes (the OUI) with another host's, each within 65,536 of the next: likely units of one product bought together, but one host's interfaces (Wi-Fi and Ethernet) or a mesh system's nodes match too, so it's a hint, not proof of separate products. A prefix IEEE splits into smaller blocks (MA-M, MA-S) is shared by several makers, so a batch there can mix them. The value is the lowest MAC of the batch; addresses that share one MAC count as one host |
+
+For a silent Espressif host, nothing but ARP answered and no scan socket
+received anything from it. Such a product
+usually talks only to its maker's cloud: it's reached through the maker's
+account, and a device list there that shows MACs, or serial numbers that end
+in one, tells which host is which. Locally administered MACs (a phone's
+random one) get neither `maker` nor `mac_batch`. The blocks are fixed at build
+time, so a block Espressif registers later gets no `maker`. A hint that doesn't
+fit the result's budget is left out, with the ones after it.
+
+## Not here
+
+IPv6 and Matter: lwIP has no NAT66.

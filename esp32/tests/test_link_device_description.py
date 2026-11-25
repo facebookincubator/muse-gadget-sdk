@@ -146,7 +146,8 @@ class DeviceDescriptionTest(unittest.TestCase):
         family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
         family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
-            "static cJSON *string_param(", "static cJSON *row_params(", "static void add_command(",
+            "static cJSON *string_param(", "static cJSON *integer_param(", "static cJSON *row_params(",
+            "static void add_command(",
             "static void add_register_metadata_string(", "static char *build_register_json(",
         ))
         # Print however large it gets, so the test reports the real size.
@@ -168,6 +169,12 @@ static const char *s_node_id = "{node_id}", *s_display_name = "{display_name}";
 static void copy_wifi_ssid(char *out, size_t size) {{ snprintf(out, size, "%s", s_wifi_ssid); }}
 static void make_uuid(char *out, size_t size) {{ snprintf(out, size, "00000000-0000-4000-8000-000000000000"); }}
 static int bits = 16;
+/* The longest station address the registration can carry. */
+static bool tunnel_relay_lan_address(char *ip, size_t size, int *prefix) {{
+    snprintf(ip, size, "255.255.255.255");
+    *prefix = 32;
+    return true;
+}}
 bool led_status_display_info(int *w, int *h) {{ *w = 800; *h = 480; return true; }}
 int led_status_display_bits(void) {{ return bits; }}
 void ble_commands_register(cJSON *commands);
@@ -191,12 +198,22 @@ int main(void) {{
         return output.splitlines()
 
     def test_register_describes_the_device(self) -> None:
+        model = ['-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"']
         params = json.loads(self.registrations([
-            "-DCONFIG_HOMEHUB_TUNNEL=1",
-            '-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"',
+            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", *model,
         ])[0])["params"]
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
+        # The VM keeps only string metadata values.
+        self.assertEqual(params["metadata"]["lan_ipv4"], "255.255.255.255")
+        self.assertEqual(params["metadata"]["lan_prefix"], "32")
+        forward = params["commands_v2"]["net.forward"]
+        self.assertEqual(set(forward["required"]), {"proto", "port", "ttl_s"})
+        self.assertEqual(set(forward["optional"]), {"to_port"})
+        # Turned off, the tunnel stays and net.forward isn't offered.
+        commands = json.loads(self.registrations(["-DCONFIG_HOMEHUB_TUNNEL=1", *model])[0])["params"]["commands_v2"]
+        self.assertIn("device.discover", commands)
+        self.assertNotIn("net.forward", commands)
         self.assertEqual(params["commands_v2"]["device.guide"],
                          {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
 
@@ -217,12 +234,16 @@ int main(void) {{
             "full UI, P4 camera": ["CONFIG_HOMEHUB_LED_BACKEND_MUSE", "CONFIG_HOMEHUB_DISPLAY_COMMANDS",
                                    "CONFIG_MUSE_P4_CSI_CAMERA"],
             "voice": ["CONFIG_HOMEHUB_VOICE"],
+            "reTerminal E1001": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS",
+                                 "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179"],
+            "reTerminal E1003": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS",
+                                 "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951"],
             "LED matrix": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_LED_MATRIX"],
         }
         model_id, model_name = "z" * 64, "~" * 128
         self.assertTrue(VALID_MODEL_NAME.fullmatch(model_name))
         common = [
-            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
+            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", "-DCONFIG_HOMEHUB_BLE_COMMANDS=1",
             f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"',
         ]
         for profile, options in profiles.items():
@@ -235,7 +256,16 @@ int main(void) {{
                     self.assertEqual((params["model_id"], params["metadata"]["model_name"]), (model_id, model_name))
                     self.assertEqual(params["metadata"]["network_ssid"], '"' * 32)
                     self.assertIn("device.guide", params["commands_v2"])
-                    self.assertIn("ble.subscribe", params["commands_v2"])
+                    commands = params["commands_v2"]
+                    self.assertIn("ble.subscribe", commands)
+                    for board, name in (
+                        ("reTerminal E1001", "display.draw_gray4_url"),
+                        ("reTerminal E1003", "display.draw_gray16_url"),
+                    ):
+                        self.assertEqual(name in commands, profile == board)
+                        if profile == board:
+                            self.assertEqual(set(commands[name]["required"]), {"url"})
+                            self.assertEqual(set(commands[name]["optional"]), {"row"})
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 # cJSON_PrintPreallocated asks for 5 bytes beyond the output.
@@ -247,7 +277,7 @@ int main(void) {{
         kconfig = (ROOT / "components/muse_apps/Kconfig").read_text()
         self.assertIn("depends on !HOMEHUB_BLE_COMMANDS", kconfig)
         model_id, model_name = "z" * 64, "~" * 128
-        common = ["-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_LED_BACKEND_MUSE=1",
+        common = ["-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", "-DCONFIG_HOMEHUB_LED_BACKEND_MUSE=1",
                   "-DCONFIG_HOMEHUB_DISPLAY_COMMANDS=1",
                   f'-DCONFIG_MUSE_DEVICE_MODEL_ID="{model_id}"', f'-DCONFIG_MUSE_DEVICE_MODEL_NAME="{model_name}"']
         for profile, options in {"full UI, apps": ["CONFIG_MUSE_WATCHER_CAMERA"],

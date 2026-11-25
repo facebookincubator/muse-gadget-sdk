@@ -70,6 +70,18 @@ menu "ESP32 Device SDK"
             Builds that intentionally ship without an SDK token turn this
             off.
 
+    config GADGET_SDK_TOKEN_CONSOLE
+        bool "SDK token and Wi-Fi proxy provisioning over the console"
+        default y
+        help
+            Accept sdk_token= and wifi_proxy= setup commands over the serial
+            console. Boards without the Muse UI start UART/USB reader tasks;
+            Muse boards use their existing console. Disable this for products
+            that do not use serial provisioning, avoiding those tasks and
+            their driver buffers. Logging, saved Wi-Fi networks, proxy
+            transport, and token configuration through other paths are
+            unchanged.
+
     config HOMEHUB_WIFI_MIN_MODEM
         bool "Wi-Fi minimum modem power saving at startup"
         default n
@@ -97,6 +109,19 @@ menu "ESP32 Device SDK"
         help
             Password for CONFIG_HOMEHUB_WIFI_SSID. Ignored when the SSID
             override is empty.
+
+    config HOMEHUB_CUSTOM_SERVER_HOSTS
+        bool "Accept any server host (development only)"
+        default n
+        help
+            Pairing names the hosts the device sends its account and VM
+            credentials to (api_url, api_url_v2 and noise_host), and so does
+            the Muse host setting on boards with the full UI. Without this
+            option the device takes only the Muse app's own
+            (components/muse/muse_server_hosts.h): it refuses another and
+            uses the default in place of another it has saved. Turn it on
+            only to point a development build at your own servers; never
+            ship it.
 
     config HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS
         int "Proactive device token refresh interval (days, 0 = disabled)"
@@ -147,7 +172,7 @@ menu "ESP32 Device SDK"
         bool "Show the agent's name on the display"
         default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306
         help
-            After the device registers, fetch GET /identity over the Noise
+            After the device registers, fetch GET /api/gadget/me over the Noise
             session and show the agent's name on the status display. Only
             display backends (and the C3's text OLED) can show it, so it is
             off for LED-only builds.
@@ -156,12 +181,37 @@ menu "ESP32 Device SDK"
         bool "Enable the home-network tunnel and network discovery"
         default y
         help
-            Open the /link-tunnel data-plane stream on the Noise session, bring
+            Open the /api/gadget/tunnel data-plane stream on the Noise session, bring
             up the NAPT tunnel netif, and accept device.discover. Together they
             need roughly 60 KB of internal RAM beyond the control session, plus
             up to 256 KB for discovery results, so boards without PSRAM (e.g.
             the classic ESP32) should disable this. The control API to the VM
             keeps working; the status turns green once the control session is up.
+
+    config HOMEHUB_TUNNEL_UDP_IDLE_S
+        int "Seconds an idle UDP flow keeps its NAPT mapping"
+        depends on HOMEHUB_TUNNEL
+        range 120 3600
+        default 120
+        help
+            How long lwIP's NAPT keeps a UDP mapping from the VM to the LAN
+            after its last datagram. lwIP's own default is 2 s, too short for
+            replies that come a few seconds later and for protocols that keep
+            a flow quiet between polls. Each mapping takes one of NAPT's 512
+            entries until it expires; when they're all taken, a new mapping
+            replaces the least recently used one, TCP included. Applied on
+            ESP-IDF v6.0.x with the NAPT input check, where it was checked;
+            otherwise the build warns and NAPT keeps 2 s.
+
+    config HOMEHUB_NET_FORWARD
+        bool "Let the VM open LAN ports to itself (net.forward)"
+        depends on HOMEHUB_TUNNEL
+        default y
+        help
+            Accept net.forward: the VM opens one of this device's LAN ports
+            (UDP or TCP, 1 to 49151) to itself for up to an hour per call, so
+            devices on the home network can connect to it. With this off, the
+            tunnel carries only connections the VM opens.
 
     config HOMEHUB_SETUP_TASKS_IN_PSRAM
         bool "Put the setup tasks' stacks in PSRAM"
@@ -252,6 +302,25 @@ menu "ESP32 Device SDK"
             throughput beside Wi-Fi: writes without response are counted
             and dropped, and writing a 4-byte little-endian count to it makes
             the device notify that many bytes back. Bench builds only.
+
+    config HOMEHUB_DMA_RESERVE_KB
+        int "Internal RAM kept for DMA and internal-only allocations (KB)"
+        depends on SPIRAM_USE_MALLOC && !IDF_TARGET_ESP32
+        range 0 128
+        default 64
+        help
+            Set aside before app_main as a heap of its own (main/main.c).
+            malloc() never takes from it and falls back to other internal RAM
+            and PSRAM instead: only requests that name their caps (DMA,
+            internal, 8-bit or 32-bit) do, such as AES DMA buffers and task
+            stacks. This replaces ESP-IDF's
+            CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL, which must stay 0: from
+            ESP-IDF v6.0.3 that pool also serves malloc(), and
+            heap_caps_get_minimum_free_size() counts it as empty from boot.
+            The classic ESP32 keeps ESP-IDF's reserve instead
+            (sdkconfig.defaults.esp32): its startup stacks hold the top
+            128 KB of internal RAM until main_task starts, after this
+            reserve is taken.
 
     config HOMEHUB_FAST_GCM
         bool "Faster AES-GCM GHASH (chips without a GCM engine)"
@@ -367,7 +436,8 @@ menu "ESP32 Device SDK"
             request gets a stream of its own; a refused or reset one
             doesn't touch Link's control stream. Muse's own boards, and
             boards with display.draw_file, always have it. Costs a few KB
-            of flash and a small queue in RAM.
+            of flash and a small queue in RAM, and on boards with PSRAM
+            104 KB of it for the session's larger inbound buffers.
 
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"

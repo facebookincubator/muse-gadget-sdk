@@ -72,7 +72,7 @@ void muse_settings_hatch_vm(char out[MUSE_VM_MAX + 1]) { (void)out; abort(); }
 int muse_settings_mic_gain(void) { return 30; }
 void muse_settings_set_ble_on(bool v) { (void)v; abort(); }
 void muse_settings_set_brightness(int v) { (void)v; abort(); }
-void muse_settings_set_hatch_host(const char *s) { (void)s; abort(); }
+bool muse_settings_set_hatch_host(const char *s) { (void)s; abort(); }
 esp_err_t muse_settings_set_hatch_token(const char *s, bool v) { (void)s; (void)v; abort(); }
 void muse_settings_set_hatch_vm(const char *s) { (void)s; abort(); }
 void muse_settings_set_mic_gain(int v) { (void)v; abort(); }

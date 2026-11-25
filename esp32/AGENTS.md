@@ -494,7 +494,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
 `components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
-`main/epd_it8951.c` (MIT, Seeed_GFX2),
+`main/epd_it8951.c` and `main/uc8179_gray4_lut.h` (MIT, Seeed_GFX2),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
 Each third-party file is listed under License in `README.md` and the root
@@ -669,6 +669,10 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   what reliably ends a call there.
 
 ## Requests to Muse's VM from your code
+
+Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
+(`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
+`/api/gadget/me`). The requests below go to the VM's daemon.
 
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
@@ -847,13 +851,17 @@ For app authoring and the guide to send Muse, see
   running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
   Other chips keep 16 KiB windows in internal RAM;
   `cmake/validate_config.cmake` enforces both.
+- `sdkconfig.defaults.esp32` keeps ESP-IDF's 64 KB internal DMA reserve on
+  the classic ESP32, which isn't offered `CONFIG_HOMEHUB_DMA_RESERVE_KB`.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
   delete the generated `sdkconfig` (or the whole build directory) and rebuild.
   `cmake/validate_config.cmake` stops the build if a stale config has the old
-  TCP buffer sizes or cJSON nesting limit, and warns if it still has the full
-  root CA bundle.
+  TCP buffer sizes, the old cJSON nesting limit or ESP-IDF's internal DMA
+  reserve (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`) on alongside
+  `CONFIG_HOMEHUB_DMA_RESERVE_KB`, and warns if it still has the full root CA
+  bundle.
 - HTTPS trusts ESP-IDF's common root CAs only (`sdkconfig.defaults`), with
   cross-signed verification so chains that reach one of them through a
   cross-sign still verify. A server whose chain ends at another root (some
@@ -905,6 +913,21 @@ For app authoring and the guide to send Muse, see
   takes about 19 KB of internal RAM (8-bit GHASH tables and the PSRAM staging
   buffer; see its Kconfig help). Turn it off to compare against IDF's;
   `tests/test_ghash32.py` checks the tables and its failure handling.
+- The tunnel relays broadcast and multicast UDP between the VM and the LAN,
+  takes the VM's `net.forward` (`CONFIG_HOMEHUB_NET_FORWARD`, default on) and
+  reports the station's address in `link.register` (`main/tunnel_relay.c`,
+  `docs/home-link-network.md`, which is the behavior the VM side builds on).
+  NAPT's idle UDP time is
+  `CONFIG_HOMEHUB_TUNNEL_UDP_IDLE_S`, which `main/CMakeLists.txt` compiles
+  into ESP-IDF's lwIP, along with a 64-entry ARP table for `device.discover`
+  (1,296 bytes of internal RAM) and an input hook
+  (`main/lwip_hooks/tunnel_napt_guard.h`) that drops packets too short for
+  NAPT's rewrite, packets from the LAN for the tunnel's subnet, and TCP for a
+  TCP forward from outside the station's subnet. They rely
+  on lwIP's own defaults and the hook's place before NAPT, so they're checked
+  on ESP-IDF v6.0.x only, and the longer UDP time comes only with the hook: on
+  another version the build warns and lwIP keeps its 2 s, its 10 entries and
+  no check.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
@@ -1033,6 +1056,9 @@ Users never see the name Hatch.
   base the app sends during pairing, with bare API paths. They ignore
   `api_url`: only older firmware reads it, and that firmware adds `/hatch/`
   itself. Keep saving it so a device flashed back to older firmware still works.
+  Pairing and the Muse host setting take only the hosts the Muse app sends
+  (`components/muse/muse_server_hosts.h`); `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS`
+  accepts others in development builds.
 - `hatch` stays only where the server or the Muse app depends on it. Don't
   rename these:
   - the VM host `hatch.metaaivm.com`

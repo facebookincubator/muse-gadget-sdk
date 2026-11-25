@@ -103,6 +103,7 @@ class LinkImageFetchHarnessTest(unittest.TestCase):
                 "-DLINK_FAKE_CUSTOM_TASKS",
                 "-DLINK_FAKE_CUSTOM_HEAP_CAPS",
                 f"-DCONFIG_SPIRAM={int(spiram)}",
+                "-DCONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951=1",
                 "-I",
                 str(ROOT / "tests" / "image_fetch_fakes"),
                 "-I",
