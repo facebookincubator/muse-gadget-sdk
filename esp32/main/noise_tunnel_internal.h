@@ -53,7 +53,7 @@ extern "C" {
 typedef struct {
     void *ctx;  // opaque, passed back to the callbacks below
 
-    // Open the POST /link-tunnel stream (StartOutboundApplicationRequest +
+    // Open the POST /api/gadget/tunnel stream (StartOutboundApplicationRequest +
     // flush). Returns true on success.
     bool (*open_stream)(void *ctx);
 
@@ -124,7 +124,7 @@ void noise_tunnel_on_session_down(void);
 // included; a longer `why` is cut.
 #define TUNNEL_FAILURE_MAX 72
 
-// The server reset the tunnel stream or refused POST /link-tunnel: mark the
+// The server reset the tunnel stream or refused POST /api/gadget/tunnel: mark the
 // tunnel down (control stays up) and record `why` in the connectivity history.
 void noise_tunnel_on_server_drop(const char *why);
 

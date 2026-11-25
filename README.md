@@ -99,7 +99,8 @@ upstream licenses:
 | [`esp32/components/muse/eink/fonts/unscii.ttf`](esp32/components/muse/eink/fonts) | unscii-8 | Public domain |
 | [`esp32/components/muse/eink/fonts/symbols.ttf`](esp32/components/muse/eink/fonts) | Font Awesome 5 Free, via LVGL v9.5.0 | SIL Open Font License 1.1 (icons CC BY 4.0) |
 | [`esp32/main/epd_ssd1677.c`](esp32/main/epd_ssd1677.c) | Seeed-reTerminal-E10xx-Firmware's SSD1677 refresh sequence | MIT, retained in the file header |
-| [`esp32/main/epd_it8951.c`](esp32/main/epd_it8951.c) | Seeed_GFX2's IT8951 command framing and ED103TC2 one-bit mode | MIT, retained in the file header |
+| [`esp32/main/uc8179_gray4_lut.h`](esp32/main/uc8179_gray4_lut.h) | Seeed_GFX2's UC8179 four-gray waveforms | MIT, retained in the file header |
+| [`esp32/main/epd_it8951.c`](esp32/main/epd_it8951.c) | Seeed_GFX2's IT8951 command framing and ED103TC2 one-bit and four-bit modes | MIT, retained in the file header |
 | SSD1681 initialization sequence and waveform LUT in [`esp32/main/epd_ssd1681.c`](esp32/main/epd_ssd1681.c) | [waveshareteam/ESP32-S3-ePaper-1.54](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54/tree/7bde32a670379d815618cbee374332c2c1a42c6c/02_Example/XiaoZhi)'s XiaoZhi V2 source, 78/xiaozhi-esp32 with Waveshare's board | MIT, see [`xiaozhi-esp32.txt`](esp32/devices/licenses/xiaozhi-esp32.txt) |
 | [`esp32/components/tinyh264/src`](esp32/components/tinyh264) | the Android Open Source Project's H.264 decoder, via [udevbe/tinyh264](https://github.com/udevbe/tinyh264) | Apache-2.0, AOSP's copyright, see [`LICENSE`](esp32/components/tinyh264/LICENSE) |
 | [`esp32/components/libvpx_vp8/src`](esp32/components/libvpx_vp8) | [libvpx](https://chromium.googlesource.com/webm/libvpx) v1.16.0's VP8 decoder, trimmed | BSD-3-Clause, the WebM Project authors' copyright, see [`LICENSE`](esp32/components/libvpx_vp8/LICENSE), with Google's patent grant in [`PATENTS`](esp32/components/libvpx_vp8/PATENTS) |

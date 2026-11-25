@@ -234,6 +234,10 @@ int main(void) {{
             "full UI, P4 camera": ["CONFIG_HOMEHUB_LED_BACKEND_MUSE", "CONFIG_HOMEHUB_DISPLAY_COMMANDS",
                                    "CONFIG_MUSE_P4_CSI_CAMERA"],
             "voice": ["CONFIG_HOMEHUB_VOICE"],
+            "reTerminal E1001": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS",
+                                 "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179"],
+            "reTerminal E1003": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS",
+                                 "CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951"],
             "LED matrix": ["CONFIG_HOMEHUB_DISPLAY_COMMANDS", "CONFIG_HOMEHUB_LED_MATRIX"],
         }
         model_id, model_name = "z" * 64, "~" * 128
@@ -252,7 +256,16 @@ int main(void) {{
                     self.assertEqual((params["model_id"], params["metadata"]["model_name"]), (model_id, model_name))
                     self.assertEqual(params["metadata"]["network_ssid"], '"' * 32)
                     self.assertIn("device.guide", params["commands_v2"])
-                    self.assertIn("ble.subscribe", params["commands_v2"])
+                    commands = params["commands_v2"]
+                    self.assertIn("ble.subscribe", commands)
+                    for board, name in (
+                        ("reTerminal E1001", "display.draw_gray4_url"),
+                        ("reTerminal E1003", "display.draw_gray16_url"),
+                    ):
+                        self.assertEqual(name in commands, profile == board)
+                        if profile == board:
+                            self.assertEqual(set(commands[name]["required"]), {"url"})
+                            self.assertEqual(set(commands[name]["optional"]), {"row"})
                 size = max(len(line) for line in lines)
                 print(f"link.register, {profile}: {size} of {REGISTER_LIMIT} bytes")
                 # cJSON_PrintPreallocated asks for 5 bytes beyond the output.

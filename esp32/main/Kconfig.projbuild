@@ -70,6 +70,18 @@ menu "ESP32 Device SDK"
             Builds that intentionally ship without an SDK token turn this
             off.
 
+    config GADGET_SDK_TOKEN_CONSOLE
+        bool "SDK token and Wi-Fi proxy provisioning over the console"
+        default y
+        help
+            Accept sdk_token= and wifi_proxy= setup commands over the serial
+            console. Boards without the Muse UI start UART/USB reader tasks;
+            Muse boards use their existing console. Disable this for products
+            that do not use serial provisioning, avoiding those tasks and
+            their driver buffers. Logging, saved Wi-Fi networks, proxy
+            transport, and token configuration through other paths are
+            unchanged.
+
     config HOMEHUB_WIFI_MIN_MODEM
         bool "Wi-Fi minimum modem power saving at startup"
         default n
@@ -177,7 +189,7 @@ menu "ESP32 Device SDK"
         bool "Show the agent's name on the display"
         default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306
         help
-            After the device registers, fetch GET /identity over the Noise
+            After the device registers, fetch GET /api/gadget/me over the Noise
             session and show the agent's name on the status display. Only
             display backends (and the C3's text OLED) can show it, so it is
             off for LED-only builds.
@@ -186,7 +198,7 @@ menu "ESP32 Device SDK"
         bool "Enable the home-network tunnel and network discovery"
         default y
         help
-            Open the /link-tunnel data-plane stream on the Noise session, bring
+            Open the /api/gadget/tunnel data-plane stream on the Noise session, bring
             up the NAPT tunnel netif, and accept device.discover. Together they
             need roughly 60 KB of internal RAM beyond the control session, plus
             up to 256 KB for discovery results, so boards without PSRAM (e.g.
@@ -441,7 +453,8 @@ menu "ESP32 Device SDK"
             request gets a stream of its own; a refused or reset one
             doesn't touch Link's control stream. Muse's own boards, and
             boards with display.draw_file, always have it. Costs a few KB
-            of flash and a small queue in RAM.
+            of flash and a small queue in RAM, and on boards with PSRAM
+            104 KB of it for the session's larger inbound buffers.
 
     config HOMEHUB_DEV_BUILD
         bool "Dev build (dev signing key + dev-only affordances)"

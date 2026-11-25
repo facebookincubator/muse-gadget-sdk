@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// The /link-control stream's framing (process_inbound_body_chunk in
+// The control stream's framing (process_inbound_body_chunk in
 // main/noise_control.cpp, sliced in by test_link_control_stream.py): u32-LE
 // prefixed JSON messages cut across BodyChunks anywhere, a message too long
 // to hold skipped whole, and a partial message dropped with its session.

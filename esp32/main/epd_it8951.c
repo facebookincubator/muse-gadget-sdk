@@ -50,6 +50,9 @@
 #define PANEL_H 1404
 #define ROW_BYTES (PANEL_W / 8)
 #define TRANSFER_ROWS 14
+#define GRAY_ROW_BYTES (PANEL_W / 2)
+// Reuse the mono DMA staging buffer, sending fewer rows at a time.
+#define GRAY_TRANSFER_ROWS (TRANSFER_ROWS * ROW_BYTES / GRAY_ROW_BYTES)
 #define SPI_HOST SPI2_HOST
 #define PIN_SCK 7
 #define PIN_MISO 8
@@ -215,6 +218,54 @@ static esp_err_t load_frame(const uint8_t *frame) {
     return err == ESP_OK ? end_err : err;
 }
 
+static void pack_gray16_row(const uint8_t *src, uint8_t *dst) {
+    // Mirror complete 16-bit words, retaining each word's byte order,
+    // as Seeed_GFX2 tconHostAreaPackedPixelWrite does for 4bpp.
+    for (int i = 0; i < GRAY_ROW_BYTES; i += 2) {
+        int from = PANEL_W - 4 - i * 2;
+        uint8_t a = (uint8_t)((src[from] + 8) / 17);
+        uint8_t b = (uint8_t)((src[from + 1] + 8) / 17);
+        uint8_t c = (uint8_t)((src[from + 2] + 8) / 17);
+        uint8_t d = (uint8_t)((src[from + 3] + 8) / 17);
+        dst[i] = (a << 4) | b;
+        dst[i + 1] = (c << 4) | d;
+    }
+}
+
+static esp_err_t load_gray16(const uint8_t *luma) {
+    esp_err_t err = write_reg(REG_LISAR + 2, (uint16_t)(s_image_address >> 16));
+    if (err == ESP_OK) err = write_reg(REG_LISAR, (uint16_t)s_image_address);
+    if (err == ESP_OK) err = command(CMD_LOAD_AREA);
+    const uint16_t args[] = {0x0020, 0, 0, PANEL_W, PANEL_H}; // IT8951 4bpp.
+    for (size_t i = 0; err == ESP_OK && i < sizeof(args) / sizeof(args[0]); ++i)
+        err = data_word(args[i]);
+    if (err != ESP_OK) return err;
+
+    err = spi_device_acquire_bus(s_spi, portMAX_DELAY);
+    if (err != ESP_OK) return err;
+    err = wait_ready(10000);
+    if (err == ESP_OK) err = word(0x0000, NULL, true);
+    if (err == ESP_OK) err = wait_ready(10000);
+    for (int first = 0; err == ESP_OK && first < PANEL_H; first += GRAY_TRANSFER_ROWS) {
+        int rows = PANEL_H - first;
+        if (rows > GRAY_TRANSFER_ROWS) rows = GRAY_TRANSFER_ROWS;
+        for (int r = 0; r < rows; ++r) {
+            const uint8_t *src = luma + (size_t)(first + r) * PANEL_W;
+            uint8_t *dst = s_tx + (size_t)r * GRAY_ROW_BYTES;
+            pack_gray16_row(src, dst);
+        }
+        spi_transaction_t t = {
+            .flags = first + rows == PANEL_H ? 0 : SPI_TRANS_CS_KEEP_ACTIVE,
+            .length = (size_t)rows * GRAY_ROW_BYTES * 8,
+            .tx_buffer = s_tx,
+        };
+        err = spi_device_polling_transmit(s_spi, &t);
+    }
+    spi_device_release_bus(s_spi);
+    esp_err_t end_err = command(CMD_LOAD_END);
+    return err == ESP_OK ? end_err : err;
+}
+
 static esp_err_t set_refresh_temperature(void) {
     // Seeed_GFX2 Driver_ED103TC2/IT8951 uses 0x0040, 1, uint8_t(temp).
     // Set it before each display operation so the TCON selects a waveform.
@@ -224,17 +275,21 @@ static esp_err_t set_refresh_temperature(void) {
     return err;
 }
 
+static esp_err_t display_full_screen(void) {
+    esp_err_t err = command(CMD_DISPLAY_AREA);
+    const uint16_t area[] = {0, 0, PANEL_W, PANEL_H, 2};
+    for (size_t i = 0; err == ESP_OK && i < sizeof(area) / sizeof(area[0]); ++i)
+        err = data_word(area[i]);
+    return err == ESP_OK ? wait_refresh(true) : err;
+}
+
 static esp_err_t display_frame(void) {
     uint16_t register_mode = 0;
     esp_err_t err = read_reg(REG_ONE_BIT_MODE, &register_mode);
     if (err == ESP_OK) err = write_reg(REG_ONE_BIT_MODE, register_mode | (1U << 2));
     if (err != ESP_OK) return err;
     err = write_reg(REG_ONE_BIT_COLOURS, 0xff00);
-    if (err == ESP_OK) err = command(CMD_DISPLAY_AREA);
-    const uint16_t area[] = {0, 0, PANEL_W, PANEL_H, 2};
-    for (size_t i = 0; err == ESP_OK && i < sizeof(area) / sizeof(area[0]); ++i)
-        err = data_word(area[i]);
-    if (err == ESP_OK) err = wait_refresh(true);
+    if (err == ESP_OK) err = display_full_screen();
     esp_err_t restore = write_reg(REG_ONE_BIT_MODE, register_mode & ~(1U << 2));
     return err == ESP_OK ? restore : err;
 }
@@ -249,6 +304,22 @@ static esp_err_t it8951_update(const uint8_t *frame, const uint8_t *prev, bool f
     if (err == ESP_OK) err = load_frame(frame);
     if (err == ESP_OK) err = display_frame();
     if (err != ESP_OK) ESP_LOGE(TAG, "IT8951 refresh failed: %s", esp_err_to_name(err));
+    xSemaphoreGive(s_spi_lock);
+    return err;
+}
+
+static esp_err_t it8951_update_gray16(const uint8_t *luma) {
+    if (!luma || !s_spi) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_spi_lock, portMAX_DELAY) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = wait_refresh(false);
+    uint16_t mode = 0;
+    if (err == ESP_OK) err = read_reg(REG_ONE_BIT_MODE, &mode);
+    if (err == ESP_OK && (mode & (1U << 2)))
+        err = write_reg(REG_ONE_BIT_MODE, mode & ~(1U << 2));
+    if (err == ESP_OK) err = set_refresh_temperature();
+    if (err == ESP_OK) err = load_gray16(luma);
+    if (err == ESP_OK) err = display_full_screen();
+    if (err != ESP_OK) ESP_LOGE(TAG, "IT8951 gray16 refresh failed: %s", esp_err_to_name(err));
     xSemaphoreGive(s_spi_lock);
     return err;
 }
@@ -340,6 +411,7 @@ static const epd_panel_t s_panel = {
     .status_scale = 8,
     .init = it8951_init,
     .update = it8951_update,
+    .update_gray16 = it8951_update_gray16,
 };
 
 const epd_panel_t *epd_panel_get(void) { return &s_panel; }

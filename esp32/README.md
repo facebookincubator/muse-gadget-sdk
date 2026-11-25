@@ -619,8 +619,10 @@ their upstream licenses:
   driver based on the Seeed-reTerminal-E10xx-Firmware refresh sequence (the
   Sticky's Link status profile), is MIT and retains the source's copyright and
   license notice.
+- [`main/uc8179_gray4_lut.h`](main/uc8179_gray4_lut.h) adapts the Seeed_GFX2
+  UC8179 four-gray waveforms and retains the MIT license and copyright notice.
 - [`main/epd_it8951.c`](main/epd_it8951.c), the reTerminal E1003 IT8951
-  driver with command framing and one-bit mode adapted from Seeed_GFX2, is
+  driver with command framing and one-bit and four-bit modes adapted from Seeed_GFX2, is
   MIT and retains the source's copyright and license notice.
 - The SSD1681 initialization sequence and waveform LUT in
   [`main/epd_ssd1681.c`](main/epd_ssd1681.c), the Waveshare 1.54" V2

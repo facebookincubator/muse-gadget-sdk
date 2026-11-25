@@ -117,6 +117,85 @@ class Reply:
         return not self.lost and all(len(self.message(m).encode("utf-8")) == n for m, n in self.sizes.items())
 
 
+class Printer:
+    """Shows a reply as it streams in, one message at a time.
+
+    Muse can stream a second message before the first one ends. The first
+    message to start is shown as it arrives; the others are held back and
+    shown whole, in order, once the ones before them are done."""
+
+    def __init__(self, out):
+        self.out = out
+        self.text = collections.defaultdict(str)    # msg -> what has arrived
+        self.final = collections.defaultdict(str)   # msg -> its whole text, until its message_done
+        self.shown = {}                             # msg -> how much of it is on screen
+        self.ended = set()                          # messages whose message_done arrived
+        self.current = None                         # the message being shown live
+
+    def _write(self, s):
+        if s:
+            self.out.write(s)
+            self.out.flush()
+
+    def _catch_up(self, msg):
+        """Shows what of `msg` isn't on screen yet."""
+        text, shown = self.text[msg], self.shown.get(msg, "")
+        if text.startswith(shown):
+            self._write(text[len(shown):])
+        else:
+            self._write("\n" + text)
+        self.shown[msg] = text
+
+    def _end(self, msg):
+        self._catch_up(msg)
+        self._write("\n")
+        self.current = None
+        for nxt in sorted(m for m in self.text if m not in self.shown and m != msg):
+            self.current = nxt
+            if nxt not in self.ended:
+                self._catch_up(nxt)
+                return
+            self._catch_up(nxt)
+            self._write("\n")
+            self.current = None
+
+    def feed(self, f):
+        t, msg = f.get("type"), f.get("msg")
+        if t == "text":
+            self.text[msg] += f.get("text", "")
+        elif t == "final":
+            self.final[msg] += f.get("text", "")    # a long one comes in several lines
+            return
+        elif t == "message_done":
+            self.ended.add(msg)
+            if msg in self.final:
+                self.text[msg] = self.final.pop(msg)
+        elif t == "done":
+            self.finish()
+            return
+        else:
+            return
+        if self.current is None and msg not in self.shown:
+            self.current = msg
+        if msg != self.current:
+            return
+        if t == "message_done":
+            self._end(msg)
+        else:
+            self._catch_up(msg)
+
+    def finish(self):
+        """Shows what is still held back or unfinished, when a turn ends or fails."""
+        for m, text in self.final.items():
+            self.text[m] = text
+        self.final.clear()
+        while self.current is not None:
+            self._end(self.current)
+        for m in sorted(self.text):
+            if m not in self.shown or self.shown[m] != self.text[m]:
+                self._end(m)
+
+
 class Board:
     def __init__(self, port):
         try:
@@ -323,13 +402,11 @@ def main():
             if not text:
                 ap.error("nothing to send")
 
+            printer = Printer(sys.stdout)
+
             def progress(f):
-                if f.get("type") in ("text", "final"):
-                    sys.stdout.write(f.get("text", ""))
-                    sys.stdout.flush()
-                elif f.get("type") == "message_done":
-                    sys.stdout.write("\n")
-                elif f.get("type") == "busy":
+                printer.feed(f)
+                if f.get("type") == "busy":
                     print("[working]" if f.get("on") else "[idle]", file=sys.stderr)
 
             try:
@@ -337,6 +414,8 @@ def main():
             except KeyboardInterrupt:
                 board.cancel()
                 raise
+            finally:
+                printer.finish()
             if args.out:
                 with open(args.out, "w", encoding="utf-8") as f:
                     f.write(reply.text)

@@ -42,7 +42,7 @@ session to Muse. The rest depends on the hardware.
 | **Waveshare ESP32-S3-ePaper-1.54G** | ESP32-S3 | 1.54" 200×200 four-colour e-paper | 8 MB / 8 MB | [Waveshare wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54G), [GitHub](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54G) | [Waveshare](https://www.waveshare.com/esp32-s3-epaper-1.54g.htm) |
 | **Seeed reTerminal E1001** | ESP32-S3 | 7.5" 800×480 black and white e-paper | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1001/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html) |
 | **Seeed reTerminal E1002** | ESP32-S3 | 7.3" 800×480 six-colour e-paper (E Ink Spectra 6) | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/reterminal_e10xx_with_esphome/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) |
-| **Seeed reTerminal E1003** | ESP32-S3 | 10.3" 1872×1404 e-paper (IT8951), black and white in Muse | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1003/) | — |
+| **Seeed reTerminal E1003** | ESP32-S3 | 10.3" 1872×1404 e-paper (IT8951), black and white or 16 gray levels | 32 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1003/) | — |
 | **Seeed reTerminal Sticky (experimental)** | ESP32-S3 | 3.97" SSD1677 e-paper (native 800×480; portrait 480×800, four gray levels for images/UI) | 32 MB / 8 MB | [Seeed hardware overview](https://www.seeedstudio.com/sticky/docs/en/device-guide/hardware-overview/) | [Seeed Studio](https://www.seeedstudio.com/reTerminal-Sticky-p-6861.html) |
 | **Home Assistant Voice Preview Edition** | ESP32-S3 | None (12-LED ring) | 16 MB / 8 MB | [ESPHome repo](https://github.com/esphome/home-assistant-voice-pe) | [Home Assistant](https://www.home-assistant.io/voice-pe/) |
 | **Seeed reSpeaker Lite with XIAO ESP32-S3 (experimental)** | ESP32-S3 | None (single RGB LED) | 8 MB / 8 MB | [Seeed wiki](https://wiki.seeedstudio.com/xiao_respeaker/) | — |
@@ -177,11 +177,11 @@ in, and temperature and humidity come from the Grove AHT20 in the box (plug it
 in). Muse reads them all at once with `sensors.read`. This needs Seeed's stock
 RP2040 firmware.
 
-The reTerminal E1001's e-paper shows only black and white, 1 bit per pixel,
-and keeps its picture without power. It shows a still status screen (the
-agent's name, the character and a line of status text) that changes only when
-the status does, since each refresh takes a second or two. Images from Muse are dithered
-to black and white on the device and refresh once they are all in, with a
+The reTerminal E1001 uses black and white for its status screen and standard
+image commands. The panel keeps its picture without power. It shows a still
+status screen (the agent's name, the character and a line of status text) that
+changes only when the status does, since each refresh takes a second or two.
+Standard images are dithered to black and white and refresh once they are all in, with a
 brief black-and-white flash. `display.draw_url` tells Muse the bit depth.
 
 Both reTerminals report calibrated battery voltage (`battery_mv`) and an
@@ -191,6 +191,9 @@ of the SHT4x sensor setting. Charging and USB-power state remain unavailable
 The percentage is inferred from cell voltage and varies with load and charging;
 it is not a fuel-gauge measurement. This does not add sleep or power-saving behavior.
 
+For four gray levels on the E1001, use `display.draw_gray4_url`. It takes the
+same `url` and optional `row` as `display.draw_url` and refreshes the full panel.
+
 The reTerminal E1002 is the same board with a six-colour E Ink Spectra 6
 panel: black, white, yellow, red, blue and green, 4 bits per pixel. It shows
 the same status screen, with the character in colour. Images from Muse are
@@ -199,8 +202,10 @@ and each refresh takes about 30 seconds and flashes. `display.draw_url` tells
 Muse the six exact colours, the resolution and how slow it is.
 
 The reTerminal E1003 uses an IT8951 controller and an ED103TC2 panel.
-Its Muse status screen and images use full-screen 1872×1404 monochrome
-refreshes. Use the green button to confirm pairing. The CH340K USB bridge
+Use `display.draw_gray16_url` for a full refresh with 16 gray levels. It also
+takes the same `url` and optional `row` as `display.draw_url`.
+Its status screen and standard image commands use full-screen monochrome
+refreshes at 1872×1404. Use the green button to confirm pairing. The CH340K USB bridge
 is used for flashing, and the battery voltage and estimated percentage
 are available through `device.health`.
 

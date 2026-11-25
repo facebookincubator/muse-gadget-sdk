@@ -47,3 +47,9 @@ endif()
 
 # ESP-IDF reads version.txt from the active project root unless PROJECT_VER is set.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# Product integration is explicit and per project. Build properties carry it
+# into ESP-IDF's separate early component-requirements expansion as well.
+foreach(property PRODUCT_CONTROL_COMPONENT PRODUCT_CONTROL_EXTENSION_HEADER PRODUCT_CONTROL_EXTENSION_IMPL)
+    idf_build_set_property(${property} "${${property}}")
+endforeach()
