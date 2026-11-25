@@ -1667,6 +1667,24 @@ static char *build_register_json(void) {
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_file"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+        const char *gray_command = "display.draw_gray4_url";
+        const char *gray_desc = "Draw an image with four gray levels at 800 by 480.";
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        const char *gray_command = "display.draw_gray16_url";
+        const char *gray_desc = "Draw an image with 16 gray levels at 1872 by 1404.";
+#endif
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        char gray_help[256];
+        snprintf(gray_help, sizeof(gray_help),
+                 "%s Same JPEG and raw RGB565 formats as display.draw_url. "
+                 "Clears the canvas before drawing and replies after one full refresh.", gray_desc);
+        cJSON *gray_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(gray_required, "url",
+                              string_param("HTTP or HTTPS URL of the image."));
+        add_command(commands, gray_command, gray_help, gray_required, row_params());
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, gray_command), "timeout_ms", 150000);
+#endif
         add_command(commands, "display.show_animation", restore, nullptr, nullptr);
     }
 #endif

@@ -231,7 +231,50 @@ static void check_four_color_dither(void) {
     assert(black > W * H * 9 / 10);
 }
 
+// Sticky Link has a four-gray image callback, but its status is monochrome.
+#undef EPD_COLOR
+#define EPD_COLOR (s_panel->bits_per_pixel > 1)
+#define EPD_W W
+#define EPD_H H
+static int sticky_gray4(const uint8_t *frame) {
+    (void)frame;
+    assert(!"status redraw must not call the grayscale update");
+    return 0;
+}
+static const struct {
+    int bits_per_pixel;
+    int (*update_gray4)(const uint8_t *);
+} sticky = {1, sticky_gray4}, *s_panel = &sticky;
+static uint8_t *s_canvas = gray, *s_frame = bits;
+static int16_t *s_err = color_err;
+#include "epaper_status_dither.inc"
+
+#define PANEL_W 8
+#define GRAY_ROW_BYTES (PANEL_W / 2)
+#include "it8951_pack.inc"
+
+static void check_reterminal_grayscale(void) {
+    uint8_t old_plane[1], new_plane[1];
+    const uint8_t levels[] = {0, 85, 170, 255, 0, 85, 170, 255};
+    dither_gray4_planes(levels, old_plane, new_plane, 8, 1, err);
+    assert(old_plane[0] == 0xaa && new_plane[0] == 0xcc);
+
+    const uint8_t row[PANEL_W] = {0, 17, 34, 51, 68, 85, 238, 255};
+    uint8_t packed[GRAY_ROW_BYTES];
+    pack_gray16_row(row, packed);
+    const uint8_t expected[] = {0x45, 0xef, 0x01, 0x23};
+    assert(memcmp(packed, expected, sizeof(expected)) == 0);
+
+    memset(gray, 255, sizeof(gray));
+    gray[0] = 0;
+    memset(bits, 0x5a, sizeof(bits));
+    epd_dither();
+    assert(bits[0] == 0x7f);
+    for (size_t i = 1; i < sizeof(bits); ++i) assert(bits[i] == 0xff);
+}
+
 int main(void) {
+    check_reterminal_grayscale();
     check_luma();
     check_rgb565_be();
     check_dither();

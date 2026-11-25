@@ -17,6 +17,9 @@
 #include "image_fetch.h"
 #include "vm_file_path.h"
 #include "led_status.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+#include "epd_panel.h"
+#endif
 #include "noise_control.h"
 #include "sdkconfig.h"
 
@@ -119,6 +122,8 @@ typedef struct {
     char *url;  // or, for a file from the VM, the request path
     bool vm;
     int row;
+    int gray_levels;
+    bool gray_started;
     image_fetch_done_cb done;
     void *user;
     esp_http_client_handle_t http;
@@ -169,7 +174,15 @@ bool image_fetch_busy(void) { return atomic_load(&s_busy); }
 // Bands downloads have drawn, ever: see image_fetch_drawn().
 static atomic_uint s_bands_drawn;
 
-static bool draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
+static bool draw_rect(fetch_t *f, int x, int y, int w, int h, const uint16_t *pixels) {
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (f->gray_levels && !f->gray_started) {
+        led_status_draw_gray_begin();
+        f->gray_started = true;
+    }
+#else
+    (void)f;
+#endif
     if (!led_status_draw_rect(x, y, w, h, pixels)) return false;
     atomic_fetch_add(&s_bands_drawn, 1);
     return true;
@@ -263,7 +276,7 @@ static const char *draw_raw(fetch_t *f, int *rows_drawn) {
             err = "image runs past the last row";
             break;
         }
-        if (rows && !draw_rect(0, y, f->width, rows, (const uint16_t *)buf)) {
+        if (rows && !draw_rect(f, 0, y, f->width, rows, (const uint16_t *)buf)) {
             err = "display write failed";
             break;
         }
@@ -307,7 +320,7 @@ static UINT jpeg_out(JDEC *jd, void *bitmap, JRECT *rect) {
         uint16_t px = ((rgb[0] & 0xF8) << 8) | ((rgb[1] & 0xFC) << 3) | (rgb[2] >> 3);
         f->mcu[i] = (uint16_t)((px >> 8) | (px << 8));
     }
-    return draw_rect(f->x0 + rect->left, f->y0 + rect->top, w, h, f->mcu);
+    return draw_rect(f, f->x0 + rect->left, f->y0 + rect->top, w, h, f->mcu);
 }
 
 static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale) {
@@ -557,7 +570,7 @@ static const char *draw_jpeg(fetch_t *f, int *out_w, int *out_h, int *out_scale)
                     o[1] = v & 0xFF;
                 }
             }
-            if (!draw_rect(f->x0, f->y0 + y, *out_w, n, (const uint16_t *)band)) {
+            if (!draw_rect(f, f->x0, f->y0 + y, *out_w, n, (const uint16_t *)band)) {
                 err = "display write failed";
             }
         }
@@ -827,13 +840,27 @@ static void fetch_task(void *arg) {
             fail = draw_raw(f, &rows);
             result.height = rows;
         }
-        // Show what arrived, even if the download broke off.
-        led_status_draw_done();
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        if (f->gray_levels) {
+            if (fail) {
+                if (f->gray_started) led_status_show_animation();
+            } else if (!led_status_draw_gray_done(f->gray_levels)) {
+                led_status_show_animation();
+                result.code = "display_failed";
+                fail = "grayscale refresh failed";
+            }
+        } else
+#endif
+        {
+            // Show what arrived, even if the download broke off.
+            led_status_draw_done();
+        }
         if (fail && f->timed_out) fail = "download timed out";
         if (fail) {
             result.message = fail;
             if (f->low_memory) result.code = "out_of_memory";
-            else if (!f->timed_out && strcmp(fail, "download failed") != 0) {
+            else if (!f->timed_out && strcmp(result.code, "download_failed") == 0
+                     && strcmp(fail, "download failed") != 0) {
                 result.code = "invalid_image";
             }
         } else {
@@ -902,7 +929,8 @@ static bool vm_allocate_body(fetch_t *f, size_t stack, int width) {
         && heap_caps_get_largest_free_block(BYTE_CAPS) >= block_need;
 }
 
-static bool start(const char *target, bool vm, int row, image_fetch_done_cb done,
+static bool start(const char *target, bool vm, int row, int gray_levels,
+                  image_fetch_done_cb done,
                   void *user, const char **code, const char **message) {
     int width, height;
     if (!led_status_display_info(&width, &height)) {
@@ -973,6 +1001,7 @@ static bool start(const char *target, bool vm, int row, image_fetch_done_cb done
     f->vm = vm;
     f->https = https;
     f->row = row;
+    f->gray_levels = gray_levels;
     f->done = done;
     f->user = user;
     f->width = width;
@@ -991,12 +1020,19 @@ static bool start(const char *target, bool vm, int row, image_fetch_done_cb done
 
 bool image_fetch_start(const char *url, int row, image_fetch_done_cb done,
                        void *user, const char **code, const char **message) {
-    return start(url, false, row, done, user, code, message);
+    return start(url, false, row, 0, done, user, code, message);
 }
+
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+bool image_fetch_start_gray(const char *url, int row, int levels, image_fetch_done_cb done,
+                            void *user, const char **code, const char **message) {
+    return start(url, false, row, levels, done, user, code, message);
+}
+#endif
 
 bool image_fetch_start_vm(const char *path, int row, image_fetch_done_cb done,
                           void *user, const char **code, const char **message) {
-    return start(path, true, row, done, user, code, message);
+    return start(path, true, row, 0, done, user, code, message);
 }
 
 bool image_fetch_claim(void) {
