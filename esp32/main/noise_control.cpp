@@ -21,6 +21,7 @@
 #endif
 #include "stack_monitor.h"
 #include "noise_upgrade.h"
+#include "muse_server_hosts.h"
 #include "noise_tunnel.h"
 #include "noise_tunnel_internal.h"
 #include "link_events.h"
@@ -67,6 +68,10 @@ extern "C" {
 #endif
 }
 
+#ifdef PRODUCT_CONTROL_EXTENSION_HEADER
+#include PRODUCT_CONTROL_EXTENSION_HEADER
+#endif
+
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
 #include <xplat/noise/core/ServiceCodec.h>
@@ -80,10 +85,9 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define NOISE_PATH       "/v1/noise"
 #define NOISE_PORT       443
 #define CTRL_STREAM_ID   1
-// One-shot GET /identity for the agent's name (TUNNEL_STREAM_ID is 2).
+// One-shot GET /api/gadget/me for the agent's name (TUNNEL_STREAM_ID is 2).
 #define IDENTITY_STREAM_ID 3
-// Without include_markdown the identity reply is ~3 KB of JSON, mostly avatar
-// asset paths. Held only until it is parsed.
+// The reply is a few dozen bytes of JSON. Held only until it is parsed.
 #define IDENTITY_BODY_MAX  8192
 #if CONFIG_HOMEHUB_SHOW_AGENT_NAME
 #define SHOW_AGENT_NAME 1
@@ -137,15 +141,19 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 // without PSRAM. Reserve enough inbound space for those frames. The ESP32-C3
 // AI Passport and AtomS3 take 12 KB: larger buffers leave too little RAM for
 // the session to stay up beside Wi-Fi and the UI.
-// With PSRAM it is the protocol's largest frame, as Muse's chat session uses,
-// so extra requests (display.draw_file) can take large replies in few frames;
-// the two buffers cost 104 KB of PSRAM more than 12 KB ones.
+// With PSRAM and extra daemon requests, use the protocol's largest frame, as
+// Muse's chat session does, so display.draw_file can take large replies in few
+// frames. Control and tunnel traffic alone need only 12 KB: the two buffers save
+// 104 KB of PSRAM. WebSocket and handshake buffers remain independent of this
+// service-frame scratch.
 // Chat events arrive one per frame; a frame over that ends the session (it
 // can't be skipped: Noise's nonces and the ordered framer would desync), the
 // request in flight ends with NOISE_CTRL_REQ_TOO_LARGE, and the session
 // reconnects.
-#if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
-                             CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
+#if !CONFIG_HOMEHUB_DAEMON_REQUESTS
+#define SVC_FRAME_SCRATCH (12 * 1024)
+#elif SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_AI_PASSPORT || \
+                               CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
 #define SVC_FRAME_SCRATCH (12 * 1024)
 #elif CONFIG_SPIRAM
 #define SVC_FRAME_SCRATCH (64 * 1024)
@@ -215,7 +223,7 @@ static std::atomic<bool> s_running{false};
 static std::atomic<bool> s_power_save{false};
 // link.register request id for the current session, and whether its reply has
 // arrived. The tunnel data-plane stream is only opened AFTER the register reply,
-// because the server authorizes /link-tunnel by checking that a device has
+// because the server authorizes /api/gadget/tunnel by checking that a device has
 // registered on this same Noise connection (checked by the server's ingress
 // proxy). Opening earlier races the registration and
 // draws a 403 that would otherwise wait out the tunnel reopen interval (~5s+).
@@ -926,6 +934,11 @@ static void clear_pending_json_body(pending_json_body &body) {
     body = {};
 }
 
+static constexpr ServiceType GADGET_SERVICE = ServiceType::Gadget;
+#define GADGET_CONTROL_PATH  "/api/gadget/control"
+#define GADGET_TUNNEL_PATH   "/api/gadget/tunnel"
+#define GADGET_IDENTITY_PATH "/api/gadget/me"
+
 enum class json_send_status { Pending, Complete, Failed };
 
 // Send at most one complete BodyChunk per loop turn, yielding to RX, tunnel
@@ -975,7 +988,7 @@ static json_send_status send_json_body_chunk(esp_tls_t *tls, ClientSession &sess
     chunk.data = ConstByteSpan(data, prefix_len + n);
     chunk.end_body = last && end_body;
     auto sws = session.StartOutboundBodyChunk(
-        ServiceType::Daemon, CTRL_STREAM_ID, chunk,
+        GADGET_SERVICE, CTRL_STREAM_ID, chunk,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1003,15 +1016,15 @@ struct tunnel_emit_ctx {
     uint8_t *ws_buf;
 };
 
-// Open the streaming POST /link-tunnel on TUNNEL_STREAM_ID.
+// Open the streaming POST /api/gadget/tunnel on TUNNEL_STREAM_ID.
 static bool tunnel_open_stream(void *vctx) {
     auto *c = static_cast<tunnel_emit_ctx *>(vctx);
     ApplicationRequestView req;
     req.verb = StringView("POST");
-    req.path = StringView("/link-tunnel");
+    req.path = StringView(GADGET_TUNNEL_PATH);
     req.end_body = false;
     auto sws = c->session->StartOutboundApplicationRequest(
-        ServiceType::Daemon, TUNNEL_STREAM_ID, req,
+        GADGET_SERVICE, TUNNEL_STREAM_ID, req,
         ByteSpan(c->svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(c->env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1031,7 +1044,7 @@ static bool tunnel_send_body(void *vctx, const uint8_t *data, size_t len) {
     chunk.data = ConstByteSpan(data, len);
     chunk.end_body = false;
     auto sws = c->session->StartOutboundBodyChunk(
-        ServiceType::Daemon, TUNNEL_STREAM_ID, chunk,
+        GADGET_SERVICE, TUNNEL_STREAM_ID, chunk,
         ByteSpan(c->svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(c->env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1052,7 +1065,7 @@ static bool tunnel_send_body_inplace(void *vctx, uint8_t *buf, size_t headroom,
                                      size_t len, size_t tailroom) {
     auto *c = static_cast<tunnel_emit_ctx *>(vctx);
     auto r = c->session->SealBodyChunkInPlace(
-        ServiceType::Daemon, TUNNEL_STREAM_ID,
+        GADGET_SERVICE, TUNNEL_STREAM_ID,
         ByteSpan(buf, headroom + len + tailroom), headroom, len);
     if (!r.status.ok() || r.offset < 14) {
         ESP_LOGE(TAG, "tunnel SealBodyChunkInPlace failed: %s (offset %u)",
@@ -1070,7 +1083,7 @@ static bool tunnel_reset_stream(void *vctx) {
     reset.code = ResetCode::Cancelled;
     reset.reason = StringView("tunnel reopen");
     auto sws = c->session->StartOutboundReset(
-        ServiceType::Daemon, TUNNEL_STREAM_ID, reset,
+        GADGET_SERVICE, TUNNEL_STREAM_ID, reset,
         ByteSpan(c->svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(c->env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1297,7 +1310,7 @@ static bool req_on_frame(const DecodedServiceFrame &) { return false; }
 
 // ---- Agent identity ----------------------------------------------------------
 
-// Reply to GET /identity, collected across the Response and BodyChunk frames.
+// Reply to GET /api/gadget/me, collected across the Response and BodyChunk frames.
 struct identity_fetch {
     bool requested;
     bool done;
@@ -1305,17 +1318,17 @@ struct identity_fetch {
     size_t len;
 };
 
-// Ask the daemon for the agent identity. Returns false only if the transport
+// Ask the VM for the agent's name. Returns false only if the transport
 // failed; a refused request just leaves the name unknown.
 static bool identity_request(esp_tls_t *tls, ClientSession &session,
                              uint8_t *svc_scratch, uint8_t *env_scratch,
                              uint8_t *ws_buf) {
     ApplicationRequestView req;
     req.verb = StringView("GET");
-    req.path = StringView("/identity");
+    req.path = StringView(GADGET_IDENTITY_PATH);
     req.end_body = true;
     auto sws = session.StartOutboundApplicationRequest(
-        ServiceType::Daemon, IDENTITY_STREAM_ID, req,
+        GADGET_SERVICE, IDENTITY_STREAM_ID, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1328,10 +1341,10 @@ static bool identity_request(esp_tls_t *tls, ClientSession &session,
 
 static void identity_finish(identity_fetch &f) {
     f.done = true;
-    // The daemon wraps the identity: {"ok":true,"result":{"name":...}}.
+    // The VM wraps the payload: {"ok":true,"result":{"muse_name":...}}.
     cJSON *root = f.body ? cJSON_ParseWithLength(f.body, f.len) : nullptr;
     cJSON *result = root ? cJSON_GetObjectItem(root, "result") : nullptr;
-    cJSON *name = cJSON_GetObjectItem(result, "name");
+    cJSON *name = cJSON_GetObjectItem(result, "muse_name");
     if (cJSON_IsString(name) && name->valuestring && *name->valuestring) {
         ESP_LOGI(TAG, "agent name: %s", name->valuestring);
         if (s_agent_name_cb) s_agent_name_cb(name->valuestring);
@@ -1365,7 +1378,7 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
     if (f.done) return;
     if (frame.kind == ServiceFrameKind::Response) {
         if (frame.response.status != 200) {
-            ESP_LOGW(TAG, "server rejected /identity: %d", frame.response.status);
+            ESP_LOGW(TAG, "server rejected /api/gadget/me: %d", frame.response.status);
             f.done = true;
             return;
         }
@@ -1727,6 +1740,10 @@ static char *build_register_json(void) {
     ble_commands_register(commands);
 #endif
 
+#ifdef PRODUCT_CONTROL_REGISTER_COMMANDS
+    PRODUCT_CONTROL_REGISTER_COMMANDS(commands);
+#endif
+
     cJSON_AddItemToObject(params, "commands_v2", commands);
     cJSON_AddItemToObject(root, "params", params);
 
@@ -1770,6 +1787,10 @@ static void queue_result(noise_ctrl_session_generation_t session_generation,
         ESP_LOGW(TAG, "result queue full, dropping result for %s", request_id);
     }
 }
+
+#ifdef PRODUCT_CONTROL_EXTENSION_IMPL
+#include PRODUCT_CONTROL_EXTENSION_IMPL
+#endif
 
 // ---- Inbound message dispatch -----------------------------------------------
 
@@ -1937,6 +1958,12 @@ static void handle_invoke_request(
 
     ESP_LOGI(TAG, "invoke request: command=%s", command);
 
+#ifdef PRODUCT_CONTROL_INVOKE
+    if (PRODUCT_CONTROL_INVOKE(command, cmd_params, session_generation, request_id)) {
+        cJSON_Delete(root);
+        return;
+    }
+#endif
     if (strcmp(command, "device.health") == 0) {
         send_device_health(session_generation, request_id);
     } else if (strcmp(command, "device.guide") == 0) {
@@ -2065,7 +2092,7 @@ static void reconnect_delay(uint32_t delay_ms) {
 
 // ---- Session loop -----------------------------------------------------------
 
-// A /link-control message cut across BodyChunks, held for its session until
+// A control-stream message cut across BodyChunks, held for its session until
 // the rest arrives. Bytes of one message held at most: one longer is skipped
 // whole (logged), so the stream stays in step.
 static constexpr uint32_t kCtrlRxMaxHeld = 32 * 1024;
@@ -2445,15 +2472,15 @@ static session_result_t run_session(stack_monitor_t *stack) {
         s_session_generation_counter);
     s_session_generation_counter = session_generation;
 
-    // 4. Open POST /link-control stream
+    // 4. Open POST /api/gadget/control stream
     {
         ApplicationRequestView req;
         req.verb = StringView("POST");
-        req.path = StringView("/link-control");
+        req.path = StringView(GADGET_CONTROL_PATH);
         req.end_body = false;
 
         auto open_sws = session.StartOutboundApplicationRequest(
-            ServiceType::Daemon, CTRL_STREAM_ID, req,
+            GADGET_SERVICE, CTRL_STREAM_ID, req,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (!open_sws.ok()) {
@@ -2466,7 +2493,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
             end_reason = "control stream open failed";
             goto cleanup;
         }
-        ESP_LOGI(TAG, "opened POST /link-control stream");
+        ESP_LOGI(TAG, "opened POST /api/gadget/control stream");
     }
 
     // Drain any stale results from previous sessions, including retained JSON.
@@ -2540,7 +2567,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
 
     // Tunnel data-plane stream, multiplexed on this session. Deferred: it is
     // opened from inside the loop only after the link.register reply arrives
-    // (s_register_acked), because the server authorizes /link-tunnel by checking
+    // (s_register_acked), because the server authorizes /api/gadget/tunnel by checking
     // this connection has a registered device. Opening before the ack races the
     // registration and takes a 403 + slow reopen.
     tunnel_emit_ctx tun_ctx = {tls, &session, svc_scratch, env_scratch, ws_buf};
@@ -2648,16 +2675,16 @@ static session_result_t run_session(stack_monitor_t *stack) {
                                  frame.response.status, (long long)frame.stream_id);
                         if (frame.response.status != 200) {
                             if (is_tunnel) {
-                                ESP_LOGW(TAG, "server rejected /link-tunnel: %d",
+                                ESP_LOGW(TAG, "server rejected /api/gadget/tunnel: %d",
                                          frame.response.status);
                                 char why[TUNNEL_FAILURE_MAX];
                                 snprintf(why, sizeof(why), "server rejected open: %d",
                                          (int)frame.response.status);
                                 noise_tunnel_on_server_drop(why);
                             } else {
-                                ESP_LOGE(TAG, "server rejected /link-control: %d",
+                                ESP_LOGE(TAG, "server rejected /api/gadget/control: %d",
                                          frame.response.status);
-                                end_reason = "server rejected /link-control";
+                                end_reason = "server rejected /api/gadget/control";
                                 error = true;
                                 break;
                             }
@@ -2668,7 +2695,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
                         }
                     }
                     if (control_stream_ended(frame)) {
-                        ESP_LOGW(TAG, "server ended /link-control");
+                        ESP_LOGW(TAG, "server ended " GADGET_CONTROL_PATH);
                         end_reason = "server ended control stream";
                         error = true;
                         break;
@@ -2999,8 +3026,10 @@ extern "C" void noise_ctrl_set_node_id(const char *node_id) {
 }
 
 extern "C" void noise_ctrl_set_host(const char *host) {
+    bool allowed = muse_server_noise_allowed(host);
+    if (!allowed) ESP_LOGW(TAG, "Noise host not allowed in this build; using the default");
     snprintf(s_noise_host, sizeof(s_noise_host), "%s",
-             host && *host ? host : NOISE_DEFAULT_HOST);
+             allowed && host && *host ? host : NOISE_DEFAULT_HOST);
 }
 
 extern "C" bool noise_ctrl_connect(const char *vm_id, const char *auth_token,

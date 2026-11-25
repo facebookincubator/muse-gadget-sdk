@@ -30,6 +30,7 @@
 #endif
 
 #include "muse_link.h"
+#include "muse_server_hosts.h"
 
 static const char *TAG = "muse_settings";
 
@@ -193,6 +194,10 @@ esp_err_t muse_settings_init(void)
     load_str("ssid", s.ssid, sizeof(s.ssid));
     load_str("pass", s.pass, sizeof(s.pass));
     load_str("host", s.host, sizeof(s.host));
+    if (!muse_server_noise_allowed(s.host)) {
+        /* Saved by firmware that allowed it: this build uses the default. */
+        strlcpy(s.host, DEFAULT_HOST, sizeof(s.host));
+    }
     load_str("vm", s.vm, sizeof(s.vm));
     load_str("token", s.token, sizeof(s.token));
 
@@ -412,13 +417,18 @@ void muse_settings_set_wifi(const char *ssid, const char *pass)
     notify(MUSE_SETTING_WIFI);
 }
 
-void muse_settings_set_hatch_host(const char *host)
+bool muse_settings_set_hatch_host(const char *host)
 {
+    if (!muse_server_noise_allowed(host)) {
+        ESP_LOGW(TAG, "Muse server not allowed in this build; keeping the current one");
+        return false;
+    }
     LOCKED({
         strlcpy(s.host, host && host[0] ? host : DEFAULT_HOST, sizeof(s.host));
         save_str("host", s.host);
     });
     notify(MUSE_SETTING_HATCH);
+    return true;
 }
 
 void muse_settings_set_hatch_vm(const char *vm)

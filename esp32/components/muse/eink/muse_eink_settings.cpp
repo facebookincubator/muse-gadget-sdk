@@ -354,7 +354,7 @@ static bool s_proxy_saving;
 /* Muse. */
 static char s_link_status[128], s_link_reset_lbl[24] = "Reset pairing", s_hatch_status[128];
 static char s_hatch_host[MUSE_HOST_MAX + 1], s_hatch_vm[MUSE_VM_MAX + 1], s_hatch_token[16], s_hatch_sdk[24];
-static int64_t s_link_reset_armed_us, s_sdk_token_bad_us;
+static int64_t s_link_reset_armed_us, s_sdk_token_bad_us, s_host_bad_us;
 
 /* Bluetooth. */
 static char s_ble_status[96];
@@ -514,7 +514,10 @@ static void on_other_ssid(const char *ssid)
     open_text(ssid, "", true, MUSE_PASS_MAX, "Empty if it's open", on_wifi_pass, WIFI);
 }
 
-static void on_hatch_host_done(const char *text) { muse_settings_set_hatch_host(text); }
+static void on_hatch_host_done(const char *text)
+{
+    s_host_bad_us = muse_settings_set_hatch_host(text) ? 0 : esp_timer_get_time();
+}
 static void on_hatch_vm_done(const char *text) { muse_settings_set_hatch_vm(text); }
 
 static void on_hatch_token_done(const char *text)
@@ -855,7 +858,12 @@ static void tick_hatch(void)
     char host[MUSE_HOST_MAX + 1], vm[MUSE_VM_MAX + 1];
     muse_settings_hatch_host(host);
     muse_settings_hatch_vm(vm);
-    SET(s_hatch_host, host);
+    if (s_host_bad_us && esp_timer_get_time() - s_host_bad_us < 5000000) {
+        SET(s_hatch_host, "Not allowed");
+    } else {
+        s_host_bad_us = 0;
+        SET(s_hatch_host, host);
+    }
     SET(s_hatch_vm, vm[0] ? vm : h.vm_id[0] ? h.vm_id : "Not set");
     /* The device token is a credential, so none of it shows. */
     SET(s_hatch_token, muse_settings_hatch_token_len() ? "Set here" : muse_link_hatch_linked() ? "Set" : "Not set");

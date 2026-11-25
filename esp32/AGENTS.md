@@ -670,6 +670,10 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 
 ## Requests to Muse's VM from your code
 
+Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
+(`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
+`/api/gadget/me`). The requests below go to the VM's daemon.
+
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
 on Link's Noise session, with `noise_ctrl_req_open()`, `noise_ctrl_req_send()`
@@ -847,13 +851,17 @@ For app authoring and the guide to send Muse, see
   running without it, and Wi-Fi uses 4 static TX buffers in internal RAM.
   Other chips keep 16 KiB windows in internal RAM;
   `cmake/validate_config.cmake` enforces both.
+- `sdkconfig.defaults.esp32` keeps ESP-IDF's 64 KB internal DMA reserve on
+  the classic ESP32, which isn't offered `CONFIG_HOMEHUB_DMA_RESERVE_KB`.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
   delete the generated `sdkconfig` (or the whole build directory) and rebuild.
   `cmake/validate_config.cmake` stops the build if a stale config has the old
-  TCP buffer sizes or cJSON nesting limit, and warns if it still has the full
-  root CA bundle.
+  TCP buffer sizes, the old cJSON nesting limit or ESP-IDF's internal DMA
+  reserve (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`) on alongside
+  `CONFIG_HOMEHUB_DMA_RESERVE_KB`, and warns if it still has the full root CA
+  bundle.
 - HTTPS trusts ESP-IDF's common root CAs only (`sdkconfig.defaults`), with
   cross-signed verification so chains that reach one of them through a
   cross-sign still verify. A server whose chain ends at another root (some
@@ -1048,6 +1056,9 @@ Users never see the name Hatch.
   base the app sends during pairing, with bare API paths. They ignore
   `api_url`: only older firmware reads it, and that firmware adds `/hatch/`
   itself. Keep saving it so a device flashed back to older firmware still works.
+  Pairing and the Muse host setting take only the hosts the Muse app sends
+  (`components/muse/muse_server_hosts.h`); `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS`
+  accepts others in development builds.
 - `hatch` stays only where the server or the Muse app depends on it. Don't
   rename these:
   - the VM host `hatch.metaaivm.com`

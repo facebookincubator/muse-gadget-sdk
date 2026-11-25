@@ -363,7 +363,7 @@ class LinkOledStatusTest(unittest.TestCase):
                         "CONFIG_HOMEHUB_TUNNEL=n",
                         'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_c3_oled_042.csv"'):
             self.assertIn(setting, overlay)
-        # The agent's name needs GET /identity, which only runs when this is on.
+        # The agent's name needs GET /api/gadget/me, which only runs when this is on.
         kconfig = (ROOT / "main" / "Kconfig.projbuild").read_text()
         name = kconfig[kconfig.index("config HOMEHUB_SHOW_AGENT_NAME"):]
         self.assertIn("default y if HOMEHUB_DISPLAY || HOMEHUB_LED_BACKEND_C3_SSD1306",

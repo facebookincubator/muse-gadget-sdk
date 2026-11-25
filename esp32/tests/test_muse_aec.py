@@ -25,6 +25,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SoftwareAEC(unittest.TestCase):
+    def test_live_calls_leave_internal_memory_for_audio_dma(self):
+        kc = (ROOT / 'components/muse/Kconfig').read_text()
+        voice = kc[kc.index('config MUSE_REALTIME_VOICE'):]
+        voice = voice[:voice.index('\n    config ', 1)]
+        self.assertIn(
+            'select MUSE_STATIC_BUFFERS_IN_PSRAM if MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY',
+            voice,
+        )
+
     def test_frame_alignment_and_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / 'muse_aec_harness'
