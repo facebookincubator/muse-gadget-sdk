@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from musegadget import __version__, tls
+from musegadget import __version__, server_hosts, tls
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,11 @@ def api_root(api_url_v2: str = "") -> str:
     """The URL that API paths are appended to: ``api_url_v2``, or the Muse API.
 
     ``api_url`` is ignored. Only older firmware reads it, adding ``/hatch``.
+    A base this client doesn't allow (``server_hosts``) gives the Muse API.
     """
+    if not server_hosts.api_allowed(api_url_v2):
+        log.warning("saved Muse API server not allowed; using the default")
+        api_url_v2 = ""
     return (api_url_v2 or API_BASE).rstrip("/")
 
 

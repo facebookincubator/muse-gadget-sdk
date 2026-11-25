@@ -552,9 +552,13 @@ def test_the_token_pairing_used_or_an_older_pairing_says_nothing(caplog):
     assert warnings_for("mgst_AAAAAAAtoken", fresh_pairing(), caplog) == []
 
 
-def test_api_root_uses_api_url_v2_or_the_muse_api():
-    assert muse_api.api_root("https://api.example/") == "https://api.example"
+def test_api_root_uses_api_url_v2_or_the_muse_api(monkeypatch):
+    monkeypatch.delenv(config.CUSTOM_SERVER_HOSTS_ENV, raising=False)
+    assert muse_api.api_root("https://hatch-api.meta.ai") == "https://hatch-api.meta.ai"
+    assert muse_api.api_root("https://api.example/") == "https://api.muse.ai"
     assert muse_api.api_root() == "https://api.muse.ai"
+    monkeypatch.setenv(config.CUSTOM_SERVER_HOSTS_ENV, "1")
+    assert muse_api.api_root("https://api.example/") == "https://api.example"
 
 
 def test_reconnected_sessions_share_command_slots(monkeypatch):

@@ -494,6 +494,7 @@ static const muse_lang_entry_t MENU[] = {
     { "Set here", "Definido aqui" },
     { "Set", "Definido" },
     { "Not a token", "Não é um token" },
+    { "Not allowed", "Não permitido" },
     { "BLUETOOTH", "BLUETOOTH" },
     { "Forget paired phones", "Esquecer celulares pareados" },
     { "When on, Muse is visible to phones nearby. Open tools/muse/ble_setup.html in Chrome, connect, and enter the code Muse shows to pair.", "Ligado, o Muse fica visível para celulares próximos. Abra tools/muse/ble_setup.html no Chrome, conecte e digite o código que o Muse mostrar para parear." },

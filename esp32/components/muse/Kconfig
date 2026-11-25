@@ -645,6 +645,7 @@ menu "Muse"
     config MUSE_REALTIME_VOICE
         bool "Live voice calls with Muse (experimental)"
         depends on (MUSE_HATCH || HOMEHUB_VOICE) && SPIRAM
+        select MUSE_STATIC_BUFFERS_IN_PSRAM if MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
         default n
         help
             A tap on the talk button starts a live voice call with Muse over
@@ -657,6 +658,8 @@ menu "Muse"
             also ends when Muse ends it, when nothing has been said or
             played for the idle limit, or at the length limit. Muse's VM
             has to accept voice calls from this gadget's credentials.
+            On Muse UI boards, static avatar and audio buffers move to PSRAM
+            to leave internal DMA memory for the live audio path.
 
     config MUSE_VOICE_NOTE_TOGGLE
         bool "Press once to record a voice note, press again to send"

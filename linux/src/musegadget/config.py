@@ -32,6 +32,9 @@ SDK_TOKEN_FILE = "sdk_token"
 # "1": new pairings offer gadget- node ids (identity.py). Off by default; turn
 # it on for development.
 GADGET_NODE_ID_ENV = "MUSEGADGET_GADGET_NODE_ID"
+# "1": pairing and the saved pairing take any server host (server_hosts.py).
+# Off by default; turn it on only for development.
+CUSTOM_SERVER_HOSTS_ENV = "MUSEGADGET_CUSTOM_SERVER_HOSTS"
 COMMANDS_DIR_ENV = "MUSEGADGET_COMMANDS_DIR"
 DEFAULT_COMMANDS_DIR = Path("/etc/musegadget/commands.d")
 # mgst_ plus 43 canonical base64url characters, as issued by gadgets.muse.ai.
@@ -41,6 +44,11 @@ _SDK_TOKEN = re.compile(r"mgst_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]")
 def gadget_node_ids() -> bool:
     """Whether a new pairing offers a gadget- node id (GADGET_NODE_ID_ENV)."""
     return os.environ.get(GADGET_NODE_ID_ENV) == "1"
+
+
+def custom_server_hosts() -> bool:
+    """Whether any server host is accepted (CUSTOM_SERVER_HOSTS_ENV), for development."""
+    return os.environ.get(CUSTOM_SERVER_HOSTS_ENV) == "1"
 
 
 def state_dir() -> Path:

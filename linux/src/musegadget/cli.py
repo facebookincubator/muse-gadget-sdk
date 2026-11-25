@@ -194,9 +194,8 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
     import asyncio
     import signal
 
-    from musegadget import muse_api
+    from musegadget import muse_api, server_hosts
     from musegadget.link_client import DeviceDescription, LinkSession
-    from musegadget.service import DEFAULT_NOISE_HOST
     from musegadget.voice_audio import LiveAudio, WavAudio
     from musegadget.voice_call import TRANSPORT_READY_TIMEOUT_S, VoiceCall
     from musegadget.wakeword_input import WakeWordBacklogError
@@ -240,7 +239,7 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
             raise ValueError("--vm-id must exactly match one leased VM")
         vm = matches[0]
         session = LinkSession(
-            noise_host=current_pairing.get("noise_host") or DEFAULT_NOISE_HOST,
+            noise_host=server_hosts.noise_host(current_pairing.get("noise_host")),
             vm_id=vm["vm_id"], vm_auth_token=vm["vm_auth_token"], app_id=args.app_id,
             register_device=False,
             device=DeviceDescription(ident.node_id, "Muse voice", __version__, {}),

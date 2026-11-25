@@ -29,7 +29,7 @@ extern "C" {
 // The tunnel does NOT open its own TLS/WebSocket/Noise connection. It rides
 // the single Noise session owned by noise_control (same /v1/noise connection
 // through the shared LB), as a second ServiceFrame stream (stream_id = 2)
-// carrying a streaming POST /link-tunnel. IP packet batches flow as BodyChunk
+// carrying a streaming POST /api/gadget/tunnel. IP packet batches flow as BodyChunk
 // frames whose body is the tunnel_netif [u16-LE len][packet]... sub-framing.
 // Noise message boundaries delimit batches, so there is no outer u32 envelope.
 //

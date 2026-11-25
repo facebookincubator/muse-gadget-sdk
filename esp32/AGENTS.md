@@ -494,7 +494,7 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/muse/boards/waveshare_s3_185b_init.h` (Apache-2.0, Waveshare),
 `components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
-`main/epd_it8951.c` (MIT, Seeed_GFX2),
+`main/epd_it8951.c` and `main/uc8179_gray4_lut.h` (MIT, Seeed_GFX2),
 `components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
 `components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
 Each third-party file is listed under License in `README.md` and the root
@@ -669,6 +669,10 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   what reliably ends a call there.
 
 ## Requests to Muse's VM from your code
+
+Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
+(`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
+`/api/gadget/me`). The requests below go to the VM's daemon.
 
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
@@ -849,6 +853,14 @@ For app authoring and the guide to send Muse, see
   `cmake/validate_config.cmake` enforces both.
 - `sdkconfig.defaults.esp32` keeps ESP-IDF's 64 KB internal DMA reserve on
   the classic ESP32, which isn't offered `CONFIG_HOMEHUB_DMA_RESERVE_KB`.
+- `CONFIG_HOMEHUB_ERROR_REPORT` (on in `sdkconfig.defaults`) sends Muse one
+  `link.error_report` after a panic, watchdog or brownout reset
+  (`../protocols/ERROR_REPORT.md`). `main/error_report.c` keeps the record in
+  RTC memory that survives a reset, writes nothing to flash, and is linked in
+  front of ESP-IDF's panic handler (`--wrap=esp_panic_handler`) to note the
+  fault. Anything added to the report must stay within that document's "What
+  it must never carry". It needs the stock panic handler, so it is unavailable
+  with `CONFIG_ESP_PANIC_HANDLER_IRAM`.
 - Each build's generated `sdkconfig` lives in its build directory
   (`build/sdkconfig`, `build-<board>/sdkconfig`). Once it exists, it overrides
   later edits to `sdkconfig.defaults` or the overlays. After changing those,
@@ -1052,6 +1064,9 @@ Users never see the name Hatch.
   base the app sends during pairing, with bare API paths. They ignore
   `api_url`: only older firmware reads it, and that firmware adds `/hatch/`
   itself. Keep saving it so a device flashed back to older firmware still works.
+  Pairing and the Muse host setting take only the hosts the Muse app sends
+  (`components/muse/muse_server_hosts.h`); `CONFIG_HOMEHUB_CUSTOM_SERVER_HOSTS`
+  accepts others in development builds.
 - `hatch` stays only where the server or the Muse app depends on it. Don't
   rename these:
   - the VM host `hatch.metaaivm.com`

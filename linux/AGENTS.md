@@ -37,14 +37,16 @@ pairing and control protocols, so the same app pairs either.
 | `ble_server.py` | BlueZ GATT peripheral and advertisement over D-Bus (GLib loop) |
 | `identity.py` | Persistent identity: the pairing's node id (`homelink-xxxxxx`, or `gadget-xxxxxx` with `MUSEGADGET_GADGET_NODE_ID=1`), `MuseGadgetXXXXXX` BLE name |
 | `muse_api.py` | `fetch_vms` and device token refresh |
+| `server_hosts.py` | The only server hosts pairing may name: the Muse app's `api_url`, `api_url_v2` and `noise_host` |
 | `tls.py` | The TLS context for every HTTPS and WSS connection: the system trust store, refused while it has a compromised root CA (a retired one only logs a warning) |
-| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/link-control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
+| `link_client.py` | One session: `/v1/noise` upgrade, Noise XX, `/api/gadget/control`, `/chat/stream`, `/chat/subscribe`, TTS streams |
 | `streaming.py` | Bounded duplex request bodies, response chunks and NDJSON parsing |
 | `voice_call.py`, `voice_audio.py`, `voice_gate.py` | MCU realtime voice lifecycle, WAV input/output and optional live audio, reply-audio fencing after an interruption |
 | `video_call.py`, `voice_video.py`, `rtc/` | Video calls: JOIN over Noise, SRTP media (ICE-lite over UDP/TCP, Opus, H.264), H.264 outputs |
 | `wakeword.py`, `wakeword_input.py`, `wakeword_check.py` | Optional Hey Muse detector (the native library from `wakeword/`), wake-word admission in front of a voice call, local check |
 | `service.py` | `musegadget run`: reconnect loop, token rotation, local socket |
 | `reaper.py` | Reaps orphaned child processes when the service runs as PID 1 |
+| `error_report.py` | Notes how `musegadget run` ended and reports a crash to Muse on the next registration |
 | `terminal_chat.py`, `terminal_chat_ui.py` | Interactive terminal chat over the service socket, curses UI and plain-text fallback |
 | `muse_turn.py` | Follows one request through Muse's chat events to its replies |
 | `executor.py`, `fileops.py` | The commands Muse can run, as the chosen account |
@@ -132,7 +134,8 @@ sudo musegadget info                 # identity and pairing state
 ```
 
 State lives in `/var/lib/musegadget` (mode 0700): `identity.json` survives
-unpairing, `pairing.json` holds the device tokens. The local socket is
+unpairing, `pairing.json` holds the device tokens, and `error_report.json`
+exists only while the service runs or a crash report waits to be sent. The local socket is
 `/run/musegadget/musegadget.sock`, owned by root and the run-as account's group.
 Besides messages, a local client can send `{"op": "muse_name"}` to get
 `{"ok": true, "muse_name": "..."}`: the name the user gave their Muse, or null
@@ -168,6 +171,11 @@ never has a command's parameters, output or error message.
 - `provision_v2` carries `api_url`, which only older firmware reads (it adds
   `/hatch/`). This client ignores it and uses `api_url_v2` when newer apps
   send it, or `https://api.muse.ai`, with bare API paths either way.
+- Setup takes only the hosts the Muse app sends (`server_hosts.py`):
+  `provision_v2` naming another gets `error_invalid_host` before anything is
+  saved, and a saved one the client doesn't take falls back to the default.
+  `MUSEGADGET_CUSTOM_SERVER_HOSTS=1` in the pairing's and the service's
+  environment accepts any, for development only.
 - The Android app writes `negotiatedMtu - 3` bytes with no cap, and Android
   rejects writes over 512 bytes. BlueZ must have `[GATT] ExchangeMTU = 256` in
   `/etc/bluetooth/main.conf`; the installer sets it. Symptom if it's missing:
@@ -182,10 +190,17 @@ never has a command's parameters, output or error message.
 - Connect to `wss://<noise_host>/v1/noise?vm_id=<vm_id>` with the per-VM bearer
   from `fetch_vms` in an `Authorization` header. A 401 or 403 on the upgrade
   means fetch fresh VM credentials, not retry the same bearer.
-- After the Noise handshake, open `POST /link-control` and leave the body open.
-  Both directions carry JSON messages, each prefixed with a little-endian u32
-  length. The device sends `link.register`, then a `link.result` for each
-  `link.invoke`. `link.unpaired` means the Muse removed the device.
+- After the Noise handshake, open `POST /api/gadget/control` on the VM's
+  Gadget API service (`SERVICE_GADGET`, 6) and leave the body open. Every
+  other request goes to the daemon (`SERVICE_DAEMON`). Both directions carry
+  JSON messages, each prefixed with a little-endian u32 length. The device
+  sends `link.register`, then a `link.result` for each `link.invoke`.
+  `link.unpaired` means the Muse removed the device.
+- After `musegadget run` ended in an exception, or was killed while the
+  machine stayed up, the next run sends one `link.error_report` once it has
+  registered (`../protocols/ERROR_REPORT.md`). It names the exception's type
+  and where it was raised, never its message. `MUSEGADGET_ERROR_REPORT=0` in
+  the service's environment turns it off.
 - Register as `platform: "linux"` and `device_family: "gadget"`, with
   `model_id` and `metadata.model_name` from the `DeviceDescription`
   (`../protocols/DEVICE.md`). Every device built with this SDK registers
@@ -204,7 +219,7 @@ never has a command's parameters, output or error message.
   chat at a time; the whole wait, queueing included, is bounded by its seconds,
   plus at most 2 s of cleanup. On a new side chat, an answer finished before
   the follow-up subscription opens is missed and the wait times out.
-- The VM accepts at most 256 KB per `/link-control` message, so command output
+- The VM accepts at most 256 KB per control message, so command output
   is cut at 96 KB per stream.
 
 ## Realtime voice
@@ -212,7 +227,7 @@ never has a command's parameters, output or error message.
 - `musegadget voice-call` uses the paired store and exact `--vm-id`; never
   add an owner-token fallback or change the account's default VM. Its
   `LinkSession(register_device=False)` waits for transport readiness without
-  `/link-control` or `link.register`, preserving the normal run service's live
+  the control stream or `link.register`, preserving the normal run service's live
   transport. Reuse the persistent identity for attribution only.
 - Each voice invocation admits a fresh call. Omit the realtime `session_id`
   query (it is for an already-admitted call); optional `thread_id` belongs in
@@ -368,6 +383,9 @@ listed here. Everything else is internal and can change.
   and clean up its background tasks before returning the outcome. `Service`
   logs exceptions from `serve()` and reconnects with backoff. Cancellation
   propagates to the caller.
+- `with error_report.watch_run(version):` around your program's whole run,
+  as `run_service` does, makes an exception that escapes it a crash that the
+  next run reports. `Service` sends a waiting report by itself.
 - `await Service.serve_local(path)` starts the optional local message socket
   at a `pathlib.Path`. It returns an `asyncio.Server` that the caller must
   close. The socket forwards to the registered session while `serve()` runs.

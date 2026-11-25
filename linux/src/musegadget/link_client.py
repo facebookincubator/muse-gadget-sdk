@@ -16,8 +16,9 @@
 
 Opens a WebSocket to ``/v1/noise`` with the per-VM bearer in an Authorization
 header, runs the Noise XX handshake, then opens a long-lived ``POST
-/link-control`` stream. Both directions of that stream carry JSON messages,
-each prefixed with its length as a little-endian u32:
+/api/gadget/control`` stream on the VM's Gadget API service. Both directions
+of that stream carry JSON messages, each prefixed with its length as a
+little-endian u32:
 
 * device → VM: ``link.register`` (capabilities), then ``link.result`` for
   each invoke;
@@ -25,7 +26,8 @@ each prefixed with its length as a little-endian u32:
   as ``link.unpaired``.
 
 Messages the device sends to the Muse (:meth:`LinkSession.send_chat`) go as
-separate ``POST /chat/stream`` requests on the same session.
+separate ``POST /chat/stream`` requests on the same session, to the VM's
+daemon like every request other than the control stream.
 """
 
 from __future__ import annotations
@@ -53,7 +55,8 @@ from musegadget.streaming import MAX_BUFFER_BYTES, MAX_BUFFER_CHUNKS, StreamingR
 log = logging.getLogger(__name__)
 
 NOISE_PATH = "/v1/noise"
-CONTROL_PATH = "/link-control"
+CONTROL_PATH = "/api/gadget/control"
+CONTROL_SERVICE = "gadget"
 CHAT_PATH = "/chat/stream"
 # The Gadget API's discovery call, which carries the Muse's name.
 GADGET_ME_PATH = "/api/gadget/me"
@@ -368,7 +371,8 @@ class LinkSession:
 
     async def _open_control_stream(self) -> None:
         encrypted = await self._send_encrypted(
-            lambda: self._transport.start_stream_request("POST", CONTROL_PATH),
+            lambda: self._transport.start_stream_request(
+                "POST", CONTROL_PATH, service=CONTROL_SERVICE),
         )
         self._stream_id = encrypted.stream_id
         self._register_id = str(uuid.uuid4())
@@ -730,7 +734,7 @@ class LinkSession:
         if not self._register_device:
             raise ValueError("no device control stream on this session")
         await self._send_complete(lambda: self._transport.encrypt_body_chunk(
-            self._stream_id, encode_message(message),
+            self._stream_id, encode_message(message), service=CONTROL_SERVICE,
         ))
 
     async def _send_complete(self, encrypt):
@@ -826,7 +830,7 @@ class LinkSession:
                 return Outcome.CLOSED
             if frame.kind == "response":
                 if not 200 <= frame.value.status < 300:
-                    log.warning("/link-control refused: HTTP %d", frame.value.status)
+                    log.warning("%s refused: HTTP %d", CONTROL_PATH, frame.value.status)
                     return Outcome.FORBIDDEN if frame.value.status == 403 else Outcome.CLOSED
                 data, ended = frame.value.body, frame.value.end_body
             else:

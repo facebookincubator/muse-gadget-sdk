@@ -221,6 +221,46 @@ static void dither_color(const uint16_t *rgb, uint8_t *codes, int w, int h, int1
     }
 }
 
+// Seeed_GFX2 UC8179 gray mode uses two 1-bit data planes. Dither the
+// 8-bit canvas to four levels, then pack each plane MSB-first.
+static void dither_gray4_planes(const uint8_t *gray, uint8_t *old_plane, uint8_t *new_plane,
+                                int w, int h, int16_t *err) {
+    int16_t *cur = err, *next = err + w + 2;
+    memset(err, 0, 2 * (size_t)(w + 2) * sizeof(*err));
+    for (int y = 0; y < h; y++) {
+        const uint8_t *row = gray + (size_t)y * w;
+        uint8_t *old_row = old_plane + (size_t)y * (w / 8);
+        uint8_t *new_row = new_plane + (size_t)y * (w / 8);
+        memset(next, 0, (size_t)(w + 2) * sizeof(*next));
+        for (int x = 0; x < w; x += 8) {
+            uint8_t old_byte = 0, new_byte = 0;
+            for (int k = 0; k < 8; k++) {
+                int i = x + k;
+                int v = row[i] + cur[i + 1];
+                int level = (v + 42) / 85;
+                if (level < 0) level = 0;
+                if (level > 3) level = 3;
+                int e = v - level * 85;
+                cur[i + 2] += (int16_t)(e * 7 / 16);
+                next[i] += (int16_t)(e * 3 / 16);
+                next[i + 1] += (int16_t)(e * 5 / 16);
+                next[i + 2] += (int16_t)(e / 16);
+                // E1001 hardware test: plane code 00 shows white and 11
+                // shows black. Invert the nominal 0=black..3=white level.
+                int panel_level = 3 - level;
+                old_byte = (uint8_t)(old_byte << 1 | (panel_level & 1));
+                new_byte = (uint8_t)(new_byte << 1 | (panel_level >> 1));
+            }
+            old_row[x / 8] = old_byte;
+            new_row[x / 8] = new_byte;
+        }
+        int16_t *tmp = cur;
+        cur = next;
+        next = tmp;
+    }
+}
+
+
 // ---- Panel state ------------------------------------------------------------
 
 static const epd_panel_t *s_panel;
@@ -240,6 +280,7 @@ static uint8_t *s_canvas;   // what is being drawn (gray or RGB565)
 static size_t s_canvas_bytes;
 static uint8_t *s_frame;    // s_canvas dithered, about to be shown
 static uint8_t *s_gray4_frame;
+static uint8_t *s_gray4_old;
 static uint8_t *s_shown;    // what the panel shows (mono panels only)
 static int16_t *s_err;      // dithering error rows
 static bool s_ready;
@@ -406,6 +447,9 @@ bool led_status_init(void) {
     if (s_panel->update_gray4) {
         s_gray4_frame = heap_caps_malloc((size_t)EPD_W * EPD_H / 4, MALLOC_CAP_SPIRAM);
     }
+    if (s_panel->update_gray4_planes) {
+        s_gray4_old = heap_caps_malloc(EPD_FRAME_BYTES, MALLOC_CAP_SPIRAM);
+    }
     size_t err_values;
     if (EPD_COLOR) {
         s_shown = NULL;
@@ -421,6 +465,7 @@ bool led_status_init(void) {
     bool ok = s_canvas && s_frame && s_err && s_panel_lock && s_lock && s_mutex;
     if (!EPD_COLOR) ok = ok && s_shown;
     if (s_panel->update_gray4) ok = ok && s_gray4_frame;
+    if (s_panel->update_gray4_planes) ok = ok && s_gray4_old;
     if (!ok) {
         ESP_LOGE(TAG, "e-paper buffer alloc failed");
         return false;
@@ -498,29 +543,65 @@ bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {
     return true;
 }
 
-void led_status_draw_done(void) {
-    if (!s_ready) return;
+static bool draw_done(int gray_levels) {
+    if (!s_ready) return false;
+    if ((gray_levels == 4 && !s_panel->update_gray4_planes) ||
+        (gray_levels == 16 && !s_panel->update_gray16)) return false;
+    esp_err_t err = ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_panel_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool show = s_image_mode && s_image_dirty;
     if (show) {
         s_image_dirty = false;
-        if (s_panel->update_gray4) {
-            dither_gray4(s_canvas, s_gray4_frame, EPD_W, EPD_H, s_err);
-        } else {
-            epd_dither();
+        if (gray_levels == 4) {
+            dither_gray4_planes(s_canvas, s_gray4_old, s_frame, EPD_W, EPD_H, s_err);
+        } else if (gray_levels == 0) {
+            if (s_panel->update_gray4)
+                dither_gray4(s_canvas, s_gray4_frame, EPD_W, EPD_H, s_err);
+            else
+                epd_dither();
         }
     }
     xSemaphoreGive(s_lock);
     if (show) {
-        esp_err_t err = s_panel->update_gray4 ? s_panel->update_gray4(s_gray4_frame)
-                                              : s_panel->update(s_frame, s_shown, true);
-        if (err == ESP_OK && s_shown && !s_panel->update_gray4) {
+        if (gray_levels == 4) {
+            err = s_panel->update_gray4_planes(s_gray4_old, s_frame);
+            // A grayscale image cannot supply the previous mono plane. The
+            // next status repaint takes the full waveform from a white base.
+            memset(s_shown, 255, EPD_FRAME_BYTES);
+            s_fast_refreshes = FULL_REFRESH_EVERY;
+        } else if (gray_levels == 16) {
+            err = s_panel->update_gray16(s_canvas);
+        } else {
+            err = s_panel->update_gray4 ? s_panel->update_gray4(s_gray4_frame)
+                                        : s_panel->update(s_frame, s_shown, true);
+        }
+        if (gray_levels == 0 && err == ESP_OK && s_shown && !s_panel->update_gray4) {
             memcpy(s_shown, s_frame, EPD_FRAME_BYTES);
         }
     }
     xSemaphoreGive(s_panel_lock);
+    return err == ESP_OK;
 }
+
+void led_status_draw_done(void) {
+    draw_done(0);
+}
+
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+void led_status_draw_gray_begin(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_image_mode = true;
+    s_status_drawn = false;
+    s_image_dirty = false;
+    memset(s_canvas, 255, s_canvas_bytes);
+    xSemaphoreGive(s_lock);
+}
+
+bool led_status_draw_gray_done(int levels) {
+    return (levels == 4 || levels == 16) && draw_done(levels);
+}
+#endif
 
 void led_status_show_animation(void) {
     if (!s_ready) return;

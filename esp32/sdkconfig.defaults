@@ -31,6 +31,10 @@ CONFIG_HOMEHUB_OTA_ENABLED=n
 # authenticated support path and never exposed in user-visible chat.
 CONFIG_HOMEHUB_SUPPORT_BUG_REPORT=y
 
+# After an abnormal reset, send the VM one summary of it with no logs or
+# identifiers (link.error_report).
+CONFIG_HOMEHUB_ERROR_REPORT=y
+
 # Optimize for performance (-O2). The default is debug (-Og) which
 # leaves significant throughput on the table for TLS, lwIP, and the
 # tunnel framing path.

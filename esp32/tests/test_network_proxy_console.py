@@ -128,7 +128,9 @@ int main(void) {
 
     def test_provisioning_applies_proxy_before_cloud_credentials(self):
         ble = (ROOT / "main/ble_server.c").read_text()
-        start = ble.index('strcmp(act, "provision_v2") == 0')
+        # Skip the shared authentication precheck and unrelated direct-OTA
+        # handler: only provisioning must parse its proxy before activation.
+        start = ble.index('} else if (decrypted && strcmp(act, "provision_v2") == 0) {')
         provision = ble[start:]
         self.assertLess(provision.index("network_proxy_parse(proxy, &a->proxy)"),
                         provision.index("link_pairing_mark_provisioning_active()"))

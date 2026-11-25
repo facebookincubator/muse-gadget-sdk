@@ -53,6 +53,7 @@
 #include "link_pairing.h"
 #include "factory_test.h"
 #include "helper_task.h"
+#include "muse_server_hosts.h"
 
 static const char *TAG = "link.ble";
 
@@ -227,6 +228,20 @@ static bool optional_ota_force(cJSON *root) {
         f = cJSON_GetObjectItem(root, "force");
     }
     return cJSON_IsTrue(f);
+}
+
+static const char *optional_str(cJSON *root, const char *key) {
+    cJSON *item = cJSON_GetObjectItem(root, key);
+    return (cJSON_IsString(item) && item->valuestring) ? item->valuestring : "";
+}
+
+// Setup may name the hosts the device sends its credentials to; a host this
+// build doesn't allow (muse_server_hosts.h) refuses the whole command before
+// any of it is applied.
+static bool setup_hosts_allowed(cJSON *root) {
+    return muse_server_api_allowed(optional_str(root, "api_url"))
+           && muse_server_api_allowed(optional_str(root, "api_url_v2"))
+           && muse_server_noise_allowed(optional_str(root, "noise_host"));
 }
 
 static void unpair_task(void *arg) {
@@ -431,6 +446,8 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
             || !cJSON_IsString(tt) || !tt->valuestring
             || strcmp(tt->valuestring, "device") != 0) {
             ble_server_send_status("error_missing_credentials");
+        } else if (!setup_hosts_allowed(root)) {
+            ble_server_send_status("error_invalid_host");
         } else {
             provision_args_t *a = calloc(1, sizeof(*a));
             if (!a) {

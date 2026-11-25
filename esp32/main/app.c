@@ -43,7 +43,9 @@
 #include "lwip/ip4_addr.h"
 
 #include "identity.h"
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #include "sdk_token_console.h"
+#endif
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
@@ -1296,6 +1298,26 @@ static bool start_wifi_join_ota_if_requested(const char *url, bool force,
     return true;
 }
 
+// Save and apply the endpoints setup sent. on_provision calls this only once
+// that setup's credentials are stored, so hosts are saved only with stored
+// credentials and refused ones never bring in new hosts. A failure here wipes
+// the credentials and any hosts saved (setup_fail_for_session).
+static bool save_setup_endpoints(const char *api_url, const char *api_url_v2,
+                                 const char *noise_host) {
+    // Only older firmware reads api_url. Keep it current so a device flashed
+    // back to that firmware still reaches the API it was paired with.
+    bool api_saved = api_url && *api_url
+        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
+    bool api_v2_saved = api_url_v2 && *api_url_v2
+        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
+    bool noise_saved = noise_host && *noise_host
+        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
+    if (!api_saved || !api_v2_saved || !noise_saved) return false;
+    vm_api_set_base_url(api_url_v2);
+    noise_ctrl_set_host(noise_host);
+    return true;
+}
+
 static void on_provision(const char *ssid, const char *password,
                          const char *access_token,
                          const char *refresh_token,
@@ -1343,25 +1365,14 @@ static void on_provision(const char *ssid, const char *password,
     persist_connected_wifi_channel();
     config_erase_key("vm_url");
 
-    // Only older firmware reads api_url. Keep it current so a device flashed
-    // back to that firmware still reaches the API it was paired with.
-    bool api_saved = api_url && *api_url
-        ? config_set_str("api_url", api_url) : config_erase_key("api_url");
-    bool api_v2_saved = api_url_v2 && *api_url_v2
-        ? config_set_str("api_url_v2", api_url_v2) : config_erase_key("api_url_v2");
-    bool noise_saved = noise_host && *noise_host
-        ? config_set_str("noise_host", noise_host) : config_erase_key("noise_host");
-    if (!api_saved || !api_v2_saved || !noise_saved) {
-        setup_fail_for_session("storage", "error_storage", session_generation);
-        goto done;
-    }
-    vm_api_set_base_url(api_url_v2);
-    noise_ctrl_set_host(noise_host);
-
     if (!require_provisioning_pairing_session(session_generation)) goto done;
     setup_stage_set("auth");
     if (!accept_pairing_credentials(access_token, refresh_token, username)) {
         setup_fail_for_session("auth", "auth_failed", session_generation);
+        goto done;
+    }
+    if (!save_setup_endpoints(api_url, api_url_v2, noise_host)) {
+        setup_fail_for_session("storage", "error_storage", session_generation);
         goto done;
     }
 
@@ -2148,7 +2159,13 @@ static cJSON *on_ws_command(
 #endif
 #if CONFIG_HOMEHUB_DISPLAY_COMMANDS
     bool draw_file = strcmp(command, "display.draw_file") == 0;
-    if (draw_file || strcmp(command, "display.draw_url") == 0) {
+    int gray_levels = 0;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179
+    if (strcmp(command, "display.draw_gray4_url") == 0) gray_levels = 4;
+#elif CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+    if (strcmp(command, "display.draw_gray16_url") == 0) gray_levels = 16;
+#endif
+    if (draw_file || gray_levels || strcmp(command, "display.draw_url") == 0) {
         // draw_file takes a path on the VM, fetched over this session.
         cJSON *target = cJSON_GetObjectItem(params, draw_file ? "path" : "url");
         cJSON *row = cJSON_GetObjectItem(params, "row");
@@ -2156,15 +2173,28 @@ static cJSON *on_ws_command(
             return command_error("missing_param",
                                  draw_file ? "path is required" : "url is required");
         }
+        if (gray_levels && row && (!cJSON_IsNumber(row) ||
+                                  row->valuedouble != row->valueint)) {
+            return command_error("invalid_params", "row must be an integer");
+        }
         draw_url_ctx_t *ctx = calloc(1, sizeof(*ctx));
         if (!ctx) return command_error("out_of_memory", "failed to allocate");
         ctx->session_generation = session_generation;
         strncpy(ctx->request_id, request_id, sizeof(ctx->request_id) - 1);
         const char *code, *message;
         int top = cJSON_IsNumber(row) ? row->valueint : IMAGE_FETCH_DEFAULT_ROW;
-        bool started = draw_file
-            ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
-            : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        bool started;
+#if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
+        if (gray_levels) {
+            started = image_fetch_start_gray(target->valuestring, top, gray_levels,
+                                             draw_url_done, ctx, &code, &message);
+        } else
+#endif
+        {
+            started = draw_file
+                ? image_fetch_start_vm(target->valuestring, top, draw_url_done, ctx, &code, &message)
+                : image_fetch_start(target->valuestring, top, draw_url_done, ctx, &code, &message);
+        }
         if (!started) {
             free(ctx);
             return command_error(code, message);
@@ -2990,7 +3020,7 @@ void app_run(void) {
     link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),
                       app_desc ? app_desc->version : "unknown", identity_sdk_token());
     vm_api_set_sdk_token(identity_sdk_token());
-#if !CONFIG_MUSE_ENABLED
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE && !CONFIG_MUSE_ENABLED
     // Muse boards' own console takes the command (muse_glue_start).
     sdk_token_console_start();
 #endif

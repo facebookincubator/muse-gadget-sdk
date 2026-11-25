@@ -164,7 +164,7 @@ normal VM lookup. `--vm-id` never changes your account's default VM and never
 falls back to it. If lookup rejects an expired device token, let the normal
 `musegadget run` service refresh it first. Do not copy tokens into command-line
 arguments. The voice connection uses a **voice-only Noise transport**: it never
-opens `/link-control` or sends `link.register`, so it cannot replace the normal
+opens the control stream or sends `link.register`, so it cannot replace the normal
 run service's live transport for the same persistent device identity. That
 identity is used only for call attribution. Use `--thread-id` when targeting a
 particular conversation. Every invocation admits a fresh call; resume/session-ID
