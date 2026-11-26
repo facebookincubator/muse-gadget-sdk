@@ -82,7 +82,9 @@ jobs:
           esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32c5
           path: esp32
-          extra_docker_args: -e FREEINK_SOURCE_DIR
+          # CI (true on GitHub's runners) goes into the container too: there a ThreadSanitizer test that can't run
+          # fails instead of skipping (tests/tsan_run.py).
+          extra_docker_args: -e FREEINK_SOURCE_DIR -e CI
           command: |
             set -e
             # test_noise_core links against the host PSA Crypto library;
