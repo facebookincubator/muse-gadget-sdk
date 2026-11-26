@@ -47,7 +47,7 @@ bool muse_avatar_files_mount(void) {
     return ok;
 }
 
-#if CONFIG_MUSE_AVATAR_ANIMATIONS
+#if CONFIG_MUSE_AVATAR_ANIMATIONS || CONFIG_MUSE_PIXEL_AVATAR
 bool muse_avatar_files_space(size_t needed) {
     size_t total=0,used=0;
     return muse_avatar_files_mount() && esp_littlefs_info("files",&total,&used)==ESP_OK &&

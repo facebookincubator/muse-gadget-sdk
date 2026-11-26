@@ -105,6 +105,9 @@ set(GADGET_REQUIRES
 
 if(CONFIG_MUSE_AVATAR_SYNC)
     list(APPEND GADGET_SRCS "avatar_sync.c")
+    if(CONFIG_MUSE_PIXEL_AVATAR)
+        list(APPEND GADGET_SRCS "pixel_avatar.c")
+    endif()
 endif()
 
 # A product component can add control commands, not replace the shared OTA

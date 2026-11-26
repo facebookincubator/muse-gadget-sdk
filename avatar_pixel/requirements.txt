@@ -1,0 +1,3 @@
+# Runtime only; no network/package installation is performed by the converter.
+# Pin the version/build in a self-host's environment for byte reproducibility.
+Pillow>=10.0,<14.0

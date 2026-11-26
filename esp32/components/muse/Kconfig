@@ -33,6 +33,18 @@ menu "Muse"
             default and can be selected without restarting. Requires PSRAM
             for bounded image decoding. Initially validated on the 1.75C.
 
+    config MUSE_PIXEL_AVATAR
+        bool "Data-only pixel-art personal avatars (experimental)"
+        depends on MUSE_AVATAR_SYNC
+        default n
+        help
+            Adds a reusable local indexed-sprite renderer and USB asset-pack
+            installer. New avatars are data rather than custom firmware code.
+            Generic breathing, bob, tap and state feedback make no anatomical
+            assumptions. No camera, live voice or public listener is enabled.
+            A matching saved pixel pack restores offline independently of the
+            cloud session. Requires a writable files volume for installation.
+
     config MUSE_AVATAR_ANIMATIONS
         bool "Experimental phone-avatar clip playback"
         depends on MUSE_AVATAR_SYNC && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4)

@@ -13,6 +13,9 @@
 #if CONFIG_MUSE_AVATAR_SYNC
 #include "avatar_sync.h"
 #include "muse_avatar.h"
+#if CONFIG_MUSE_PIXEL_AVATAR
+#include "muse_pixel_avatar.h"
+#endif
 #if CONFIG_MUSE_AVATAR_ANIMATIONS
 #include "muse_avatar_motion.h"
 #include "avatar_motion_console.h"
@@ -64,10 +67,40 @@ static atomic_uint s_identity_reads, s_file_reads, s_bytes_received, s_cache_wri
 static atomic_uint s_path_id, s_revision_id, s_cached_path_id, s_cached_revision_id;
 static atomic_uint s_completions;
 static portMUX_TYPE s_image_guard = portMUX_INITIALIZER_UNLOCKED;
+#if CONFIG_MUSE_PIXEL_AVATAR
+typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; uint8_t pixel_key[32]; bool pixel_key_valid; } image_t;
+#else
 typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; } image_t;
+#endif
 static image_t *s_image;
 static avatar_identity_t s_identity;
 static uint8_t s_binding[32];
+#if CONFIG_MUSE_PIXEL_AVATAR
+static bool pixel_identity_key(const avatar_identity_t *id,uint8_t key[32]) {
+    if(!id)return false;
+    mbedtls_md_context_t md;mbedtls_md_init(&md);
+    bool ok=!mbedtls_md_setup(&md,mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),0) && !mbedtls_md_starts(&md) &&
+        !mbedtls_md_update(&md,(const uint8_t *)id->path,strlen(id->path)+1) &&
+        !mbedtls_md_update(&md,(const uint8_t *)id->revision,strlen(id->revision)) && !mbedtls_md_finish(&md,key);
+    mbedtls_md_free(&md);return ok;
+}
+static void pixel_identity(const avatar_identity_t *id) {
+    uint8_t key[32]={0};bool have=pixel_identity_key(id,key);
+    muse_pixel_avatar_identity(have?key:NULL);
+}
+static bool set_image_pixel_key(image_t *image,const avatar_identity_t *id) {
+    image->pixel_key_valid=pixel_identity_key(id,image->pixel_key);return image->pixel_key_valid;
+}
+bool muse_avatar_copy_image_key(const muse_avatar_image_t *image,uint8_t out[32]) {
+    if(!image || !out)return false;
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+    if(image->release)return false; /* only canonical stills own this metadata */
+#endif
+    const image_t *owner=(const image_t *)image;
+    if(!owner->pixel_key_valid)return false;
+    memcpy(out,owner->pixel_key,32);return true;
+}
+#endif
 #if CONFIG_MUSE_AVATAR_ANIMATIONS
 static uint8_t s_motion_source[32], s_motion_binding[32];
 static bool s_motion_bound;
@@ -94,9 +127,16 @@ static void motion_binding(const avatar_identity_t *id) {
     if (id) { memcpy(s_motion_source,key,32); memcpy(s_motion_binding,s_binding,32); }
     portEXIT_CRITICAL(&s_image_guard);
     muse_avatar_motion_bind(id?key:NULL,id?s_binding:NULL);
+#if CONFIG_MUSE_PIXEL_AVATAR
+    pixel_identity(id);
+#endif
 }
 #else
+#if CONFIG_MUSE_PIXEL_AVATAR
+#define motion_binding(id) pixel_identity(id)
+#else
 #define motion_binding(id) ((void)0)
+#endif
 #endif
 
 static bool s_have_binding;
@@ -159,6 +199,9 @@ static void probe_task(void *arg) {
 }
 
 bool avatar_sync_console(const char *line) {
+#if CONFIG_MUSE_PIXEL_AVATAR
+    if(muse_pixel_avatar_console(line))return true;
+#endif
 #if CONFIG_MUSE_AVATAR_ANIMATIONS
     if (avatar_motion_console(line)) return true;
 #endif
@@ -346,6 +389,9 @@ static bool cache_load(void) {
             avatar_cache_identity_read(CACHE_META, &h);
             image_t *image = new_image(pixels, h.width, h.height, content_epoch);
             if (!image) return false;
+#if CONFIG_MUSE_PIXEL_AVATAR
+            if(!set_image_pixel_key(image,&h.identity)) {muse_avatar_release(&image->view);return false;}
+#endif
             publish(image); s_identity = h.identity; motion_binding(&s_identity); s_cache_slot = slot; s_cache_sequence = h.sequence;
             s_image_saved = true;
             atomic_store(&s_cached_path_id, avatar_cache_crc(h.identity.path, strlen(h.identity.path)));
@@ -391,6 +437,11 @@ static bool sync_once(unsigned generation) {
      * not prove that the person chose the built-in character. */
     if (available == 0) return false;
     if (available != 1) return false;
+#if CONFIG_MUSE_PIXEL_AVATAR
+    /* A known new generation invalidates a pixel pack even if downloading
+     * its still later fails. Keep the last good still as a separate fallback. */
+    pixel_identity(&identity);
+#endif
     atomic_store(&s_path_id, avatar_cache_crc(identity.path, strlen(identity.path)));
     atomic_store(&s_revision_id, avatar_cache_crc(identity.revision, strlen(identity.revision)));
     if (s_image && identity.revision[0] && !strcmp(identity.path, s_identity.path) && !strcmp(identity.revision, s_identity.revision)) {
@@ -410,6 +461,9 @@ static bool sync_once(unsigned generation) {
     if (cancelled(generation)) { muse_webp_free(decoded.pixels); return false; }
     image_t *image = new_image(decoded.pixels, decoded.width, decoded.height, content_epoch);
     if (!image) return false;
+#if CONFIG_MUSE_PIXEL_AVATAR
+    if(!set_image_pixel_key(image,&identity)) {muse_avatar_release(&image->view);return false;}
+#endif
     bool same = s_image && image->crc == s_image->crc && decoded.width == s_image->view.data.width && decoded.height == s_image->view.data.height &&
                 !memcmp(image->view.data.pixels, s_image->view.data.pixels, (size_t)decoded.width * decoded.height * 2);
     bool saved = same ? s_image_saved : cache_save(image, &identity, generation);
@@ -422,7 +476,12 @@ static bool sync_once(unsigned generation) {
         }
     }
     if (cancelled(generation)) { muse_avatar_release(&image->view); return false; }
+#if CONFIG_MUSE_PIXEL_AVATAR
+    bool same_key=s_image && s_image->pixel_key_valid && !memcmp(s_image->pixel_key,image->pixel_key,32);
+    if (same && same_key) muse_avatar_release(&image->view); else publish(image);
+#else
     if (same) muse_avatar_release(&image->view); else publish(image);
+#endif
     s_image_saved = saved;
     s_identity = identity; motion_binding(&s_identity);
     atomic_store(&s_last_ms, (int)((esp_timer_get_time() - started) / 1000));
@@ -446,6 +505,9 @@ static void worker_task(void *arg) {
             unsigned expected = source;
             if (atomic_compare_exchange_strong(&s_source, &expected, muse_settings_avatar_source())) {
                 atomic_fetch_add(&s_generation, 1); atomic_store(&s_status, "Could not save setting");
+#if CONFIG_MUSE_PIXEL_AVATAR
+                muse_pixel_avatar_source_changed();
+#endif
             }
             continue;
         }
@@ -501,12 +563,21 @@ static void worker_kick(void) {
 }
 void muse_avatar_start(void) {
     atomic_store(&s_source, muse_settings_avatar_source()); atomic_store(&s_ready, true);
+#if CONFIG_MUSE_PIXEL_AVATAR
+    muse_pixel_avatar_start();
+#endif
     if (muse_avatar_source() == MUSE_AVATAR_PERSONAL || (atomic_load(&s_jobs) & JOB_CLEAR)) worker_kick();
 }
 muse_avatar_source_t muse_avatar_source(void) { return atomic_load(&s_source); }
 void muse_avatar_select(muse_avatar_source_t source) {
     if (source != MUSE_AVATAR_BUILTIN && source != MUSE_AVATAR_PERSONAL) return;
+    bool changed=atomic_load(&s_source)!=(unsigned)source;
     atomic_store(&s_source, source); atomic_fetch_add(&s_generation, 1);
+#if CONFIG_MUSE_PIXEL_AVATAR
+    if(changed)muse_pixel_avatar_source_changed();
+#else
+    (void)changed;
+#endif
     atomic_store(&s_status, source == MUSE_AVATAR_PERSONAL ? "Updating" : "Built-in");
     atomic_fetch_or(&s_jobs, JOB_REFRESH); worker_kick();
 }
@@ -515,8 +586,16 @@ uint32_t muse_avatar_content_epoch(void) {
     uint32_t epoch = atomic_load(&s_content_epoch);
     return !atomic_load(&s_binding_blocked) && atomic_load(&s_metadata_epoch) == epoch ? epoch : 0;
 }
-void muse_avatar_clear(void) { motion_binding(NULL); atomic_fetch_add(&s_content_epoch, 1); atomic_fetch_add(&s_generation, 1); atomic_fetch_or(&s_jobs, JOB_CLEAR); worker_kick(); }
+void muse_avatar_clear(void) {
+#if CONFIG_MUSE_PIXEL_AVATAR
+    muse_pixel_avatar_clear();
+#endif
+    motion_binding(NULL); atomic_fetch_add(&s_content_epoch, 1); atomic_fetch_add(&s_generation, 1); atomic_fetch_or(&s_jobs, JOB_CLEAR); worker_kick();
+}
 void muse_avatar_pairing_changed(void) {
+#if CONFIG_MUSE_PIXEL_AVATAR
+    muse_pixel_avatar_invalidate();
+#endif
     motion_binding(NULL);
     atomic_store(&s_binding_blocked, true); atomic_fetch_add(&s_generation, 1);
     atomic_fetch_add(&s_content_epoch, 1);

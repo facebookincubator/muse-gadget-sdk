@@ -383,6 +383,12 @@ the chip, button pin, status light, and flash size.
 [`devices/README.md`](devices/README.md#add-a-board) covers the details, or ask
 Muse Code to do it for you.
 
+To apply a reusable pixel-art appearance without writing a renderer for each
+avatar, enable the experimental [data-only pixel-avatar path](docs/pixel-avatars.md).
+The [shared converter/API](../avatar_pixel/README.md) compiles images into bounded
+sprite packs; one local renderer supplies generic reactions. New packs do not
+require a firmware rebuild. Inputs and generated personal assets stay private.
+
 To put your own avatar on a board's screen, plug in the board and run
 `python3 tools/muse/avatar.py`. It asks your Muse to redraw its avatar as the
 board's pixel avatar, checks the result, then builds and flashes it. Your avatar
