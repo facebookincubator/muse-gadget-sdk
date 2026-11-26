@@ -313,6 +313,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | M5Stack StickS3 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack StopWatch | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack TriviaPOD (experimental) | UI, touch, push-to-talk, settings; sleep, wake and battery unverified | `tools/muse/board.sh build triviapod` |
+| [Seeed Wio Tracker L2 (IPS, experimental)](devices/seeed-wio-tracker-l2.md) | Touch UI, U/B push-to-talk, ES8311 speaker and ES7243E mic (hardware verification pending) | `tools/muse/board.sh build l2` |
 | [Seeed XIAO ESP32-S3 1.47 Touch Display](devices/seeed-xiao-s3-147.md) | UI, USR1 push-to-talk, touch, settings, images; PDM mic, no speaker | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack CoreS3 Lite | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |

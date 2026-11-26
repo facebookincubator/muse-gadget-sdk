@@ -69,7 +69,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"dfrobot_unihiker_k10\", \"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_18\", \"waveshare_s3_216\", \"waveshare_s3_206\", \"waveshare_s3_185b\", \"waveshare_s3_185c\", \"waveshare_s3_143\", \"waveshare_s3_146\", \"lilygo_s3_amoled_175\", \"aipi\", \"atk_dnesp32s3_box\", \"atk_dnesp32s3_box2\", \"m5stack_cardputer_adv\", \"m5stack_atoms3\", \"sensecap_watcher\", \"m5stack_sticks3\", \"crowpanel_advance_43\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"m5stack_triviapod\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"spotpear_esp32_ai_128\", \"esp_mosaico\", \"waveshare_p4_lcd35\", \"deotaland_rorolee\", \"waveshare_s3_lcd19\", \"waveshare_s3_143c\", \"viewe_smartring_plus\", \"waveshare_s3_lcd_35\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"dfrobot_unihiker_k10\", \"ostb_echoear_2st\", \"waveshare_s3_175c\", \"waveshare_s3_175\", \"waveshare_s3_18\", \"waveshare_s3_216\", \"waveshare_s3_206\", \"waveshare_s3_185b\", \"waveshare_s3_185c\", \"waveshare_s3_143\", \"waveshare_s3_146\", \"lilygo_s3_amoled_175\", \"aipi\", \"atk_dnesp32s3_box\", \"atk_dnesp32s3_box2\", \"m5stack_cardputer_adv\", \"m5stack_atoms3\", \"sensecap_watcher\", \"m5stack_sticks3\", \"crowpanel_advance_43\", \"m5stack_stickc_plus2\", \"m5stack_stopwatch\", \"m5stack_triviapod\", \"seeed_wio_tracker_l2\", \"seeed_xiao_s3_147\", \"fnk0104b\", \"vn_s3_183\", \"ai_passport\", \"waveshare_s3_lcd128\", \"spotpear_esp32_ai_128\", \"esp_mosaico\", \"waveshare_p4_lcd35\", \"deotaland_rorolee\", \"waveshare_s3_lcd19\", \"waveshare_s3_143c\", \"viewe_smartring_plus\", \"waveshare_s3_lcd_35\"]"
   espressif/esp_lcd_ili9341:
     version: "^2.1.0"
     rules:
@@ -121,7 +121,7 @@ dependencies:
   espressif/esp_lcd_touch_gt911:
     version: "1.2.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"crowpanel_advance_43\", \"waveshare_s3_lcd7\", \"reterminal_sticky\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"seeed_wio_tracker_l2\", \"crowpanel_advance_43\", \"waveshare_s3_lcd7\", \"reterminal_sticky\"]"
   espressif/esp_lcd_co5300:
     version: "^2.2.0"
     rules:
@@ -193,4 +193,4 @@ dependencies:
   espressif/esp_lcd_sh8601:
     version: "^2.0.1"
     rules:
-      - if: "$CONFIG{MUSE_BOARD_ID} in [\"waveshare_s3_lcd19\", \"waveshare_s3_143c\"]"
+      - if: "$CONFIG{MUSE_BOARD_ID} in [\"seeed_wio_tracker_l2\", \"waveshare_s3_lcd19\", \"waveshare_s3_143c\"]"
