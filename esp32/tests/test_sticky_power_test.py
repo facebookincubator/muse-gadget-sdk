@@ -12,8 +12,10 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 
 ROOT = Path(__file__).resolve().parents[1]
 

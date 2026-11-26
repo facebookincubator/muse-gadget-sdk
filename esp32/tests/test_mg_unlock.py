@@ -75,6 +75,18 @@ class MgConsoleWords(unittest.TestCase):
         out = self.run_lines(["pause " + k for k in cases])
         self.assertEqual(out, list(cases.values()))
 
+    def test_pair_auto_never_armed_over_the_air(self) -> None:
+        # The bench auto-confirm presses the next setup confirmation for the user, with the talk key's semantics
+        # (muse_link_bench_confirm). It's for benches: a release build never arms it from the Nordic UART, on a
+        # proven connection either, in SAFE or out; "!PAIR AUTO 0" (disarming) still runs, and the USB console's
+        # >pair.auto arms it in every build.
+        for safe in "01":
+            out = self.run_lines([f"remote 1 {safe} " + w for w in ("!PAIR AUTO", "!PAIR AUTO 1", "!PAIR AUTO 0")])
+            self.assertEqual(out, ["locked", "locked", "runs"], safe)
+        self.assertEqual(self.run_lines(["arm", "auto"]), ["auto 1"])   # >pair.auto
+        ble = (MG / "mg_ble.c").read_text()
+        self.assertIn('ESP_LOGW(TAG, "a bench-only word: refused on a release build");', ble)
+
     def test_remote_words_in_both_build_types(self) -> None:
         # CONFIG_MUSE_GADGET_AUTOMATION on (a bench build, MUSE_BENCH=1) keeps every Nordic UART word open.
         # Off (a release build, every board overlay), a word that changes state runs only on a connection
@@ -95,13 +107,16 @@ class MgConsoleWords(unittest.TestCase):
         # Release build, unproven: every state-changing word locked, every read runs.
         out = self.run_lines(["remote 0 0 " + w for w in words + reads])
         self.assertEqual(out, ["locked"] * len(words) + ["runs"] * len(reads))
-        # Proven: every word runs.
-        self.assertEqual(self.run_lines(["remote 1 0 " + w for w in words + reads]), ["runs"] * len(words + reads))
+        # Proven: every word runs, but arming the bench auto-confirm (test_pair_auto_never_armed_over_the_air).
+        armed = ("!PAIR AUTO", "!PAIR AUTO 1")
+        proven = ["locked" if w in armed else "runs" for w in words + reads]
+        self.assertEqual(self.run_lines(["remote 1 0 " + w for w in words + reads]), proven)
         # SAFE, unproven: only the way out of SAFE (and the reads); proven, every word.
         safe = {w: "runs" if w in ("safe.off", "safe=0") else "locked" for w in words}
         self.assertEqual(self.run_lines(["remote 0 1 " + w for w in words]), list(safe.values()))
         self.assertEqual(self.run_lines(["remote 0 1 " + w for w in reads]), ["runs"] * len(reads))
-        self.assertEqual(self.run_lines(["remote 1 1 " + w for w in words]), ["runs"] * len(words))
+        self.assertEqual(self.run_lines(["remote 1 1 " + w for w in words]),
+                         ["locked" if w in armed else "runs" for w in words])
         # The one dispatch point: a release build asks with the connection's proof, before any word runs; an
         # automation build doesn't ask.
         ble = (MG / "mg_ble.c").read_text()

@@ -22,15 +22,19 @@ through the memory bus: a final partial 16-byte word (the signed image ends
 on an odd length) can be left unwritten, and whatever an earlier firmware
 left in the primary slot's trailer stays there for MCUboot to misread. This
 merges both images, pads every segment out to whole 16-byte words with 0xff,
-and blanks (writes 0xff, RRAM's erased value) the last 16 KB of slot0, where
-MCUboot keeps its swap state.
+and blanks (writes 0xff, RRAM's erased value) MCUboot's swap state in both
+slots: the last 16 KB of slot0, and slot1's trailer, so a test image staged
+in slot1 earlier can't swap over the app just flashed. Only slot1's trailer
+goes: where the offline clips live in slot1 it is the part the clip queue
+never writes (CONFIG_MG_QUEUE_SLOT1_TRAILER), so the clips stay.
 
 --fresh also blanks slot1's first and last 16 KB (an old image's header and
 trailer) and the whole settings partition: a clean first flash, without a
-chip erase. It drops pairings, settings and device tokens.
+chip erase. It drops pairings, settings, device tokens and offline clips at
+the slot's ends.
 
-Partition offsets come from the build's own devicetree. Needs intelhex (in
-the Zephyr venv: pip install intelhex).
+Partition offsets come from the build's own devicetree, slot1's trailer from
+its .config. Needs intelhex (in the Zephyr venv: pip install intelhex).
 """
 
 from __future__ import annotations
@@ -52,6 +56,30 @@ def partitions(dts: str) -> dict[str, tuple[int, int]]:
                          dts, re.S):
         out[m.group(1)] = (int(m.group(2), 16), int(m.group(3), 16))
     return out
+
+
+def slot1_trailer(config: str) -> int:
+    """The bytes at slot1's end to blank on every flash: MCUboot's trailer,
+    within what the clip queue never writes when the clips live in slot1."""
+    if re.search(r"^CONFIG_MG_QUEUE_IN_SLOT1=y$", config, re.M):
+        m = re.search(r"^CONFIG_MG_QUEUE_SLOT1_TRAILER=(0x[0-9a-fA-F]+|\d+)$", config, re.M)
+        if not m:
+            raise SystemExit("CONFIG_MG_QUEUE_SLOT1_TRAILER missing from the build's .config")
+        return int(m.group(1), 0)
+    return TRAILER
+
+
+def blank_plan(parts: dict[str, tuple[int, int]], fresh: bool,
+               s1_trailer: int) -> list[tuple[int, int, str]]:
+    """[(start, size, what)] the flash writes 0xff over, in order."""
+    s0, s1, st = parts["slot0_partition"], parts["slot1_partition"], parts["storage_partition"]
+    plan = [(s0[0] + s0[1] - TRAILER, TRAILER, "slot0 swap trailer"),
+            (s1[0] + s1[1] - s1_trailer, s1_trailer, "slot1 swap trailer")]
+    if fresh:
+        plan += [(s1[0], TRAILER, "slot1 header"),
+                 (s1[0] + s1[1] - TRAILER, TRAILER, "slot1 end"),
+                 (st[0], st[1], "settings")]
+    return plan
 
 
 def pad_words(ih, fill: int = 0xFF) -> None:
@@ -78,18 +106,16 @@ def build_hex(build: Path, fresh: bool):
         if not f.exists():
             raise SystemExit(f"{f} missing: build with --sysbuild")
     parts = partitions((build / "zephyr/zephyr/zephyr.dts").read_text())
-    s0, s1, st = parts["slot0_partition"], parts["slot1_partition"], parts["storage_partition"]
+    s0 = parts["slot0_partition"]
+    plan = blank_plan(parts, fresh, slot1_trailer((build / "zephyr/zephyr/.config").read_text()))
     ih = IntelHex()
     ih.merge(IntelHex(str(boot)), overlap="error")
     ih.merge(IntelHex(str(app)), overlap="error")
     if ih.maxaddr() >= s0[0] + s0[1] - TRAILER:
         raise SystemExit("the app reaches into slot0's trailer: too big for the slot")
     pad_words(ih)
-    blank(ih, s0[0] + s0[1] - TRAILER, TRAILER)
-    if fresh:
-        blank(ih, s1[0], TRAILER)
-        blank(ih, s1[0] + s1[1] - TRAILER, TRAILER)
-        blank(ih, st[0], st[1])
+    for start, size, _ in plan:
+        blank(ih, start, size)
     for start, end in ih.segments():
         assert start % WORD == 0 and end % WORD == 0, (hex(start), hex(end))
     return ih
@@ -100,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("build", type=Path, help="a sysbuild build directory")
     ap.add_argument("-o", "--out", type=Path, required=True)
     ap.add_argument("--fresh", action="store_true",
-                    help="also blank slot1's header and trailer and the settings (drops pairings and tokens)")
+                    help="also blank slot1's first and last 16 KB and the settings (drops pairings and tokens)")
     a = ap.parse_args(argv)
     ih = build_hex(a.build, a.fresh)
     # The image holds the SDK token when the build did: 0600.

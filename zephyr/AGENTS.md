@@ -1131,6 +1131,13 @@ Kconfig options live in `Kconfig.mg` (`CONFIG_MG_*`): SBC bitpool, LC3 frame
 size, audio source, mic gain, queue size, the setup reset hold, firmware
 updates, the bench console.
 
+Live audio goes as whole frames per Data notification, so a frame must fit
+the link's room (ATT_MTU - 3): before the format is announced, a frame that
+doesn't (an SBC bitpool up to 124 makes 256 B frames, a high LC3 bitrate on
+a small MTU) is cut to the largest SBC bitpool or LC3 frame that fits, and
+logged once (`mg_codec_fit()`, unit `test_fit_room_sbc`,
+`test_fit_room_lc3`). The announced format is always what's sent.
+
 ### Firmware updates (MCUmgr SMP)
 
 The SMP GATT service sits beside the mg service, DIS, BAS and NUS, with the
@@ -2187,8 +2194,12 @@ python3 tools/flash_hex.py ~/zephyrproject/build-xiao -o mg-xiao-first.hex --fre
 ```
 
 It merges MCUboot and the signed app, pads every segment to whole 16-byte
-words with 0xff, and blanks the last 16 KB of slot0 (MCUboot's swap state);
-`--fresh` also blanks slot1's header and trailer and the settings partition
+words with 0xff, and blanks MCUboot's swap state in both slots: the last
+16 KB of slot0, and slot1's trailer, so a test image staged in slot1 earlier
+can't swap over the app just flashed (only the trailer: with the offline
+clips in slot1, the `CONFIG_MG_QUEUE_SLOT1_TRAILER` bytes the queue never
+writes, so the clips stay; host run.py `flash_hex`);
+`--fresh` also blanks slot1's first and last 16 KB and the settings partition
 (drops settings and what Link setup stored), which replaces a chip erase on
 a board fresh from the factory.
 

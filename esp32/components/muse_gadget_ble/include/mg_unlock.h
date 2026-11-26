@@ -39,8 +39,10 @@
  *                       reboot ends it); the confirm screen says
  *                       "Auto-confirm on" meanwhile. Open in automation
  *                       builds so benches stay automatable: it can complete
- *                       a setup with no press, a known trade-off. The USB
- *                       console's >pair.auto does the same
+ *                       a setup with no press, a known trade-off. A release
+ *                       build never arms it over the air, proven or not
+ *                       (mg_unlock_remote_ok); !PAIR AUTO 0 still runs. The
+ *                       USB console's >pair.auto does the same in every build
  *                       (mg_unlock_pair_auto()).
  * Pure (no IDF), for the host tests: the caller gives the clock. (The file
  * keeps its name from the owner unlock it once held.)
@@ -90,7 +92,10 @@ bool mg_unlock_automation_word(const char *line);
  * (CONFIG_MUSE_GADGET_AUTOMATION off). A state-changing word
  * (mg_unlock_automation_word) runs only on a connection whose token proof
  * matched; in SAFE, safe.off / safe=0 (the way out of SAFE) also run
- * unproven. Reads always run. Automation builds don't ask: every word runs.
+ * unproven. Reads always run. Arming the bench auto-confirm (!PAIR AUTO,
+ * !PAIR AUTO 1) never runs, proven or not: it's for benches (the USB
+ * console's >pair.auto arms it in every build). Automation builds don't ask:
+ * every word runs.
  */
 bool mg_unlock_remote_ok(const char *line, bool proven, bool safe_mode);
 /* A Nordic UART read of the owner's content (!IN voice?, voice activity; !IN img?, the shown image's path): on a

@@ -501,7 +501,9 @@ carries runs a release image. Off (a release build, every board overlay),
 the ones that change state run only on a
 connection whose token proof matched and are refused otherwise
 (`mg_unlock_remote_ok()`, logged as `locked`; in SAFE, `safe.off` / `safe=0`
-stay open). Identity and status reads (`status`, `version`, `guard?`,
+stay open). There, arming `!PAIR AUTO` is refused on every connection (the
+USB console's `>pair.auto` arms it), and a `key=` while a setup or re-setup
+prompt is up answers `real press needed` and presses nothing. Identity and status reads (`status`, `version`, `guard?`,
 `ota?`) stay open, and their answer goes back to the asking connection,
 proven or not, SAFE included; so do the other `!IN` reads (`wake?` /
 `call?` / `vib?` / `mic.gain?` / `spk.dsp` / `spk.dsp?` / `ptt.minrise?` / `vol?`).

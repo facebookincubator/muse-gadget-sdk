@@ -138,6 +138,14 @@ class StopWatchPTT(unittest.TestCase):
                 if result.returncode:
                     raise AssertionError(result.stdout + result.stderr)
                 cls.binaries[(kind, board, realtime) + ((1,) if ble else ())] = out
+                if kind == 'input' and (board, realtime) == (1, 1):
+                    # The same input, a test image (MUSE_NO_PERSON): injected input takes every person gate.
+                    tb = stage / 'input_tb'
+                    result = subprocess.run([*command, '-DCONFIG_MUSE_GADGET_TEST_BUILD=1', '-lm', '-o', str(tb)],
+                                            capture_output=True, text=True)
+                    if result.returncode:
+                        raise AssertionError(result.stdout + result.stderr)
+                    cls.binaries[('input_tb', board, realtime)] = tb
 
     def run_case(self, kind, scenario, board=1, realtime=1, ble=0):
         key = (kind, board, realtime) + ((1,) if ble else ())
@@ -466,6 +474,16 @@ class StopWatchPTT(unittest.TestCase):
         # "After 5 min" lapsed with the screen dark, before the UI's tick: the press itself locks and opens the keypad.
         self.run_case('input', 24)
         self.run_case('input', 24, board=0)
+
+    def test_an_injected_aux_key_never_confirms_a_prompt_that_armed_after_it(self):
+        # A Nordic UART line's key=aux queued before the setup prompt armed, taken by the input task after: on a
+        # release image it confirms nothing (checked where the press is used, aux_key), and with no prompt up it
+        # presses as before; the wired console's key=aux confirms; a test image confirms both.
+        self.run_case('input', 30)
+        self.run_case('input', 31)
+        self.run_case('input', 30, board=0)
+        self.run_case('input_tb', 30)
+        self.run_case('input_tb', 31)
 
     def test_display_only_talk_press_never_posts(self):
         self.run_case('input', 22)

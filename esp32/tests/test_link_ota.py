@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -40,6 +41,11 @@ def function_source(source: str, signature: str) -> str:
     raise AssertionError(f"Unclosed function: {signature}")
 
 
+def model_hash(model: str) -> str:
+    """components/muse_image_id/CMakeLists.txt's MUSE_DEVICE_MODEL_HASH for a CONFIG_MUSE_DEVICE_MODEL_ID."""
+    return ",".join(f"0x{b:02x}" for b in hashlib.sha256(model.encode()).digest()[:8])
+
+
 class LinkOtaTest(unittest.TestCase):
     def compile_and_run(self, sources: list[Path], include: Path) -> str:
         compiler = shlex.split(os.environ.get("CC", "cc"))
@@ -59,14 +65,16 @@ class LinkOtaTest(unittest.TestCase):
         self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
         return ran.stdout
 
-    def harness(self, enabled: bool, dev: bool = True, mosaico: str = "", gadget: str = "") -> str:
+    def harness(self, enabled: bool, dev: bool = True, mosaico: str = "", gadget: str = "",
+                model: str = "") -> str:
         """Runs link_ota_harness.c in one configuration; returns its output
         (log lines included). mosaico: "" (another board), "board" (the
         ESP-Mosaico without its Vibe Mode overlay), "vibe" (its Vibe Mode
         build) or "vibe2" (for Vibe Mode 0.2, Recovery ABI 2). gadget: ""
         (a plain Home Link build), "refuse" (a Muse Gadget, musegadgets BLE
         audio: Wi-Fi OTA refused) or "same-board" (a Muse Gadget with
-        CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD)."""
+        CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD). model: a Home Link build's
+        CONFIG_MUSE_DEVICE_MODEL_ID, sent real image heads (LINK_MODEL_TEST)."""
         with tempfile.TemporaryDirectory() as name:
             tmp = Path(name)
             (tmp / "sdkconfig.h").write_text(
@@ -83,6 +91,9 @@ class LinkOtaTest(unittest.TestCase):
                    "#define CONFIG_HOMEHUB_BLE_PRODUCT_CODE \"W175\"\n"
                    "#define CONFIG_MUSE_BOARD_ID \"waveshare_s3_175c\"\n" if gadget else "")
                 + ("#define CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD 1\n" if gadget == "same-board" else "")
+                + ("" if gadget else "#define CONFIG_IDF_FIRMWARE_CHIP_ID 9\n")
+                + (f"#define LINK_MODEL_TEST 1\n#define MUSE_DEVICE_MODEL_HASH {model_hash(model)}\n"
+                   if model else "")
             )
             # Print log lines (the refusals are checked), type-checking their arguments.
             (tmp / "esp_log.h").write_text(
@@ -91,7 +102,7 @@ class LinkOtaTest(unittest.TestCase):
                 "#define ESP_LOGW ESP_LOGI\n#define ESP_LOGE ESP_LOGI\n"
             )
             sources = [ROOT / "main/ota.c", ROOT / "tests/link_ota_harness.c"]
-            if gadget == "same-board":
+            if gadget == "same-board" or (enabled and not gadget):   # a Home Link build checks the model
                 sources.append(ROOT / "components/muse_image_id/muse_image_id.c")
             return self.compile_and_run(sources, tmp)
 
@@ -139,6 +150,23 @@ class LinkOtaTest(unittest.TestCase):
         self.assertIn("no board description", refusals[4])
         self.assertIn("weren't seen whole", out)   # the tampered copy
         self.assertEqual(out.count("image is this board's (W175)"), 3)
+
+    def test_a_home_link_build_refuses_another_models_image(self) -> None:
+        # The S3 Home Link boards share a chip, no product code and board
+        # "none"; their device models tell them apart. The model is checked on
+        # the download's first bytes before esp_https_ota_perform: another
+        # model's image is refused with nothing written; this model's, an
+        # image without a model (built before it) and one without a board
+        # description install as before.
+        out = self.harness(True, model="muse-gadget-seeed-respeaker-lite")
+        self.assertIn("OTA harness passed", out)
+        refusals = [l for l in out.splitlines() if "Wi-Fi OTA refused before writing" in l]
+        self.assertEqual(len(refusals), 3, out)
+        self.assertIn("built for another device model (offered chip 9, (no product code) none, version 1000.0.0; "
+                      "this is chip 9,  none), from example.com/update.bin", refusals[0])
+        self.assertIn("built for another chip", refusals[1])
+        self.assertIn("built for another device model", refusals[2])
+        self.assertEqual(out.count("image check: this board's"), 2, out)
 
     def test_url_for_log(self) -> None:
         with tempfile.TemporaryDirectory() as name:

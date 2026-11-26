@@ -19,10 +19,12 @@ as "Help."): its grammar and range (mg_minrise.h). What the held turn sends
 test_minrise_reply; the UI after a dropped turn is test_muse_ptt_ui's
 test_bench_guard_held_turn_ui."""
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_mg_ble import MG, compile_and_run
 
 

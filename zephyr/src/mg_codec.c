@@ -40,6 +40,18 @@ static const struct sbc_frame sbc_cfg = {
 
 static uint8_t cur_type;
 static uint16_t cur_bytes; /* LC3 frame bytes */
+static struct sbc_frame sbc_cur; /* sbc_cfg at the open format's bitpool */
+
+/* The SBC frame at a bitpool (0: the configured one). */
+static struct sbc_frame sbc_at(uint8_t bitpool)
+{
+	struct sbc_frame f = sbc_cfg;
+
+	if (bitpool) {
+		f.bitpool = bitpool;
+	}
+	return f;
+}
 static sbc_t sbc;
 #if defined(CONFIG_MG_LC3)
 /* Sized for the highest rate this build captures at. */
@@ -130,6 +142,7 @@ int mg_codec_format_cfg(uint8_t type, uint16_t rate, uint16_t kbps, struct mg_au
 	switch (type) {
 	case mg_data_type_audio_sbc:
 		fmt->frame_samples = sbc_cfg.nblocks * sbc_cfg.nsubbands;
+		fmt->sbc_bitpool = sbc_cfg.bitpool;
 		fmt->frame_bytes = sbc_get_frame_size(&sbc_cfg);
 		fmt->frame_us = fmt->frame_samples * 1000000U / fmt->sample_rate;
 		return 0;
@@ -145,6 +158,42 @@ int mg_codec_format_cfg(uint8_t type, uint16_t rate, uint16_t kbps, struct mg_au
 #endif
 	default:
 		return -ENOTSUP;
+	}
+}
+
+int mg_codec_fit(struct mg_audio_format *fmt, size_t room)
+{
+	switch (fmt->type) {
+	case mg_data_type_audio_sbc: {
+		struct sbc_frame f = sbc_at(fmt->sbc_bitpool);
+
+		for (unsigned int bp = f.bitpool; bp >= 2; bp--) {
+			f.bitpool = bp;
+			unsigned int n = sbc_get_frame_size(&f);
+
+			if (n <= room) {
+				bool cut = bp != (unsigned int)sbc_at(fmt->sbc_bitpool).bitpool;
+
+				fmt->sbc_bitpool = (uint8_t)bp;
+				fmt->frame_bytes = (uint16_t)n;
+				return cut ? 1 : 0;
+			}
+		}
+		return -EMSGSIZE;
+	}
+#if defined(CONFIG_MG_LC3)
+	case mg_data_type_audio_lc3:
+		if (fmt->frame_bytes <= room) {
+			return 0;
+		}
+		if (room < MG_LC3_MIN_FRAME_BYTES) {
+			return -EMSGSIZE;
+		}
+		fmt->frame_bytes = (uint16_t)room;
+		return 1;
+#endif
+	default:
+		return fmt->frame_bytes <= room ? 0 : -EMSGSIZE;
 	}
 }
 
@@ -172,6 +221,7 @@ int mg_codec_open_fmt(const struct mg_audio_format *fmt)
 	switch (type) {
 	case mg_data_type_audio_sbc:
 		sbc_reset(&sbc);
+		sbc_cur = sbc_at(fmt->sbc_bitpool);
 		break;
 #if defined(CONFIG_MG_LC3)
 	case mg_data_type_audio_lc3:
@@ -199,12 +249,12 @@ int mg_codec_encode(const int16_t *pcm, uint8_t *out, size_t room)
 {
 	switch (cur_type) {
 	case mg_data_type_audio_sbc: {
-		unsigned int n = sbc_get_frame_size(&sbc_cfg);
+		unsigned int n = sbc_get_frame_size(&sbc_cur);
 
 		if (room < n) {
 			return -ENOMEM;
 		}
-		if (sbc_encode(&sbc, pcm, 1, NULL, 0, &sbc_cfg, out, n) < 0) {
+		if (sbc_encode(&sbc, pcm, 1, NULL, 0, &sbc_cur, out, n) < 0) {
 			return -EIO;
 		}
 		return n;

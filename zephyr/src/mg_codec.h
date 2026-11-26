@@ -43,6 +43,7 @@ struct mg_audio_format {
 	uint16_t frame_bytes; /* 0 = variable */
 	uint16_t frame_us;
 	uint16_t frame_samples;
+	uint8_t sbc_bitpool; /* SBC: the bitpool frame_bytes follows from */
 };
 
 /* Fills in the format a codec encodes with at 16 kHz. Returns -ENOTSUP for
@@ -55,6 +56,12 @@ int mg_codec_format_rate(uint8_t type, uint16_t rate, struct mg_audio_format *fm
  * rate (clamp, never refuse); a fixed-bitrate codec (SBC)
  * keeps its own. LC3 frame bytes = floor(kb/s * 10000 / 8000). */
 int mg_codec_format_cfg(uint8_t type, uint16_t rate, uint16_t kbps, struct mg_audio_format *fmt);
+/* Fits one frame into room bytes (a live Data notification's): unchanged
+ * (0) when it fits, else the largest SBC bitpool or LC3 frame (bitrate) that
+ * fits (1); -EMSGSIZE when even the smallest doesn't. Call it before the
+ * format is announced and the encoder opened, so what's announced is what's
+ * sent. */
+int mg_codec_fit(struct mg_audio_format *fmt, size_t room);
 /* The bitrate range in kb/s for a codec and rate (min == max: fixed). */
 int mg_codec_kbps_range(uint8_t type, uint16_t rate, uint16_t *min, uint16_t *max);
 /* The rates a codec captures at, 16000 first; returns the count (0: codec

@@ -4609,7 +4609,11 @@ static void nus_command(char *line)
     bool proven = mg_proto_proof_matched(&s_proto);
     mg_unlock();
     if (!mg_unlock_remote_ok(line, proven, s_platform.safe_mode)) {
-        ESP_LOGW(TAG, "a state-changing word: locked (this connection's proof hasn't matched)");   /* never its text */
+        if (proven) {
+            ESP_LOGW(TAG, "a bench-only word: refused on a release build");   /* !PAIR AUTO (the USB console arms it) */
+        } else {
+            ESP_LOGW(TAG, "a state-changing word: locked (this connection's proof hasn't matched)");   /* never its text */
+        }
         return;
     }
 #endif

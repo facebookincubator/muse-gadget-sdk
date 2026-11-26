@@ -45,6 +45,7 @@ through unchanged; its stdin is this tool's. <state> is $STUCK_WATCH_DIR, else
 ~/.cache/stuck-watch.
 """
 import argparse
+import errno
 import fnmatch
 import json
 import math
@@ -52,12 +53,14 @@ import os
 import platform
 import re
 import secrets
+import select
 import shlex
 import signal
 import socket
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -126,11 +129,19 @@ def run_quiet(cmd, timeout=15):
         return f"({cmd[0]} failed: {e})\n"
 
 
-def group_ps(pgid):
-    """`ps` rows of the processes in process group pgid (ps -g means a session on Linux, a group on macOS)."""
+def dead(stat):
+    """A zombie: Z, but not Linux's "Zl" (its main thread exited while other threads still run)."""
+    return stat.startswith("Z") and "l" not in stat
+
+
+def group_ps(pgid, zombies=False):
+    """`ps` rows of the processes in process group pgid (ps -g means a session on Linux, a group on macOS). Zombies
+    only with zombies=True (the capture): in a container whose init doesn't reap, a stopped run's processes stay
+    zombies, and they don't make the group live."""
     out = run_quiet(["ps", "-Ao", "pid,ppid,pgid,pcpu,stat,etime,args"])
     lines = out.splitlines()
-    rows = [l for l in lines[1:] if len(l.split()) > 2 and l.split()[2] == str(pgid)]
+    rows = [l for l in lines[1:]
+            if len(l.split()) > 4 and l.split()[2] == str(pgid) and (zombies or not dead(l.split()[4]))]
     return lines[:1] + rows
 
 
@@ -141,11 +152,27 @@ def group_pids(pgid):
 def capture(pgid, idle_s):
     """What the frozen run looks like, read-only."""
     parts = ["-- processes (its group: CPU, state, elapsed) --",
-             "\n".join(group_ps(pgid)),
+             "\n".join(group_ps(pgid, zombies=True)),
              f"-- idle --\nno output for {idle_s:.0f} s; each process's %CPU above"]
     for pid in group_pids(pgid)[:SAMPLED]:
         if platform.system() == "Darwin":
-            s = run_quiet(["sample", str(pid), "1", "-mayDie"], timeout=30)
+            try:
+                fd, rep = tempfile.mkstemp(prefix="stuck-watch-sample-", suffix=".txt")   # sample's own report
+                os.close(fd)
+            except OSError as e:
+                parts.append(f"-- {pid}: not sampled ({e}) --")
+                continue
+            try:
+                s = run_quiet(["sample", str(pid), "1", "-mayDie", "-file", rep], timeout=30)
+                with open(rep, errors="replace") as f:
+                    s += f.read()
+            except OSError:
+                pass
+            finally:
+                try:
+                    os.remove(rep)
+                except OSError:
+                    pass
             frames = [line.rstrip() for line in s.splitlines() if re.match(r"^\s+\d+ ", line)]
             parts.append(f"-- {pid}: where it waits (innermost last) --\n" + "\n".join(frames[-6:]))
         else:
@@ -161,40 +188,103 @@ def capture(pgid, idle_s):
 
 
 def group_alive(pgid):
+    """Whether any live (not zombie) process is left in group pgid."""
     try:
         os.killpg(pgid, 0)
-        return True
     except ProcessLookupError:
         return False
-    except PermissionError:
+    except PermissionError:   # macOS: a group whose processes are all zombies answers EPERM
+        pass
+    ps = group_ps(pgid, zombies=True)
+    if not ps or ps[0].split()[:1] != ["PID"] or len(ps) == 1:   # no usable ps, or it lists none of the group:
+        return True                                               # the kernel's answer stands
+    return any(not dead(row.split()[4]) for row in ps[1:])
+
+
+def leader_exited(p):
+    """Whether the run's leader has exited, without reaping it: while it's an unreaped zombie its group id can't be
+    reused, so every signal below still goes to this run's own group."""
+    if p.returncode is not None:
         return True
+    if hasattr(os, "waitid"):
+        try:
+            return os.waitid(os.P_PID, p.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+        except ChildProcessError:   # not waitable (SIGCHLD ignored, reaped elsewhere): its group id isn't ours
+            p.stuck_watch_lost = True
+            return True
+    # No waitid (Apple's Python 3.9): ps says whether it's a zombie.
+    out = run_quiet(["ps", "-o", "stat=", "-p", str(p.pid)]).split()
+    if out and re.fullmatch(r"[A-Z][A-Za-z<+]*", out[0]):
+        return out[0].startswith("Z")
+    return p.poll() is not None   # no usable ps: reap to see (its group id then isn't signalled again)
+
+
+def owned(p):
+    """Whether the run's group id is still certainly this run's: its leader not reaped, and still waitable."""
+    return p.returncode is None and not getattr(p, "stuck_watch_lost", False)
+
+
+def wait_unreaped(p, timeout):
+    """Waits up to timeout for the leader to exit, without reaping it; True if it did."""
+    deadline = time.monotonic() + timeout
+    if not hasattr(os, "waitid") and hasattr(select, "kqueue"):   # macOS Python < 3.13: the exit as an event
+        try:
+            kq = select.kqueue()
+        except OSError:
+            kq = None   # polling, below
+        if kq is not None:
+            try:
+                ev = select.kevent(p.pid, filter=select.KQ_FILTER_PROC, flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                                   fflags=select.KQ_NOTE_EXIT)
+                got = kq.control([ev], 1, timeout)
+                if not got:
+                    return leader_exited(p)
+                e = got[0]
+                if not (e.flags & select.KQ_EV_ERROR) or e.data == errno.ESRCH:   # an exit, or already exited
+                    return True
+            except ProcessLookupError:   # already exited (an unreaped zombie)
+                return True
+            except OSError:
+                pass   # polling, below, to the same deadline
+            finally:
+                kq.close()
+    while not leader_exited(p):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        time.sleep(min(0.05 if hasattr(os, "waitid") else 0.5, left))
+    return True
 
 
 def stop_group(p, pgid):
-    """SIGTERM to the group; SIGKILL to the group if any of it is left GRACE_S after the TERM, leader gone or not."""
+    """SIGTERM to the group; SIGKILL to the group if any of it is left GRACE_S after the TERM, leader gone or not.
+    The leader is reaped only after the last signal (see leader_exited), so the group id stays this run's."""
+    if not owned(p):
+        return f"process group {pgid} not signalled: its leader was already reaped, so the id may not be this run's"
     try:
         os.killpg(pgid, signal.SIGTERM)
     except OSError:
         pass
     deadline = time.monotonic() + GRACE_S
-    while time.monotonic() < deadline and group_alive(pgid):
-        if p.poll() is not None:
-            time.sleep(0.2)   # the leader is reaped; the rest of the group gets the same grace
-            continue
-        try:
-            p.wait(timeout=0.2)
-        except subprocess.TimeoutExpired:
-            pass
-    killed = group_alive(pgid)
+    gone = False
+    while time.monotonic() < deadline:
+        if not group_alive(pgid):   # final: the group isn't looked up again, so a reused id is never signalled
+            gone = True
+            break
+        time.sleep(0.2)
+    killed = not gone and group_alive(pgid)   # (one that emptied in the last moment isn't killed)
     if killed:
         try:
             os.killpg(pgid, signal.SIGKILL)
         except OSError as e:
-            return f"SIGKILL to process group {pgid} failed: {e}"
+            if group_alive(pgid):
+                return f"SIGKILL to process group {pgid} failed: {e}"
+            killed = False   # it was gone by then
     try:
         p.wait(timeout=GRACE_S)
     except subprocess.TimeoutExpired:
-        return f"sent process group {pgid} SIGKILL; its leader {p.pid} hasn't exited"
+        return (f"sent process group {pgid} SIGKILL; " if killed else f"process group {pgid}: ") + \
+            f"its leader {p.pid} hasn't exited"
     return f"stopped process group {pgid}" + (" (SIGKILL after the grace)" if killed else "")
 
 
@@ -257,9 +347,16 @@ def watch(suite, cmd, cap, state):
             t.start()
         if held.got:   # checked once the handlers are back: none held during the start is missed
             raise KeyboardInterrupt
-        rc = p.wait(timeout=limit)
-        t.join(timeout=5)   # (an interrupt while the output drains still stops what's left of the group)
+        if not wait_unreaped(p, limit):
+            raise subprocess.TimeoutExpired(cmd, limit)
+        # The leader stays unreaped (its group id stays this run's) until the output is drained; an interrupt
+        # meanwhile still stops what's left of the group. Then it's reaped with the signals held.
+        t.join(timeout=5)
         done.set()
+        with deferred_signals() as held:
+            rc = p.wait()
+        if held.got:
+            raise KeyboardInterrupt
         if rc == 5:   # Python 3.12's unittest says "no tests ran" before it checks errors: a failed setUpClass exits 5
             with lock:
                 if failed_seen[0] or not eof.is_set():   # a FAILED summary, or output not read to its end
@@ -273,16 +370,18 @@ def watch(suite, cmd, cap, state):
                            last_out, done)
         except KeyboardInterrupt:   # one that came just before the signals were held
             done.set()
-            with deferred_signals():
-                say("stuck_watch: stopped the run on the way out: " + stop_group(p, p.pid))
+            if owned(p):   # not reaped yet: its group is still this run's
+                with deferred_signals():
+                    say("stuck_watch: stopped the run on the way out: " + stop_group(p, p.pid))
             raise
         if held.got:
             raise KeyboardInterrupt
         return rc
     except BaseException:   # Ctrl-C, SIGTERM (below), or a failure starting the pump: the run never outlives this tool
         done.set()
-        if p is not None and (p.poll() is None or group_alive(p.pid)):   # the group, even once its leader is gone
-            with deferred_signals():
+        # Only while the leader is unreaped (its group id can't have been reused): its group, even once it exited.
+        with deferred_signals():   # a second interrupt waits for the check and the stop
+            if p is not None and owned(p) and (not leader_exited(p) or group_alive(p.pid)):
                 say("stuck_watch: stopped the run on the way out: " + stop_group(p, p.pid))
         raise
 
@@ -431,6 +530,7 @@ class deferred_signals:
 
 
 def main(argv=None):
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)   # an inherited SIG_IGN would auto-reap the run's leader
     for sig in STOP_SIGNALS[1:]:
         signal.signal(sig, _sigterm)
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])

@@ -686,6 +686,34 @@ static void announce(const struct mg_audio_format *fmt)
 	(void)mg_session_send_control(buf, n);
 }
 
+/* A live frame must fit the link's room, or every one would be dropped
+ * after its format went out: the largest SBC bitpool or LC3 bitrate that
+ * fits, before the format is announced (logged once per change). */
+static void fit_live(struct mg_audio_format *fmt)
+{
+	static uint32_t logged;
+	size_t room = MIN(mg_session_data_room(), sizeof(chunk));
+	uint16_t want = fmt->frame_bytes;
+	int rc = mg_codec_fit(fmt, room);
+	uint32_t key = (uint32_t)fmt->type << 24 | (uint32_t)want << 12 | fmt->frame_bytes;
+
+	if (rc == 0 || key == logged) {
+		return;
+	}
+	logged = key;
+	if (rc < 0) {
+		LOG_ERR("live audio: a %u B frame doesn't fit the link's %u B", want,
+			(unsigned int)room);
+	} else if (fmt->type == mg_data_type_audio_sbc) {
+		LOG_WRN("live audio: SBC frames cut from %u to %u B (bitpool %u) to fit the link's "
+			"%u B", want, fmt->frame_bytes, fmt->sbc_bitpool, (unsigned int)room);
+	} else {
+		LOG_WRN("live audio: frames cut from %u to %u B (%u kb/s) to fit the link's %u B",
+			want, fmt->frame_bytes,
+			(unsigned int)(fmt->frame_bytes * 8000U / fmt->frame_us), (unsigned int)room);
+	}
+}
+
 static size_t frames_per_chunk(const struct mg_audio_format *fmt)
 {
 	size_t room = MIN(mg_session_data_room(), sizeof(chunk));
@@ -774,7 +802,14 @@ static void run_capture(const struct request *r)
 	size_t blen = 0, bhead = 0, bmax = 0;
 	uint32_t bdropped = 0;
 
-	if (mg_codec_format_cfg(r->codec, r->rate, r->kbps, &pk.fmt) || mg_codec_open_fmt(&pk.fmt)) {
+	if (mg_codec_format_cfg(r->codec, r->rate, r->kbps, &pk.fmt)) {
+		LOG_ERR("codec %u at %u Hz unavailable", r->codec, r->rate);
+		return;
+	}
+	if (live) {
+		fit_live(&pk.fmt);
+	}
+	if (mg_codec_open_fmt(&pk.fmt)) {
 		LOG_ERR("codec %u at %u Hz unavailable", r->codec, r->rate);
 		return;
 	}

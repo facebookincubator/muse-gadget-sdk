@@ -27,10 +27,12 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_muse_subs import home_geom_header
 
 ROOT = Path(__file__).resolve().parents[1]

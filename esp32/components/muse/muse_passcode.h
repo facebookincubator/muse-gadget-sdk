@@ -103,8 +103,16 @@ void muse_passcode_clear(void);
 void muse_passcode_status(char *out, size_t n);
 
 /* The platform (muse_passcode_esp.c on the gadget, the simulator's stand-in
- * on a desktop): the settings store's record, SHA-256 and the salt. */
-bool muse_passcode_platform_load(muse_pass_rec_t *rec);
+ * on a desktop): the settings store's record, SHA-256 and the salt. Loading
+ * says which of three it found: no record (the store says it has none), the
+ * record, or one it couldn't read (any other error, or a blob of no known
+ * size or format), which starts locked (muse_pass_init_unreadable). */
+typedef enum {
+    MUSE_PASS_LOAD_NONE,
+    MUSE_PASS_LOAD_OK,
+    MUSE_PASS_LOAD_UNREADABLE,
+} muse_pass_load_t;
+muse_pass_load_t muse_passcode_platform_load(muse_pass_rec_t *rec);
 bool muse_passcode_platform_save(const muse_pass_rec_t *rec);
 bool muse_passcode_platform_sha256(const uint8_t *data, size_t len, uint8_t out[32]);
 bool muse_passcode_platform_salt(uint8_t salt[MUSE_PASS_SALT_LEN]);

@@ -1181,7 +1181,8 @@ its constants.
   scripted or bench key press confirms as a real one does (on release builds
   the console words that change state stay refused over Bluetooth); on a
   release build a scripted or bench touch on the Confirm control never does,
-  over any link (`touch_confirms()`). **The talk key never confirms a
+  over any link (`touch_confirms()`), and neither does a Nordic UART line's
+  `key=`: during a setup or re-setup prompt it answers `real press needed`. **The talk key never confirms a
   re-setup** on a set-up gadget's release build: its press while the prompt is up only
   dismisses it ("Not now", no talk turn; `app_confirm_pairing_press()`'s
   `talk_key`, `muse_link_confirm_press()` vs `muse_link_confirm_key_press()`).
@@ -1940,7 +1941,8 @@ its constants.
   the build did). The gadget holds the app's first 352 bytes until they say
   it's this board's: the image header's chip id, and the board description
   every image carries (`components/muse_image_id`: product code and board
-  profile, in ESP-IDF's custom app description section, BLE updates kept).
+  profile, the device model when both carry one, in ESP-IDF's custom app
+  description section, BLE updates kept).
   Another chip's or board's image, or one built before the description, is
   refused there (rc 3, EINVAL) with nothing written (esp_ota_begin erases
   nothing with sequential writes), so the other slot keeps what it held;
@@ -2294,7 +2296,9 @@ its constants.
   (`mg_unlock_automation_word()`) runs only on a connection whose token
   proof matched and answers `locked` on `mg.ble` otherwise
   (`mg_unlock_remote_ok()`, at `nus_command()`); in SAFE, `safe.off` /
-  `safe=0` stay open (the way out of SAFE). Identity and status reads
+  `safe=0` stay open (the way out of SAFE). Arming the bench auto-confirm
+  (`!PAIR AUTO`, `!PAIR AUTO 1`) is refused there on every connection, proven
+  or not (the USB console's `>pair.auto` arms it). Identity and status reads
   (`status`, `version`, `guard?`, `ota?`) and the other `?` words stay open;
   the owner's content (`!IN voice?`, `!IN img?`) answers only a proven
   connection on a set-up gadget (`mg_unlock_owner_word()`; refused, it's
@@ -2323,7 +2327,12 @@ its constants.
   menus, Status, Settings, reply text and drawn files
   stay off the screen; the Link setup prompt, low battery and power screens
   show as usual. Wrong codes: 5 free, then 30 s, 1, 2, 4, 5 min, kept across
-  reboots; never a wipe. The pairing's erase takes it (`passcode_forget()`
+  reboots; never a wipe. Only NVS saying there's no `passcode` blob means
+  no passcode: a blob that can't be read (any other NVS error, or one of no
+  known size or format) boots locked with no code right
+  (`muse_pass_init_unreadable()`; wrong codes still reach the wait, counted
+  in RAM, nothing written over it), and Forgot passcode's Reset pairing (or
+  the console's `pass clear`) erases it. The pairing's erase takes it (`passcode_forget()`
   in `main/app.c`: Reset pairing, the token proof's clear, a setup reset, a
   completed Link setup). A UI stream or phone camera view that starts or
   arrives while locked is held like a drawn file (`muse_video_set_hold()`:
@@ -2540,7 +2549,10 @@ its constants.
   automatable: there an armed `!PAIR AUTO` or an injected press (`press=`,
   `tap=`, `key=`) can complete a Link setup with no one at the gadget. In a
   release build the words that change state run only on a connection whose
-  token proof matched (`locked` otherwise); identity and status reads and
+  token proof matched (`locked` otherwise), arming `!PAIR AUTO` never runs,
+  and a `key=` while a setup or re-setup prompt is up answers `real press
+  needed` and presses nothing (an aux press it made never confirms a prompt
+  that arms after the line, either: `aux_key()`); identity and status reads and
   the other `?` words (`wake?`, `vib?`, ...) and, in SAFE, `safe.off` /
   `safe=0` stay open, the owner's content (`voice?`, `img?`) answers only a
   proven connection on a set-up gadget, and the USB console stays open with
@@ -3045,7 +3057,11 @@ For app authoring and the guide to send Muse, see
   description), must name the same product code and board profile before
   `esp_https_ota_perform` (esp_ota_begin and the first write); ESP-IDF's
   chip id check (on the first 1 KB, before its first write) and the RSA
-  check at the end stay (`tests/test_link_ota.py`).
+  check at the end stay (`tests/test_link_ota.py`). A Home Link build (no
+  musegadgets BLE audio) reads those first bytes too and refuses an image
+  for another device model (`CONFIG_MUSE_DEVICE_MODEL_ID`) before the first
+  write, so one S3 Home Link board's image never lands on another; an image
+  without a model (built before it) installs as before.
 - Versions: `version.txt` holds the release number
   (`MAJOR.MINOR.PATCH`), the one place it's set. `cmake/version.cmake` turns
   it into each image's version: the number alone when HEAD is exactly the

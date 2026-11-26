@@ -48,7 +48,7 @@ extern "C" {
 #define MUSE_PASS_DIGITS 4
 #define MUSE_PASS_SALT_LEN 16
 #define MUSE_PASS_HASH_LEN 32
-#define MUSE_PASS_FORMAT 2               /* the record's layout (1: an earlier one); any other reads as no passcode */
+#define MUSE_PASS_FORMAT 2               /* the record's layout (1: an earlier one); any other loads as unreadable: locked */
 #define MUSE_PASS_FORMAT_1_SIZE 53       /* format 1's blob: one byte shorter (no reserved byte) */
 #define MUSE_PASS_TAG "mg-passcode-v1"   /* hashed between the salt and the digits (the format tag) */
 #define MUSE_PASS_FREE_TRIES 5           /* wrong codes in a row before the first wait */
@@ -87,6 +87,7 @@ typedef struct {
     int64_t dark_since_ms;
     int64_t wait_until_ms;   /* a wrong-code wait runs until then; 0: none */
     bool dirty;              /* rec changed: store it */
+    bool unreadable;         /* a record is stored but couldn't be read: locked, no code is right, nothing stored */
 } muse_pass_t;
 
 typedef enum {
@@ -99,6 +100,13 @@ typedef enum {
 /* rec: as loaded (NULL or another format: no passcode). A passcode that's on
  * starts locked; a stored count of 5 or more starts its level's wait again. */
 void muse_pass_init(muse_pass_t *p, const muse_pass_rec_t *rec, int64_t now_ms);
+/* A record is stored but couldn't be read (a storage error, a blob of no
+ * known size or format): on and locked, never a passcode lost to an error.
+ * No code is right (the wrong ones count and wait, in RAM: the wait screen's
+ * Forgot passcode leads to Reset pairing) and nothing is stored over it,
+ * until the pairing's erase (muse_pass_forget) or the console's
+ * `pass clear` (muse_pass_turn_off) erases it. */
+void muse_pass_init_unreadable(muse_pass_t *p);
 
 /* The wait at a level: 30, 60, 120, 240, then 300 s. */
 int muse_pass_wait_s(int level);

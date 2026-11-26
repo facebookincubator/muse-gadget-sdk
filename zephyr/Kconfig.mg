@@ -111,7 +111,10 @@ config MG_SBC_BITPOOL
 	  SBC at 16 kHz mono, 16 blocks, 8 subbands, loudness allocation.
 	  Bitpool 26 gives 60-byte frames every 8 ms (60 kb/s), the same
 	  quality point as mSBC. At most 124: the encoder's bit allocation
-	  divides by zero from 125 up.
+	  divides by zero from 125 up. A live frame must fit one Data
+	  notification: on a link whose room is smaller (bitpool 124 makes
+	  256 B frames, a 247-byte MTU carries 244) live audio uses the largest
+	  bitpool that fits, announced as such.
 
 config MG_LC3
 	bool "LC3 codec"
