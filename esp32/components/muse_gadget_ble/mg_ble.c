@@ -194,6 +194,8 @@ static portMUX_TYPE s_nus_mux = portMUX_INITIALIZER_UNLOCKED;
 /* The Nordic UART log mirror (its ring, filled by the logger, drained by the worker). */
 static char *s_nus_ring;
 static size_t s_nus_head, s_nus_len;
+static uint32_t s_nus_gen;                 /* +1 each time the ring is emptied (a new link): a drain's copy is stale */
+static void nus_ring_reset(void);
 static volatile uint8_t s_nus_inflight;    /* NUS notifies in the stack (mg_nus.h: at most MG_NUS_INFLIGHT_MAX) */
 static volatile uint32_t s_nus_dropped;    /* log lines with no room in the ring (the status line's nus_dropped) */
 static volatile uint32_t s_host_closed;    /* links NimBLE closed itself (the status line's host_closed, mg_link_close.h) */
@@ -3990,9 +3992,7 @@ int mg_ble_gap_event(struct ble_gap_event *ev)
             s_link_phy_asked = false;
             mg_proto_connect(&s_proto);
             s_nus_owner = !NUS_MIRROR_RELEASE || !s_set_up;   /* a new link waits for its own proof */
-            portENTER_CRITICAL(&s_nus_mux);
-            s_nus_len = 0;   /* nothing queued for an earlier link goes to this one */
-            portEXIT_CRITICAL(&s_nus_mux);
+            nus_ring_reset();   /* nothing queued for an earlier link goes to this one */
             gap_name_connect();   /* the central's GAP name, read 1.5 s on */
             mg_unlock();
             bench_mark_sync();   /* the USB console's switch, kept across connections, shows again */
@@ -4160,6 +4160,15 @@ static void nus_owner_refresh(void)
     s_nus_owner = !NUS_MIRROR_RELEASE || !s_set_up || mg_proto_proof_matched(&s_proto);
 }
 
+/* Empties the NUS ring for a new link (any task): its generation moves on, so a drain under way debits nothing. */
+static void nus_ring_reset(void)
+{
+    portENTER_CRITICAL(&s_nus_mux);
+    s_nus_len = 0;
+    s_nus_gen++;
+    portEXIT_CRITICAL(&s_nus_mux);
+}
+
 static int nus_vprintf(const char *fmt, va_list args)
 {
     va_list copy;
@@ -4194,7 +4203,12 @@ static int nus_vprintf(const char *fmt, va_list args)
 
 /* Sends what's queued for NUS, a notification at a time, within its budget
  * (mg_nus.h: two in the stack, and the protocol's msys reserve left free);
- * the worker drains it after the protocol's own sends. True if more is left. */
+ * the worker drains it after the protocol's own sends. True if more is left.
+ * A new link empties the ring (nus_ring_reset, on the host task) while a
+ * drain may be between its copy and its debit: the ring's generation says
+ * so, and the drain then neither sends that copy nor debits it (a debit
+ * after the reset would underflow the count, and the retained bytes would
+ * flood the new, unproven central). */
 static bool nus_drain(void)
 {
     uint16_t conn = s_conn;
@@ -4202,9 +4216,7 @@ static bool nus_drain(void)
         return false;
     }
     if (!s_nus_sub || conn == BLE_HS_CONN_HANDLE_NONE) {
-        portENTER_CRITICAL(&s_nus_mux);
-        s_nus_len = 0;   /* an unproven central's ring holds only its own status replies (nus_vprintf) */
-        portEXIT_CRITICAL(&s_nus_mux);
+        nus_ring_reset();   /* an unproven central's ring holds only its own status replies (nus_vprintf) */
         return false;
     }
     uint16_t mtu = ble_att_mtu(conn);
@@ -4216,20 +4228,30 @@ static bool nus_drain(void)
     for (int k = 0; k < 4 && s_nus_len && mg_nus_may_send(s_nus_inflight, os_msys_num_free()); k++) {
         size_t n = 0;
         portENTER_CRITICAL(&s_nus_mux);
+        uint32_t gen = s_nus_gen;
         while (n < max && n < s_nus_len) {
             buf[n] = (uint8_t)s_nus_ring[(s_nus_head + n) % NUS_RING];
             n++;
         }
         portEXIT_CRITICAL(&s_nus_mux);
+        if (!n || gen != s_nus_gen || conn != s_conn) {
+            return s_nus_len != 0;   /* a new link since the copy: those bytes were the last one's */
+        }
         struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, n);
         if (!om || ble_gatts_notify_custom(conn, s_nus_tx_handle, om) != 0) {
             return true;   /* out of buffers: later */
         }
         s_nus_inflight++;
         portENTER_CRITICAL(&s_nus_mux);
-        s_nus_head = (s_nus_head + n) % NUS_RING;
-        s_nus_len -= n;
+        bool same = gen == s_nus_gen;
+        if (same) {
+            s_nus_head = (s_nus_head + n) % NUS_RING;
+            s_nus_len -= n;   /* only what this ring still holds: a reset since the copy took it all */
+        }
         portEXIT_CRITICAL(&s_nus_mux);
+        if (!same) {
+            break;
+        }
     }
     return s_nus_len != 0;
 }

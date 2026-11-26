@@ -124,6 +124,106 @@ def codec_build(lc3: bool, fixed: bool = False, lc3_24k: bool = True) -> tuple[l
     return srcs, defs, incs
 
 
+
+class NusRingAcrossALink(unittest.TestCase):
+    """mg_ble.c's NUS log ring, compiled from the glue itself (nus_ring_reset and nus_drain, the stack faked): a new
+    link that empties the ring while a drain is between its copy and its debit (the host task's connect, during the
+    drain's notify) moves the ring's generation on, so the drain debits nothing: the count never underflows, and the
+    last link's retained bytes never go to the new, unproven central (#525 council). The new link's own reply, queued
+    after the reset, goes out whole, and nothing else."""
+
+    def test_a_connect_during_a_drain(self) -> None:
+        ble = (MG / "mg_ble.c").read_text()
+
+        def fn(head: str) -> str:
+            i = ble.index(head)
+            return ble[i:ble.index("\n}\n", i) + 3]
+        decl = "".join(l + "\n" for l in ble.splitlines()
+                       if l.startswith(("static uint32_t s_nus_gen;", "#define NUS_RING ")))
+        conn = ble[ble.index("    case BLE_GAP_EVENT_CONNECT:"):]
+        conn = conn[:conn.index("        break;")]
+        if "static void nus_ring_reset(void)\n{" in ble:
+            self.assertIn("nus_ring_reset();   /* nothing queued for an earlier link goes to this one */", conn)
+            reset = fn("static void nus_ring_reset(void)\n{")
+        else:   # a glue without it: what its connect did
+            self.assertIn("s_nus_len = 0;   /* nothing queued for an earlier link goes to this one */", conn)
+            reset = "static void nus_ring_reset(void) { s_nus_len = 0; }\n"
+        drv = r"""
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "mg_nus.h"
+typedef int portMUX_TYPE;
+#define portENTER_CRITICAL(m) ((void)(m))
+#define portEXIT_CRITICAL(m) ((void)(m))
+#define BLE_HS_CONN_HANDLE_NONE 0xffff
+struct os_mbuf { uint8_t d[256]; uint16_t n; };
+static portMUX_TYPE s_nus_mux;
+static char ring[4096];
+static char *s_nus_ring = ring;
+static size_t s_nus_head, s_nus_len;
+static volatile uint8_t s_nus_inflight;
+static bool s_nus_sub = true;
+static uint16_t s_conn = 1, s_nus_tx_handle = 9;
+@DECL@
+static uint16_t ble_att_mtu(uint16_t c) { (void)c; return 247; }
+static int os_msys_num_free(void) { return 100; }
+static struct os_mbuf mb;
+static struct os_mbuf *ble_hs_mbuf_from_flat(const void *b, uint16_t n) { memcpy(mb.d, b, n); mb.n = n; return &mb; }
+static void nus_put(const char *t);
+static int connect_in_notify;   /* a new link comes up while this notify is in the stack */
+static char sent[8192];
+static size_t sent_n;
+static void nus_ring_reset(void);
+static int ble_gatts_notify_custom(uint16_t c, uint16_t h, struct os_mbuf *om) {
+    (void)c; (void)h;
+    if (sent_n + om->n < sizeof(sent)) memcpy(sent + sent_n, om->d, om->n);
+    sent_n += om->n;
+    if (connect_in_notify && !--connect_in_notify) {
+        nus_ring_reset();          /* the host task's BLE_GAP_EVENT_CONNECT */
+        nus_put("NEWLINK\n");      /* the new link's own status reply */
+    }
+    return 0;
+}
+@RESET@
+@DRAIN@
+static void nus_put(const char *t) {
+    for (size_t i = 0; t[i]; i++) s_nus_ring[(s_nus_head + s_nus_len++) % NUS_RING] = t[i];
+}
+int main(void) {
+    /* The last link's mirror: 600 bytes queued (the drain takes 244 a notify). */
+    for (int i = 0; i < 60; i++) nus_put("OLDLINK-x\n");
+    connect_in_notify = 1;
+    (void)nus_drain();   /* the first notify goes, then the connect */
+    size_t first = sent_n;
+    sent_n = 0;
+    s_nus_inflight = 0;
+    for (int i = 0; i < 20 && nus_drain(); i++) s_nus_inflight = 0;
+    s_nus_inflight = 0;
+    (void)nus_drain();
+    sent[sent_n < sizeof(sent) ? sent_n : sizeof(sent) - 1] = 0;
+    printf("%zu %zu %zu [%s]\n", first, s_nus_len, sent_n, sent);
+    return 0;
+}
+"""
+        src = (drv.replace("@DECL@", decl).replace("@RESET@", reset)
+               .replace("@DRAIN@", fn("static bool nus_drain(void)\n{")))
+        with tempfile.TemporaryDirectory(prefix="mg-nus-") as t:
+            Path(t, "d.c").write_text(src)
+            cc = shlex.split(os.environ.get("CC", "cc"))
+            r = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+                                "-fsanitize=address,undefined", "-I", str(MG), str(Path(t, "d.c")),
+                                "-o", str(Path(t, "d"))], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            r = subprocess.run([str(Path(t, "d"))], capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        first, left, n, text = r.stdout.split(" ", 3)
+        self.assertEqual((first, left), ("244", "0"), r.stdout)   # one notify of the old link's, then nothing owed
+        self.assertEqual(text.strip(), "[NEWLINK\n]", r.stdout)   # the new link gets its own reply, and only that
+        self.assertEqual(n, "8")
+
 class MgBleTest(unittest.TestCase):
     def test_protocol_queue_and_routing(self) -> None:
         # The token proof's crypto is the host reference here; test_mg_token_proof

@@ -76,7 +76,7 @@ class EveryOwnerContentRead(unittest.TestCase):
         self.assertIn('bool open_read = !strcmp(line, "status") || !strcmp(line, "version") || !strcmp(line, "guard?") ||\n'
                       '                         !strcmp(line, "ota?");', acc)
         self.assertIn("s_nus_reply_task = NULL;", acc)
-        self.assertIn("s_nus_len = 0;   /* nothing queued for an earlier link goes to this one */", ble)
+        self.assertIn("nus_ring_reset();   /* nothing queued for an earlier link goes to this one */", ble)
         self.assertIn("s_nus_owner = !NUS_MIRROR_RELEASE || !s_set_up;   /* a new link waits", ble)
         self.assertIn("#if CONFIG_MUSE_GADGET_AUTOMATION || CONFIG_MUSE_GADGET_TEST_BUILD\n#define NUS_MIRROR_RELEASE false",
                       ble)
