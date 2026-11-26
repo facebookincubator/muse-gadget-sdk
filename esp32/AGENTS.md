@@ -2734,7 +2734,9 @@ its constants.
     build is confirmed with the button alone. Flash rig boards with
     `MUSE_BENCH=1 tools/muse/board.sh flash <board>`.
     The `d` / `u` keys are push-to-talk only and never confirm. The Zephyr
-    gadget takes the same line in bench builds (`zephyr/AGENTS.md`, Bench console).
+    gadget takes the same line in every build: bench builds confirm on it,
+    release builds answer `@pair.confirm disabled` (`zephyr/AGENTS.md`, Bench
+    console).
   - `tools/mg_confirm.py PORT` watches a console for `@pair.pending` and
     answers it (`--count 0 --secs N` keeps answering, `--log FILE` saves the
     console, `--now` confirms what waits now); start it, then run the Muse
