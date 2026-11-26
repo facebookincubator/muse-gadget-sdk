@@ -20,8 +20,10 @@
  * gadget, and muse_ui.c's own callbacks take them. That covers on_pair_ok for
  * the setup and re-setup prompt (an object event on the disc), and
  * on_any_press for the update card (an indev event: the point comes from
- * lv_indev_active()). A tap on the disc confirms each one; a tap elsewhere
- * confirms nothing, and on the update card it cancels the update. On a screen
+ * lv_indev_active()). A tap on the disc (a press and its release on it)
+ * confirms each one, at the release; a press that slides off the disc before
+ * it lifts confirms nothing; a tap elsewhere confirms nothing, and on the
+ * update card it cancels the update. On a screen
  * that went dark under the setup card, the waking tap lands on the sleep
  * cover and confirms nothing; the next tap, once lit, confirms. The asking
  * update card never goes dark. An injected touch (a bench press: muse_touch_real() false) confirms nothing, a
@@ -95,6 +97,23 @@ static void tap(int x, int y)
     touch(x, y, true);
     touch(x, y, true);
     touch(x, y, false);
+}
+
+/* A finger down on the disc's center, dragged slowly (no swipe) to just past the disc's hit area, lifted there. */
+static void slide_off(void)
+{
+    lv_area_t a, hit;
+    lv_obj_get_coords(s_pair_code, &a);
+    lv_obj_get_click_area(s_pair_code, &hit);
+    int x = (a.x1 + a.x2) / 2, y = (a.y1 + a.y2) / 2, to = hit.y2 + 4;
+    assert(to < lv_display_get_vertical_resolution(NULL));
+    touch(x, y, true);
+    touch(x, y, true);
+    for (; y < to; y += 2) {
+        touch(x, y, true);
+    }
+    touch(x, to, true);
+    touch(x, to, false);
 }
 
 /* A tap on a dark screen, with the UI's frames running between its samples as on the gadget. */
@@ -175,8 +194,15 @@ int main(int argc, char **argv)
         elsewhere(&x, &y);
         tap(x, y);
         assert(confirms == 0);
+        /* A press that slides off the disc before it lifts confirms nothing. */
+        slide_off();
+        assert(confirms == 0);
+        /* The tap confirms at its release, not its touch-down. */
         disc_center(&x, &y);
-        tap(x, y);
+        touch(x, y, true);
+        touch(x, y, true);
+        assert(confirms == 0);
+        touch(x, y, false);
         assert(confirms == 1);
         /* The screen went dark under the prompt: a tap on where the disc is wakes the screen and confirms nothing
          * (a prompt you can't see isn't shown); the next tap, lit, confirms. */
@@ -219,8 +245,24 @@ int main(int argc, char **argv)
     chrome();
     assert(!lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && s_pair_ok == PAIR_OK_UPDATE && atomic_load(&s_ask_shown));
     confirms = 0;
+    /* A press on the disc that slides off before it lifts neither confirms nor cancels it. */
+    slide_off();
+    assert(notes == 0 && cancels == 0 && confirms == 0 && s_prompting);
+    /* A press on the disc that went down while the card wasn't on show (the video view over it, the screen dark)
+     * confirms nothing, even released once it is. */
     disc_center(&x, &y);
-    tap(x, y);
+    atomic_store(&s_ask_shown, false);
+    touch(x, y, true);
+    touch(x, y, true);
+    chrome();
+    assert(atomic_load(&s_ask_shown));
+    touch(x, y, false);
+    assert(notes == 0 && cancels == 0 && s_prompting);
+    /* The tap confirms at its release, not its touch-down. */
+    touch(x, y, true);
+    touch(x, y, true);
+    assert(notes == 0 && cancels == 0);
+    touch(x, y, false);
     assert(notes == 1 && cancels == 0 && confirms == 0);
     s_prompting = true;   /* asked again */
     chrome();

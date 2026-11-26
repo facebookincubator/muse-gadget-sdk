@@ -80,6 +80,17 @@ static pair_ok_t s_pair_ok;
 #define MUSE_PRESS_PANEL 2
 static bool muse_touch_real(void) { return true; }
 static bool touch_confirms(void) { return muse_touch_real(); }   /* a release image (muse_ui.c) */
+/* Confirm's tap (muse_ui.c on_pair_ok): down on the control, lifted on it. */
+typedef int lv_event_code_t;
+#define LV_EVENT_CLICKED 4
+typedef struct { int x, y; } lv_point_t;
+typedef struct lv_indev lv_indev_t;
+static int s_pair_code_obj, indev_obj;
+static void *s_pair_code = &s_pair_code_obj;
+static bool s_ok_down;
+static lv_indev_t *lv_indev_active(void) { return (lv_indev_t *)&indev_obj; }
+static void lv_indev_get_point(lv_indev_t *indev, lv_point_t *pt) { (void)indev; pt->x = pt->y = 0; }
+static bool lv_obj_hit_test(void *obj, const lv_point_t *pt) { (void)obj; (void)pt; return true; }
 static void muse_input_press(int src) { (void)src; }
 static bool muse_input_talk_ok(bool real) { return real; }   /* a release image: the finger here is real */
 '''
@@ -121,7 +132,8 @@ int main(void) {
     pending_pair=true;link_state=MUSE_LINK_CONFIRM;on_any_press(&event);
     talk_button(atomic_exchange(&s_touch_talk_events,0));
     assert(confirmed==1 && down==4 && up==4 && !s_talk_down);
-    s_pair_ok=true;event=LV_EVENT_PRESSED;on_pair_ok(&event);
+    s_pair_ok=true;event=LV_EVENT_PRESSED;on_pair_ok(&event);assert(confirmed==1);   /* at the tap's release */
+    event=LV_EVENT_CLICKED;on_pair_ok(&event);
     assert(confirmed==2 && down==4 && up==4 && !s_talk_down);
     board.touch_talk=false;on_any_press(&event);assert(atomic_load(&s_touch_talk_events)==0);
     return 0;

@@ -1127,7 +1127,8 @@ its constants.
   `error_pairing_unavailable`), with the same handshake. ONE press confirms
   a setup: a tap on the prompt's on-screen Confirm (touch boards: "Pair with
   Muse", "Tap Confirm to pair"; a generous hit area, the control and a tenth
-  of the screen's shorter side around it; on the e-paper boards, which draw
+  of the screen's shorter side around it; a press and its release on it, so
+  one that slides off confirms nothing; on the e-paper boards, which draw
   no control, the whole screen), a press of a second key (the aux key,
   Enter on a keyboard) or, for a first setup, the talk key (the Link button
   on boards without the full UI, taken at its down edge,

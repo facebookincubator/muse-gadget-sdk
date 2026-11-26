@@ -392,7 +392,7 @@ static lv_obj_t *s_pair_hint;
 typedef enum {
     PAIR_OK_NONE = 0,
     PAIR_OK_SETUP,    /* a re-setup's Confirm (on_pair_ok) */
-    PAIR_OK_UPDATE,   /* the update's Confirm (on_any_press) */
+    PAIR_OK_UPDATE,   /* the update's Confirm (on_pair_ok; on_any_press passes it only a real touch) */
 } pair_ok_t;
 static pair_ok_t s_pair_ok;
 
@@ -408,21 +408,54 @@ static bool touch_confirms(void)
 #endif
 }
 
+static atomic_bool s_ask_shown;   /* the update card asks and is on show (no video over it, the screen lit) */
+/* This touch went down on Confirm (its PRESSED), as a real touch where one is needed; a PRESS_LOST clears it. */
+static bool s_ok_down;
+
+/* Confirm takes a tap, on either card: a press on the control and its release on it too (its hit area). A press
+ * that slides off before it lifts, a swipe that starts on it, confirms nothing. */
 static void on_pair_ok(lv_event_t *e)
 {
-    if (s_pair_ok != PAIR_OK_SETUP) {
-        return;   /* not a re-setup's Confirm: the update's is on_any_press's */
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        s_ok_down = s_pair_ok != PAIR_OK_NONE && touch_confirms();
+        if (s_pair_ok != PAIR_OK_NONE && !s_ok_down) {
+            ESP_LOGW(TAG, "setup prompt: a real press is needed");
+        }
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+        if (s_pair_ok == PAIR_OK_UPDATE && !atomic_load(&s_ask_shown)) {
+            s_ok_down = false;   /* down while the update card wasn't on show: its tap isn't the update's */
+        }
+#endif
+        return;
+    }
+    bool down = s_ok_down;
+    s_ok_down = false;
+    if (code != LV_EVENT_CLICKED || !down || !touch_confirms()) {
+        return;   /* PRESS_LOST, or not a real touch's tap */
+    }
+    lv_point_t pt;
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) {
+        return;
+    }
+    lv_indev_get_point(indev, &pt);
+    if (!lv_obj_hit_test(s_pair_code, &pt)) {
+        return;   /* let go off the control: no tap */
     }
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
+    if (s_pair_ok == PAIR_OK_UPDATE) {
+        if (muse_local_press_prompting() && atomic_load(&s_ask_shown)) {
+            (void)muse_local_press_note("a tap on the update card's Confirm");
+            muse_state_poke();
+        }
+        return;
+    }
     if (muse_local_press_prompting()) {
         return;   /* the update holds the card (drawn at the next chrome tick): no re-setup confirms under it */
     }
 #endif
-    if (lv_event_get_code(e) == LV_EVENT_PRESSED && s_pair_ok) {
-        if (!touch_confirms()) {
-            ESP_LOGW(TAG, "setup prompt: a real press is needed");
-            return;
-        }
+    if (s_pair_ok == PAIR_OK_SETUP) {
         (void)muse_link_confirm_key_press();   /* one tap on Confirm pairs, a first setup or a re-setup */
     }
 }
@@ -2346,16 +2379,14 @@ static uint32_t ui_inactive_ms(void)
 
 static void swipe_down(void);
 
-static atomic_bool s_ask_shown;   /* the update card asks and is on show (no video over it, the screen lit) */
-
 static void on_any_press(lv_event_t *e)
 {
     s_press_us = esp_timer_get_time();
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
     if (s_pair_ok == PAIR_OK_UPDATE && muse_local_press_prompting() && atomic_load(&s_ask_shown)) {
-        /* The update card's Confirm, a real touch on it, confirms the update; a real touch elsewhere cancels it
-         * (rc 11 next); injected touches do neither. The tap is the update's alone: LVGL sends it no further (the
-         * code line's own PRESSED and CLICKED, on_pair_ok, never see it). */
+        /* The update card's Confirm, a real tap on it, confirms the update (on_pair_ok, at the tap's release on the
+         * control); a real touch elsewhere cancels it (rc 11 next); injected touches do neither. A touch on Confirm
+         * goes on to the control; any other goes no further. */
         lv_point_t pt;
         lv_area_t ok;
         /* The indev this callback is registered on (its user data: the panel's, or the mirror's), never a guess
@@ -2371,7 +2402,8 @@ static void on_any_press(lv_event_t *e)
         if (!touch_confirms()) {
             ESP_LOGW(TAG, "update prompt: a real press is needed");
         } else if (on) {
-            (void)muse_local_press_note("a touch on the update card's Confirm");
+            muse_state_poke();
+            return;   /* to Confirm: its tap confirms (on_pair_ok) */
         } else {
             muse_local_press_cancel("a touch elsewhere on the update card");   /* the next change: rc 11 */
         }
@@ -2594,6 +2626,7 @@ static void build_overlays(void)
     lv_obj_remove_flag(s_pair_code, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_pair_code, on_pair_ok, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_pair_code, on_pair_ok, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_pair_code, on_pair_ok, LV_EVENT_PRESS_LOST, NULL);
     s_pair_hint = make_label(s_pair, font_pick(&lv_font_montserrat_14, FONT_COMPACT), COLOR_DIM);
     lv_obj_set_style_text_font(s_pair_hint, muse_lang_montserrat(lv_obj_get_style_text_font(s_pair_hint, 0)), 0);   /* and the UI language's letters */
     lv_label_set_text(s_pair_hint, muse_lang_menu(s_small ? "Enter on phone" : "Enter it on your phone"));

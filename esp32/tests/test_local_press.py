@@ -387,8 +387,12 @@ int main(void) {
         ui = (ROOT / "components" / "muse" / "muse_ui.c").read_text()
         ok = ui[ui.index("static void on_pair_ok(lv_event_t *e)"):]
         ok = ok[:ok.index("\n}\n")]
-        self.assertLess(ok.index("if (s_pair_ok != PAIR_OK_SETUP) {\n        return;"), ok.index("muse_link_confirm_key_press("))
-        self.assertLess(ok.index("if (muse_local_press_prompting()) {"), ok.index("muse_link_confirm_key_press("))
+        upd_ok = ok[ok.index("if (s_pair_ok == PAIR_OK_UPDATE) {"):]
+        upd_ok = upd_ok[:upd_ok.index("        return;\n    }")]
+        self.assertIn('(void)muse_local_press_note("a tap on the update card\'s Confirm");', upd_ok)
+        self.assertNotIn("muse_link_confirm_key_press(", upd_ok)   # the update's tap confirms no re-setup
+        self.assertLess(ok.index("if (muse_local_press_prompting()) {\n        return;"), ok.index("muse_link_confirm_key_press("))
+        self.assertIn("if (s_pair_ok == PAIR_OK_SETUP) {\n        (void)muse_link_confirm_key_press();", ok)
         press = ui[ui.index("static void on_any_press(lv_event_t *e)"):]
         press = press[:press.index("\n}\n")]
         upd = press[press.index("if (s_pair_ok == PAIR_OK_UPDATE"):]
@@ -439,7 +443,10 @@ class OnlyTheGadgetsOwnPressOnThePrompt(unittest.TestCase):
         press = ui[ui.index("static void on_any_press(lv_event_t *e)"):]
         press = press[:press.index("\n}\n")]
         self.assertIn("if (s_pair_ok == PAIR_OK_UPDATE && muse_local_press_prompting() && atomic_load(&s_ask_shown)) {", press)
-        self.assertIn('} else if (on) {\n            (void)muse_local_press_note("a touch on the update card\'s Confirm");', press)
+        self.assertIn('} else if (on) {\n            muse_state_poke();\n            return;   /* to Confirm: its tap confirms (on_pair_ok) */', press)
+        ok = ui[ui.index("static void on_pair_ok(lv_event_t *e)"):]
+        self.assertIn("if (muse_local_press_prompting() && atomic_load(&s_ask_shown)) {\n"
+                      '            (void)muse_local_press_note("a tap on the update card\'s Confirm");', ok[:ok.index("\n}\n")])
         self.assertIn('muse_local_press_cancel("a touch elsewhere on the update card");', press)
         self.assertLess(press.index("if (!touch_confirms()) {"), press.index("} else if (on) {"))   # real only
         self.assertIn('const char *title = ask ? "Confirm update"', ui)

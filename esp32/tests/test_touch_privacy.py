@@ -53,19 +53,18 @@ class ThePhoneGetsOnlyTheFacesTouches(unittest.TestCase):
 
 
 class OneTapOnConfirmPairsAndATapElsewhereDoesNothing(unittest.TestCase):
-    """A setup or a re-setup is confirmed by one tap on the card's Confirm (a generous hit area), however long; a tap
-    anywhere else does nothing, and the back gesture (a swipe) ends the prompt ("Not now"). In a release build the
+    """A setup or a re-setup is confirmed by one tap on the card's Confirm (a generous hit area), however long: a press
+    and its release on the control (a press that slides off confirms nothing); a tap anywhere else does nothing, and the back gesture (a swipe) ends the prompt ("Not now"). In a release build the
     tap is a finger's, never a bench press (over any link), on the setup card's Confirm as on the update card's."""
 
     def test_the_confirm_paths(self) -> None:
         ui = (MUSE / "muse_ui.c").read_text()
         pair = body(ui, "static void on_pair_ok(lv_event_t *e)\n{")
-        self.assertIn("if (lv_event_get_code(e) == LV_EVENT_PRESSED && s_pair_ok) {\n"
-                      "        if (!touch_confirms()) {\n"
-                      "            ESP_LOGW(TAG, \"setup prompt: a real press is needed\");\n"
-                      "            return;\n"
-                      "        }\n"
-                      "        (void)muse_link_confirm_key_press();", pair)
+        self.assertIn("s_ok_down = s_pair_ok != PAIR_OK_NONE && touch_confirms();", pair)   # down on it, real
+        self.assertIn("if (code != LV_EVENT_CLICKED || !down || !touch_confirms()) {", pair)   # its release, real
+        self.assertLess(pair.index("if (!lv_obj_hit_test(s_pair_code, &pt)) {"),           # lifted on it
+                        pair.index("(void)muse_link_confirm_key_press();"))
+        self.assertIn("lv_obj_add_event_cb(s_pair_code, on_pair_ok, LV_EVENT_PRESS_LOST, NULL);", ui)
         # A generous hit area on the Confirm control; a tap elsewhere does nothing; the back gesture (a swipe)
         # dismisses.
         self.assertIn("lv_obj_set_ext_click_area(s_pair_code, on ? (s_w < s_h ? s_w : s_h) / 10 : 0);", ui)
