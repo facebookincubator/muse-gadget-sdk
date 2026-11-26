@@ -2502,6 +2502,83 @@
         ]
       },
       {
+        "name": "an injected tap never confirms a re-setup",
+        "mtu": 247,
+        "device": {},
+        "note": "On a set-up gadget's release build a console or Nordic UART word, or a scripted tap, confirms nothing while a re-setup prompt is up: the prompt stays, and the owner's physical press then confirms it.",
+        "steps": [
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a re-setup hello (1): the prompt shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "injected_press",
+            "notify": [],
+            "note": "an injected tap: nothing, the prompt stays",
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "injected_press",
+            "notify": [],
+            "note": "another: still nothing",
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "a physical press: confirms hello 1",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": 1,
+              "confirmed_hello": 1
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
         "name": "the re-setup prompt on an automation build",
         "mtu": 247,
         "device": {
