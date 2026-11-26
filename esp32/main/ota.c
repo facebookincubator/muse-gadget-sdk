@@ -35,9 +35,20 @@ static const char *TAG __attribute__((unused)) = "link.ota";   // a build may co
 #endif
 #if CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD && CONFIG_HOMEHUB_OTA_ENABLED
 #define OTA_SAME_BOARD 1
-#include "muse_image_id.h"
 #else
 #define OTA_SAME_BOARD 0
+#endif
+// A Home Link build (no musegadgets BLE audio) checks the device model only: an image for another
+// model with the same chip (another Home Link board) is refused before anything is written.
+#if !CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_HOMEHUB_OTA_ENABLED
+#define OTA_MODEL_CHECK 1
+#else
+#define OTA_MODEL_CHECK 0
+#endif
+// Either check reads the download's first bytes (muse_image_id.h).
+#define OTA_IMAGE_HEAD (OTA_SAME_BOARD || OTA_MODEL_CHECK)
+#if OTA_IMAGE_HEAD
+#include "muse_image_id.h"
 #endif
 
 static int s_ota_owner;   // ota_owner_t, changed only by compare-and-swap
@@ -228,9 +239,9 @@ typedef struct {
     bool force;
     ota_status_cb cb;
     void *user;
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
     // The download's first bytes, as the HTTP client delivers them
-    // (HTTP_EVENT_ON_DATA), for the board check before anything is written.
+    // (HTTP_EVENT_ON_DATA), for the image check before anything is written.
     uint16_t head_n;
     uint8_t head[MUSE_IMAGE_HEAD_BYTES];
 #endif
@@ -283,17 +294,17 @@ static void emit(ota_ctx_t *ctx, ota_result_t result, const char *detail,
 
 static esp_err_t ota_http_event_handler(esp_http_client_event_t *evt) {
     const char *phase = "ota download";
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
     ota_ctx_t *ctx = (ota_ctx_t *)evt->user_data;
 #endif
     switch (evt->event_id) {
         case HTTP_EVENT_HEADERS_SENT:
             ESP_LOGI(TAG, "%s request headers sent", phase);
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
             if (ctx) ctx->head_n = 0;   // a new request (a redirect): its body starts again
 #endif
             break;
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
         case HTTP_EVENT_ON_DATA: {
             // Only the image's own body: not a redirect's or an error page's.
             int status = esp_http_client_get_status_code(evt->client);
@@ -375,7 +386,7 @@ void ota_verify_forget(void) {
     config_erase_key(OTA_VERIFY_KEY);
 }
 
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
 #ifdef ESP_PLATFORM
 _Static_assert(offsetof(esp_app_desc_t, version) == 16, "esp_app_desc_t.version");
 _Static_assert(offsetof(esp_app_desc_t, app_elf_sha256) == 144, "esp_app_desc_t.app_elf_sha256");
@@ -392,12 +403,18 @@ static muse_image_verdict_t image_verdict(const ota_ctx_t *ctx, const esp_app_de
         ESP_LOGW(TAG, "the download's first bytes weren't seen whole (%u bytes)", (unsigned)ctx->head_n);
         return MUSE_IMAGE_SHORT;
     }
+#if OTA_SAME_BOARD
     return muse_image_check(ctx->head, ctx->head_n, true, info);
+#else
+    return muse_image_check_model(ctx->head, ctx->head_n, info);
+#endif
 }
 
+#if OTA_SAME_BOARD
 static const char *who_short(const muse_image_info_t *info) {
     return info->product_code[0] ? info->product_code : info->board_id;
 }
+#endif
 #endif
 
 // Streaming OTA on a dedicated task (callers are often on the WS event-handler
@@ -424,7 +441,7 @@ static void ota_task(void *arg) {
         .max_redirection_count = OTA_MAX_REDIRECTS,
         .buffer_size_tx = OTA_HTTP_TX_BUFFER_BYTES,
         .event_handler = ota_http_event_handler,
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
         .user_data = ctx,
 #endif
     };
@@ -456,15 +473,25 @@ static void ota_task(void *arg) {
     new_version[sizeof(new_desc.version)] = '\0';
     ESP_LOGI(TAG, "incoming version=%s", new_version);
 
-#if OTA_SAME_BOARD
+#if OTA_IMAGE_HEAD
     // Before esp_https_ota_perform (esp_ota_begin and the first write): the
-    // image must be this board's. get_img_desc read its first 1 KB, which
-    // the HTTP client also handed the event handler; the copy must match
-    // what ESP-IDF read (its version and ELF SHA-256), or it isn't trusted.
+    // image must be this board's (the same-board opt-in) or, on a Home Link
+    // build, not another device model's. get_img_desc read its first 1 KB,
+    // which the HTTP client also handed the event handler; the copy must
+    // match what ESP-IDF read (its version and ELF SHA-256), or it isn't
+    // trusted.
     {
         muse_image_info_t info;
         muse_image_verdict_t v = image_verdict(ctx, &new_desc, &info);
-        if (v != MUSE_IMAGE_OK) {
+#if OTA_SAME_BOARD
+        bool refuse = v != MUSE_IMAGE_OK;
+#else
+        // A Home Link build refuses only what it knows is wrong: another chip
+        // or another device model. An image without a model (an older build)
+        // or whose first bytes weren't seen installs as before.
+        bool refuse = v == MUSE_IMAGE_WRONG_CHIP || v == MUSE_IMAGE_WRONG_MODEL;
+#endif
+        if (refuse) {
             char who[112], target[128];
             muse_image_describe(&info, who, sizeof(who));
             ota_url_for_log(ctx->url, target, sizeof(target));
@@ -477,7 +504,11 @@ static void ota_task(void *arg) {
             emit(ctx, OTA_RESULT_REFUSED, msg, new_version, running);
             goto done;
         }
+#if OTA_SAME_BOARD
         ESP_LOGI(TAG, "image is this board's (%s)", who_short(&info));
+#else
+        ESP_LOGI(TAG, "image check: %s", muse_image_verdict_text(v));
+#endif
     }
 #endif
 

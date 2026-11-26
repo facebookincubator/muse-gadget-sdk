@@ -20,7 +20,9 @@ Every image this firmware builds carries a 64-byte `muse_board_desc_t`
 (`include/muse_image_id.h`): the chip, the product code
 (`CONFIG_HOMEHUB_BLE_PRODUCT_CODE`, e.g. W175, SCW1, M5SW, WC6, EMO1), the
 board profile (`CONFIG_MUSE_BOARD_ID`, e.g. `waveshare_s3_175c`; `none` on
-Link-only builds) and flags (musegadgets BLE audio, BLE updates).
+Link-only builds), the device model (`CONFIG_MUSE_DEVICE_MODEL_ID`, as the
+first 8 bytes of its SHA-256) and flags (musegadgets BLE audio, BLE updates,
+a model present).
 
 It lives in ESP-IDF's custom app description section, the documented way
 to add a structure to the app image (ESP-IDF v6.0.1, App Image Format,
@@ -37,8 +39,9 @@ from.
 
 `muse_image_check()` reads the first `MUSE_IMAGE_HEAD_BYTES` (352) of a
 download and says whether the image is for this chip and, when asked, this
-board (same product code and board profile, and BLE updates if this build
-takes them), before any flash write. Its callers:
+board (same product code and board profile, the same device model when both
+carry one, and BLE updates if this build takes them), before any flash write.
+Its callers:
 
 - `main/ota.c` (Wi-Fi OTA, from Link setup): only with
   `CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD` on a Muse Gadget build; a gadget
@@ -49,5 +52,14 @@ takes them), before any flash write. Its callers:
 An image built before the description existed reads as "no board
 description" and is refused wherever the board is checked: install such a
 build over USB.
+
+The device model came later, in the 8 bytes the first layout left reserved
+(zeros), with its own flag. Firmware from before it never reads them, so it
+takes a newer image as it always did; newer firmware compares models only when
+both its own build and the image carry one, so an image from before still
+installs. It tells apart builds that share a chip, a product code and a board
+profile, such as the Home Link boards of one chip (no product code, board
+`none`): the reSpeaker Lite, the XVF3800 and the ESP32-S3-DevKitC-1 refuse each
+other's images.
 
 `tests/test_muse_image_id.py` runs the check on the host.

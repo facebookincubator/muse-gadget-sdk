@@ -1941,7 +1941,8 @@ its constants.
   the build did). The gadget holds the app's first 352 bytes until they say
   it's this board's: the image header's chip id, and the board description
   every image carries (`components/muse_image_id`: product code and board
-  profile, in ESP-IDF's custom app description section, BLE updates kept).
+  profile, the device model when both carry one, in ESP-IDF's custom app
+  description section, BLE updates kept).
   Another chip's or board's image, or one built before the description, is
   refused there (rc 3, EINVAL) with nothing written (esp_ota_begin erases
   nothing with sequential writes), so the other slot keeps what it held;
@@ -3056,7 +3057,11 @@ For app authoring and the guide to send Muse, see
   description), must name the same product code and board profile before
   `esp_https_ota_perform` (esp_ota_begin and the first write); ESP-IDF's
   chip id check (on the first 1 KB, before its first write) and the RSA
-  check at the end stay (`tests/test_link_ota.py`).
+  check at the end stay (`tests/test_link_ota.py`). A Home Link build (no
+  musegadgets BLE audio) reads those first bytes too and refuses an image
+  for another device model (`CONFIG_MUSE_DEVICE_MODEL_ID`) before the first
+  write, so one S3 Home Link board's image never lands on another; an image
+  without a model (built before it) installs as before.
 - Versions: `version.txt` holds the release number
   (`MAJOR.MINOR.PATCH`), the one place it's set. `cmake/version.cmake` turns
   it into each image's version: the number alone when HEAD is exactly the
