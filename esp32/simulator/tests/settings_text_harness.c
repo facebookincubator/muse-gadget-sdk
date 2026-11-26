@@ -173,6 +173,16 @@ bool muse_link_image_status(char *out, size_t cap) { SWEEP_ONLY(); strlcpy(out, 
 bool muse_link_sdk_token_fp(unsigned *len, char hex[MUSE_LINK_FP_HEX]) { SWEEP_ONLY(); *len = 0; hex[0] = 0; return false; }
 void muse_ble_phone_setup(bool on) { (void)on; abort(); }
 bool muse_input_talk_choice(void) { return false; }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+/* Live call (muse_call.c): the home's Live call row with no call up and no phone; starting or ending one fails this
+ * focused test. */
+void muse_call_start_from(const char *why) { (void)why; abort(); }
+void muse_call_end_from(const char *why) { (void)why; abort(); }
+bool muse_call_active(void) { return false; }
+muse_call_phase_t muse_call_phase(int *live_s) { if (live_s) *live_s = 0; return MUSE_CALL_NONE; }
+bool muse_call_available(void) { return false; }
+bool muse_call_supported(void) { return true; }
+#endif
 bool muse_state_on_battery_real(void) { abort(); }
 bool mg_ble_haptic_test_caps(mght_caps_t *c) { (void)c; return false; }   /* no actuator: no Vibration tests */
 mght_result_t mg_ble_haptic_test(const mght_cmd_t *c) { (void)c; abort(); }

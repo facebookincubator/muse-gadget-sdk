@@ -24,6 +24,7 @@
 #include "mg_link.h"
 #include "mg_press_src.h"
 #include "mg_session.h"
+#include "mg_subs.h"
 #include "mg_token_proof.h"
 #include "mg_video.h"
 
@@ -130,8 +131,8 @@ typedef struct {
      */
     size_t (*speaker_clear)(int16_t *keep, size_t max);
     /*
-     * The video's picture on the panel now (muse_video_shown32): its
-     * frame number extended to 32 bits; false while
+     * The call video's picture on the panel now (muse_video_shown32): its
+     * frame number extended to 32 bits as subtitles count it; false while
      * none is showing. Set: the device lists
      * mg_stream_audio_capability_video_sync and holds a reply's first sample
      * to its mg_stream_audio_video_anchor. NULL: no video, not listed.
@@ -197,6 +198,24 @@ typedef struct {
     const mg_video_caps_t *video_caps;
     bool (*video_begin)(const mg_video_params_t *vp);
     void (*video_end)(void);
+    /*
+     * Live call (mg_command_live_call): the call's state as the client
+     * reports it (mg_live_call_state_t; idle when the client disconnects).
+     * NULL: not offered. Called from the BLE worker with the protocol locked:
+     * don't block.
+     */
+    void (*live_call)(uint8_t state);
+    /*
+     * Live call subtitles (mg_command_subtitle):
+     * what the board draws, and each message from the phone (BLE worker,
+     * protocol locked: copy what you keep, don't block long). NULL: not offered.
+     */
+    const mg_subs_caps_t *(*subtitle_caps)(void);
+    void (*subtitle)(const mg_subs_event_t *ev);
+    /* Whether the board can draw subtitles now (their buffers allocated):
+     * false leaves mg_command_subtitle unlisted and refused.
+     * NULL: always, once subtitle_caps gave caps. */
+    bool (*subtitle_ready)(void);
     /*
      * The board's clock (device_action set/get_unix_time, mgcommands.h,
      * Clock): set from the phone's time, read back for report_unix_time.
@@ -341,6 +360,22 @@ void mg_ble_peer(mg_ble_peer_t *out);
  * status line (peer_name_fails=N; never the name). 0 without the read. Any task. */
 uint32_t mg_ble_peer_name_failures(void);
 
+/* A live call's stats overlay: what the link and
+ * the reply playback already keep, read under the protocol's lock. link:
+ * a central is connected (itvl: its connection interval in 1.25 ms units, 0
+ * not reported yet; mode: "sleep" / "ready" / "active"). play: the board has
+ * a speaker (stream: bumped by each reply stream's start; underruns: that
+ * stream's; depth_ms: reply audio queued now). Any task. */
+typedef struct {
+    bool link;
+    uint16_t itvl;
+    const char *mode;
+    bool play;
+    uint32_t stream, underruns, depth_ms;
+    uint32_t silence_ms;   /* that stream's silence for underruns and prebuffering */
+} mg_ble_call_stats_t;
+void mg_ble_call_stats(mg_ble_call_stats_t *out);
+
 /* Control's queue counts (no silent drops), as on the BLE
  * console's status line: replies dropped (no room in the outbox), held for
  * the MTU exchange, notifications refused for length, commands past the
@@ -353,7 +388,7 @@ int mg_ble_reply_stats(bool json, char *out, size_t n);
 /* The receive ring the decoder pops frames from, or NULL. */
 muse_vstream_t *mg_ble_vstream(void);
 /*
- * The audio clock for the picture (lip sync; mg_play_av_pos): true
+ * The audio clock for the call picture (lip sync; mg_play_av_pos): true
  * while a reply's audio plays steadily after a resolved A/V anchor, with
  * *frame the anchor's picture and *pos_us where the sound heard now stands
  * from that anchor's sample (us of the reply's content). The playback task
@@ -393,7 +428,7 @@ bool mg_ble_ui_menu_toggle(void);
 bool mg_ble_hid_key(uint16_t usage);
 /* Bench: fn(arg) on the musegadgets worker, where a client's commands run
  * (its stack has room for what a console word mustn't do on the console's,
- * such as a text layout). fn owns arg. False: not queued (the worker
+ * such as the subtitles' layout). fn owns arg. False: not queued (the worker
  * isn't up, or its queue is full), fn isn't called and arg is the caller's. */
 bool mg_ble_run_on_worker(void (*fn)(void *arg), void *arg);
 /* Bench: forgets every bonded phone (a HID host that keeps reconnecting) and drops the connection. */
@@ -453,6 +488,17 @@ void mg_ble_session_request(bool open);
 /* The largest message the gadget takes (its hello's max_message), or 0 without the session. */
 size_t mg_ble_session_max_message(void);
 
+/* ---- live call (mg_command_live_call) ---- */
+/* The user started (true) or ended (false) a live call on the device. */
+void mg_ble_live_call(bool start);
+/* Why the call the client just reported failed (mg_live_call_failure_reason_t,
+ * setup_required 1), 0 when it gave none. Any task. */
+uint8_t mg_ble_live_call_failure_reason(void);
+/* The call state the client just reported came from a central without this connection's token proof, and
+ * wasn't the answer to the gadget's own pending start. Any task. */
+bool mg_ble_live_call_unproven(void);
+/* The UI holds the phone's call behind the passcode keypad: its reply audio waits for the release. */
+void mg_ble_live_call_held(bool held);
 /* The device's user changed a setting (mgcommands.h, Settings reports): the
  * client hears [get_settings, param, value]. */
 void mg_ble_report_setting(uint8_t param);
@@ -461,6 +507,9 @@ void mg_ble_report_battery(void);
 /* A press the device itself detected (mg_press_src.h: a physical key, the panel, its wake event): it opens a
  * client's start_mic for MG_PRESS_WINDOW_MS on a release build. Any other source counts for nothing. Any task. */
 void mg_ble_press(uint8_t src);
+/* The build offers Live call at all (a board that can draw it: PSRAM).
+ * The UI shows its Live call row only then. */
+bool mg_ble_live_call_offered(void);
 /* The device's talk press (at touch-down): activity for link modes (active).
  * Any task. */
 void mg_ble_link_activity(void);
@@ -528,6 +577,12 @@ bool mg_ble_output_ok(void);
 void mg_ble_proof_clear_done(bool erased);
 /* The sealed clear's answer isn't out yet: the platform's restart waits for it, bounded. Any task. */
 bool mg_ble_proof_clear_owed(void);
+
+/* A client that can take a live call is connected and ready. */
+bool mg_ble_live_call_client(void);
+/* Bench: the link goes to full speed at a live call's start (on, the
+ * default) or only at its video stream's start, as before (off). */
+void mg_ble_call_fastlink(bool on);
 
 /* Bench A/B (console credit.coalesce=1|0, RAM only, off at boot): a request_buffer_update during a live-depth
  * reply answered by the stream tick's next update (<= 10 ms) instead of at once (the default). */

@@ -32,6 +32,8 @@ extern "C" {
 #endif
 
 typedef enum {
+    MUSE_ICON_CALL,
+    MUSE_ICON_CALL_END,
     MUSE_ICON_VOLUME_UP,
     MUSE_ICON_VOLUME_OFF,
     MUSE_ICON_MIC,
@@ -40,6 +42,8 @@ typedef enum {
     MUSE_ICON_POWER,
     MUSE_ICON_INFO,
     MUSE_ICON_VIDEOCAM,
+    MUSE_ICON_ADD,
+    MUSE_ICON_REMOVE,
     MUSE_ICON_DISPLAY,     /* the Display row (brightness, screen timeout) */
     MUSE_ICON_BATTERY,     /* the Battery row */
     MUSE_ICON_HOME,        /* the Muse row (Material home, redrawn) */

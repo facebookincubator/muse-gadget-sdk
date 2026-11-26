@@ -32,7 +32,9 @@
  *   a request colliding with the central's own update can go unanswered and
  *   the controller then drops the link on its 40 s LL procedure timer.
  * - Active on the device's own activity, never slower than before: its talk
- *   press (at touch-down), a stream the app starts (video, UI, audio playback), push-to-talk capture, Link setup and
+ *   press (at touch-down), a call (Calling... included; Calling... and
+ *   connecting for at most 30 s, MG_LINKPOL_CALL_STARTING_US), a stream the app
+ *   starts (video, UI, audio playback), push-to-talk capture, Link setup and
  *   an MCUmgr update for their whole duration. mg_linkpol_action() marks an
  *   instant (a press); mg_linkpol_in_t.busy something ongoing.
  * - The gadget's own turn is activity (mgcommands.h;
@@ -54,7 +56,7 @@
  * - A user's wake or touch on the gadget (any key press, a touch, the screen
  *   lit by the user; the bench's injected input alike: automation behaves
  *   like a user) moves sleep to ready, never active, and restarts the 10 min
- *   (mgcommands.h; from sleep a gadget with an S22 waited 11.75 s
+ *   (mgcommands.h; a call from sleep waited 11.75 s on a gadget with an S22
  *   for the central to schedule the active update, 1.5-3 s from ready). In
  *   ready it restarts the 10 min the same way. A sleep the app wrote is
  *   lifted to ready too, for 10 min after the user's last wake or touch,
@@ -82,7 +84,7 @@
  *   there), outside the 2 s pacing and the refusal's own 500 ms settle (a
  *   later update still settles it); up to MG_LINKPOL_COLLISION_TRIES times a
  *   mode, then as any refusal.
- * - A video stream that starts while already active gets a brief
+ * - A call (or its video) that starts while already active gets a brief
  *   idle -> fast toggle so the central re-plans the link (the
  *   iPhone's two-gadget starvation: re-asking identical parameters is a
  *   no-op):
@@ -96,9 +98,9 @@
  *      half asked 1 ms after the idle half's grant went silent at its
  *      instant and the link dropped on supervision timeout.
  *   No outcome within 2 s (MG_LINKPOL_ANSWER_US): the toggle is skipped for
- *   that stream (logged), nothing more is asked and the fast set stays. A
+ *   that call (logged), nothing more is asked and the fast set stays. A
  *   mode change in between supersedes it; a disconnect cancels it; another
- *   stream start during it joins it.
+ *   call start during it joins it.
  * - A request with no outcome in 2 s (MG_LINKPOL_ANSWER_US: no grant, no
  *   refusal) is asked again then, unless the link is in the mode's set by
  *   then (on the Watcher a talk press from sleep asked active, no
@@ -190,9 +192,17 @@ typedef enum {
 #define MG_LINKPOL_HCI_COLLISION 0x2A             /* LL error: Different Transaction Collision */
 #define MG_LINKPOL_HS_HCI_BASE 0x200              /* NimBLE's status for an HCI error: this + the code (554) */
 #define MG_LINKPOL_TURN_WAIT_US (20LL * 1000 * 1000)   /* a turn with no reply this long is over */
+/* A call as activity (every activity source has an abandonment
+ * bound): live keeps the link active by its own source, for as long as it's
+ * live; a call starting (Calling... pending, or the client's connecting)
+ * counts for at most this long from the start or the client's last
+ * connecting (a re-sent one restarts it), so a client gone quiet mid-connect
+ * lets the link fall to ready 5 s later while the call screen waits for
+ * muse_call's 60 s backstop. */
+#define MG_LINKPOL_CALL_STARTING_US (30LL * 1000 * 1000)
 #define MG_LINKPOL_WAKE_US (20LL * 1000 * 1000)        /* a listening window closes this long after its request */
 #define MG_LINKPOL_WAKE_PERIOD_MIN_US 3750              /* the pending notification's period: half the interval, at least this */
-/* The stream-start toggle's idle half: excludes the fast 15 ms by
+/* The call-start toggle's idle half: excludes the fast 15 ms by
  * interval alone, latency 0. Apple: max >= min + 15 ms. */
 #define MG_LINKPOL_TOGGLE_ITVL_MIN 24
 #define MG_LINKPOL_TOGGLE_ITVL_MAX 36
@@ -216,11 +226,11 @@ typedef struct {
 
 /* What the board says each round. */
 typedef struct {
-    /* Something ongoing that keeps it active, for the log ("video stream",
-     * "audio playback", "push-to-talk capture", "setup", ...); NULL:
+    /* Something ongoing that keeps it active, for the log ("call", "video
+     * stream", "audio playback", "push-to-talk capture", "setup", ...); NULL:
      * nothing. */
     const char *busy;
-    /* A reply is playing: a reply stream open (in a stream kept open,
+    /* A reply is playing: a reply stream open (in a Live call's one stream,
      * audio playing). The gadget's turn ends when the reply that started
      * after its press stops. */
     bool reply;
@@ -345,10 +355,27 @@ bool mg_linkpol_collision(int status);
 /* The link in effect is active's set (15 ms, latency 0): a reply plays at the
  * normal start then, else at MG_PLAY_SLOW_START_US. */
 bool mg_linkpol_link_active(const mg_linkpol_t *p);
-/* A video stream starts: activity, and if the link is already active, a
- * brief idle -> fast toggle so the central re-plans it (one already under
+/* A call (or its video) starts: activity, and if the link is already active,
+ * a brief idle -> fast toggle so the central re-plans it (one already under
  * way covers this start too). */
 void mg_linkpol_stream_start(mg_linkpol_t *p, int64_t now_us, const char *why);
+/* A call's state for the link policy (MG_LINKPOL_CALL_STARTING_US). */
+typedef enum {
+    MG_LINKPOL_CALL_NONE = 0,
+    MG_LINKPOL_CALL_STARTING,   /* asked (Calling...) or connecting */
+    MG_LINKPOL_CALL_LIVE,
+} mg_linkpol_call_phase_t;
+typedef struct {
+    uint8_t phase;              /* mg_linkpol_call_phase_t */
+    int64_t since_us;           /* STARTING: the start, or the client's last connecting */
+} mg_linkpol_call_t;
+/* The call's state at now_us: STARTING again (a re-sent connecting) restarts
+ * its bound; NONE or LIVE ends it. */
+void mg_linkpol_call_note(mg_linkpol_call_t *c, int64_t now_us, mg_linkpol_call_phase_t phase);
+/* Whether the call keeps the link active now ("call" for
+ * mg_linkpol_in_t.busy), else NULL: live, or starting for less than
+ * MG_LINKPOL_CALL_STARTING_US. */
+const char *mg_linkpol_call_busy(const mg_linkpol_call_t *c, int64_t now_us);
 
 /* The app wrote link_mode: false if mode isn't one (nothing changes). */
 bool mg_linkpol_app_mode(mg_linkpol_t *p, int64_t now_us, uint8_t mode);

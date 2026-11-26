@@ -113,7 +113,7 @@ void mg_voice_claim_turn(bool on);
  * (mg_proto_barge_pause: the barge-in echo rule). */
 void mg_voice_barge_pause(bool on);
 /* A client's stream is open on the speaker (playing, buffering, or empty
- * between replies): the codecs stay open for it. */
+ * between a Live call's replies): the codecs stay open for it. */
 bool mg_voice_playing(void);
 /* A client's audio is playing (mg_play_audible): held, or played within the
  * last 300 ms; not an open stream's silence between replies. The speaking

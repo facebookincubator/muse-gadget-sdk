@@ -100,3 +100,11 @@ Caires and other contributors, licensed under CC-BY 4.0
 (https://creativecommons.org/licenses/by/4.0/; the full text is in
 `LICENSE-twemoji.txt`). They are changed: scaled to 16x16 and converted to
 RGB565A8.
+`muse_font_ellipsis_20.c` and `muse_font_ellipsis_28.c` hold one glyph, the
+ellipsis (U+2026), as fallbacks for LVGL's `lv_font_montserrat_20` and `_28`,
+which stop at ASCII and their symbols: the Live call's "Calling…" and
+"Waiting for phone…" (`muse_call.c`). They're converted from
+the `Montserrat-Medium.ttf` LVGL ships for its own Montserrat builds, with the
+same options; `tools/muse/gen_ellipsis_font.sh` regenerates them. Montserrat
+is by Julieta Ulanovsky and contributors, under the SIL Open Font License,
+version 1.1, as LVGL's built-in Montserrat fonts are.

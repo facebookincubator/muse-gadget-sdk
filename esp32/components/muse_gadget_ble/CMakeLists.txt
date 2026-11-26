@@ -20,7 +20,7 @@ set(protocols "../../../protocols")
 set(portable "../../../portable")
 if(CONFIG_MUSE_GADGET_BLE_AUDIO)
     set(srcs "haptics/mg_haptics.c" "haptics/mg_haptic_test.c" "mg_ble.c" "mg_linkpol.c" "mg_voice.c" "mg_proto.c" "mg_codec.c" "mg_route.c" "mg_queue.c" "mg_play.c" "mg_chain.c"
-        "mg_resample.c" "mg_token_proof.c" "mg_unlock.c" "mg_ui.c" "mg_session.c"
+        "mg_resample.c" "mg_token_proof.c" "mg_unlock.c" "mg_ui.c" "mg_lct.c" "mg_lct_fmt.c" "mg_session.c"
         # Sealed device-session credentials (mgcommands.h, Sealed credentials): the
         # seal, vendored unchanged, on this component's token proof crypto;
         # and the credentials-only device session (layer 2) a Wi-Fi

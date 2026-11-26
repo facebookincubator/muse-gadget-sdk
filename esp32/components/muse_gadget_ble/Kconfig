@@ -310,6 +310,34 @@ menu "Muse Gadget BLE audio (musegadgets protocol)"
             phone pairs from its Bluetooth settings or when an app reads the
             Report Map. Advertising adds the HID UUID and appearance.
 
+    config MUSE_GADGET_BLE_LIVE_CALL
+        bool "Live call with the Muse"
+        depends on MUSE_ENABLED
+        default y if SPIRAM
+        help
+            Offers mg_command_live_call: Live call in Settings (or the menu)
+            asks the connected client to start a live voice call with the
+            Muse, and the screen shows the call while the client says it's
+            connecting or live, with a button to end it. Push-to-talk and
+            replies work as outside a call, and video the client streams
+            during the call shows without opening Phone camera.
+            On by default only where a call works: the full-UI BLE boards
+            with PSRAM (the call's picture, controls and subtitles live
+            there). Elsewhere it's compiled out: no Call disc on the home,
+            no menu row.
+
+    config MUSE_CALL_AT_BOOT
+        string "Bench: a timed call armed at boot (DELAY_S,LEN_S)"
+        depends on MUSE_GADGET_BLE_LIVE_CALL
+        default ""
+        help
+            Bench images only. Empty: off. "DELAY_S,LEN_S"
+            arms the console's call.at at boot, once per image: a phone app
+            that holds the gadget's only link and never writes its console
+            still gets a timed call (DELAY_S after its session is ready,
+            LEN_S long, ended by the gadget). It fires once for each image
+            (its ELF sha256, kept in NVS), never on that image's later boots.
+
     config MUSE_GADGET_BLE_LC3_24K
         bool "List LC3 at 24 kHz"
         depends on MUSE_GADGET_BLE_LC3

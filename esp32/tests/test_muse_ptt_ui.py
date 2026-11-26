@@ -152,7 +152,7 @@ class StopWatchPTT(unittest.TestCase):
         self.assertIn("!MUSE_BOARD_SENSECAP_WATCHER", block)
         self.assertIn("!MUSE_UI_FREEINK", block)
     # main's voice scenarios carried into muse_ptt_voice_harness.c are 100 +
-    # main's numbers (141-149, 164-169, 185-215): other branches have their own.
+    # main's numbers (141-149, 164-169, 185-215): the call scenarios are 41-51 and 60-78.
     def test_failed_notes_make_room_by_dropping_the_oldest(self):
         self.run_case('voice', 210, board=4, realtime=0)
 
@@ -499,6 +499,12 @@ class StopWatchPTT(unittest.TestCase):
                 self.run_case('voice', scenario, realtime=0)
                 self.run_case('voice', scenario, ble=1)
                 self.run_case('voice', scenario, realtime=0, ble=1)
+
+    def test_face_and_panel_follow_audio_not_the_open_stream(self):
+        # One reply stream per Live call (mgcommands.h): open and silent between
+        # replies, no speaking face and no panel hold; each reply's audio brings them, its end ends them.
+        self.run_case('voice', 51, ble=1)
+        self.run_case('voice', 51, realtime=0, ble=1)
 
     def test_client_capture_waits_for_the_codecs_to_open(self):
         # The StopWatch on battery: a start_mic right after a wake, while the codecs are still opening,

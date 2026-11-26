@@ -17,7 +17,8 @@
 /*
  * Stand-ins for the services the v1.0 home, Status page and Settings menu read
  * (muse_home.c, muse_settings_ui.c): settings in RAM, a clock the scenario
- * sets, no audio, battery or Wi-Fi.
+ * sets, a Live call client the scenario plays (muse_call.c itself is the
+ * production code), no audio, battery or Wi-Fi.
  */
 
 #include <stdio.h>
@@ -36,6 +37,8 @@
 #include "muse_battery.h"
 #include "muse_ble.h"
 #include "mg_ble.h"
+#include "mg_lct.h"
+#include "muse_call.h"
 #include "muse_chat.h"
 #include "muse_clock.h"
 #include "muse_input.h"
@@ -43,6 +46,7 @@
 #include "muse_avatar.h"
 #include "network_proxy.h"
 #include "muse_settings.h"
+#include "muse_subs.h"
 #include "muse_touch.h"
 #include "muse_voice.h"
 #include "muse_wifi.h"
@@ -56,8 +60,9 @@ static struct {
     muse_talk_mode_t talk;
     bool clock_set, clock_24h;
     int hour, min;
+    bool call_available;
 } s = { .volume = 60, .mic_gain = 30, .sleep_s = 120, .ble_on = true, .haptics = true,
-        .talk = MUSE_TALK_BOTH };
+        .talk = MUSE_TALK_BOTH, .call_available = true };
 
 void sim_stubs_set_clock(int hour, int min, bool h24)
 {
@@ -65,6 +70,11 @@ void sim_stubs_set_clock(int hour, int min, bool h24)
     s.hour = hour;
     s.min = min;
     s.clock_24h = h24;
+}
+
+void sim_stubs_set_call_available(bool available)
+{
+    s.call_available = available;
 }
 
 void sim_stubs_set_volume(int pct)
@@ -154,6 +164,7 @@ void muse_touch_attach(lv_indev_t *indev) { (void)indev; }
 bool muse_touch_real(void) { return true; }   /* the simulator's pointer is a finger */
 bool muse_touch_press_wireless(void) { return false; }
 void muse_touch_set_shareable(bool (*shareable)(void)) { (void)shareable; }   /* no BLE sink here */
+int muse_touch_downs_within(int ms) { (void)ms; return 0; }
 /* The bench's named taps (the console's tap=): no console in the simulator. */
 bool muse_touch_tap_obj(lv_obj_t *obj, int ms, muse_touch_gesture_t *g) { (void)obj; (void)ms; (void)g; return false; }
 bool muse_touch_slide_obj(lv_obj_t *slider, int value, muse_touch_gesture_t *g) { (void)slider; (void)value; (void)g; return false; }
@@ -172,11 +183,17 @@ bool muse_link_sdk_token_set(const char *token) { (void)token; return false; }
 const char *muse_link_state_name(muse_link_state_t state) { (void)state; return "Online"; }
 /* No device session in the simulator: no Ask Muse for an image test. */
 bool muse_link_image_test(void) { return false; }
-/* The pairing prompt (link=confirm): one tap on its Confirm control confirms (@confirm), a first setup or a
- * re-setup alike; a tap anywhere else does nothing; the back gesture (a swipe) ends it (@dismiss). */
+/* A setup prompt takes the press; with the scenario's reconfirm=true it's a re-setup's prompt: one tap on its
+ * Confirm control confirms (@confirm), a first setup or a re-setup alike; a tap anywhere else does nothing; the back
+ * gesture (a swipe) ends it (@dismiss). */
+bool g_sim_reconfirm;
+static bool sim_prompt_up(void)
+{
+    return g_sim_reconfirm || muse_link_state() == MUSE_LINK_CONFIRM;
+}
 bool muse_link_confirm_key_press(void)
 {
-    if (muse_link_state() != MUSE_LINK_CONFIRM) {
+    if (!sim_prompt_up()) {
         return false;
     }
     if (!muse_link_prompt_armed()) {
@@ -187,7 +204,7 @@ bool muse_link_confirm_key_press(void)
 }
 bool muse_link_confirm_dismiss(void)
 {
-    if (muse_link_state() != MUSE_LINK_CONFIRM) {
+    if (!sim_prompt_up()) {
         return false;
     }
     printf("@dismiss\n");
@@ -211,6 +228,13 @@ static void face_show(void)
         if (px) memcpy(px, s_face_px, s_face_n * sizeof(uint16_t));
     }
     muse_ui_face_bg_set(px);
+    /* The calling screen's plain picture: the same pixels here. */
+    uint16_t *plain = NULL;
+    if (px) {
+        plain = heap_caps_malloc(s_face_n * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+        if (plain) memcpy(plain, s_face_px, s_face_n * sizeof(uint16_t));
+    }
+    muse_ui_face_plain_set(plain);
 }
 
 bool sim_stubs_face_load(const char *path)
@@ -265,8 +289,21 @@ int muse_wifi_scan_results(muse_wifi_ap_t *out, int max, uint32_t *gen) { (void)
 bool muse_wifi_scanning(void) { return false; }
 void muse_ble_forget_all(void) {}
 
-void muse_input_wake(const char *why) { (void)why; }
-void muse_input_keep_lit(const char *why) { (void)why; }
+/* ---- Live call: the real muse_call.c over a client the scenario plays ---- */
+void mg_ble_live_call(bool start) { (void)start; }
+uint8_t mg_ble_live_call_failure_reason(void) { return 0; }
+bool mg_ble_live_call_unproven(void) { return false; }
+void mg_ble_live_call_held(bool held) { (void)held; }
+bool mg_ble_live_call_client(void) { return s.call_available; }
+void mg_lct_begin(void) {}
+void mg_lct_begin_by(const char *by) { (void)by; }
+void mg_lct_mark(mg_lct_point_t point) { (void)point; }
+void mg_lct_end(void) {}
+void mg_lct_end_why(const char *why) { (void)why; }
+/* The subtitles' band is the production muse_subs.c (scenario subs=). */
+/* Each wake and keep-lit (the idle timer's reset) prints, for the subtitles' rules. */
+void muse_input_wake(const char *why) { printf("@wake %s\n", why); }
+void muse_input_keep_lit(const char *why) { printf("@keep_lit %s\n", why); }
 bool muse_input_charged_hold(void) { return false; }   /* no charger here: the passcode's usual idle rules */
 void muse_input_press(muse_press_t src) { (void)src; }
 bool muse_input_talk_ok(bool wireless) { (void)wireless; return true; }   /* the window's own finger */

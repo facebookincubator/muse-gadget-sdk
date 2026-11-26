@@ -50,7 +50,7 @@ typedef enum {
 muse_voice_view_t muse_voice_call_view(void);
 bool muse_voice_in_call(void);
 /* A reply plays on the gadget now: a musegadgets client's stream_audio
- * reaching the speaker
+ * reaching the speaker, or a Live call's subtitles band on screen
  * (it holds a lit panel until it ends; it never wakes a dark one). Any task. */
 bool muse_voice_reply_holds_panel(void);
 bool muse_voice_ptt_call(void);

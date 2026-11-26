@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
+#include "muse_touch_log.h"
 
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
@@ -46,6 +47,7 @@ static bool s_press_wireless;          /* the bench press was armed by a Nordic 
 static bool s_user_down;               /* the last read's finger (the panel's or a bench press) */
 static bool s_sink_down;               /* the sink's last sample was a press */
 static bool s_held;                    /* a passcode screen took the panel: nothing reaches the sink until a lift */
+static muse_touch_ring_t s_downs;      /* recent touch-downs (a call's start/end line counts them) */
 
 /* A user's touch-down (the panel's, or a bench press: automation behaves like
  * a user): link modes sleep -> ready, through the input task. */
@@ -53,8 +55,14 @@ static void user_touch(bool down)
 {
     if (down && !s_user_down) {
         muse_input_user_touch();
+        muse_touch_ring_add(&s_downs, esp_timer_get_time());
     }
     s_user_down = down;
+}
+
+int muse_touch_downs_within(int ms)
+{
+    return muse_touch_ring_count(&s_downs, esp_timer_get_time(), ms);
 }
 
 void muse_touch_set_sink(const muse_touch_sink_t *sink)

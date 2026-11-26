@@ -27,6 +27,8 @@
 #include "mg_token_proof.h"
 #include "mgcommands.h"
 
+static void mark(mg_proto_t *p, mg_lct_point_t point);   /* the live call timeline: below */
+
 
 #define DEFAULT_BUZZ_FREQ_HZ 210
 #define DEFAULT_BUZZ_MS 100
@@ -197,7 +199,7 @@ static bool send_control_now(mg_proto_t *p, const uint8_t *d, size_t n)
 /* The Control reply outbox (one more request_status line once overran a
  * gadget's 5-reply reserve, and a gadget's reply slot silently
  * dropped an over-long capabilities reply): a one-shot reply the stack
- * refuses (request_status's lines, settings, errors) waits
+ * refuses (request_status's lines, a call start, settings, errors) waits
  * here whole, in order, behind the token proof answer, and goes as the stack
  * takes it (every pump). One longer than the link's ATT payload waits for the
  * MTU exchange (and the replies after it, in order). One that finds no room
@@ -842,6 +844,14 @@ static bool capq_control(mg_proto_t *p, const uint8_t *m, size_t n, uint16_t fb,
     return true;
 }
 
+/* Subtitles are offered while the device can draw them: configured, and its
+ * band's buffers allocated (ops.subtitles_ready; NULL: always). Unlisted and
+ * refused otherwise. */
+static bool subtitles_offered(const mg_proto_t *p)
+{
+    return p->cfg.subtitles && (!p->ops.subtitles_ready || p->ops.subtitles_ready(p->ops.ctx));
+}
+
 /* power_off is offered where the board can power off now. */
 static bool power_off_offered(const mg_proto_t *p)
 {
@@ -865,7 +875,7 @@ static void send_features(mg_proto_t *p)
         mg_command_start_mic, mg_command_stop_mic, mg_command_set_mic_gain, mg_command_request_status,
         mg_command_get_settings, mg_command_set_settings,
     };
-    _Static_assert(1 + sizeof(base) + 8 <= sizeof(m), "the command list: six always, eight optional");
+    _Static_assert(1 + sizeof(base) + 10 <= sizeof(m), "the command list: six always, ten optional");
     memcpy(m + n, base, sizeof(base));
     n += sizeof(base);
     if (p->cfg.play) {
@@ -884,8 +894,14 @@ static void send_features(mg_proto_t *p)
     if (p->cfg.video && p->cfg.vstream) {
         m[n++] = mg_command_stream_video;
     }
+    if (p->cfg.live_call) {
+        m[n++] = mg_command_live_call;
+    }
     if (p->cfg.ui_input) {
         m[n++] = mg_command_ui_input;
+    }
+    if (subtitles_offered(p)) {
+        m[n++] = mg_command_subtitle;
     }
     if (session_supported(p) || creds_supported(p)) {
         m[n++] = mg_command_session;
@@ -969,6 +985,14 @@ static void send_features(mg_proto_t *p)
             }
         }
         send_control(p, c, k);
+    }
+
+    /* The live call features: the device shows why a
+     * call failed (failure_reason). Hands-free isn't claimed. */
+    if (p->cfg.live_call) {
+        const uint8_t lc[4] = { mg_command_supported_features, mg_command_sub_feature, mg_command_live_call,
+                                mg_live_call_feature_failure_reason };
+        send_control(p, lc, sizeof(lc));
     }
 
     /* Device actions: every one the device implements, the
@@ -1364,6 +1388,7 @@ static void reset_connection(mg_proto_t *p)
     creds_reset(p, false);
     memset(p->sub, 0, sizeof(p->sub));
     p->mtu = 23;
+    p->subs_caps_sent = false;
     p->ptt_enabled = false;
     p->ptt_held = false;
     p->ptt_asked = false;
@@ -1397,6 +1422,17 @@ static void reset_connection(mg_proto_t *p)
     p->rx_type = 0;
     p->flush_update_owed = false;
     p->framed = false;   /* framed Data ends at disconnect */
+    p->call.mic_ignored = false;
+    p->call.mic_taken = false;   /* the link's end stops the client's capture (mg_proto_disconnect) */
+    /* A call lives on the client: it's over when the client goes (a pending start stays). */
+    p->call.owner_on = p->call.own_start = p->call.held = false;
+    if (p->call.state != mg_live_call_state_idle) {
+        p->call.state = mg_live_call_state_idle;
+        p->call.unproven = false;   /* the device's own end of it, not a central's report */
+        if (p->ops.live_call) {
+            p->ops.live_call(p->ops.ctx, mg_live_call_state_idle);
+        }
+    }
     p->touch_enabled = false;
     memset(p->ui_ctl, 0, sizeof(p->ui_ctl));
     if (p->video.active) {
@@ -1486,6 +1522,7 @@ void mg_proto_connect(mg_proto_t *p)
     p->rx_hold = false;
     p->rx_hold_bytes = 0;
     p->out_bench_conn = false;   /* the Nordic UART's bench switch: never carried into a new connection */
+    p->call.asked_here = false;  /* a pending start is asked again on this link (request_status) */
     p->connected = true;
 }
 
@@ -1495,6 +1532,7 @@ void mg_proto_disconnect(mg_proto_t *p)
     stream_abort(p, false);   /* nobody left to tell */
     reset_connection(p);
     p->connected = false;
+    p->call.asked_here = false;
     p->out_bench_conn = false;   /* the Nordic UART's bench switch ends with its connection */
     /* A turn left thinking or responding ends with its client. */
     if (was && p->cfg.assistant && p->ops.assistant_state) {
@@ -1506,12 +1544,14 @@ void mg_proto_disconnect(mg_proto_t *p)
     }
 }
 
+static void send_subtitle_caps(mg_proto_t *p);
+
 void mg_proto_set_mtu(mg_proto_t *p, uint16_t mtu)
 {
     /* Every write and notification is at most min(ATT_MTU - 3,
      * MG_MAX_ATT_VALUE) bytes (mgcommands.h): ATT caps an attribute value at
      * 512, so at MTU 517 a 514-byte notification is invalid. Keeping the MTU
-     * seen by every payload computation (data, the device session
+     * seen by every payload computation (data, subtitles, the device session
      * and its layer 2) at 512 + 3 bounds them all. */
     if (mtu > MG_MAX_ATT_VALUE + 3) {
         mtu = MG_MAX_ATT_VALUE + 3;
@@ -1525,8 +1565,40 @@ void mg_proto_set_mtu(mg_proto_t *p, uint16_t mtu)
     if (changed && p->connected && proof_flush(p)) {
         ctlq_flush(p);
     }
+    /* max_words_bytes follows the link's ATT payload: a client that already
+     * asked gets the new bound, unsolicited (mgcommands.h, subtitles). */
+    if (changed && p->subs_caps_sent && subtitles_offered(p)) {
+        send_subtitle_caps(p);
+    }
     if (session_supported(p)) {
         mg_session_set_mtu(&p->session, mtu);
+    }
+}
+
+/*
+ * The largest words payload (from the reply id on) the device reports: its
+ * own limit, and no more than one ATT payload (ATT_MTU - 3) can carry after
+ * the command and sub-command bytes, so a whole words write always fits the
+ * link (mgcommands.h, Live call subtitles).
+ */
+uint16_t mg_proto_subtitle_words_max(const mg_proto_t *p)
+{
+    uint16_t cfg = p->cfg.subtitles ? p->cfg.subtitles->max_words_bytes : 0;
+    int link = (int)p->mtu - 3 - 2;
+    if (link < 0) {
+        link = 0;
+    }
+    return cfg < link ? cfg : (uint16_t)link;
+}
+
+static void send_subtitle_caps(mg_proto_t *p)
+{
+    const mg_subs_caps_t *caps = p->cfg.subtitles;
+    uint16_t max = mg_proto_subtitle_words_max(p);
+    uint8_t m[8] = { mg_command_subtitle, mg_subtitle_capabilities, MG_SUBTITLE_CAPS_VERSION, caps->flags, caps->lines,
+                     caps->chars_per_line, (uint8_t)max, (uint8_t)(max >> 8) };
+    if (send_control(p, m, sizeof(m))) {
+        p->subs_caps_sent = true;
     }
 }
 
@@ -2109,7 +2181,7 @@ static void kick(mg_proto_t *p)
 }
 
 /* The playback credit: the ring's room, or for a stream with a live depth
- * (start_streaming's parameter 6, the client's choice) what
+ * (start_streaming's parameter 6, the client's choice, in a call or not) what
  * holds the device's queued ms at that depth plus what it sees in flight
  * (mg_play_credit, with flight_us below). */
 static uint32_t play_credit(const mg_proto_t *p)
@@ -2234,7 +2306,7 @@ static void send_capabilities(mg_proto_t *p)
     ne++;
     put16(m + n, (uint16_t)((mg_play_live_floor_us(p->cfg.play) + 999) / 1000));
     n += 2;
-    /* With video, a reply's first sample waits for the picture its anchor names. */
+    /* With call video, a reply's first sample waits for the picture its anchor names. */
     if (p->cfg.vstream && p->cfg.play->shown32) {
         m[n++] = mg_stream_audio_capability_video_sync;
         ne++;
@@ -2326,9 +2398,11 @@ static void cmd_start_streaming(mg_proto_t *p, const uint8_t *a, size_t n)
         send_error(p, mg_command_stream_audio, mg_error_code_invalid_value);
         return;
     }
-    if (p->audio_claimed) {
+    bool call = p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live;
+    if (p->audio_claimed && !call) {
         /* The device's own sound has the audio path. A push-to-talk turn
-         * doesn't refuse: the stream waits under credits (p->turn). */
+         * doesn't refuse: the stream waits under credits (p->turn); in a
+         * Live call neither does the device's sound (mg_proto_play_held). */
         send_error(p, mg_command_stream_audio, mg_error_code_busy);
         return;
     }
@@ -2348,9 +2422,12 @@ static void cmd_start_streaming(mg_proto_t *p, const uint8_t *a, size_t n)
         send_error(p, mg_command_stream_audio, mg_error_code_busy);   /* no memory for the buffer */
         return;
     }
+    /* One reply-audio stream per Live call: open for the whole call, empty between replies. */
+    pl->keep_open = call;
     /* The stream's counters start at 0: nothing it allowed is in flight yet (the measure itself stays). */
     p->flight_edge = 0;
     p->flight_head = p->flight_n = 0;
+    p->audio_paused = p->audio_claimed && call;   /* the device's sound playing: it waits for it */
     /* A second stream: Data stays with the first until change_data_type. After a device end that
      * left Data held, a start with video on keeps it held (the writes in flight are the ended
      * stream's, never the video's); alone, the new stream takes it. */
@@ -2359,6 +2436,8 @@ static void cmd_start_streaming(mg_proto_t *p, const uint8_t *a, size_t n)
         p->rx_hold = false;
     }
     p->grant_limit = 0;   /* this stream's first buffer_update grants its credit */
+    p->audio_got_bytes = false;
+    mark(p, MG_LCT_T6S_AUDIO_START);
     if (p->ops.stream_starting) {
         p->ops.stream_starting(p->ops.ctx);   /* active asked ahead of the first buffer_update */
     }
@@ -2366,10 +2445,7 @@ static void cmd_start_streaming(mg_proto_t *p, const uint8_t *a, size_t n)
     kick(p);
 }
 
-static uint32_t rd32(const uint8_t *a)
-{
-    return (uint32_t)a[0] | (uint32_t)a[1] << 8 | (uint32_t)a[2] << 16 | (uint32_t)a[3] << 24;
-}
+static uint32_t rd32(const uint8_t *a);
 
 static void cmd_stream_audio(mg_proto_t *p, const uint8_t *a, size_t n)
 {
@@ -2389,6 +2465,13 @@ static void cmd_stream_audio(mg_proto_t *p, const uint8_t *a, size_t n)
     case mg_stream_audio_start_streaming:
         if (!stream_ok(p)) {
             send_error(p, mg_command_stream_audio, mg_error_code_proof_required);
+            return;
+        }
+        if (p->call.held &&
+            (p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live)) {
+            /* Nothing of a call held behind the keypad reaches the gadget before the unlock, its speech
+             * included: busy (the client retries; the unlock lets it in). */
+            send_error(p, mg_command_stream_audio, mg_error_code_busy);
             return;
         }
         cmd_start_streaming(p, a + 1, n - 1);
@@ -2431,7 +2514,7 @@ static void cmd_stream_audio(mg_proto_t *p, const uint8_t *a, size_t n)
         return;
     case mg_stream_audio_video_anchor:
         /* Lip sync (mgcommands.h): the first sample of the next Data write belongs with picture
-         * `frame`; applied here, in order with the Data writes around it. Only while video
+         * `frame`; applied here, in order with the Data writes around it. Only while the call's video
          * runs (otherwise ignored: the audio plays at once). */
         if (n < 5) {
             send_error(p, mg_command_stream_audio, mg_error_code_invalid_length);
@@ -2727,12 +2810,14 @@ static void video_start(mg_proto_t *p, const uint8_t *a, size_t n)
     p->video.granted = p->video.overrun_asked = false;   /* a new stream's first update grants its credit */
     p->video.decode_ms = 0;
     p->video.have_shown = false;
+    p->video.got_bytes = false;
     if (p->ops.video_begin && !p->ops.video_begin(p->ops.ctx, &vp)) {
         p->video.active = false;
         muse_vstream_stop(p->cfg.vstream);
         send_error(p, mg_command_stream_video, mg_error_code_busy);
         return;
     }
+    mark(p, MG_LCT_TS_START);
     video_send_update(p);
 }
 
@@ -2749,6 +2834,7 @@ static void cmd_stream_video(mg_proto_t *p, const uint8_t *a, size_t n)
     switch (a[0]) {
     case mg_stream_video_request_capabilities:
         video_send_caps(p);
+        mark(p, MG_LCT_TV_CAPS);
         return;
     case mg_stream_video_start_streaming:
         if (!stream_ok(p)) {
@@ -2824,7 +2910,7 @@ void mg_proto_video_tick(mg_proto_t *p)
     uint32_t since = now_ms(p) - p->video.update_ms;
     uint32_t avail = muse_vstream_available(p->cfg.vstream);
     uint32_t got = muse_vstream_received(p->cfg.vstream) - p->video.update_recv;
-    /* Video credit back promptly (a bench test of a reply with video): the apps keep only 2-3 KB of
+    /* Video credit back promptly (the AV60 bench test, tools/av60.py): the apps keep only 2-3 KB of
      * video in flight during a reply, so an update goes once 1 KB has been taken from the ring (the
      * room freed: what avail grew by, plus what came in meanwhile) or 1 KB received, else 20 ms after
      * any news (bytes in, room freed, a picture shown), never held to a decode pass or 100 ms. At most
@@ -3019,6 +3105,10 @@ static void video_bytes(mg_proto_t *p, const uint8_t *d, size_t n)
     }
     p->video.overrun_asked = false;
     muse_vstream_write(p->cfg.vstream, d, n);
+    if (!p->video.got_bytes && n) {
+        p->video.got_bytes = true;
+        mark(p, MG_LCT_T8R_BYTES);
+    }
 }
 
 void mg_proto_credit_overruns(const mg_proto_t *p, uint32_t *writes, uint32_t *bytes)
@@ -3047,6 +3137,10 @@ static void audio_bytes(mg_proto_t *p, mg_play_t *pl, const uint8_t *d, size_t n
     if (n) {
         mg_play_write(pl, d, n);
         flight_check(p);
+        if (!p->audio_got_bytes) {
+            p->audio_got_bytes = true;
+            mark(p, MG_LCT_T6R_AUDIO_BYTES);
+        }
     }
 }
 
@@ -3091,7 +3185,7 @@ static void data_in(mg_proto_t *p, const uint8_t *d, size_t n)
     /* No stream of the selected type is open (audio chunks still on their
      * way after the device ended the playback, say): dropped and counted.
      * Never fed to another stream: interleaved audio in the video ring froze
-     * the video until it ended. */
+     * a live call's video until it ended. */
     p->rx_discarded += (uint32_t)n;
     if (p->rx_hold) {
         p->rx_hold_bytes += (uint32_t)n;
@@ -3142,7 +3236,20 @@ void mg_proto_claim_turn(mg_proto_t *p, bool on)
 /* The turn takes the speaker: the reply being talked over goes. */
 static void claim_now(mg_proto_t *p)
 {
-    stream_abort(p, p->connected && mg_proto_ready(p));   /* the reply being talked over */
+    mg_play_t *pl = p->cfg.play;
+    if (pl && pl->keep_open && mg_play_active(pl) && pl->state != MG_PLAY_DONE) {
+        /* A Live call's one reply stream (mgcommands.h, Live reply audio): the press barges in by
+         * flushing it, as mg_stream_audio_flush does; the stream stays open for the next reply,
+         * which the turn holds until it ends. Ending it would lose every later reply. */
+        if (mg_play_flush(pl)) {
+            kick(p);
+        }
+        if (p->connected && mg_proto_ready(p)) {
+            send_buffer_update(p);
+        }
+    } else {
+        stream_abort(p, p->connected && mg_proto_ready(p));   /* the reply being talked over */
+    }
 }
 
 void mg_proto_barge_pause(mg_proto_t *p, bool on)
@@ -3164,6 +3271,17 @@ void mg_proto_claim_audio(mg_proto_t *p, bool claim)
 {
     p->audio_claimed = claim;
     if (!claim) {
+        if (p->audio_paused) {
+            p->audio_paused = false;
+            kick(p);   /* the reply resumes where it was */
+        }
+        return;
+    }
+    mg_play_t *pl = p->cfg.play;
+    if (pl && pl->keep_open && mg_play_active(pl) && pl->state != MG_PLAY_DONE) {
+        /* A Live call's one reply stream (mgcommands.h: ended only when it can't go on): it
+         * waits for the device's sound and resumes after it, with everything it holds. */
+        p->audio_paused = true;
         return;
     }
     stream_abort(p, p->connected && mg_proto_ready(p));
@@ -3171,7 +3289,7 @@ void mg_proto_claim_audio(mg_proto_t *p, bool claim)
 
 bool mg_proto_play_held(const mg_proto_t *p)
 {
-    return p->turn || mg_proto_barge_held(p);
+    return p->turn || p->audio_paused || mg_proto_barge_held(p);
 }
 
 void mg_proto_stream_tick(mg_proto_t *p)
@@ -3205,7 +3323,7 @@ void mg_proto_stream_tick(mg_proto_t *p)
         }
         return;
     }
-    /* The whole-buffer path on an active link (a bench test of a reply with video:
+    /* The whole-buffer path on an active link (an AV60 run:
      * fixed 15 ms audio updates held the notify slot and made video credit late 5x as often, with no
      * audio gain): on change only, once 1 KB of room was freed since the last update
      * (MG_PLAY_UPDATE_FREED), or 50 ms on with any change (MG_PLAY_UPDATE_CHANGE_MS), never while any
@@ -4174,8 +4292,26 @@ static bool press_ok(const mg_proto_t *p)
     return !p->cfg.press_gate || !have_key(p) || mg_proto_press_window(p);
 }
 
+/* During a call (started, connecting or live)
+ * and for 3 s after it ends, a client's start_mic is ignored: no capture, no
+ * ring, no answer; its stop_mic likewise. The user's talk hold carries the
+ * call (walkie-talkie). */
+#define CALL_TAIL_MS 3000
+static bool call_mic_ignored(const mg_proto_t *p)
+{
+    if (p->call.pending || p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live) {
+        return true;
+    }
+    return p->call.ended && (uint32_t)(now_ms(p) - p->call.ended_ms) < CALL_TAIL_MS;
+}
+
 static void cmd_start_mic(mg_proto_t *p, const uint8_t *a, size_t n)
 {
+    if (call_mic_ignored(p)) {
+        p->call.mic_ignored = true;
+        return;
+    }
+    p->call.mic_ignored = false;   /* a start taken: an older ignored one's stop isn't owed any more */
     /* The codec asked for if this device can capture it, else the
      * device's own (change_data_type names the one sent); never refused. */
     uint8_t codec = 0;
@@ -4208,6 +4344,18 @@ static void cmd_start_mic(mg_proto_t *p, const uint8_t *a, size_t n)
     p->transfer = false;   /* live audio wins over a download */
     if (p->ops.capture) {
         p->ops.capture(p->ops.ctx, true, &fmt);
+        p->call.mic_taken = true;
+    }
+}
+
+/* A call starts: a capture the client's start_mic began before it ends (the call's own mic is the gadget's press). */
+static void call_mic_end(mg_proto_t *p)
+{
+    if (p->call.mic_taken) {
+        p->call.mic_taken = false;
+        if (p->ops.capture) {
+            p->ops.capture(p->ops.ctx, false, NULL);
+        }
     }
 }
 
@@ -4245,9 +4393,302 @@ static void cmd_change_data_type(mg_proto_t *p, const uint8_t *d, size_t n)
     p->rx_type = type;
 }
 
+/* ---- Live call subtitles (mg_command_subtitle) ---- */
+
+static uint16_t rd16(const uint8_t *a)
+{
+    return (uint16_t)(a[0] | a[1] << 8);
+}
+
+static uint32_t rd32(const uint8_t *a)
+{
+    return (uint32_t)a[0] | (uint32_t)a[1] << 8 | (uint32_t)a[2] << 16 | (uint32_t)a[3] << 24;
+}
+
+static void cmd_subtitle(mg_proto_t *p, const uint8_t *a, size_t n)
+{
+    const uint8_t cmd = mg_command_subtitle;
+    const mg_subs_caps_t *caps = p->cfg.subtitles;
+    if (!subtitles_offered(p)) {
+        send_error(p, cmd, mg_error_code_unsupported);
+        return;
+    }
+    if (n < 1) {
+        send_error(p, cmd, mg_error_code_invalid_length);
+        return;
+    }
+    /* No proof gate: the lock is what protects the screen. On a locked gadget subtitles never draw over
+     * the lock screen and no subtitle message, state 1 included, wakes or unlocks it (muse_subs.c). Without
+     * this connection's proof on a set-up gadget they're marked unproven: shown only on a screen already on,
+     * they never wake it, keep it lit or hold off the passcode lock. */
+    mg_subs_event_t ev = { .sub = a[0], .proven = owner_ok(p) };
+    const uint8_t *b = a + 1;
+    size_t bn = n - 1;
+    switch (a[0]) {
+    case mg_subtitle_request_capabilities:
+        send_subtitle_caps(p);
+        return;
+    case mg_subtitle_state:
+        if (bn < 2) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        if (b[0] > 1 || b[1] > mg_subtitle_timing_ms) {
+            send_error(p, cmd, mg_error_code_invalid_value);   /* active is 0 or 1 (mg_subtitle_ref.py) */
+            return;
+        }
+        ev.active = b[0] == 1;
+        ev.timing = b[1];
+        break;
+    case mg_subtitle_words: {
+        if (bn < MG_SUBTITLE_WORDS_HEADER || bn > caps->max_words_bytes) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        ev.reply_id = rd16(b);
+        ev.flags = b[2];
+        ev.char_offset = rd16(b + 3);
+        int count = b[5];   /* 1..255 */
+        if (count == 0) {
+            send_error(p, cmd, mg_error_code_invalid_value);
+            return;
+        }
+        /* The whole message is checked before any of it is delivered. */
+        size_t i = 6;
+        for (int k = 0; k < count; k++) {
+            if (i + MG_SUBTITLE_WORD_HEADER > bn || i + MG_SUBTITLE_WORD_HEADER + b[i + 4] > bn) {
+                send_error(p, cmd, mg_error_code_invalid_length);
+                return;
+            }
+            if (b[i + 4] == 0) {
+                send_error(p, cmd, mg_error_code_invalid_value);   /* an empty word */
+                return;
+            }
+            i += MG_SUBTITLE_WORD_HEADER + b[i + 4];
+        }
+        if (i != bn) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        /* Then in runs of MG_SUBS_MAX_WORDS, each from its first word's offset: replace on the first run
+         * only, final on the last only (a small stack, whatever the count). */
+        mg_subs_word_t words[MG_SUBS_MAX_WORDS];
+        uint8_t flags = ev.flags;
+        i = 6;
+        for (int done = 0; done < count;) {
+            int n = count - done < MG_SUBS_MAX_WORDS ? count - done : MG_SUBS_MAX_WORDS;
+            uint16_t run_off = ev.char_offset;
+            for (int k = 0; k < n; k++) {
+                words[k].show_at = rd32(b + i);
+                words[k].len = b[i + 4];
+                words[k].utf8 = b + i + MG_SUBTITLE_WORD_HEADER;
+                i += MG_SUBTITLE_WORD_HEADER + words[k].len;
+                ev.char_offset = (uint16_t)(ev.char_offset + words[k].len);
+            }
+            done += n;
+            mg_subs_event_t run = ev;
+            run.char_offset = run_off;
+            run.count = (uint8_t)n;
+            run.words = words;
+            run.flags = (uint8_t)(flags & ~(done < count ? mg_subtitle_words_final : 0));
+            flags &= (uint8_t)~mg_subtitle_words_replace;
+            if (p->ops.subtitle) {
+                p->ops.subtitle(p->ops.ctx, &run);   /* words live on this stack: delivered here */
+            }
+        }
+        return;
+    }
+    case mg_subtitle_reply_end:
+        if (bn < 6) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        ev.reply_id = rd16(b);
+        ev.show_at = rd32(b + 2);
+        break;
+    case mg_subtitle_clear:
+        if (bn < 3) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        ev.reply_id = rd16(b);
+        ev.reason = b[2];
+        if (ev.reason > mg_subtitle_clear_new_reply) {
+            send_error(p, cmd, mg_error_code_invalid_value);
+            return;
+        }
+        break;
+    case mg_subtitle_clock:
+        if (bn < 6) {
+            send_error(p, cmd, mg_error_code_invalid_length);
+            return;
+        }
+        ev.reply_id = rd16(b);
+        ev.playout_ms = rd32(b + 2);
+        break;
+    default:
+        send_error(p, cmd, mg_error_code_invalid_value);
+        return;
+    }
+    if (p->ops.subtitle) {
+        p->ops.subtitle(p->ops.ctx, &ev);
+    }
+}
+
+/* ---- live call (mg_command_live_call) ----------------------------------- */
+
+/* A step of a live call's start, for its timeline (mg_lct.h). */
+static void mark(mg_proto_t *p, mg_lct_point_t point)
+{
+    if (p->ops.mark) {
+        p->ops.mark(p->ops.ctx, (uint8_t)point);
+    }
+}
+
+/* The client reports the call's state. */
+static void cmd_live_call(mg_proto_t *p, const uint8_t *a, size_t n)
+{
+    if (!p->cfg.live_call) {
+        send_error(p, mg_command_live_call, mg_error_code_unsupported);
+        return;
+    }
+    if (n < 1) {
+        send_error(p, mg_command_live_call, mg_error_code_invalid_length);
+        return;
+    }
+    if (a[0] > mg_live_call_state_failed) {
+        send_error(p, mg_command_live_call, mg_error_code_invalid_value);
+        return;
+    }
+    /* No proof gate on call states, within limits. connecting, failed and ended answering this connection's own
+     * pending start drive that start as usual; any other state from a central without this connection's proof
+     * never cancels or replaces the owner's pending or live call (ignored while one is on), and otherwise goes to
+     * the UI marked unproven (shown only on an unlocked, awake gadget). */
+    bool ends = a[0] == mg_live_call_state_ended || a[0] == mg_live_call_state_failed;
+    bool own_answer = (p->call.pending && p->call.asked_here && (a[0] == mg_live_call_state_connecting || ends)) ||
+                      (p->call.own_start && ends);
+    bool unproven = !owner_ok(p) && !own_answer;
+    if (unproven && (p->call.owner_on || p->call.pending)) {
+        return;
+    }
+    p->call.unproven = unproven;
+    /* Anything but idle answers a pending start: the client has taken it
+     * (connecting, live) or turned it down (ended, failed). Idle is also what
+     * a client says before it has seen the start, so that keeps it pending. */
+    if (a[0] != mg_live_call_state_idle) {
+        p->call.pending = false;
+    }
+    if (a[0] == mg_live_call_state_connecting) {
+        mark(p, MG_LCT_T1C_CONNECTING);
+    } else if (a[0] == mg_live_call_state_live) {
+        mark(p, MG_LCT_T7R_LIVE);
+    }
+    bool was_on = p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live;
+    bool now_on = a[0] == mg_live_call_state_connecting || a[0] == mg_live_call_state_live;
+    if (was_on && !now_on) {
+        p->call.ended = true;   /* start_mic stays ignored for 3 s more */
+        p->call.ended_ms = now_ms(p);
+    }
+    if (now_on && !was_on) {
+        call_mic_end(p);
+    }
+    mg_play_t *pl = p->cfg.play;
+    if (pl) {
+        /* A call's reply stream stays open through its gaps; the device ends it only when it can't go
+         * on (mgcommands.h). Once the call is over the client stops it, and if it doesn't,
+         * the 10 s end of a starved stream outside a call applies again. */
+        pl->keep_open = now_on;
+    }
+    /* With failed, why ([live_call, failed, reason]); 0 (unspecified) without one. */
+    p->call.fail_reason = a[0] == mg_live_call_state_failed && n >= 2 ? a[1] : mg_live_call_failure_unspecified;
+    p->call.state = a[0];
+    p->call.owner_on = now_on && (!unproven || (was_on && p->call.owner_on));
+    p->call.held = p->call.held && now_on;   /* (the hold goes with the call) */
+    p->call.own_start = now_on && (own_answer || (was_on && p->call.own_start));
+    if (p->ops.live_call) {
+        p->ops.live_call(p->ops.ctx, a[0]);   /* no reply */
+    }
+}
+
+void mg_proto_live_call_request(mg_proto_t *p, bool start)
+{
+    if (!p->cfg.live_call || p->cfg.recovery_mode) {
+        return;
+    }
+    bool in_call = p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live;
+    if (start && in_call) {
+        return;   /* already on */
+    }
+    bool had = p->call.pending || in_call;
+    p->call.pending = start;
+    if (!start && !had) {
+        return;   /* nothing to end */
+    }
+    if (start) {
+        call_mic_end(p);
+    } else if (in_call) {
+        /* The gadget ends it: over here at once, not when the client's ended comes (a client that never answers
+         * would leave the reply stream open, start_mic ignored and LC3 turns for good). Its ended is still
+         * taken, and changes nothing. */
+        p->call.ended = true;
+        p->call.ended_ms = now_ms(p);
+        p->call.state = mg_live_call_state_ended;
+        p->call.owner_on = p->call.own_start = p->call.held = false;
+        if (p->cfg.play) {
+            p->cfg.play->keep_open = false;
+        }
+    }
+    p->call.asked_here = false;   /* a new request: asked again where it's sent */
+    if (mg_proto_ready(p)) {
+        uint8_t m[2] = { mg_command_live_call, start ? mg_live_call_request_start : mg_live_call_request_end };
+        send_control(p, m, sizeof(m));
+        if (start) {
+            p->call.asked_here = true;
+            mark(p, MG_LCT_T0R_SEND);
+        }
+    }
+}
+
+uint8_t mg_proto_live_call_failure_reason(const mg_proto_t *p)
+{
+    return p->call.fail_reason;
+}
+
+bool mg_proto_live_call_unproven(const mg_proto_t *p)
+{
+    return p->call.unproven;
+}
+
+void mg_proto_live_call_held(mg_proto_t *p, bool held)
+{
+    if (held && !p->call.held) {
+        /* A reply stream opened before the call ends too: nothing reaches the gadget's speaker behind the
+         * keypad (the client's next start is busy until the unlock). */
+        stream_abort(p, p->connected && mg_proto_ready(p));
+    }
+    p->call.held = held;
+}
+
+uint8_t mg_proto_live_call_state(const mg_proto_t *p)
+{
+    return p->call.state;
+}
+
 uint8_t mg_proto_turn_codec(const mg_proto_t *p)
 {
+#if MG_WITH_LC3
+    /* In a call (started, connecting or live) a talk hold is
+     * LC3, 16 kHz, whatever setting 7 says (change_data_type labels it). */
+    if (p->call.pending || p->call.state == mg_live_call_state_connecting || p->call.state == mg_live_call_state_live) {
+        return mg_data_type_audio_lc3;
+    }
+#endif
     return mg_proto_capture_codec(p);
+}
+
+bool mg_proto_live_call_pending(const mg_proto_t *p)
+{
+    return p->call.pending;
 }
 
 /* A recovery mode serves only its own command set. */
@@ -4306,11 +4747,24 @@ static void command(mg_proto_t *p, const uint8_t *d, size_t n)
             uint8_t m[3] = { mg_command_stream_video, mg_stream_video_request_streaming, 1 };
             send_control(p, m, sizeof(m));   /* a pending request, for a client that just arrived */
         }
+        if (p->call.pending && p->cfg.live_call) {
+            uint8_t m[2] = { mg_command_live_call, mg_live_call_request_start };
+            send_control(p, m, sizeof(m));   /* likewise */
+            p->call.asked_here = true;   /* this connection now holds the gadget's own start */
+            mark(p, MG_LCT_T0R_SEND);
+        }
         break;
     case mg_command_start_mic:
         cmd_start_mic(p, a, an);
         break;
     case mg_command_stop_mic:
+        /* A stop for a capture this client's start_mic began is always taken, in a call too. */
+        if (!p->call.mic_taken && (p->call.mic_ignored || call_mic_ignored(p))) {
+            p->call.mic_ignored = false;   /* the start_mic it ends was ignored */
+            break;
+        }
+        p->call.mic_ignored = false;
+        p->call.mic_taken = false;
         if (p->ops.capture) {
             p->ops.capture(p->ops.ctx, false, NULL);
         }
@@ -4342,6 +4796,12 @@ static void command(mg_proto_t *p, const uint8_t *d, size_t n)
         break;
     case mg_command_token_proof:
         cmd_token_proof(p, a, an);
+        break;
+    case mg_command_live_call:
+        cmd_live_call(p, a, an);
+        break;
+    case mg_command_subtitle:
+        cmd_subtitle(p, a, an);
         break;
     case mg_command_session:
         if (creds_supported(p)) {
@@ -4876,7 +5336,7 @@ bool mg_proto_turn_rise(mg_proto_t *p, const mg_capture_level_t *lv)
     q->gate = false;
     if (p->claim_deferred && p->turn) {
         /* The order a turn that isn't held has: its button_down, then its claim (the reply talked over goes:
-         * stop_streaming drop), then change_data_type and the audio. The turn's first
+         * stop_streaming drop, or the call's flush), then change_data_type and the audio. The turn's first
          * held message goes alone (what follows it waits, held), then the claim. */
         for (uint8_t i = 0; i < q->nctl; i++) {
             if (q->ctl[i].held) {

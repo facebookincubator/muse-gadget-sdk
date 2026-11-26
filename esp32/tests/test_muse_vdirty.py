@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Changed-only redraw of video (components/muse/muse_vdirty.c, muse_video.c's vd_* and the boards'
+"""Changed-only redraw of call video (components/muse/muse_vdirty.c, muse_video.c's vd_* and the boards'
 draw_windows). A window left out leaves a stale part of the picture on the
 panel until it changes again, with nobody watching, so:
 

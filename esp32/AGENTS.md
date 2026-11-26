@@ -598,7 +598,7 @@ paired (or has a token set by hand), the name goes, and the mic icon
 appears. It's hidden until then, since a press can't reach Muse. On the v1.0
 home, while no device token is stored, "Open Muse app" (small, dim) takes the
 time's place and `<PRODUCT>-<XXXXXX>` (white) the date line, and the Speaker
-button stays where it is (the "Not set
+and a dimmed Call button stay where they are (the "Not set
 up" home). The StopWatch is an exception:
 its dedicated microphone, speaker/mute and power rim icons stay visible before
 pairing as well, identifying its three physical controls.
@@ -608,11 +608,11 @@ A held talk key talks from a dark panel too: the press wakes the screen and, sti
 Talking: on a board with a talk button and
 the home's hold region (StopWatch yellow, ESP-Mosaico AI, Watcher wheel
 press, C6 BOOT), Settings > Talk defaults to Button only: a screen touch
-never opens the mic. A tap on the idle home, on Muse or anywhere but
-Speaker, plays the happy bounce once (the avatar's hop and hearts,
+never opens the mic. A tap on the idle home, on Muse or anywhere but Speaker
+and Call, plays the happy bounce once (the avatar's hop and hearts,
 1.6 s; it sends nothing and opens no mic) in place of the old "Hold to talk"
-hint; during a turn, a realtime voice call or a setup prompt a tap does what
-that screen does.
+hint; during a turn, a call (a Live call or a realtime voice call) or a setup
+prompt a tap does what that screen does.
 
 A swipe that starts on a control is a swipe. Once the finger moves past the slop (`muse_swipe.h`: 12 px on either
 axis, the touch slop, or a page or list scrolling with it), the control
@@ -620,8 +620,11 @@ under its start gets neither its tap nor its hold, however long the finger
 stays down: `muse_ui.c` stops LVGL's clicks and long presses at the indev for
 every control (Speaker, list rows, settings controls, buttons), and the
 controls that time their own holds ask `muse_ui_touch_swiped()` (the home's
-hold region: a drag before 250 ms never becomes a talk press). Once a talk turn has begun, movement doesn't end it and swipes are off
-until the lift, which ends it (once talking, drift is fine).
+Call button, and its hold region: a drag before 250 ms never becomes a talk
+press). Once a talk turn has begun, movement doesn't end it and swipes are off
+until the lift, which ends it (once talking, drift is fine). The call's
+own touch path (`muse_call.c`, the video's polls too) takes the same slop: a
+press past it is no tap.
 
 Muse's own phone setup service (`components/muse/muse_ble.c`, the Wi-Fi
 builds with the full UI; Settings > Bluetooth > Phone setup) needs a
@@ -911,6 +914,27 @@ the design, the Wi-Fi protocol and the numbers.
   decerr=N fps=N int=FREE low=LOWEST` (frames taken from the ring, drawn,
   dropped, decoded but not drawn, refused by the decoder; internal RAM free
   now and its lowest since boot).
+- **Stats overlay on the call video:** five taps
+  on the call video (each within 400 ms of the last) show it: the first tap
+  still toggles the controls, taps 2-4 do nothing, the fifth hides the
+  controls; a tap on a shown control button is the button's (quick + / -
+  presses never count). One tap hides it (consumed); it starts hidden in
+  every call. No Developer mode. Refreshed once a second, fixed-width
+  (unscii 16, or 8 under 300 px), in a half-dark box at the top, clear of the
+  mic ring (the subtitles band and the controls are at the bottom): codec and
+  coded > shown size; video kb/s and pictures shown over the last second;
+  decode errors, drops and keyframe requests; the link interval and mode;
+  the reply depth and underruns (call totals, from the call's start; a field
+  a board can't measure is left out, never 0). It reads the counters
+  `muse_video` (`muse_video_stats`) and mg.play / the link
+  (`mg_ble_call_stats`) already keep, renders a 1-bit picture of the box on
+  the input task (double-buffered), and the show task blends it into each
+  frame's pieces like the subtitles band: no redraw, no wait, nothing on the
+  audio path (`muse_call.c`; rules in `muse_call_stats.c`,
+  `test_muse_call_stats`). Console word (an automation word): `>vstats`
+  toggles it, `>vstats=1` / `>vstats=0`, `>vstats?` reports (`@vstats on|off`);
+  while it's up the same lines print once a second on the USB console as
+  `@vstats a | b | ...`, never on the Nordic UART.
 - **Changed-only redraw:** on
   by default (every `muse_lcd_bands` board). `>vdirty=0|1` either way,
   RAM only. The `vdirty:` lines log internal free / largest when its block
@@ -930,8 +954,9 @@ the design, the Wi-Fi protocol and the numbers.
   aren't hashed. Pictures skipped by the show task fold into the next one
   drawn. Where it lands: the output is cut into cells at the pixels where
   the scaler's source macroblock changes, on the panel's alignment
-  (`muse_vdirty_axis`), and windows are whole cells. Overlays (the bench mark, a board's
-  own) give their rectangles and a gen (`muse_video_set_overlay_rects`): when a gen
+  (`muse_vdirty_axis`), and windows are whole cells. Overlays (subtitles,
+  call controls, the stats box, the bench mark) give their rectangles and a
+  gen (`muse_subs_overlay_rect`, `muse_video_set_overlay_rects`): when a gen
   changes, where it draws now and where it drew are redrawn; unchanged, it's
   drawn into whatever window crosses it. A repeated or held picture with no
   overlay change writes nothing. Adaptive: after 2 s of pictures drawn whole
@@ -1026,6 +1051,23 @@ the design, the Wi-Fi protocol and the numbers.
   captures (`vt_112_crop.264`: coded 192x112, right 80 px; `vt_80_crop.264`:
   right and bottom) and the 112 one with left and top offsets, byte for byte
   against ffmpeg and the coded pictures.
+- **A call's pictures stopping:** a
+  live call's picture stays through a blip and, once pictures have stopped
+  for 2.5 s with the stream open (`STALL_US`), Muse animates in its place;
+  the call screen adds "No picture from the phone" 5 s after the last
+  picture, and the call goes on. The client's video stop_streaming while the
+  call goes on (an app giving up on video) holds the last picture 1 s after
+  the stop (`CALL_STOP_HOLD_US`; unless the mic ring changes: the UI takes
+  the screen to draw it, the decoder's pictures being gone), then Muse; the
+  line comes 5 s after the stop (`muse_video_call_stalled_since()` returns
+  the stop's time for a stopped stream, else the last picture's). A size
+  change (stop, then start_streaming at the new size with a keyframe, under
+  1 s) shows the new size with no face, black or calling screen in between.
+  The call keeps its own picture clock across its streams
+  (`s_call_shown_t`): a new start after the stop goes back to the picture
+  clock's stall (Muse 2.5 s after the last picture) and keeps the stop as
+  the line's reference until a picture comes, so a silent restart gets Muse
+  and then the line 5 s after the stop (line after Muse either way).
 - **Untrusted input:** everything from the network is. Keep the checks in
   `../protocols/VIDEO.md`'s Trust section when changing the transport, the
   decoders' glue (`muse_vdec.c`) or the drawing (`fill()` in `muse_video.c`).
@@ -1242,7 +1284,7 @@ its constants.
   outbox sends nothing of a capture (change_data_type, Data, the gestures and
   stop_mic queued behind it) to a central that hasn't passed this
   connection's token proof. A capture before the proof (a talk press right at
-  connect, a client's start_mic) is held whole, the
+  connect, a client's start_mic, a Live call's talk hold) is held whole, the
   bench guard's size (`MG_CAPTURE_GUARD_S`, 16 s of its format, in PSRAM;
   without PSRAM, the C6, up to `CONFIG_MUSE_GADGET_BLE_CAPTURE_GUARD_INTERNAL_KB`
   (32 KB: 4.3 s of 60 kb/s SBC, 8.1 s of 32 kb/s LC3) of internal RAM in one
@@ -1294,9 +1336,10 @@ its constants.
   handle H) ...`, `bench.out off (...): bench.out=0` / `: disconnected`).
   While either switch is on for the connected central the gadget shows
   **"Bench"** (amber, the small type) in the page dots' place on every
-  screen LVGL draws (the home and its talk screen; one line above the lock
-  glyph on the locked face; LVGL's top layer, `muse_home_bench_tick`), and a
-  board with no screen gives a
+  screen LVGL draws (the home and its talk screen, the calling screen, the
+  call's face; one line above the lock glyph on the locked face; LVGL's
+  top layer, `muse_home_bench_tick`), drawn into a call's video frames too
+  (`bench_overlay` in `muse_call.c`), and a board with no screen gives a
   blue double flash 30/100/30 ms every 4 s on its status light at the
   lowest priority (the shared LED table: only over a steady
   connection color, never over a voice state, the volume or a blinking or
@@ -1342,14 +1385,14 @@ its constants.
   `test_held_turn`, and `test_output_proof_wiring`).
 - **The Control reply outbox** (added after one more request_status
   line overran a gadget's 5-reply reserve): a one-shot Control reply the
-  stack refuses (request_status's lines, settings, errors,
+  stack refuses (request_status's lines, a call start, settings, errors,
   status reports) waits whole in `mg_proto_t.ctlq` (`MG_CTLQ_MAX` 16
   records in `MG_CTLQ_RING` 1024 bytes), in order, behind the token proof
   answer, and goes as the stack takes it (every pump; the worker looks every
-  5 ms while one waits). Sized for the worst request_status (its lines:
+  5 ms while one waits). Sized for the worst request_status (11 lines:
   change_data_type, the command list, `10 FE 89`, start_mic's codecs,
   change_data_type's formats, settings, device actions, UI input, a pending
-  video request) plus the proof result and
+  video request, a pending call start, `10 FE 85`) plus the proof result and
   spare; one that finds no room is counted (`ctlq.dropped`, never expected).
   **Reply sizes** (a gadget's reply slot once silently dropped
   an over-long capabilities reply): every reply the firmware builds is at
@@ -1374,7 +1417,7 @@ its constants.
   and video credit, touch events), and the capture's outbox and the
   session's ports keep their own queues. `test_mg_ble`
   (`test_reply_outbox`: request_status with the stack refusing for 500 ms
-  while a proof challenge arrives: the proof answer first,
+  while a call start and a proof challenge arrive: the proof answer first,
   then every line in order). **Replies never dropped** (mgcommands.h
   ordering; a gadget's mic error under request_status bursts): while the
   outbox holds anything, a client's Control command that answers through it
@@ -1498,7 +1541,8 @@ its constants.
   in active mode while it downloads), shows it over everything but the mic
   ring, answers once it's on screen (`shown_for_ms`, size, `download_ms`),
   and `muse_ui_image_hide_after()` takes it down from the frame tick after
-  `duration_ms` (a tap or a talk press sooner). Settings > Developer > Tests > **Ask Muse for an
+  `duration_ms` (a tap, a talk press or a Live call's start sooner; a call
+  refuses it as `busy`). Settings > Developer > Tests > **Ask Muse for an
   image** (the Tests row shows whenever the gadget has a test) asks Muse in
   plain words on the gadget's own session (`POST /chat/stream`,
   `{"message":"Please make a random picture ... on my gadget <BLE name> for
@@ -1682,10 +1726,11 @@ its constants.
   link played with 6 underruns at 30 ms) starts at 150 ms held
   (`MG_PLAY_SLOW_START_US`), or at its end of data when the clip is shorter
   (stop_streaming keep, or no data for 100 ms), and at 30 ms once active is
-  granted (`mg_play_t.slow_link`, from `mg_linkpol_link_active`); start_streaming asks
+  granted (`mg_play_t.slow_link`, from `mg_linkpol_link_active`); a Live
+  call's stream keeps 30 ms (the call holds active); start_streaming asks
   for active before its first buffer_update (`ops.stream_starting`).
   Adaptive start (`mg_play_t.start_us`): per
-  connection, a reply that underran in its first second
+  connection, a reply outside a Live call that underran in its first second
   of audio makes the next one start 20 ms higher, up to the live depth's
   floor (70 ms); each clean reply (no underrun) eases it back 10 ms, never
   below 30; a reply with only later underruns leaves it; a new connection
@@ -1743,7 +1788,8 @@ its constants.
   held: the 30 ms start + the decoder's 10 ms chunk + the board's I2S DMA
   depth, 70 ms; `mg_play_live_floor_us`), and only a stream whose
   start_streaming carries parameter 6 (uint16 ms; 0 or over 1000:
-  `invalid_value`) is capped. Without it the credit is the whole ring. With it the device holds queued ms at max(asked, floor), and
+  `invalid_value`) is capped. Without it the credit is the whole ring, in a
+  call too. With it the device holds queued ms at max(asked, floor), and
   audio in flight doesn't count against it (~70 ms in flight left
   ~20 ms on the device under a queued + in-flight cap): the credit
   (`mg_play_credit`) is depth - queued + what it sees in flight (the time
@@ -1757,14 +1803,32 @@ its constants.
   entries carry no length, so an unknown parameter id ends the list and
   what came before applies (defaults for the rest), never `unsupported`
   (`test_mg_ble`: a client writing 20 ms only when credit allows, a 15 ms
-  link, 0-30 ms of jitter: without parameter 6 the ring fills; with 100 ms, 60 s: 0 underruns, queued ~88 ms, one update per
+  link, 0-30 ms of jitter: without parameter 6 the ring fills, in a call or
+  not; with 100 ms, 60 s: 0 underruns, queued ~88 ms, one update per
   connection event; two forced outages grow the allowance to 40 ms and it
   shrinks back to 0; 50 ms more stack delay: one underrun while it learns,
   ~88 ms held, where counting in flight against the depth underran 109
   times; and on a modeled ready link,
   slave latency 5 skipped unless a notification is pending, the 7.7 KB
-  reply written in 65 ms with active granted after 0.9 s: 0 underruns).
- A gap of 400 ms or more (`MG_PLAY_IDLE_US`) is a
+  reply written in 65 ms with active granted after 0.9 s: 0 underruns). One reply stream per Live call (mgcommands.h
+  "Live reply audio"): a stream opened in a call
+  (`mg_play_t.keep_open`) stays open however long it runs empty (silence
+  after the concealment fade, never the 10 s end, which stays for streams
+  outside a call), plays the next reply's first frame at the next chunk
+  (10 ms + the 30 ms DMA), and ends on stop_streaming or a disconnect
+  (mgcommands.h: the device ends a call's stream only when it
+  can't go on; after the call the 10 s end of a starved stream applies
+  again). The device's own sound in a call (a chirp, the Sound page's or
+  bench tests, a saved note: `mg_proto_claim_audio`) pauses the call's
+  stream and resumes it after: nothing flushed or lost,
+  Data and credits go on, a start meanwhile is taken and waits
+  (`mg_proto_play_held`; `mg.play: paused for the device's sound (N ms
+  kept)` / `resumed ...`); it pauses rather than ducks, since no board mixes
+  two sources in its output path. Outside a call the sound still ends a
+  reply. A talk press in the call flushes it
+  instead of ending it (`mg_proto_claim_turn`: the same as
+  `mg_stream_audio_flush`, a buffer_update sent; the next reply waits for
+  the turn and plays after it). A gap of 400 ms or more (`MG_PLAY_IDLE_US`) is a
   reply boundary, not an underrun: an underrun is counted when audio comes
   back sooner, at the gap's start on the stream's clock. The speaking face,
   the panel hold and "playback over" follow audio playing
@@ -1815,9 +1879,10 @@ its constants.
   and a hold's claim, a client's flush or drop
   discards them (`paused at the talk press (N ms kept, M ms back from the
   speaker)`; `test_muse_audio_tx` against a model of ESP-IDF's TX driver,
-  `test_muse_spk_dsp`'s barge-in through the chain). Every board
+  `test_muse_spk_dsp`'s barge-in through the chain, `test_mg_ble`'s barge DMA clear). Every board
   with a speaker attaches its TX channel
-  (`muse_audio_attach_tx`, before `i2s_channel_enable`). Push-to-talk ends a stream with stop_streaming drop. The client reads and
+  (`muse_audio_attach_tx`, before `i2s_channel_enable`). Push-to-talk ends a stream with stop_streaming drop (in a Live call it
+  flushes the call's stream instead, above). The client reads and
   sets the Muse speaker level with the `speaker_volume` setting (0 = off:
   playback is then silent, the stream still paced).
   **The ESP-Mosaico's speaker**: its NS4150B clips at a DAC output of about -5
@@ -1984,7 +2049,8 @@ its constants.
   `components/muse_gadget_ble/mg_linkpol.c`):** sleep 100/160/4/600, ready
   24/36/5/400, active 12/12/0/400. Ready at every connect (asked after the
   central's first update, or 1 s after connect); active on the gadget's own
-  activity (its talk press at touch-down, a
+  activity (its talk press at touch-down, a call from Calling... on (Calling... and connecting for at most 30 s,
+  `MG_LINKPOL_CALL_STARTING_US`; live while live), a
   stream the app starts: video, a changing UI stream, audio playback;
   push-to-talk capture, Link setup, an MCUmgr update); the gadget's own turn
   is activity (mgcommands.h): from its talk press (button_down
@@ -2010,7 +2076,8 @@ its constants.
   meanwhile with BLE_HS_EALREADY, which isn't a refusal
   (`mg_linkpol_request_busy()`: again 2 s later), for at most 45 s a mode
   (`MG_LINKPOL_UNANSWERED_MAX_US`), then as a refusal; at most one request per 2 s, none
-  while one is out, none within 500 ms of a connection update. A touch, a key, a menu, the console
+  while one is out, none within 500 ms of a connection update; the
+  call-start toggle stays. A touch, a key, a menu, the console
   or a GATT write alone isn't activity, and the screen and USB power no
   longer matter.
   A user's wake or touch (any key press, a touch, the screen lit by the
@@ -2128,7 +2195,8 @@ its constants.
   "Help."):** with `ptt.minrise=N` (console words, USB `>` and `!IN`:
   `ptt.minrise=N` 1-40 dB and `ptt.minrise=0` off are automation,
   `ptt.minrise?` a diagnostic; answered `@ptt.minrise N` / `@ptt.minrise
-  off`; `mg_minrise.h`) every BLE push-to-talk turn the gadget starts is held on the gadget (`mg_proto_turn_hold`:
+  off`; `mg_minrise.h`) every BLE push-to-talk turn the gadget starts, a Live
+  call's talk hold included, is held on the gadget (`mg_proto_turn_hold`:
   `button_down`, `change_data_type`, the audio from the pre-roll on and the
   turn's claim all wait in the capture's outbox, 16 s of the format in PSRAM;
   32 KB internal on the C6, `CONFIG_MUSE_GADGET_BLE_CAPTURE_GUARD_INTERNAL_KB`)
@@ -2154,17 +2222,15 @@ its constants.
   (N and M as speaker_volume reads them: 0 while the speaker is off); both
   `vol=` words are automation, `vol?` a diagnostic; logged on `mg.bench`
   (the Nordic UART mirror). A reboot comes back at the saved volume. A
-  user's change (a key, a slider) or the app's
+  user's change (a key, a slider, a call's controls) or the app's
   set_settings speaker_volume ends it: the saved values come back first,
   then that change applies and is saved, so the saved volume never holds a
   bench value; the client's set of the level the speaker already plays at
   changes nothing (`set_speaker_volume` in `mg_glue.c`: nothing saved, the
   bench volume stays). Like any change on the gadget it's reported
   unsolicited as speaker_volume. The bench tools use it for a run's
-  volume and put it back: `barge_check.py` mutes a speaker that isn't at 0
-  with `>vol=0` on its console and sends `>vol=saved` at the end (an image
-  without the word is refused, as before); `mg_ble_client.py play --volume`
-  sends `!IN vol=N` over the Nordic UART and
+  volume and put it back: `mg_ble_client.py play --volume`
+  and `av60.py --volume` send `!IN vol=N` over the Nordic UART and
   `!IN vol=saved` after (set_settings and the original written back on an
   older image). `test_muse_ptt_ui`'s
   `test_bench_volume_is_ram_only` runs it on `muse_settings.c` (no NVS
@@ -2182,7 +2248,8 @@ its constants.
   (`volume_watch`, `muse_vol_show.h`, before the video check so the caption
   is current under it too) shows an outside change at once, with the overlay the
   gadget's own controls use and a short source line, **"Set by phone"** or
-  **"Set by bench"**: on the home layout
+  **"Set by bench"**: in a call the call's controls (their level bar, the
+  source on their hint line, `muse_call_volume_by`); on the home layout
   (the five catalog boards, every touch panel that isn't small or e-paper)
   Speaker's volume card, the source under the level, closed 3 s later as
   after a tap (`muse_home_volume_by`); on the compact and keys-only faces,
@@ -2245,21 +2312,23 @@ its constants.
   wrong count and wait level in Muse's NVS namespace as the `passcode` blob;
   when it locks; the waits; the keypad's geometry and hit rules), behind a
   mutex in `muse_passcode.c`, the screens in `muse_passcode_ui.c` (the
-  locked face is the home with no Speaker / hold region and a lock
+  locked face is the home with no Speaker / Call / hold region and a lock
   glyph for the page dots, `muse_home_set_locked()`; the digit ring on round
   panels, the 3 x 4 grid on the others, the wait after 5 wrong codes, Forgot
   passcode). It locks at screen-off (or 5 min after it), after 5 min idle
-  where the screen stays on, at every boot; never during the
+  where the screen stays on, at every boot; never during a Live call or the
   gadget's own talk turn. Locked, a talk press opens the keypad ("Unlock to
-  talk") and is dropped; menus, Status, Settings, reply text and drawn files
+  talk") and is dropped; a call the phone starts waits behind it ("Call
+  from phone": nothing from the call until unlocked, declined after 60 s);
+  menus, Status, Settings, reply text and drawn files
   stay off the screen; the Link setup prompt, low battery and power screens
   show as usual. Wrong codes: 5 free, then 30 s, 1, 2, 4, 5 min, kept across
   reboots; never a wipe. The pairing's erase takes it (`passcode_forget()`
   in `main/app.c`: Reset pairing, the token proof's clear, a setup reset, a
   completed Link setup). A UI stream or phone camera view that starts or
   arrives while locked is held like a drawn file (`muse_video_set_hold()`:
-  not shown, the screen not woken for it, shown once unlocked if still live).
-  A Set, Change or Turn off passcode keypad on an unlocked gadget holds it
+  not shown, the screen not woken for it, shown once unlocked if still live;
+  a call's own video never). A Set, Change or Turn off passcode keypad on an unlocked gadget holds it
   the same way and keeps its touches from the phone (`muse_video_set_cover()`). Console: `pass` (a diagnostic: `@pass on locked
   tries=0 wait=0` or `@pass off`, never the code, salt or hash), `pass
   lock` and `pass clear` (automation: lock now; erase only the passcode, the
@@ -2434,12 +2503,13 @@ its constants.
   screen and buttons for a bench without fingers (each logs its outcome on
   `mg.bench`, on the Nordic UART mirror): `>press=X,Y[,X2,Y2,MS]` (a finger
   down, moved, lifted: the touch read reports it in place of the panel, for
-  LVGL and the video view alike; the phone's touch events get none of it,
+  LVGL and the call's video alike; the phone's touch events get none of it,
   unlike `>touch=`), `>tap=<control>` (the same at a control its screen
   locates: `home.speaker`, `home.speaker.hold`, `home.slider<N>`,
-  `set.speaker`, `set.volume<N>`; "not on the screen now" otherwise),
+  `set.speaker`, `set.volume<N>`, `call.minus`, `call.plus`, `call.panel`,
+  `call.swipe.down`, `call.swipe.up`; "not on the screen now" otherwise),
   `>key=speaker|power|aux` (a press and release, never a hold), `>key=talk[,MS]` (the talk key held MS ms, 400 by default, through the key's own path, from a dark panel too; never a pairing's confirming press; `>key=talk,MS,AFTER_S` queues one to start AFTER_S s later, up to 4, each waiting for the one held before it, so a bench can arm holds over the Nordic UART and hand the connection to a phone; `>key=talk?` lists them, `>key=talk,cancel` drops them),
-  `>page=face|settings|settings/<page>` (`settings/tests`
+  `>page=face|settings|settings/<page>` (not in a call; `settings/tests`
   and `settings/vibration` too) and `>wake?`
   (`screen awake|asleep|dark`). On a release image a Nordic UART line's
   `ptt=1` or `key=talk`, or a bench press or tap on a talk surface, answers
@@ -2455,14 +2525,14 @@ its constants.
   talk-turn, cap and duty rules) and answer with its status line on
   `mg.bench`; nothing plays one on its own (no boot or timer pattern). A press on a sleeping screen is refused
   (`screen asleep`): `>wake` first. Over the Nordic UART, `!IN <word>` takes
-  these and `wake`, `ptt=1` / `ptt=0`, `voice?`,
+  these and `call`, `call=0`, `call?`, `wake`, `ptt=1` / `ptt=0`, `voice?`,
   `vib=` / `vib?`, `mic.gain?` / `mic.gain=N`, `spk.dsp` / `spk.dsp=`, `ptt.minrise=` / `ptt.minrise?` and
   `vol=` / `vol?` (`mg_glue.c`'s allowlist: nothing that changes setup,
   power or tokens). Who may send them (Console words over Bluetooth, above):
   in a bench build (`CONFIG_MUSE_GADGET_AUTOMATION`) every Nordic UART word
-  is open: `voice?`, `wake?`, `vib=`,
+  is open: `voice?`, `wake?`, `call?`, `vib=`,
   `vib?`, `key=` (talk holds, queued ones too, open the mic), `ptt=`, `tap=`,
-  `press=`, `page=`, `wake`, `ble.pause=` and, with the
+  `press=`, `page=`, `call`, `call=0`, `wake`, `ble.pause=` and, with the
   device session, `session.ping`, and `!PAIR AUTO` (also the USB console's
   `>pair.auto` / `>pair.auto=0`), `!RESTART`, `!SAFEID`, `!SILENCE` and
   `!SETUP ADV` (the vibration tests' safety rules hold
@@ -2485,8 +2555,9 @@ its constants.
   The Wi-Fi video overlay (`MUSE_VIDEO=1`) goes on a board's Wi-Fi profile
   only (`board.sh` refuses it with a `-gadget` alias): with Wi-Fi, the UI and
   video the S3 has no internal RAM left for BLE audio.
-- **Mute reports:** every change of the speaker level
-  made on the gadget (a key, a slider, Speaker's long press, the console's `vol=` / `vol=saved`) reports speaker_volume
+- **Mute reports and subtitles:** every change of the speaker level
+  made on the gadget (a key, a slider, Speaker's long press, a call's volume
+  − / + or swipe, the console's `vol=` / `vol=saved`) reports speaker_volume
   unsolicited (0 when muted), and the
   client's own set is never reported back, even when it takes two settings
   writes (`mg_spk_report.h`); each report logs `mg.ble: speaker_volume N
@@ -2502,7 +2573,91 @@ its constants.
   later (owed: no client)` / `(owed: the link is busy)`, then `speaker_volume
   N reported (owed)` when it leaves. `test_mg_ble` (`test_spk_owed`: a busy
   stack, a full outbox, a disconnect with one owed, a change while
-  disconnected, no duplicate, the client's write not echoed).
+  disconnected, no duplicate, the client's write not echoed). Subtitles turn on only with the client's state 1, in a call or
+  not (a muted push-to-talk reply too): words, reply_end and clock while the
+  mode is off are dropped and counted, state 0 and clear take the band off
+  at once, and a call's end turns the mode off. They need no token proof,
+  but a central whose proof hasn't matched on a set-up gadget gets less:
+  its subtitles (`mg_subs_event_t.proven` false) show only on a screen
+  that's already on, and never wake it, keep it lit, hold the panel or
+  reset the idle timer, so auto-sleep and the passcode's auto-lock run as
+  usual. The owner's state 1 (a proven central's, or the console's) wakes a
+  sleeping screen (a sleeping one draws no band; never while the passcode
+  lock is up) and each words message keeps it on. **Nothing of the band
+  draws over a card that asks for a press or a code** (the pairing confirm,
+  the update prompt, the re-setup prompt, a passcode keypad:
+  `muse_subs_card`, set by `muse_ui.c`'s `sync_card` every frame and as the
+  card changes): the tall band is hidden at once, the video's band and the
+  call's controls aren't drawn, a touch goes to the card, never the call,
+  and the update prompt's confirm counts the band as covering the card
+  (`muse_subs_band_drawn`), so no caption ever lies over a Confirm
+  (`tests/test_subs_unproven.py`). A talk press's touch-down pauses the band
+  with the reply's audio: a tap brings it back where the reply now is, the
+  turn's claim drops the rest of that reply's subtitles, and a press nobody
+  decided lapses after 1.5 s (`MUSE_SUBS_PAUSE_MAX_MS`). A word waits for
+  its moment while its timing domain has a time (a frame on the panel, or
+  this reply's clock: a reply's clock never carries over to the next); only
+  a word with neither shows 2 s after it came (`MUSE_SUBS_LATE_MS`). Behind the text the band darkens the picture to 1/8 of its brightness on
+  GUI screens and to at most 0.35 over video and UI streams
+  (`MUSE_SUBS_SCRIM_*`, `muse_subs_core.h`), so pure white text keeps 7:1
+  over the brightest pixel behind it. **Over video the band is 2 lines; with
+  no video on screen it's the tall band**: an LVGL rounded panel at the GUI scrim with one label on
+  the system layer (under the mic ring), laid out on LVGL's tick
+  (`tall_tick`): the two-line band's bottom and width (on a round panel the
+  bottom line's chord, one wrap width for every line, so nothing reflows as
+  lines scroll up), growing as lines come (never shrinking mid-reply) up to
+  just below the home's top row, or below the clock while it shows
+  (`muse_home_clock_shown`, the home's own geometry); newest line at the
+  bottom; lines that come at once scroll in one at a time,
+  `MUSE_SUBS_SCROLL_MS` apart. Lines (no clock / clock): StopWatch and W175
+  10 / 8 (28 px), Watcher 8 / 7. When the
+  pool fills, the lines that scrolled away go first, whole
+  (`muse_subs_keep_from`), so the lines kept never reflow.
+  `tests/muse_subs_tall_harness.c` (`test_muse_subs.SubtitleTallBandTest`);
+  the simulator renders it (`subs=TEXT`, `subs.more=TEXT`). Nothing of them draws
+  while the passcode lock is up (a phone's call held behind the keypad
+  included): the band and the video overlay stay dark, the words are kept,
+  and the latest band shows once it's unlocked (`tests/test_subs_passcode.py`,
+  the simulator's `dump=sys` and `passenter=DDDD`). `mg.subs` logs the mode
+  (`state 1 (ms timing)`) and each band transition (`band on (client)`,
+  `band off (state 0)`), never the words.
+- **Live call:** `CONFIG_MUSE_GADGET_BLE_LIVE_CALL` (default on with the
+  full UI) adds `mg_command_live_call`: Live call in Settings or the menu
+  asks the client to start a voice call with the Muse, the screen goes
+  black with only "Calling…" centered until the call's first picture
+  ("Waiting for phone…" with no app ready; without video,
+  the face with "Live m:ss" once live), on-screen controls (End call,
+  volume − / + and a level bar) show over it, the face or the call's video
+  for 3 s after the last touch. **Up, a tap away from them dismisses them
+  at once**, anywhere on the picture
+  that isn't a control, and a tap on a control acts and re-arms the 3 s
+  (`muse_call_tap`); the touch that showed them never dismisses them on its
+  own lift (a tap's, a drag's or a hold's), and a press away held 250 ms or
+  more (not a tap) keeps them. **Where the picture isn't a talk surface they come up
+  at the touch-down**: the call
+  video and the calling screen always, and the call's face unless the touch
+  lands on the home's hold region with Settings > Talk on Screen or Both
+  (`muse_home_talk_at`; Button, the default on every call board, makes
+  every touch a touch-down one). A drag or a hold keeps them up, 3 s from
+  the last touch, and the lift is still a tap (it acts on a control, or
+  dismisses them away from one, only if they were up at the touch-down). On the hold region with screen talk
+  they wait for a tap's lift, and a hold (250 ms) talks with no
+  controls flash (`muse_call_touch_*`). `mg.call` logs `call controls
+  drawn on the screen|over video N ms after the touch-down` once per show
+  (the simulator: 10-20 ms from the finger). They're one 300 x 156
+  panel, the same pixels on every board with a 320 px screen or larger
+  (`muse_call_controls.h`): its hit areas only grow their
+  rows to 7 mm where a panel's pixels per mm need it, and − and + take taps
+  out to the screen's side edges. A vertical swipe or the board's other buttons set the
+  volume (only in the owner's call: an unproven central's call state shows the call screen but remaps no
+  key, so power sleeps the screen and the speaker key toggles the speaker), and video the client streams during it shows without Phone camera
+  and closes with the call (`components/muse/muse_call.c`). A call the gadget ends is over on the gadget
+  at once, whether or not the phone answers. A capture the client's `start_mic` began before the call ends
+  when the call starts, and its `stop_mic` is always taken. The console's `>call` / `>call=0` start
+  and end one (`>call?` only reads: it never counts as activity); the component README has the details. A phone that holds the link leaves the Nordic
+  UART no way to start one, so `>call.at=DELAY_S,LEN_S` (USB console, RAM only) arms a timed call
+  before it connects: it starts DELAY_S after the next Live call client is ready, ends itself after
+  LEN_S, and fires once; `>call.at=0` disarms, `>call.at?` reports (`muse_call_at.h`).
 - **set_mic_gain:** the client's
   1-100 level has a fixed meaning: 50 is the board's tuned gain
   (`MUSE_MIC_GAIN_TUNED`, 30 dB); 1-50 map linearly in dB from 0 dB (the
@@ -2975,9 +3130,11 @@ For app authoring and the guide to send Muse, see
   captures; the phone's assistant_state alone never wakes a dark panel nor
   holds a lit one past its usual timeout (the user may be chatting on the
   phone). A reply on the gadget, a client's stream_audio reaching the
-  speaker (`muse_voice_reply_holds_panel()`),
+  speaker or subtitles' band on screen (`muse_voice_reply_holds_panel()`),
   holds a lit panel the same way until it ends, then the usual timeout runs
-  from its end; it never wakes a dark one.
+  from its end; it never wakes a dark one. Subtitles' state 1 wakes it
+  (`muse_subs.c`); their words keep a lit one on (`muse_input_keep_lit()`)
+  without waking a dark one.
 - Don't move offsets in `partitions.csv`. `prod_data` and `prod_bak` are fixed
   manufacturing locations, and the table offset of `0x10000` leaves room for a
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
@@ -3150,6 +3307,12 @@ Where the ESP32 firmware adds to or departs from the common gadget behavior:
   Watcher).
 - **Settings > Passcode on the C6 1.8:** "Change code" drops its icon where
   the label doesn't fit beside it.
+- **Passcode and "Call from phone":** the call waits behind
+  the keypad with no phase, so no picture, subtitles or mic; a sleeping
+  screen wakes to the keypad, and a reply stream opened before the call
+  ends (the call's own is busy until the unlock). Not yet
+  verified on hardware: no phone audio plays and the mic stays closed before
+  the unlock.
 - **Sleep when charged, the % fallback:** "charged"
   is the charger's own charge-done report (`muse_board_t.charged =
   MUSE_CHARGED_DONE`, latched at the first done of a plug-in whatever the

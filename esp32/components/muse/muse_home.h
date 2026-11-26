@@ -19,7 +19,8 @@
  * full-layout touch panel: the reference layout scaled from its 466 px round
  * reference. Battery at the top, the time (12/24 h
  * from the phone, hidden until synced), a date / state line, Muse with the
- * screen's hold region, the Speaker button left, page dots. Status, one swipe right: the
+ * screen's hold region, the Speaker button left and the Call
+ * button right, page dots. Status, one swipe right: the
  * connection, battery, ID, volume and firmware. LVGL's task only.
  */
 
@@ -43,9 +44,9 @@ typedef struct {
     int top;            /* 0: the reference lays out the whole panel, top down */
     int muse_px;        /* Muse's canvas, whole cells: the largest in 50-55 % of S */
     int muse_y;         /* its centre, from the screen's centre */
-    int button_d;       /* Speaker */
-    int button_y;       /* its centre, from the screen's centre (Muse's line) */
-    int button_x;       /* ...and from the middle (left of it) */
+    int button_d;       /* Speaker and Call */
+    int button_y;       /* their centres, from the screen's centre (Muse's line) */
+    int button_x;       /* ...and from the middle, either side */
     int hold_d;         /* the hold region, a disc over Muse */
     int ring;           /* the mic ring's width */
     int batt_top, batt_w, batt_h, batt_stroke, batt_r, batt_gap, nub_w, nub_h, nub_gap;
@@ -79,7 +80,7 @@ typedef struct {
 /* Every quarter second while the face is up. */
 void muse_home_tick(const muse_home_state_t *st);
 
-/* The passcode's locked face: no Speaker button, no hold
+/* The passcode's locked face: no Speaker or Call buttons, no hold
  * region, a lock glyph in the page dots' place, no reply text on the state
  * line. */
 void muse_home_set_locked(bool locked);
@@ -102,12 +103,22 @@ bool muse_home_bench_mark(int *x, int *y, const struct _lv_font_t **font, uint32
 /* Hidden while a reply's page takes the face (muse_ui.c's answer layouts). */
 void muse_home_set_hidden(bool hidden);
 
+/* A hold at screen point x, y would be a talk press: the home's hold region
+ * shows there (the face active, not locked), talks (Settings > Talk isn't
+ * Button), and no shown call control takes the point (the call's
+ * controls wait for a tap's lift there, else they come up at the
+ * touch-down). LVGL task. */
+bool muse_home_talk_at(int x, int y);
+
 /* A hold on the screen is past the threshold: the face doesn't slide. */
 bool muse_home_holding(void);
 
 /* The home shows the time now (synced, set up, the home not hidden by a
- * reply's page). LVGL task. */
+ * reply's page): the subtitles' tall band stops below it. LVGL task. */
 bool muse_home_clock_shown(void);
+
+/* The state line's y (from the screen's centre), for the call's pill. */
+int muse_home_line_y(void);
 
 /* Half the panel's visible width at row y (from the top), inset px in from
  * its edge horizontally: a round panel's chord, a rounded rectangle's corners. */

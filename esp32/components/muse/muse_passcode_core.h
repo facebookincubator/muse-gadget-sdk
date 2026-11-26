@@ -23,7 +23,7 @@
  *   - the stored record: SHA-256 over a random 16-byte salt, a format tag
  *     and the 4 digits, with the wrong count and the wait level;
  *   - when it locks: at screen-off, or 5 minutes after it, never during a
- *     talk turn, and after 5 minutes without input where the
+ *     Live call or a talk turn, and after 5 minutes without input where the
  *     screen stays on; a reboot starts locked;
  *   - wrong codes: 5 free, then 30 s, 1, 2, 4, 5 min (the cap), the count and
  *     level kept across reboots, a right code resetting them; never a wipe;
@@ -103,7 +103,7 @@ void muse_pass_init(muse_pass_t *p, const muse_pass_rec_t *rec, int64_t now_ms);
 /* The wait at a level: 30, 60, 120, 240, then 300 s. */
 int muse_pass_wait_s(int level);
 
-/* The screen turned off. busy: a talk turn is on (no lock;
+/* The screen turned off. busy: a Live call or a talk turn is on (no lock;
  * the next screen-off after it ends locks). True if this locked it. */
 bool muse_pass_screen_off(muse_pass_t *p, int64_t now_ms, bool busy);
 /* The screen woke: "After 5 min" locks here once 5 minutes passed. True if

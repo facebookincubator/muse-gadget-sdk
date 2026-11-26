@@ -40,6 +40,9 @@ void muse_touch_set_sink(const muse_touch_sink_t *sink);
 /* The sink gets only the touches on what a phone may see: a UI stream's picture, or the face. While shareable()
  * says no (Settings, its keyboard, the passcode, the menu on screen) it gets none. NULL: every touch. */
 void muse_touch_set_shareable(bool (*shareable)(void));
+/* Touch-downs (the panel's, a bench press's) within the last ms: a call's
+ * start/end line says how many there were (muse_touch_log.h). */
+int muse_touch_downs_within(int ms);
 /* A passcode screen owns the panel now (the lock, its keypad or any other passcode entry): the sink gets no touch,
  * a touch under way ends there, and a finger still down when it closes stays out until it lifts. mg_ble asks it
  * too (mg_ble_platform_t.touch_private). Any task. */
@@ -57,8 +60,8 @@ void muse_touch_poll(void);
  * the sink as if from the panel (10 ms samples, on a task of its own). */
 void muse_touch_inject(int x1, int y1, int x2, int y2, int ms);
 /* Bench: a press on Muse's own screen, as a finger's (muse_touch_script.h):
- * down at (x1, y1), moved to (x2, y2) over ms, lifted. LVGL and the video
- * view's poll read it in place of the panel; the sink gets none of it.
+ * down at (x1, y1), moved to (x2, y2) over ms, lifted. LVGL and the live
+ * call's video poll read it in place of the panel; the sink gets none of it.
  * False without a touch screen. */
 bool muse_touch_press(int x1, int y1, int x2, int y2, int ms);
 /* The same along a path of n corners (2..6, one speed): a swipe through
@@ -67,8 +70,9 @@ bool muse_touch_press_path(const int *xs, const int *ys, int n, int ms);
 
 /* A bench gesture on a named control, worked out by the screen that draws
  * it (muse_home_bench_point, muse_settings_ui_bench_point,
- * the bench points): what muse_touch_press takes. The home's and
- * Sound page's run on the LVGL task (they read LVGL's objects). */
+ * muse_call_bench_point): what muse_touch_press takes. The home's and
+ * Sound page's run on the LVGL task (they read LVGL's objects); the call's are
+ * arithmetic and run anywhere. */
 typedef struct {
     int x1, y1, x2, y2, ms;
 } muse_touch_gesture_t;

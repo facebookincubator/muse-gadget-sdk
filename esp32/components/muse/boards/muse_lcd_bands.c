@@ -542,13 +542,13 @@ static void send_band_pieces(const band_t *b, int *k)
 
 /*
  * The send task's stack. Everything run on the panel runs here: LVGL's bands, a video frame or windows with their
- * fill (the conversion, the overlays, the ring and the dot, the shadow
+ * fill (the conversion, the subtitles, the call controls and stats overlays, the ring and the dot, the shadow
  * compare's model) and the tearing line's log. -fstack-usage on the S3: send_bands 144 + send_windows 304
- * + fill_win 112 + the overlays 336 = 896 B to the deepest draw; a log line from
+ * + fill_win 112 + the controls overlay 160 + muse_call_rrect 176 = 896 B to the deepest draw; a log line from
  * there (esp_log 96, the Nordic UART mirror's nus_vprintf 224, diagnostic_log_vprintf 608, vsnprintf 480) is
- * about 1.4 KB more, and an interrupt's frame on top. 2560 overflowed (the W175, an overlay's first draw
+ * about 1.4 KB more, and an interrupt's frame on top. 2560 overflowed (the W175, a call's first controls draw
  * over windowed video logged from inside the fill); 4096 leaves over 25 % past that worst case. No
- * draw logs from the fill now. The 2 s av video line reports what's left
+ * draw logs from the fill now (muse_call's shown_down_log only notes). The 2 s av video line reports what's left
  * (spanel=, muse_lcd_bands_stack_free).
  */
 #define LCD_SEND_STACK 4096

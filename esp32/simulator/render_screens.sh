@@ -15,7 +15,8 @@
 
 # Renders the Muse Gadgets UI screens of each full-UI board
 # (StopWatch m5sw, Watcher scw1, Mosaico emo1, C6 wc6) from the production
-# UI, into OUT_DIR/<code>/*.png (needs ImageMagick).
+# UI, into OUT_DIR/<code>/*.png (needs ImageMagick), with the Live call's
+# calling screen and end banners on the three that offer calls.
 #   cmake --build esp32/simulator/build && esp32/simulator/render_screens.sh /tmp/renders
 set -e
 SIM=${MUSE_SIM:-$(dirname "$0")/build/muse_simulator}
@@ -53,11 +54,14 @@ ble=advertising"
   esac
   shot $b $c home_unpaired "paired=false
 ble=advertising
+call=unavailable
 ble_name=$nm"
   # The top row's connecting flash: Bluetooth advertising, the app
-  # not ready; two frames 500 ms apart, on and off.
-  shot $b $c home_connecting_off "ble=advertising"
+  # not ready (Call dimmed); two frames 500 ms apart, on and off.
+  shot $b $c home_connecting_off "ble=advertising
+call=unavailable"
   shot $b $c home_connecting "ble=advertising
+call=unavailable
 advance=500"
   shot $b $c home_mic_ring "ring=true
 face=listening"
@@ -67,6 +71,7 @@ face=listening"
   shot $b $c home_charging "battery=64
 charging=true
 usb=true"
+  shot $b $c home_call_unavailable "call=unavailable"
   shot $b $c status "page=status"
   shot $b $c settings "page=settings"
   for p in sound display talk battery bluetooth muse about developer; do
@@ -140,4 +145,38 @@ advance=800
 $WRONG
 advance=800
 tap=$fc"
+  [ $c = wc6 ] && continue   # the C6 offers no Live call (no PSRAM)
+  # The calling screen and the end banners, from the
+  # production muse_call.c; a tap in the middle of the panel.
+  case $c in
+    m5sw) mid=233,233 ;;
+    scw1) mid=206,206 ;;
+    emo1) mid=240,240 ;;
+  esac
+  shot $b $c call_asked "call=asked
+advance=600"
+  shot $b $c call_tapped "call=asked
+advance=600
+tap=$mid
+advance=300"
+  shot $b $c call_waiting "call=unavailable
+call=asked
+advance=600"
+  shot $b $c call_no_answer "call=asked
+advance=31000"
+  shot $b $c call_failed "call=asked
+call=connecting
+advance=300
+call=failed
+advance=300"
+  shot $b $c call_dropped "call=asked
+call=live
+advance=300
+call=failed
+advance=300"
+  shot $b $c call_ended "call=asked
+call=live
+advance=300
+call=ended
+advance=300"
 done

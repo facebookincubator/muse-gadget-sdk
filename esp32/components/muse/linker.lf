@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM: the avatar's and audio's
-# zero-initialized statics go to PSRAM (.ext_ram.bss,
+# CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM: the avatar's, audio's and captions'
+# (muse_subs, 4.7 KB) zero-initialized statics go to PSRAM (.ext_ram.bss,
 # cleared at startup), on Wi-Fi and BLE-only builds alike (the
 # Watcher's BLE-only build idles at 12 KB internal with the captions kept in).
 # Their initialized data stays internal. A custom avatar keeps the object
@@ -29,6 +29,7 @@ entries:
     if MUSE_STATIC_BUFFERS_IN_PSRAM = y:
         muse_pixel (muse_extram_bss)
         muse_audio (muse_extram_bss)
+        muse_subs (muse_extram_bss)
         # The UI's own state: LVGL objects and layout, touched only from tasks (no ISR, no
         # flash-write path), so PSRAM serves it. The passcode's record and typed digits
         # (muse_passcode, muse_passcode_ui) stay in internal RAM, as does muse_f2's NVS diagnostic.

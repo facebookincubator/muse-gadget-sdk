@@ -57,7 +57,7 @@ bool mg_unlock_automation_word(const char *line)
 {
     if (!strncmp(line, "!IN ", 4)) {
         const char *w = line + 4;
-        return strcmp(w, "voice?") && strcmp(w, "wake?") && strcmp(w, "vib?") &&
+        return strcmp(w, "voice?") && strcmp(w, "wake?") && strcmp(w, "call?") && strcmp(w, "vib?") &&
                strcmp(w, "mic.gain?") && strcmp(w, "img?") && strcmp(w, "dev?") && strcmp(w, "spk.dsp") &&
                strcmp(w, "spk.dsp?") && strcmp(w, "ptt.minrise?") && strcmp(w, "vol?");
     }

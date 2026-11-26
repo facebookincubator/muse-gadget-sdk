@@ -22,9 +22,9 @@
  * and its pages, the button menu, a picture Muse drew, the phone camera, UI
  * streams), one small breathing dot at the same spot, top
  * center just inside the red mic ring, clear of the time and the ring:
- *   - thinking (stop_mic until the reply's first audio):
+ *   - thinking (stop_mic until the reply's first audio or subtitle):
  *     #E07BFF, breathing every 1.6 s;
- *   - responding (reply audio playing): #6FF0BF, every 0.96 s.
+ *   - responding (reply audio or subtitles playing): #6FF0BF, every 0.96 s.
  * Nothing at listening (the ring says it), nothing outside a turn,
  * never text, and nothing during a realtime voice call (its screens stay
  * as the call has them). It follows
@@ -73,7 +73,8 @@ muse_turn_dot_kind_t muse_turn_dot_kind(muse_mode_t mode);
  * and then the dot shows over it too. */
 bool muse_turn_dot_avatar_ok(uint32_t thinking_rgb, uint32_t speaking_rgb);
 
-/* A realtime voice call is on (muse_voice_in_call): the dot stays off whatever the mode, on
+/* A call is on (a Live call, asked to over: muse_call_active; a realtime
+ * voice call: muse_voice_in_call): the dot stays off whatever the mode, on
  * every path, until it's over. The UI sets it every mode watch; any task. */
 void muse_turn_dot_set_in_call(bool in_call);
 bool muse_turn_dot_in_call(void);

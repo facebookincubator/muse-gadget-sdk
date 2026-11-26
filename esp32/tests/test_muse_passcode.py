@@ -291,7 +291,7 @@ class Wiring(unittest.TestCase):
 
     def test_ui_streams_and_camera_views_are_held_while_locked(self):
         # A UI stream or a phone camera view is held like a drawn file (not shown, the screen not
-        # woken for it) and shows once unlocked if still live.
+        # woken for it) and shows once unlocked if still live; a call's video too (a call opens only unlocked).
         v = read("muse_video.c")
         held = v[v.index("static bool held(void)"):]
         held = held[:held.index("\n}\n")]
@@ -299,7 +299,7 @@ class Wiring(unittest.TestCase):
         self.has("muse_video_set_cover(true);", read("muse_passcode_ui.c"))
         self.has("bool drawable = sl->pic && !sl->failed && s_open && !held();", v)   # its pictures dropped
         self.has("|| stalled || held())) {", v)                                    # the screen given back at once
-        self.has("bool open = s_open && !held();", v)  # the view hidden
+        self.has("bool open = s_open && !s_call_cover && !s_call_stalled && !held();", v)  # the view hidden
         self.has("if (s_open && !held()) {", v)                                     # no awake tick: nothing drawn
         begin = v[v.index("static bool begin_locked(const muse_video_transport_t *t, const muse_video_params_t *vp)\n{"):]
         begin = begin[:begin.index("\n}\n")]
@@ -322,9 +322,10 @@ class Wiring(unittest.TestCase):
         self.has("muse_passcode_screen_on();", ui)                    # "After 5 min" at the wake
         self.has("&& !muse_passcode_ui_locked_face()) {\n            answer = layout;", ui)   # no reply text
         self.has("if (s_image_dsc.data && !image_held_off()) {", ui)                        # no drawn files
-        self.has("!muse_home_holding() && !locked;", ui)                             # no swipes to Status / Settings
+        self.has("!call && !locked;", ui)                             # no swipes to Status / Settings
         home = read("muse_home.c")
-        self.has("lv_obj_t *const objs[] = {\n        s_spk,\n        s_hold,\n    };", home)   # no buttons
+        self.has("lv_obj_t *const objs[] = {\n        s_spk,\n#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL\n        s_call,\n"
+                 "#endif\n        s_hold,\n    };", home)   # no buttons (Call only with Live call)
         self.has("!(s_locked && s_caption_turn)", home)
 
     def test_never_logged(self):

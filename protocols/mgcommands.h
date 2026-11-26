@@ -268,8 +268,11 @@
  *   value], e.g. [get_settings, speaker_volume (10), v] (0 = speaker off).
  *   A change the client made itself with set_settings is not reported back.
  *   Clients apply it as an answer to get_settings.
+ *   During a live call, a speaker_volume report re-picks subtitles or reply
+ *   audio (see Live call subtitles).
  *   - The device's speaker_volume is the source of truth. Clients read it
  *     with get_settings at connect and follow its reports.
+ *     They read it again at a call's start.
  *     A client's volume control writes it with set_settings; a client never
  *     keeps a copy of its own as the level, and never pushes a stored value
  *     to the device on connect.
@@ -365,6 +368,7 @@
  *     device-initiated capture (push-to-talk turns and their pre-roll); the
  *     device persists them (see set_settings) and clients send theirs at
  *     every connect (see each setting).
+ *     Talk holds in a call are device-initiated capture too.
  *     The rate applies where the capture's codec lists it, else 16000; the
  *     bitrate is clamped into that codec and rate's range (a fixed-bitrate
  *     codec keeps its own). A press that adopts a client's start_mic capture
@@ -391,6 +395,7 @@
  *      mg_error_code_unsupported / mg_error_code_invalid_value if not, or
  *      mg_error_code_busy while its own use has the speaker (media, a bench
  *      test); never because of push-to-talk (below).
+ *      A hands-free call is such a use too.
  *   3. The client writes the encoded audio on Data with Write Without
  *      Response: whole codec frames, in order, no header, in the codec from
  *      start_streaming. It keeps the bytes in flight (bytes written minus the
@@ -424,12 +429,17 @@
  *   The device notifies stop_streaming drop on its own when it must end
  *   playback, e.g. when push-to-talk takes over the audio path; the client
  *   stops writing.
+ *   In a Live call's one reply stream (Live reply audio below) a talk press
+ *   instead discards what the device holds, as a flush does, and keeps the
+ *   stream open; the device ends a call's stream only when it can't go on
+ *   (an error).
  *   A client whose stream the device ended opens a new one at the next
  *   reply.
  *   A user cancel: a device-ended stop_streaming drop of a push-to-talk
  *   answer that no [gesture, button_down] follows within 300 ms, once that
  *   answer has started playing on the device, means the user cancelled it
  *   there (a short press); a drop before playback started is not a cancel.
+ *   This holds outside a Live call only.
  *   The client sees playback start only by what playback alone causes,
  *   between two buffer_updates of the stream with no flush between: queued
  *   ms falling by 20 ms or more, or available bytes rising by at least one
@@ -437,6 +447,7 @@
  *   The client then cancels the answer too: no further audio, follow-up
  *   answer or late text for that turn, and on the chat path no phone
  *   playback.
+ *   On a voice session that includes cancelling the response at the VM.
  *   It shows no failure and settles the turn. A device sends this
  *   drop only to clients that act on it (by client_app version); to other
  *   clients it stops locally and answers keep.
@@ -450,8 +461,10 @@
  *     turn N's reply plays after turn N+1.
  *   - A client must tolerate a reply stream that gets no credits for as long
  *     as a turn lasts (up to about 60 s), without timing out.
+ *     In a call it doesn't fail the call for it either.
  *   Devices start playing once they hold their start threshold, and fill
  *   underruns with concealment or silence.
+ *   In a call that threshold is at most 40 ms (Live reply audio below).
  *   Playback follows the device's speaker setting
  *   (mg_setting_parameter_speaker_volume): with the speaker off, the stream
  *   is accepted and paced but plays silence.
@@ -471,6 +484,7 @@
  *      retries busy a few times, spaced (about 250, 500 and 1000 ms), then
  *      steps down to the next smaller size its capabilities allow before it
  *      gives up the stream.
+ *      In a call, that gives up video for the call.
  *      A stream leaves audio playback on (see below for both at once).
  *      If the device's capabilities carry
  *      mg_stream_video_capability_flag_early_keyframe, the client may
@@ -537,6 +551,7 @@
  *   A/V sync: when reply audio and video come from one source, the speaker
  *   and the panel must agree within audio 45 ms ahead of the picture to
  *   125 ms behind it (broadcast lip-sync tolerance).
+ *   In a Live call that source is the call's video of an avatar speaking.
  *   The device shows each video frame as soon as it is decoded
  *   and plays audio in order from its buffer; it reports the numbers and the
  *   client does the aligning, since only the client holds frames cheaply:
@@ -555,12 +570,14 @@
  *     moves the hold by at most one frame per second, so the picture never
  *     jumps, and sets it straight to the target at each reply start (nothing
  *     is spoken between replies, so the step isn't seen).
+ *     It resets the hold at each call start.
  *     Through a reply's first 500 ms, while the device's buffer fills, the
  *     hold follows the target at once, and estimates taken before any of the
  *     reply's audio was written are ignored.
  *   - A device that doesn't send queued ms is aligned by the client's
  *     estimate from buffer_size − available at the stream's byte rate.
  *   Live reply audio: reply audio a client paces live
+ *   (a call's reply audio always is)
  *   plays with at most ~100 ms of total depth on the device (queued ms,
  *   output path included), so it feels live:
  *   - The device starts playing once it holds its start threshold (at most
@@ -574,6 +591,9 @@
  *     that paces this way says so with mg_stream_audio_parameter_live_depth_ms
  *     in start_streaming, and only then does the device cap its credit to
  *     that depth.
+ *     The Muse apps always send it for a call's reply stream, with a depth of
+ *     at most 100 ms (a device whose listed floor is over 100 ms gets none
+ *     and plays from its whole buffer).
  *     Without it (older clients) the device grants its whole buffer and
  *     starts at its normal threshold, so a client that doesn't pace live never
  *     underruns against a cap it didn't ask for.
@@ -586,12 +606,181 @@
  *     request_buffer_update for that stream (re-asking on every answer
  *     floods the link: ~85 requests/s at a 100 ms depth, each answered);
  *     it asks only when no report arrived for 500 ms (its stuck check).
+ *   One stream per Live call: the client opens one reply-audio stream when
+ *   the call goes live (or at its first reply) and keeps it open until the
+ *   call ends, writing each reply's audio as it arrives and nothing between
+ *   replies. It never stops and restarts the stream per reply, since each
+ *   restart waits on the old stream's play-out and the new start's answer
+ *   while live audio piles up.
+ *   - Between replies the device's buffer runs empty: it plays silence (a
+ *     short concealment fade first), keeps the stream open however long the
+ *     gap (a whole turn, minutes), and plays the next reply's first bytes
+ *     at once, never re-buffering to a larger threshold. "Reply playback"
+ *     (panel hold, the speaking face) means audio is playing, not that the
+ *     stream is open.
+ *   - Barge-in: the client sends mg_stream_audio_flush to a device that
+ *     lists it, discarding what the device holds without closing the
+ *     stream; to one that doesn't, stop_streaming drop and a new start.
+ *   - The push-to-talk rules above still apply: audio arriving during a turn
+ *     is held and plays after the turn and its tail.
  *   The device may ask for a stream: request_streaming [1] when its user
  *   picks the camera (or other video) on the device, request_streaming [0]
  *   when they leave it. A client that can stream answers 1 with
  *   start_streaming and 0 by stopping. The device repeats a pending
  *   request_streaming [1] when a client becomes ready (request_status).
  *
+ * Live call:
+ *   The client is the Muse app; the SDK's reference apps don't implement it.
+ *   A device that can start a live call with the Muse lists
+ *   mg_command_live_call in supported_features. In a live call the client
+ *   holds an open voice conversation with the Muse: push-to-talk utterances
+ *   go into the call as the user's audio, the Muse's spoken replies come back
+ *   as audio playback, and the client may stream the Muse's picture as video.
+ *   - Device -> client: [live_call, mg_live_call_request_t] when the user
+ *     starts or ends the call on the device (a menu item or a gesture).
+ *     The device repeats a pending start when a client becomes ready
+ *     (request_status), as for request_streaming.
+ *   - Client -> device: [live_call, mg_live_call_state_t] whenever the call
+ *     changes state, whichever side started it, so the device can show it.
+ *     A device shows no call after idle, ended or failed, or when the client
+ *     disconnects. A device that has shown connecting for 60 s with no newer
+ *     state from the client ends the call itself: it sends
+ *     [live_call, end] as for the user's end, shows its "Couldn't start the
+ *     call" banner and leaves the calling screen. It is a backstop for a
+ *     silent client: a client fails its own join sooner (the Muse apps at
+ *     45 s), with a reason. The client cancels the connect on that end as on
+ *     the user's and answers ended or failed. A client whose connect
+ *     legitimately takes longer re-sends connecting, which restarts the 60 s.
+ *     With failed, a client adds why
+ *     ([live_call, failed, mg_live_call_failure_reason_t]) to a device that
+ *     lists the failure_reason live-call feature; others get failed alone.
+ *     setup_required means the phone needs the user first (the Muse app's
+ *     voice intro, the microphone permission): the device shows "Open the
+ *     Muse app to finish setting up calls" instead of "Couldn't start the
+ *     call", and the client prompts on the phone.
+ *   - From a central whose token proof hasn't matched on this connection, a
+ *     set-up gadget takes live_call states without a proof gate, within
+ *     limits. connecting, failed and ended that answer this connection's own
+ *     pending start (the gadget asked this link to start a call) drive that
+ *     start screen as usual: connecting shows, failed or ended closes it (the
+ *     Muse apps answer a gadget's start before the proof; live comes only
+ *     after it). Any other state may show the call screen only on an unlocked,
+ *     awake gadget. For every call that isn't this connection's own pending
+ *     start (another link's call, or a proven link's live call), such a
+ *     state never wakes the screen, never draws over or delays the passcode
+ *     lock (auto-lock runs as usual), and never cancels or replaces the
+ *     owner's pending or live call (one this gadget started or accepted).
+ *   Push-to-talk, assistant_state and audio playback work as outside a call.
+ *   - Hands-free: a device that keeps its mic open for the whole call lists
+ *     [supported_features, sub_feature, live_call, hands_free, ...] (bytes
+ *     10 fe 85 01). The client then sends start_mic when the call goes live
+ *     and stop_mic only at the call's end. Without it, the client sends no
+ *     start_mic for the call: push-to-talk carries the call, and the mic
+ *     opens only while the user holds talk. A talk hold in a call captures
+ *     in LC3 where the device has it, whatever audio_codec says, at
+ *     capture_sample_rate and capture_bitrate_kbps (16 kHz and 32 kb/s
+ *     unless the client set others), labeled with its frame bytes.
+ *   - Walkie-talkie: a device without hands_free opens the mic for a call
+ *     only while the user holds talk (button or screen), from the call's
+ *     start until it ends, with the mic ring on while it captures. It
+ *     ignores a client start_mic during a call and for 3 s after it ends (no
+ *     capture, no ring, no answer); clients send none. A capture a client's
+ *     start_mic began before the call ends when the call starts, and a
+ *     stop_mic for it is always taken. The press that
+ *     starts a call is never a talk hold, even if it stays down after the
+ *     call starts: a talk hold is a new press on the talk control. A hold
+ *     during connecting is captured as a push-to-talk turn would be; the client
+ *     takes its audio as the call's joining speech (not a question), buffers
+ *     it until the call has joined and trims leading silence.
+ * Live call subtitles (live calls only; test-vectors/
+ * mg-subtitle-v1.json and mg_subtitle_ref.py are the reference):
+ *   A device without a speaker, or whose speaker is silent, can show the
+ *   Muse's words instead of playing them, in step with the avatar's mouth.
+ *   The client decides, for a device that lists mg_command_subtitle: it
+ *   sends subtitles rather than reply audio when the device has no speaker
+ *   or its speaker_volume is 0, and subtitles together with reply audio when
+ *   the user chose "always" for this device ("never" = reply audio even at
+ *   0). The device's speaker_volume is the source of truth (see Settings
+ *   reports). Under "always" the client sends subtitle state 1 before the
+ *   reply's first audio, to every device with a speaker whatever
+ *   wants_audio_too says. When subtitles replace the audio, the client opens
+ *   no stream_audio for replies (unless the device sets wants_audio_too), so
+ *   the link carries video alone, and it sends assistant_state done when the
+ *   reply's text ends. A mute or unmute in the
+ *   middle of a Live call switches at once both ways: on a mute the client
+ *   stops writing the reply's audio and flushes what the device holds
+ *   (mg_stream_audio_flush, where listed), keeping the call's stream open,
+ *   and the rest of the reply shows as subtitles; on an unmute it resumes
+ *   writing the reply's audio from the current moment, so the voice comes
+ *   back at once at the current word. Flush serves this switch and barge-in. All integers are
+ *   little-endian; every message is [subtitle, mg_subtitle_command_t, ...].
+ *   - request_capabilities / capabilities, as the other families do. The
+ *     client asks once per connection; a device answers version 1 and the
+ *     flags, lines and characters per line it renders and the largest words
+ *     payload it takes (max_words_bytes, counted from the reply id on, after
+ *     the command and sub-command bytes).
+ *   - A words message (header included) never exceeds the link's ATT payload
+ *     (ATT_MTU - 3). max_words_bytes is an upper bound the device sets from
+ *     its MTU: it counts from the reply id, so a whole words write is
+ *     max_words_bytes + 2 bytes, and the device reports no more than
+ *     ATT_MTU - 5. If the MTU changes after it answered, the device sends
+ *     capabilities again, unsolicited, with the new bound; the client uses
+ *     the latest. A client must also cap each words write at its own maximum
+ *     write-without-response length and split a long burst into several
+ *     words messages.
+ *   - state says whether this call is in subtitle mode and which timing
+ *     domain the cues use. state off, like clear, drops everything queued.
+ *     Only state 1 starts subtitle mode: words, reply_end and clock received
+ *     outside it are ignored (a device may count them), so a device never
+ *     shows text the client did not turn on.
+ *   - On a locked gadget (its passcode lock screen up) subtitles never draw
+ *     over the lock screen, and no subtitle message, state 1 included, wakes
+ *     or unlocks it. The device keeps the reply's words and shows them, as
+ *     they come due, once the user unlocks; a reply whose end (reply_end's
+ *     moment) comes while it is locked is dropped.
+ *   - From a central whose token proof hasn't matched on a set-up device,
+ *     subtitles show only on a screen that is already on: they never wake
+ *     it or keep it lit (see Token proof). While the device shows a prompt
+ *     that asks for the user's press or code (pairing, an update's confirm,
+ *     the passcode keypad), no subtitle draws over it.
+ *   - words carries cues: one word each (the word with the whitespace after
+ *     it, UTF-8, 1..255 bytes) and the moment to show it.
+ *     - Frame timing (the default, while video streams): the moment is a
+ *       video frame number, so the word appears with the mouth that speaks
+ *       it and no clock needs syncing. It is the video frame header's 16-bit
+ *       frame number extended to 32 bits: the device counts wraps over every
+ *       frame header it receives (decoded or dropped) since start_streaming,
+ *       and both sides start again from the header's number at each
+ *       start_streaming. The device reveals a word when it shows a frame
+ *       whose extended number has reached the cue's (serial comparison: due
+ *       when (int32_t)(shown - show_at) >= 0).
+ *     - Milliseconds timing (no video): the moment is milliseconds from the
+ *       reply's start, and the client sends clock about once a second with
+ *       how much of the reply has played; the device runs its own clock from
+ *       the latest one.
+ *     - MG_SUBTITLE_SHOW_NOW shows a word at once, in either domain; a cue
+ *       whose moment has already passed is shown at once too.
+ *     The device keeps one reply. A words message for another reply id drops
+ *     the old one first. offset is the first word's UTF-8 byte offset in the
+ *     reply's text, and each further word follows the one before. replace
+ *     drops every word at or after offset before adding these (the Muse
+ *     revised its text); final says the reply's text up to the end of this
+ *     message won't change. Revealed text is the longest run of words from
+ *     the reply's start that are each due; a revealed word stays revealed
+ *     until a replace or clear removes it.
+ *   - The client sends each cue at least ~300 ms before its moment, packs as
+ *     many whole cues as fit max_words_bytes (at most 255) into a message,
+ *     with replace on the first message of a run only and final on the last
+ *     only, and cuts a word longer than max(4, min(255, max_words_bytes - 11))
+ *     bytes into pieces at code point boundaries, never inside one.
+ *   - reply_end closes a reply at a moment in the same domain; the device keeps
+ *     the last lines briefly (its choice) and then clears them. clear drops
+ *     everything for that reply id (0: any reply): barge-in, the end of the
+ *     call, subtitle mode going off, or a new reply. A device ignores clock,
+ *     reply_end and clear for a reply id it doesn't hold (other than 0).
+ *   - A device that renders Latin-1 only says so (latin1_only); the client
+ *     then sends no other characters. A device shows what it can of anything
+ *     else (a replacement glyph), never rejects a message for it.
  * UI streaming (client -> device):
  *   A mostly static picture (the phone's screen, a web page) at the panel's
  *   own size, as opposed to camera video at the smaller size the device
@@ -712,6 +901,13 @@
  *   answers unsupported first, before any proof check: the gate covers only
  *   what a device does. assistant_state and the throughput test stay open,
  *   with no proof.
+ *   So do subtitles and the Live call screen, within limits: from a
+ *   central whose proof hasn't matched, subtitles show only on a screen
+ *   that is already on (they never wake it, keep it lit or hold off its
+ *   sleep or its passcode lock), nothing of them or of a call's controls
+ *   draws over a prompt that asks for the user's press or code (pairing,
+ *   an update's confirm, the passcode keypad), and such a call state
+ *   remaps none of the device's keys.
  *   Reads of the owner's content: on a release build of a device that holds
  *   a token, reads that return the owner's content answer only a connection
  *   whose proof matched, or in the local window a key hold arms:
@@ -796,6 +992,12 @@
  *   development key, which is public, so a valid signature doesn't show who
  *   built the image. Firmware the relay installs can therefore open the
  *   microphone whenever it likes.
+ *   During a call a device without hands_free (see Live call) ignores
+ *   start_mic altogether; only the user's own talk hold opens its
+ *   microphone then. On a device that lists hands_free, the press, gesture
+ *   or wake word that started the call (or the press that accepted it)
+ *   grants start_mic for that call, so while it is connecting or live a
+ *   relay holding the proof can open the microphone too.
  *   The re-setup prompt is limited per connection, so a nearby device can
  *   raise it again by reconnecting; the talk key never confirms it, so the
  *   owner can only dismiss it.
@@ -860,6 +1062,7 @@
  *   - Client: it trusts nothing from a declared device and runs no token
  *     proof with it: no push-to-talk, audio, video, offline clips, settings
  *     writes, device session or skills.
+ *     No Live call or subtitles either.
  *     It keeps the gadget's saved setup, shows that the gadget is in recovery
  *     and why, and offers only an MCUmgr update, Forget (on the phone) and, with
  *     mg_recovery_flag_restart, restart normally (device_action reboot). A
@@ -1420,6 +1623,7 @@
  *     central's own first update, or about 1 s after connect if none came).
  *   - The device goes active on its own, never slower than without this
  *     setting: at its own talk press (at touch-down),
+ *     at a call's start,
  *     when the client starts a stream to it (start_video, start_streaming,
  *     start_mic), and for Link setup and updates for their whole duration.
  *     A talk press's turn stays activity until its reply has played (or
@@ -1447,6 +1651,7 @@
  *     error 0x2A, Different Transaction Collision) is retried after about
  *     300 ms instead, if the link isn't already at the target. It accepts any update the central makes by
  *     itself, and never re-requests the set it is in (to force an update,
+ *     e.g. at call start,
  *     it goes through the other mode first).
  *   - Clients keep at most one gadget active per phone: when one goes active,
  *     they write ready to every other gadget that is, and write sleep to a
@@ -1502,6 +1707,14 @@ MG_ENUM(uint8_t, mg_command_t) {
   // proof alone. A release build of a device that isn't set up holds no
   // token, so no proof can match: it refuses a client's start_mic with
   // error proof_required (bench, automation and test builds don't).
+  // During a call, and for 3 s after it ends, a device without the Live
+  // call hands_free feature ignores start_mic (no capture, no answer) and
+  // the stop_mic that follows it; a stop_mic for a capture taken before the
+  // call is honored, and a call's start ends that capture. A device that
+  // lists hands_free also takes start_mic while a call it started is
+  // connecting or live (started by a real press, gesture or wake word, or
+  // accepted by a real press; a call a console word or protocol command
+  // started opens none), on a new link too once its token proof matched.
   mg_command_start_mic = 1,
   // Client -> device: stop capture.
   // Device -> client: capture has ended. Sent whenever capture ends,
@@ -1553,6 +1766,10 @@ MG_ENUM(uint8_t, mg_command_t) {
   //    get_settings and set_settings. Clients offer only these (e.g. no
   //    vibration controls on a device that doesn't list haptics_enabled)
   //    and never send others.
+  //   [supported_features, sub_feature, mg_command_live_call,
+  //    <mg_live_call_feature_t>...]   live call features the device has
+  //    (any number; clients ignore values they don't know; absent: none; a
+  //    later list replaces an earlier one on that connection)
   //   [supported_features, sub_feature, mg_command_request_status,
   //    mg_device_mode_t, mg_recovery_reason_t, mg_recovery_flag_t]   the
   //    device is in a recovery mode (see Recovery mode); sent before the
@@ -1615,9 +1832,14 @@ MG_ENUM(uint8_t, mg_command_t) {
   // param 1: mg_stream_video_command_t, additional params depend on
   // sub-command. See Video streaming.
   mg_command_stream_video = 0x84,
+  // Both directions. param 1: mg_live_call_request_t (device -> client) or
+  // mg_live_call_state_t (client -> device). See Live call.
+  mg_command_live_call = 0x85,
   // param 1: mg_ui_input_command_t, additional params depend on
   // sub-command. See UI input.
   mg_command_ui_input = 0x86,
+  // Both directions. param 1: mg_subtitle_command_t. See Live call subtitles.
+  mg_command_subtitle = 0x87,
   // param 1: mg_skill_command_t, additional params depend on sub-command.
   // See Skills. Superseded by mg_command_session.
   mg_command_skill = 0x88,
@@ -1688,6 +1910,8 @@ MG_ENUM(uint8_t, mg_data_type_t) {
   //   stream's type (until then the device stays framed). A client that keeps
   //   one playback stream open across replies stays framed meanwhile; with a
   //   playback stream per reply it re-enters framed per reply.
+  //   A Live call keeps one reply stream open for the whole call, so it stays
+  //   framed for the call.
   mg_data_type_framed = 30,
 };
 
@@ -1787,6 +2011,7 @@ MG_ENUM(uint8_t, mg_setting_parameter_t) {
   mg_setting_parameter_mic_low_power = 12,
   // Sample rate for device-initiated capture (push-to-talk turns), where the
   // capture's codec takes it, else 16000.
+  // Talk holds in a call are device-initiated capture too.
   // Persisted on device: remembered across connections and reboots; 16000 on
   // a fresh device or after a factory reset. Clients still send their chosen rate
   // at every connect, and get_settings answers the remembered value. Only
@@ -1861,6 +2086,7 @@ MG_ENUM(uint8_t, mg_link_mode_t) {
   mg_link_mode_ready = 1,
   // Streams, push-to-talk capture, reply playback, setup and updates:
   // 12/12/0/400 (15 ms, latency 0, 4 s).
+  // Calls too.
   mg_link_mode_active = 2,
 };
 
@@ -1942,6 +2168,18 @@ MG_ENUM(uint8_t, mg_device_action_t) {
   // param 2: int16_t utc_offset_minutes, param 3: uint8_t mg_clock_flags_t.
   mg_device_action_report_unix_time = 20,
   // 21-0xFF reserved (legacy device actions)
+};
+
+// Live call features a device lists as
+// [supported_features, sub_feature, mg_command_live_call, features...].
+MG_ENUM(uint8_t, mg_live_call_feature_t) {
+  // The device captures the user for the whole call, hands-free: the client's
+  // start_mic at live carries the call until it ends. Without it, the client
+  // opens no call capture: push-to-talk carries the call.
+  mg_live_call_feature_hands_free = 1,
+  // The device takes a mg_live_call_failure_reason_t after a failed state
+  // and shows it.
+  mg_live_call_feature_failure_reason = 2,
 };
 
 // Flags of set_unix_time / report_unix_time (param 3).
@@ -2332,8 +2570,10 @@ MG_ENUM(uint8_t, mg_stream_audio_command_t) {
   // Payload: uint32_t frame, a video frame number extended to 32 bits: the
   // video frame header's 16-bit frame number, its wraps counted over every
   // frame header received since start_streaming.
+  // Subtitle frame timing extends it the same way.
   // Client -> device, only to a device that lists
   // mg_stream_audio_capability_video_sync, and only while a video stream runs.
+  // In a Live call that is the call's video stream.
   // Applied in order with the Data writes around it,
   // like flush: the first sample of the next Data written after it belongs
   // with picture `frame` (the picture the client would show as that sample
@@ -2413,6 +2653,116 @@ MG_ENUM(uint8_t, mg_stream_audio_buffer_action_t) {
   // Discard what is buffered and stop now.
   mg_stream_audio_buffer_drop = 1,
 };
+
+MG_ENUM(uint8_t, mg_live_call_request_t) {
+  // The user ended the call on the device.
+  mg_live_call_request_end = 0,
+  // The user started the call on the device.
+  mg_live_call_request_start = 1,
+};
+
+MG_ENUM(uint8_t, mg_live_call_state_t) {
+  // No call.
+  mg_live_call_state_idle = 0,
+  // The client is connecting the call.
+  mg_live_call_state_connecting = 1,
+  // The call is live.
+  mg_live_call_state_live = 2,
+  // The call ended normally.
+  mg_live_call_state_ended = 3,
+  // The call failed to start or dropped.
+  mg_live_call_state_failed = 4,
+};
+
+// Why a call failed (after mg_live_call_state_failed, to a device that lists
+// mg_live_call_feature_failure_reason).
+MG_ENUM(uint8_t, mg_live_call_failure_reason_t) {
+  // No reason given: the device shows its usual failure text.
+  mg_live_call_failure_unspecified = 0,
+  // The phone needs the user before calls can start (the Muse app's voice
+  // intro, the microphone permission). The device shows "Open the Muse app
+  // to finish setting up calls"; the client prompts on the phone.
+  mg_live_call_failure_setup_required = 1,
+};
+
+// mg_subtitle_capabilities' version byte.
+#define MG_SUBTITLE_CAPS_VERSION 1
+
+MG_ENUM(uint8_t, mg_subtitle_command_t) {
+  // Client -> device. No payload.
+  mg_subtitle_request_capabilities = 0,
+  // Device -> client. Payload: uint8_t version (MG_SUBTITLE_CAPS_VERSION),
+  // uint8_t flags
+  // (mg_subtitle_capability_flag_t), uint8_t text lines the device renders,
+  // uint8_t characters a line holds at its font, uint16_t max_words_bytes
+  // (the largest words payload it accepts, counted from the reply id; never
+  // more than ATT_MTU - 5, so a whole words write fits one ATT payload; sent
+  // again unsolicited when the MTU changes).
+  mg_subtitle_capabilities = 1,
+  // Client -> device. Payload: uint8_t 1 while this call shows subtitles,
+  // 0 to stop (drops everything), uint8_t mg_subtitle_timing_t. Any other
+  // first byte is invalid (the device answers invalid_value).
+  mg_subtitle_state = 2,
+  // Client -> device. Payload: uint16_t reply id, uint8_t flags
+  // (mg_subtitle_words_flag_t), uint16_t the first word's UTF-8 byte offset
+  // in the reply, uint8_t count (1..255), then count words, each uint32_t
+  // when to show it (see Live call subtitles; MG_SUBTITLE_SHOW_NOW for at
+  // once), uint8_t length (1..255), and that many UTF-8 bytes.
+  mg_subtitle_words = 3,
+  // Client -> device. Payload: uint16_t reply id, uint32_t when the last
+  // word's cue ends (same domain as the words).
+  mg_subtitle_reply_end = 4,
+  // Client -> device. Payload: uint16_t reply id (0 = every reply),
+  // uint8_t mg_subtitle_clear_reason_t.
+  mg_subtitle_clear = 5,
+  // Client -> device, milliseconds timing only, about once a second.
+  // Payload: uint16_t reply id, uint32_t milliseconds played of the reply.
+  mg_subtitle_clock = 6,
+};
+
+MG_ENUM(uint8_t, mg_subtitle_capability_flag_t) {
+  // The device has no speaker, so a client with subtitles always uses them.
+  mg_subtitle_capability_no_speaker = 0x01,
+  // The device takes reply audio and subtitles together.
+  mg_subtitle_capability_wants_audio_too = 0x02,
+  // The device takes cues timed by video frame number (it decodes video).
+  mg_subtitle_capability_frame_timing = 0x04,
+  // The device takes cues timed in milliseconds.
+  mg_subtitle_capability_ms_timing = 0x08,
+  // The device reveals each word as its cue comes due, not a line at a time.
+  mg_subtitle_capability_word_reveal = 0x10,
+  // The device renders Latin-1 only; a client sends no other text.
+  mg_subtitle_capability_latin1_only = 0x20,
+};
+
+MG_ENUM(uint8_t, mg_subtitle_timing_t) {
+  // show_at is a video frame number, extended to 32 bits.
+  mg_subtitle_timing_frame = 0,
+  // show_at is milliseconds from the reply's start.
+  mg_subtitle_timing_ms = 1,
+};
+
+MG_ENUM(uint8_t, mg_subtitle_words_flag_t) {
+  // The reply's text up to the end of this message will not change.
+  mg_subtitle_words_final = 0x01,
+  // The words replace everything from their offset on.
+  mg_subtitle_words_replace = 0x02,
+};
+
+MG_ENUM(uint8_t, mg_subtitle_clear_reason_t) {
+  mg_subtitle_clear_call_ended = 0,
+  // The user spoke over the Muse, or pressed to talk.
+  mg_subtitle_clear_interrupted = 1,
+  mg_subtitle_clear_mode_off = 2,
+  mg_subtitle_clear_new_reply = 3,
+};
+
+// A cue with this moment is shown as soon as it arrives.
+#define MG_SUBTITLE_SHOW_NOW 0xFFFFFFFFu
+// Bytes before the first word of a words payload, and before each word's text.
+#define MG_SUBTITLE_WORDS_HEADER 6
+#define MG_SUBTITLE_WORD_HEADER 5
+#define MG_SUBTITLE_MAX_WORD_BYTES 255
 
 MG_ENUM(uint8_t, mg_stream_video_command_t) {
   // Client -> device. No payload.
@@ -2554,6 +2904,7 @@ MG_ENUM(uint8_t, mg_stream_video_capability_t) {
   // mg_stream_video_parameter_rotation in start_streaming, with width and
   // height the coded size; everything else (frame numbers, keyframes,
   // credit, the A/V anchor) is unchanged.
+  // Subtitle cues are unchanged too.
   // A size change
   // (stop + start) may switch between turned and upright. Comes after still
   // (a client that doesn't know one stops parsing there).

@@ -559,7 +559,7 @@ int main(void) {
         self.assertIn("muse_passcode_request_keypad(MUSE_PASS_WHY_UPDATE);", take)
         self.assertLess(inp.index("update_wake_take();"), inp.index("own = update_prompt_press(own);"))
         ui = (ROOT / "components" / "muse" / "muse_passcode_ui.c").read_text()
-        self.assertIn('s_why == MUSE_PASS_WHY_UPDATE ? "Unlock to update"', ui)
+        self.assertRegex(ui, r's_why == MUSE_PASS_WHY_UPDATE\s+\? "Unlock to update"')
         glue = (ROOT / "main" / "muse_glue.c").read_text()
         self.assertIn("muse_local_press_set_ui(muse_passcode_locked, muse_input_update_wake);", glue)
 

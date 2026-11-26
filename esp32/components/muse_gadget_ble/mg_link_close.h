@@ -18,7 +18,7 @@
 #include <stdint.h>
 
 /*
- * Which link closes our code asked for (two link drops read as
+ * Which link closes our code asked for (two Live call drops once read as
  * "the gadget closed it" with nothing in the log). Every ble_gap_terminate()
  * in this firmware goes through a linker wrap (-Wl,--wrap=ble_gap_terminate,
  * mg_link_close.c) that notes when. NimBLE's own closes don't: its L2CAP

@@ -18,9 +18,9 @@
 /*
  * A bench press on the device's own screen (muse_touch_press): down at
  * (x1, y1), moved in a straight line to (x2, y2) over ms, then lifted. The
- * touch read (muse_touch.c's read_cb, which LVGL and the video
+ * touch read (muse_touch.c's read_cb, which LVGL and the live call's video
  * poll both go through) reports it in place of the panel, so it lands where
- * a finger would: the home's Speaker, swipes, the
+ * a finger would: the home's Speaker, the call's controls and swipes, the
  * Sound page. After the lift it reports released for RELEASE_US, so every
  * reader sees the lift, then hands back to the panel.
  *

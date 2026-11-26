@@ -15,7 +15,7 @@
  */
 
 /*
- * Video beside reply audio on one Data characteristic, replayed
+ * A Live call's video beside reply audio on one Data characteristic, replayed
  * on the host through the gadget's own code (tests/test_video_route.py):
  * components/muse_gadget_ble/mg_proto.c (routing, change_data_type, the
  * streams' start and end), components/muse_vstream (the receive ring and its

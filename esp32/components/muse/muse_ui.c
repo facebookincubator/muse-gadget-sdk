@@ -53,6 +53,10 @@
 #include "muse_ble.h"
 #include "muse_audio.h"
 #include "muse_board.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#include "muse_subs.h"
+#endif
 #include "muse_icons.h"
 #include "muse_input.h"
 #include "muse_chat.h"
@@ -370,6 +374,9 @@ static void turn_dot_sync(void)
     }
     /* No dot in a realtime voice call: its screens stay as the call has them. */
     bool in_call = muse_voice_in_call();
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    in_call = in_call || muse_call_active();
+#endif
     muse_turn_dot_set_in_call(in_call);
     if (muse_turn_dot_update(kind, esp_timer_get_time())) {
         invalidate_dot();
@@ -405,6 +412,20 @@ static bool touch_confirms(void)
     return true;
 #else
     return muse_touch_real();
+#endif
+}
+
+/* A card that asks for a press or a code is up: the pairing confirm, the update prompt, the re-setup prompt (all on
+ * s_pair) or a passcode keypad. Nothing of a Live call's subtitles or its controls draws over one, so no caption
+ * can lie over a Confirm (muse_subs_card, muse_call_card). LVGL's task: every frame, and as s_pair changes. */
+static void sync_card(void)
+{
+    bool card = (s_pair && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN)) || muse_passcode_ui_covering();
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_card(card);
+    muse_call_card(card);
+#else
+    (void)card;
 #endif
 }
 
@@ -2030,6 +2051,12 @@ static void build_screen(void)
         lv_obj_add_flag(s_name_lbl, LV_OBJ_FLAG_HIDDEN);
         muse_home_build(face, &s_hg);
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    /* A live call shows in the name's place (the name's gone once a client is
+     * connected); on the home, over its state line. */
+    muse_call_build(face, s_home ? s_h / 2 + muse_home_line_y() - 16
+                          : muse_board->rim_controls ? 84 : s_small ? 30 : 56 + s_dy, s_small);
+#endif
 
     s_caption_lbl = make_label(face, font_pick(caption_font(), &lv_font_unscii_8), COLOR_CAPTION);
 #if CONFIG_MUSE_EMOJI
@@ -2189,6 +2216,12 @@ static void image_sync(void)
         image_hide_locked();   /* display.show_image's showing is over */
         ESP_LOGI("mg.image", "picture hidden (its time on screen is up)");
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (s_image_dsc.data && muse_call_active()) {
+        image_hide_locked();   /* a call takes the screen at once */
+        ESP_LOGI("mg.image", "picture hidden: a Live call started");
+    }
+#endif
     xSemaphoreTake(s_image_mutex, portMAX_DELAY);
     if (s_image_buf && !s_image_dsc.data) {
         s_image_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -2250,6 +2283,51 @@ static void face_bg_sync(void)
     lv_obj_invalidate(lv_obj_get_parent(s_face_bg));   /* the face (s_face exists only on touch boards) */
     if (old && old != next) {
         heap_caps_free(old);
+    }
+}
+
+/* The plain picture (muse_ui_face_plain_set): what the calling screen shows
+ * behind "Calling…", no scrim, no Size. Same hand-over as the face's;
+ * the descriptor and the pixels are PSRAM. LVGL task only past the hand-over. */
+static lv_image_dsc_t s_face_plain_dsc FACE_BG_PSRAM;
+static uint16_t *s_face_plain_buf;
+static atomic_uintptr_t s_face_plain_next;
+static uint32_t s_face_plain_ver;
+
+const void *muse_ui_face_image(uint32_t *ver)
+{
+    uintptr_t v = atomic_exchange(&s_face_plain_next, (uintptr_t)0);
+    if (v) {
+        uint16_t *next = v == FACE_BG_NONE ? NULL : (uint16_t *)v;
+        uint16_t *old = s_face_plain_buf;
+        lv_image_cache_drop(&s_face_plain_dsc);   /* the same descriptor, new pixels */
+        memset(&s_face_plain_dsc, 0, sizeof(s_face_plain_dsc));
+        if (next) {
+            s_face_plain_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+            s_face_plain_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+            s_face_plain_dsc.header.w = s_w;
+            s_face_plain_dsc.header.h = s_h;
+            s_face_plain_dsc.header.stride = s_w * sizeof(uint16_t);
+            s_face_plain_dsc.data_size = (size_t)s_w * s_h * sizeof(uint16_t);
+            s_face_plain_dsc.data = (const uint8_t *)next;
+        }
+        s_face_plain_buf = next;
+        s_face_plain_ver++;   /* the caller sets its image's source again in this same LVGL pass */
+        if (old && old != next) {
+            heap_caps_free(old);   /* nothing draws between here and the caller's new source (one task) */
+        }
+    }
+    if (ver) {
+        *ver = s_face_plain_ver;
+    }
+    return s_face_plain_buf ? &s_face_plain_dsc : NULL;
+}
+
+void muse_ui_face_plain_set(uint16_t *px)
+{
+    uintptr_t old = atomic_exchange(&s_face_plain_next, px ? (uintptr_t)px : FACE_BG_NONE);
+    if (old > FACE_BG_NONE && old != (uintptr_t)px) {
+        heap_caps_free((void *)old);   /* never shown */
     }
 }
 
@@ -2673,6 +2751,9 @@ static void build_overlays(void)
      * the panel, over everything LVGL draws (on_flush_start). */
     lv_display_add_event_cb(lv_display_get_default(), on_flush_start, LV_EVENT_FLUSH_START, NULL);
     s_mic_ring_ready = true;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_ui_init();   /* Live call subtitles: their band, below the ring */
+#endif
 }
 
 /* Shows or hides the mic ring when capture starts or stops, and draws it
@@ -2704,13 +2785,16 @@ bool muse_ui_dark(void)
     return s_dark;
 }
 
-/* The gadget's own talk turn is on: no passcode lock until
+/* A Live call or the gadget's own talk turn is on: no passcode lock until
  * the first screen-off after it ends. */
 static bool passcode_busy(void)
 {
     muse_mode_t m = muse_state_mode(NULL);
     bool turn = (m == MUSE_MODE_LISTENING || m == MUSE_MODE_THINKING || m == MUSE_MODE_SPEAKING) && muse_state_own_turn();
     bool call = muse_voice_in_call();
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    call = call || muse_call_owner_active();   /* an unproven one never does */
+#endif
     return turn || call;
 }
 
@@ -2813,10 +2897,14 @@ static void update_chrome(float now)
         lv_obj_t *active = lv_tileview_get_tile_active(s_tv);
         int page = active == s_settings;
         bool subpage = muse_settings_ui_in_subpage();
+        bool call = false;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        call = muse_call_active();   /* in a call the face stays */
+#endif
         /* A sub-page goes back with its own swipe; a hold that's talking
          * keeps the face still until release. */
         bool locked = muse_passcode_ui_locked_face();   /* locked: no Status, Settings or menus */
-        s_swipe_enabled = (!page || !subpage) && !muse_home_holding() && !locked;
+        s_swipe_enabled = (!page || !subpage) && !muse_home_holding() && !call && !locked;
         update_tileview_swipe();   /* nor while the screen mic, a volume swipe or a toggled note holds it */
         int dot = page ? s_ndots - 1 : active == s_face ? s_ndots - 2 : active == s_status ? s_ndots - 3 : 0;
         bool bench = muse_home_bench_shown();   /* the "Bench" mark takes their place */
@@ -2925,6 +3013,9 @@ static void update_chrome(float now)
     const lv_font_t *name_font = s_small ? &lv_font_unscii_8 : &lv_font_unscii_16;
     int name_cw = lv_font_get_glyph_width(name_font, 'M', ' ');
     const char *shown = paired ? "" : b.name;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_active()) shown = "";   /* the call's pill has its place */
+#endif
 #if LV_USE_SNAPSHOT
     if (!paired && s_bench_demo) shown = "MuseGadget-DEMO";
 #endif
@@ -3082,11 +3173,15 @@ static void update_chrome(float now)
         set_pair_ok(PAIR_OK_NONE);   /* (an update that isn't asking, or a passkey on the card) */
     }
     lv_obj_set_flag(s_pair, LV_OBJ_FLAG_HIDDEN, !b.passkey && !confirm && !let_go && !upd);
+    sync_card();   /* the subtitle band and the call's controls go at once */
     /* The confirm press counts only while the card is on show: drawn, not under the video view
-     * (it writes the panel past LVGL), the screen lit. */
+     * (it writes the panel past LVGL) or a subtitle band, the screen lit. */
     bool covered = muse_state_asleep();
 #if CONFIG_MUSE_VIDEO
     covered |= muse_video_is_open();
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    covered |= muse_subs_band_drawn();
 #endif
     atomic_store(&s_ask_shown, ask && !covered && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
     if (confirm && !upd && !let_go && !covered && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN)) {
@@ -3588,7 +3683,8 @@ static bool image_held_off(void)
 
 /* Every speaker change the
  * gadget didn't make itself shows at once with the volume overlay its own
- * controls use, plus who made it. On the home layout, Speaker's
+ * controls use, plus who made it. In a call, the call's controls (their
+ * level bar, the source on their hint line); on the home layout, Speaker's
  * volume card with the source under the level; on the compact and keys-only
  * faces (no volume card), the caption line, as their speaker key's "Speaker
  * on" / "Speaker off". muse_app.c wakes a dark panel for it. LVGL task. */
@@ -3602,6 +3698,11 @@ static void volume_watch(void)
     if (!by) {
         return;
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_volume_by(by)) {
+        return;
+    }
+#endif
     /* The volume card isn't opened over a passcode screen or the locked face
      * (muse_home_volume_by says no there): the caption line says it. */
     if (s_home && !muse_passcode_ui_covering() && muse_home_volume_by(by)) {
@@ -3684,8 +3785,8 @@ static void frame_tick_body(void)
     }
 #endif
     passcode_screens_tick();
-    muse_home_bench_tick();   /* the "Bench" mark, over whatever LVGL shows */
-    volume_watch();   /* before video, so the caption is current under it too */
+    muse_home_bench_tick();   /* the "Bench" mark, over whatever LVGL shows (over video: muse_call.c) */
+    volume_watch();   /* before video, so a call's video shows it too */
 #if CONFIG_MUSE_VIDEO
     if (muse_video_tick()) {
         muse_menu_close();
@@ -3701,6 +3802,11 @@ static void frame_tick_body(void)
     }
 #endif
     update_chrome(now);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    sync_card();   /* a keypad opened since */
+    muse_call_tick();
+    muse_subs_tick();   /* a Live call's subtitles without video */
+#endif
     if (muse_menu_tick(now)) {
         image_hide_locked();
         return;   /* the menu covers the face */

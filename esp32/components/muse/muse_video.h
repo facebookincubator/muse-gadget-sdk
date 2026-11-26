@@ -69,19 +69,49 @@ bool muse_video_decoding(void);
 void muse_video_open(void);
 /* Close the view and end the stream (any button while it's open). */
 void muse_video_close(void);
+/* Each stream's number (bumped at every begin). */
+uint32_t muse_video_gen(void);
+/* muse_video_close, only while stream gen is still the one on (an ended call's video, never a newer one). */
+void muse_video_close_gen(uint32_t gen);
 /* The passcode lock: while held,
  * a UI stream or phone camera view is kept off the screen like a drawn file
  * (its pictures dropped, the screen never woken for them, the view hidden)
- * and shows once unlocked if still live.
+ * and shows once unlocked if still live; a call's own video is held the
+ * same way (a phone's call waits behind the keypad until the unlock).
  * Any task (muse_passcode.c at every lock change). */
 void muse_video_set_hold(bool hold);
 /* The same while a passcode keypad (Set, Change or Turn off passcode) covers
  * the screen of an unlocked gadget, so its touches and picture stay on the
  * gadget. LVGL's task (muse_passcode_ui.c). */
 void muse_video_set_cover(bool cover);
+/*
+ * A live call (muse_call.c), for the screen: from the call's start
+ * (CALLING) until its first picture is drawn the view stays out of the way
+ * (muse_video_tick false) and muse_call shows its calling screen ("Calling…"
+ * on black); the first picture replaces that directly (no
+ * face, pill or "PHONE CAMERA" in between). During the call (CALLING or LIVE)
+ * a stream that goes quiet keeps its last picture instead of handing the
+ * screen back to the face. NONE: the call is over (muse_call closes the view).
+ */
+typedef enum { MUSE_VIDEO_CALL_NONE, MUSE_VIDEO_CALL_CALLING, MUSE_VIDEO_CALL_LIVE } muse_video_call_t;
+void muse_video_call(muse_video_call_t state);
+/* A call is on and its first picture hasn't been drawn yet. */
+bool muse_video_call_waiting(void);
+/* Why this call's video can't show on the gadget ("Video unavailable:
+ * low memory", ...), for the call screen in the picture's place; NULL while
+ * nothing failed here (cleared by a shown picture and at the call's end). */
+const char *muse_video_call_failure(void);
 /* The last stream's numbers (size, pictures shown, decode times, CPU peak, internal RAM at its start, once
- * the decoder opened and at its lowest), three lines. */
+ * the decoder opened and at its lowest), three lines, for the console's call.last?. */
 int muse_video_last_summary(char *out, size_t cap);
+/* A live call's stream stopped sending pictures (nothing failed here),
+ * or the client stopped its video (1 s after the stop): the view
+ * gives the screen back to the face (Muse animates in the picture's place)
+ * until the next picture. 0 while pictures come; else the line's reference
+ * (esp_timer us): the client's video stop if it stopped (a new start that
+ * sends nothing keeps it), else the last picture shown, so the call screen
+ * can add its line 5 s after it. */
+int64_t muse_video_call_stalled_since(void);
 /* From the UI's frame tick, LVGL locked: keeps the view's captions current.
  * True while the view is up (the face isn't drawn). */
 bool muse_video_tick(void);
@@ -90,11 +120,11 @@ bool muse_video_has_client(void);
 /* LVGL is paused: frames go straight to the panel and LVGL reads no touch. */
 bool muse_video_drawing(void);
 /* The live video picture on the panel now, by its frame number extended to 32
- * bits (the A/V anchor); false while no picture of
+ * bits as subtitles count it (the A/V anchor); false while no picture of
  * the running stream has been drawn. Any task. */
 bool muse_video_shown32(uint32_t *frame);
 /*
- * Something drawn over the video (a board's own overlay): called on the
+ * Something drawn over the video (a live call's controls): called on the
  * show task with each piece of a frame once it's filled, RGB565 in the
  * panel's byte order, with where the piece's first pixel is on the panel.
  * It must be quick and must not block. NULL: nothing.
@@ -157,6 +187,22 @@ void muse_video_piece_sent(const uint8_t *px, int stride, int x, int y, int w, i
 /* Boards that hold a draw for the panel's scan (boards/muse_lcd_bands.c): how long it waited and how long it wrote,
  * once a draw_frame or draw_windows call, for the vdirty: line's TE wait. */
 void muse_video_panel_timing(uint32_t te_hold_us, uint32_t write_us);
+/*
+ * What the video keeps, for a live call's stats overlay
+ * (muse_call_stats.h): plain reads of the counters the decode and show
+ * tasks already keep, nothing measured for it. Any task.
+ */
+typedef struct {
+    bool streaming;              /* a video stream (not a UI stream) is decoding */
+    bool vp8;                    /* its codec: VP8, else H.264 */
+    uint16_t coded_w, coded_h;   /* the stream's picture */
+    uint16_t shown_w, shown_h;   /* drawn on the panel (0 before the first picture) */
+    uint32_t rx_bytes;           /* bytes into the ring since the stream started */
+    uint16_t shown, dropped;     /* since the stream started */
+    uint32_t dec_errors;         /* since the stream started */
+    uint32_t kf_requests;        /* keyframes asked for, since boot */
+} muse_video_stats_t;
+void muse_video_stats(muse_video_stats_t *out);
 /* Bench (>shot): the next frame drawn, as the panel gets it (overlays and
  * the mic ring included), RGB565 in the panel's byte order, w x h. False:
  * no frame within timeout_ms (no video). The buffer stays the module's. */

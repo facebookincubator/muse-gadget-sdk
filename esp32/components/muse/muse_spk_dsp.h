@@ -21,7 +21,7 @@
  * with a UMIK-1: almost nothing below ~700 Hz, +12 dB/oct up to 1.5
  * kHz, the NS4150B clipping at DAC -5 dBFS), on every reply's way to the
  * speaker of a board with muse_board_t.speaker_speech_chain (the musegadgets
- * player's stream_audio, push-to-talk and stream_audio replies alike, and the
+ * player's stream_audio, push-to-talk and Live call replies alike, and the
  * device's own sounds through muse_audio_write; muse_audio.h):
  *   1. high-pass, 4th-order Butterworth (two biquads) at hpf_hz: the 200-800
  *      Hz of speech the speaker can't make only eats the amp's headroom;

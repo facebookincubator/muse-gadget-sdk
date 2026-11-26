@@ -76,11 +76,20 @@ def lit(pixels: bytes, x0: int, y0: int, x1: int, y1: int, outside: bool = False
     return n
 
 
+def has_color(pixels: bytes, rgb: tuple[int, int, int], tol: int = 12) -> int:
+    n = 0
+    for i in range(0, len(pixels), 3):
+        if all(abs(pixels[i + k] - rgb[k]) <= tol for k in range(3)):
+            n += 1
+    return n
+
+
 def check_turn_dot(binary: Path, tmp: Path) -> None:
     """On a screen without Muse a turn's thinking shows a breathing
     #E07BFF dot and responding a #6FF0BF one, top center inside the ring
     (412 px: ring 9, gap 4, radius 7: center (206, 20)); nothing at
-    listening or idle, nothing where Muse shows it (the home)."""
+    listening or idle, nothing where Muse shows it (the home), nothing on
+    the calling screen."""
     cx, cy, r = WIDTH // 2, 20, 7
     box = (cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2)
     base = "wifi=connected\nble=connected\npaired=true\nbattery=72\nclock=10:09\n"
@@ -119,6 +128,10 @@ def check_turn_dot(binary: Path, tmp: Path) -> None:
             assert dot_pixels(shot(face, f"face={face}\n" + page)) == 0, f"{page.strip()}: a dot at {face}"
     for face in ("thinking", "speaking"):
         assert lit(shot(f"home_{face}", f"face={face}\n"), *box) == 0, f"home: Muse shows {face}, no dot"
+    # The calling screen stays black but for its text, mid-turn too.
+    calling = shot("calling", "face=thinking\ncall=asked\nadvance=600\n")
+    c = WIDTH // 2
+    assert lit(calling, c - 140, c - 24, c + 140, c + 24, outside=True) == 0, "a dot on the calling screen"
 
 
 def main() -> None:
