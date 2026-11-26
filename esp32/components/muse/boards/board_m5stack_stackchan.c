@@ -357,7 +357,7 @@ static int clamp_int(int val, int min_val, int max_val)
 static void stackchan_motion_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "Stack-Chan motion & LED task started");
+    ESP_LOGI(TAG, "Stack-Chan motion & LED task started (power-save enabled)");
 
     /* Center servos at startup */
     vTaskDelay(pdMS_TO_TICKS(300));
@@ -365,10 +365,13 @@ static void stackchan_motion_task(void *arg)
     scs_set_torque(SERVO_ID_PITCH, true);
     scs_write_pos(SERVO_ID_YAW, YAW_CENTER, 60, 0);
     scs_write_pos(SERVO_ID_PITCH, PITCH_CENTER, 60, 0);
-    stackchan_set_leds_rgb(20, 20, 20);
+    stackchan_set_leds_rgb(0, 30, 45);
 
     uint32_t tick = 0;
     muse_mode_t prev_mode = MUSE_MODE_BOOT;
+    bool torque_active = true;
+    uint32_t idle_settle_ticks = 0;
+    bool base_boost_on = true;
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(40)); /* 25 Hz loop */
@@ -378,6 +381,31 @@ static void stackchan_motion_task(void *arg)
         muse_mode_t mode = muse_state_mode(&secs_in_mode);
         float level = muse_state_level();
         float t = (float)(esp_timer_get_time() % 31415926) / 1000000.0f;
+
+        /* Check battery power periodically every 50 ticks (2 seconds) */
+        muse_power_t power = muse_state_power();
+        bool on_battery = !power.usb;
+        bool low_battery = on_battery && ((power.battery_pct >= 0 && power.battery_pct <= 20) ||
+                                          (power.battery_mv > 0 && power.battery_mv <= 3500));
+        bool critical_battery = on_battery && ((power.battery_pct >= 0 && power.battery_pct <= 8) ||
+                                              (power.battery_mv > 0 && power.battery_mv <= 3350));
+
+        /* Critical battery safety guard: shut down 5V boost converter to protect battery cell */
+        if (critical_battery && base_boost_on) {
+            ESP_LOGW(TAG, "Battery CRITICAL (%d%%, %d mV): disabling 5V base boost converter",
+                     power.battery_pct, power.battery_mv);
+            scs_set_torque(SERVO_ID_YAW, false);
+            scs_set_torque(SERVO_ID_PITCH, false);
+            stackchan_set_leds_rgb(0, 0, 0);
+            bsp_feature_enable(BSP_FEATURE_USB, false);
+            base_boost_on = false;
+            torque_active = false;
+        } else if (!critical_battery && !base_boost_on && power.usb) {
+            /* Recovered on USB power */
+            ESP_LOGI(TAG, "USB power restored: re-enabling 5V base boost converter");
+            bsp_feature_enable(BSP_FEATURE_USB, true);
+            base_boost_on = true;
+        }
 
         if (mode != prev_mode) {
             ESP_LOGD(TAG, "Mode changed: %d -> %d", prev_mode, mode);
@@ -393,6 +421,15 @@ static void stackchan_motion_task(void *arg)
                 stackchan_play_sound(SOUND_SLEEP);
             }
 
+            /* Re-enable torque when leaving idle into an active state */
+            if (mode != MUSE_MODE_IDLE && mode != MUSE_MODE_OFF && !low_battery && base_boost_on) {
+                if (!torque_active) {
+                    scs_set_torque(SERVO_ID_YAW, true);
+                    scs_set_torque(SERVO_ID_PITCH, true);
+                    torque_active = true;
+                }
+            }
+            idle_settle_ticks = 0;
             prev_mode = mode;
         }
 
@@ -404,57 +441,82 @@ static void stackchan_motion_task(void *arg)
             target_yaw = YAW_CENTER;
             target_pitch = PITCH_CENTER;
             float pulse = 0.5f + 0.5f * sinf(t * 4.0f);
-            stackchan_set_leds_rgb((uint8_t)(100 * pulse), (uint8_t)(60 * pulse), (uint8_t)(10 * pulse));
+            stackchan_set_leds_rgb((uint8_t)(40 * pulse), (uint8_t)(30 * pulse), (uint8_t)(5 * pulse));
             break;
         }
 
         case MUSE_MODE_IDLE: {
-            /* Gentle relaxed breathing motion */
-            float breath = sinf(t * 1.5f);
-            float sway = sinf(t * 0.5f);
-            target_pitch = PITCH_CENTER + (int)(breath * 10.0f);
-            target_yaw = YAW_CENTER + (int)(sway * 18.0f);
+            target_pitch = PITCH_CENTER;
+            target_yaw = YAW_CENTER;
+            idle_settle_ticks++;
 
-            /* Subtle low-power dim LED breathing */
-            float led_p = 0.2f + 0.15f * (1.0f + sinf(t * 1.5f));
-            stackchan_set_leds_rgb((uint8_t)(30 * led_p), (uint8_t)(35 * led_p), (uint8_t)(45 * led_p));
+            /* After 35 ticks (~1.4s) settled in center: release servo torque and turn off LEDs (saves ~500mA!) */
+            if (idle_settle_ticks > 35 && torque_active) {
+                scs_set_torque(SERVO_ID_YAW, false);
+                scs_set_torque(SERVO_ID_PITCH, false);
+                torque_active = false;
+                stackchan_set_leds_rgb(0, 0, 0); /* LEDs off in idle saves ~80mA */
+            }
+
+            /* On USB power only, do a subtle glance once every 30 seconds */
+            if (power.usb && idle_settle_ticks > 750) { /* 750 * 40ms = 30s */
+                idle_settle_ticks = 0;
+                scs_set_torque(SERVO_ID_YAW, true);
+                scs_set_torque(SERVO_ID_PITCH, true);
+                torque_active = true;
+                int glance = (tick / 750 % 2 == 0) ? 55 : -55;
+                target_yaw = YAW_CENTER + glance;
+                target_pitch = PITCH_CENTER - 15;
+            }
             break;
         }
 
         case MUSE_MODE_LISTENING: {
+            if (low_battery) {
+                stackchan_set_leds_rgb(0, 0, 0);
+                break;
+            }
             /* Attentive posture: tilt head slightly forward/up towards user */
             float attentive_nod = sinf(t * 2.5f) * 6.0f;
             target_pitch = PITCH_CENTER - 35 + (int)attentive_nod;
             target_yaw = YAW_CENTER;
 
-            /* Soft glowing blue LEDs indicating active listening */
+            /* Soft glowing blue LEDs indicating active listening (energy conserved) */
             float pulse = 0.6f + 0.4f * sinf(t * 3.5f);
-            stackchan_set_leds_rgb(0, (uint8_t)(60 * pulse), (uint8_t)(220 * pulse));
+            stackchan_set_leds_rgb(0, (uint8_t)(25 * pulse), (uint8_t)(90 * pulse));
             break;
         }
 
         case MUSE_MODE_THINKING: {
+            if (low_battery) {
+                stackchan_set_leds_rgb(0, 0, 0);
+                break;
+            }
             /* Curious tilted posture while reasoning / thinking */
             float tilt = sinf(t * 2.8f) * 25.0f;
             float nod = cosf(t * 2.8f) * 15.0f;
             target_yaw = YAW_CENTER + (int)tilt;
             target_pitch = PITCH_CENTER - 15 + (int)nod;
 
-            /* Soft purple / magenta shimmer */
+            /* Soft purple / magenta shimmer (energy conserved) */
             float pulse = 0.5f + 0.5f * sinf(t * 4.0f);
-            stackchan_set_leds_rgb((uint8_t)(180 * pulse), (uint8_t)(30 * pulse), (uint8_t)(190 * pulse));
+            stackchan_set_leds_rgb((uint8_t)(70 * pulse), (uint8_t)(15 * pulse), (uint8_t)(75 * pulse));
             break;
         }
 
         case MUSE_MODE_SPEAKING: {
+            if (low_battery) {
+                stackchan_set_leds_rgb(0, 0, 0);
+                break;
+            }
             /* Expressive conversational micro-movements synced with voice level */
             float nod = sinf(t * 7.5f) * (14.0f + 35.0f * level);
             float tilt = sinf(t * 3.2f) * (12.0f + 28.0f * level);
             target_pitch = PITCH_CENTER + (int)nod;
             target_yaw = YAW_CENTER + (int)tilt;
 
-            /* Cheerful friendly turquoise LEDs reacting to speech level */
-            uint8_t brightness = (uint8_t)(80 + 175.0f * level);
+            /* Cheerful friendly turquoise LEDs reacting to speech level (energy conserved) */
+            uint8_t brightness = (uint8_t)(35 + 75.0f * level);
             stackchan_set_leds_rgb(0, brightness, (uint8_t)(brightness * 0.75f));
             break;
         }
@@ -465,13 +527,14 @@ static void stackchan_motion_task(void *arg)
             stackchan_set_leds_rgb(0, 0, 0);
             scs_set_torque(SERVO_ID_YAW, false);
             scs_set_torque(SERVO_ID_PITCH, false);
+            torque_active = false;
             break;
         }
 
         default:
             target_yaw = YAW_CENTER;
             target_pitch = PITCH_CENTER;
-            stackchan_set_leds_rgb(20, 20, 20);
+            stackchan_set_leds_rgb(0, 0, 0);
             break;
         }
 
@@ -479,8 +542,8 @@ static void stackchan_motion_task(void *arg)
         target_yaw = clamp_int(target_yaw, YAW_MIN, YAW_MAX);
         target_pitch = clamp_int(target_pitch, PITCH_MIN, PITCH_MAX);
 
-        /* Update servo positions smoothly every 2 ticks (50 Hz / 40 ms) */
-        if (mode != MUSE_MODE_OFF && (tick % 2 == 0)) {
+        /* Update servo positions smoothly only when torque is active and not low battery */
+        if (torque_active && base_boost_on && !low_battery && (tick % 2 == 0)) {
             scs_write_pos(SERVO_ID_YAW, (uint16_t)target_yaw, 35, 0);
             scs_write_pos(SERVO_ID_PITCH, (uint16_t)target_pitch, 35, 0);
         }
@@ -495,19 +558,33 @@ static esp_err_t init(void)
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
 
-    /* Enable CoreS3 5V base rail (AW9523 USB_EN / 5V boost) so the Stack-Chan base powers up */
-    esp_err_t err = bsp_feature_enable(BSP_FEATURE_USB, true);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "BSP_FEATURE_USB enable failed: %s", esp_err_to_name(err));
-    }
-
-    /* Initialize AXP2101 PMU for power sensing and power key */
-    err = muse_pmu_init(bsp_i2c_get_handle(), true);
+    /* Initialize AXP2101 PMU first for power sensing and power key */
+    esp_err_t err = muse_pmu_init(bsp_i2c_get_handle(), true);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "PMU unavailable (%s): no talk button or battery status", esp_err_to_name(err));
     } else {
         s_pmu = true;
         (void)muse_pmu_set_key_shutdown(true);
+    }
+
+    /* Check battery state before enabling high-current 5V boost converter */
+    muse_power_t pwr = { 0 };
+    bool critical = false;
+    if (s_pmu && muse_pmu_read_power(&pwr) == ESP_OK) {
+        if (!pwr.usb && ((pwr.battery_pct >= 0 && pwr.battery_pct <= 10) ||
+                         (pwr.battery_mv > 0 && pwr.battery_mv <= 3400))) {
+            critical = true;
+            ESP_LOGW(TAG, "Battery CRITICAL on boot (%d%%, %d mV): deferring 5V base rail to prevent brownout",
+                     pwr.battery_pct, pwr.battery_mv);
+        }
+    }
+
+    /* Enable CoreS3 5V base rail (AW9523 USB_EN / 5V boost) if safe */
+    if (!critical) {
+        err = bsp_feature_enable(BSP_FEATURE_USB, true);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "BSP_FEATURE_USB enable failed: %s", esp_err_to_name(err));
+        }
     }
 
     /* Give the base hardware 150 ms to stabilize power rail */
@@ -621,6 +698,8 @@ static esp_err_t power_off(void)
     scs_set_torque(SERVO_ID_YAW, false);
     scs_set_torque(SERVO_ID_PITCH, false);
     stackchan_set_leds_rgb(0, 0, 0);
+    /* Disable 5V boost converter rail to prevent battery drain while powered off */
+    bsp_feature_enable(BSP_FEATURE_USB, false);
     return muse_pmu_power_off();
 }
 
