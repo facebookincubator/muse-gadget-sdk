@@ -950,7 +950,7 @@
     ]
   },
   "proof_gates": {
-    "description": "More of the protocol behind the token proof (mgcommands.h, Token proof; README.md, Gadget setup v2). Steps as in streams_and_updates; each also records acted: the usages the device's HID pressed, the client's haptic pattern playing (its id) and the assistant_state shown. The device lists ui_input hid_key (its HID host connected), mg_command_skill with mg-skills-v2.json's test_skills, test_payloads and test_manifest, haptic_play and haptic_stop (a pattern plays until stopped; haptic_play is refused, reason disabled, until the client writes haptics_enabled 1 with set_settings on that connection, which is taken without the proof) and assistant_state; device flags hid, skills or haptics false leave that part out. Event resetup_request is a pairing_client_hello in Link setup on this device; setup is its answer: confirm_required (encrypted, once the handshake has its keys) or error_operation_in_progress (at once, in plaintext: plaintext is its bytes on the setup TX characteristic), and prompt what it did to the re-setup prompt (shown, taken_over: still on screen, bound to this hello, no new flash; none). Event dismiss is the back gesture (a swipe or a separate back key); event press while the prompt is up is the confirm key or a tap on the Confirm disc, which confirms it, or with key talk the talk key, which on a set-up release device only dismisses a re-setup prompt (a dismiss on its connection) and otherwise confirms; event tap_elsewhere (a tap outside the disc) changes nothing. Event setup_mode: the device restarts in setup mode (its button held at boot, into its normal firmware with Link setup under its normal identity; never a SAFE) and the phone reconnects; setup mode ends at the confirmed re-setup or setup_mode_ms after that boot (test and bench builds are always in it). Device flag talk_key_only: its only key is its talk key; on a release build it takes a re-setup only in setup mode, answering a hello outside it error_pairing_unavailable (in plaintext, no session). resetup, on those events: the connection and hello (counted from 1 on each connection) the prompt is bound to (null: none up) and those the last press confirmed. A resetup_request step may carry conn, the connection it arrives on when several are open (default 1). Event setup_ends (with conn) is that connection's confirmed setup ending: its provision_v2 committed (auth_ok) or its session ended; until then other connections' hellos are refused too. Device flag dismiss_drops_link (default false): a device whose dismiss ends the setup link runs the exchanges flagged true and skips those flagged false, and the other way round; an exchange without the flag holds for both.",
+    "description": "More of the protocol behind the token proof (mgcommands.h, Token proof; README.md, Gadget setup v2). Steps as in streams_and_updates; each also records acted: the usages the device's HID pressed, the client's haptic pattern playing (its id) and the assistant_state shown. The device lists ui_input hid_key (its HID host connected), mg_command_skill with mg-skills-v2.json's test_skills, test_payloads and test_manifest, haptic_play and haptic_stop (a pattern plays until stopped; haptic_play is refused, reason disabled, until the client writes haptics_enabled 1 with set_settings on that connection, which is taken without the proof) and assistant_state; device flags hid, skills or haptics false leave that part out. Event resetup_request is a pairing_client_hello in Link setup on this device; setup is its answer: confirm_required (encrypted, once the handshake has its keys) or error_operation_in_progress (at once, in plaintext: plaintext is its bytes on the setup TX characteristic), and prompt what it did to the re-setup prompt (shown, taken_over: still on screen, bound to this hello, no new flash; none). Event dismiss is the back gesture (a swipe or a separate back key); event press while the prompt is up is the confirm key or a tap on the Confirm disc, which confirms it, or with key talk the talk key, which on a set-up release device only dismisses a re-setup prompt (a dismiss on its connection) and otherwise confirms; event tap_elsewhere (a tap outside the disc) changes nothing. Event setup_mode: the device restarts in setup mode (its button held at boot, into its normal firmware with Link setup under its normal identity; never a SAFE) and the phone reconnects; setup mode ends at the confirmed re-setup or setup_mode_ms after that boot (test and bench builds are always in it). Device flag talk_key_only: its only key is its talk key; on a release build it takes a re-setup only in setup mode, answering a hello outside it error_pairing_unavailable (in plaintext, no session). resetup, on those events: the connection and hello (counted from 1 on each connection) the prompt is bound to (null: none up) and those the last press confirmed. A resetup_request step may carry conn, the connection it arrives on when several are open (default 1), and invalid true: a hello whose top-level fields are valid but whose mobile_pub or mobile_nonce fails validation (error_pairing_invalid_hello; on the prompt's own connection it ends the prompt, prompt ended; device flags bad_hello_encrypted, the refusal encrypted under the session still current instead of in plaintext, and bad_hello_drops_link, the link dropped after it, work like dismiss_drops_link). Event setup_ends (with conn) is that connection's confirmed setup ending: its provision_v2 committed (auth_ok) or its session ended; until then other connections' hellos are refused too. Device flag dismiss_drops_link (default false): a device whose dismiss ends the setup link runs the exchanges flagged true and skips those flagged false, and the other way round; an exchange without the flag holds for both. An smp step is an SMP v1 request to the update gate of mg-update-v2.json (mg_update_ref.py's model) with the rc it answers and update_prompt after it (none or confirm); a press while the update prompt shows answers only that prompt's upload. Event injected_press is a console or Nordic UART word or a scripted tap: it confirms neither prompt.",
     "resetup_prompt_ms": 10000,
     "setup_mode_ms": 300000,
     "exchanges": [
@@ -2036,6 +2036,575 @@
               "prompt_hello": 3,
               "confirmed_conn": 1,
               "confirmed_hello": 1
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "a takeover hello that fails validation ends the prompt",
+        "mtu": 247,
+        "device": {
+          "talk_key_only": false,
+          "bad_hello_encrypted": false,
+          "bad_hello_drops_link": false
+        },
+        "note": "A hello on the prompt's own connection whose top-level fields are valid but whose mobile_pub or mobile_nonce fails validation gets its error and ends the prompt: nothing is latched, a press afterwards confirms nothing, and the next valid hello prompts afresh and needs its own press. The error goes out in plaintext, or encrypted under the session still current by a device that refuses before wiping it (bad_hello_encrypted); a device may drop the link after it (bad_hello_drops_link), and the next hello comes on a new connection.",
+        "steps": [
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a re-setup request (hello 1): the prompt shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "invalid": true,
+            "notify": [],
+            "note": "hello 2 on the same connection, a bad mobile_pub: error_pairing_invalid_hello in plaintext, the prompt ends",
+            "setup": {
+              "status": "error_pairing_invalid_hello",
+              "plaintext": "6572726f725f70616972696e675f696e76616c69645f68656c6c6f",
+              "prompt": "ended"
+            },
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "key": "talk",
+            "notify": [],
+            "note": "a talk-key press: no prompt is up, so nothing is confirmed",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a valid hello (3): the prompt shows afresh",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 3,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "the confirm key: confirms hello 3, the one it was shown for",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": 1,
+              "confirmed_hello": 3
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "a takeover hello that fails validation ends the prompt, answered encrypted",
+        "mtu": 247,
+        "device": {
+          "talk_key_only": false,
+          "bad_hello_encrypted": true,
+          "bad_hello_drops_link": false
+        },
+        "note": "A hello on the prompt's own connection whose top-level fields are valid but whose mobile_pub or mobile_nonce fails validation gets its error and ends the prompt: nothing is latched, a press afterwards confirms nothing, and the next valid hello prompts afresh and needs its own press. The error goes out in plaintext, or encrypted under the session still current by a device that refuses before wiping it (bad_hello_encrypted); a device may drop the link after it (bad_hello_drops_link), and the next hello comes on a new connection.",
+        "steps": [
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a re-setup request (hello 1): the prompt shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "invalid": true,
+            "notify": [],
+            "note": "hello 2 on the same connection, a bad mobile_pub: error_pairing_invalid_hello encrypted under the current session, the prompt ends",
+            "setup": {
+              "status": "error_pairing_invalid_hello",
+              "encrypted": true,
+              "prompt": "ended"
+            },
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "key": "talk",
+            "notify": [],
+            "note": "a talk-key press: no prompt is up, so nothing is confirmed",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a valid hello (3): the prompt shows afresh",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 3,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "the confirm key: confirms hello 3, the one it was shown for",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": 1,
+              "confirmed_hello": 3
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "a takeover hello that fails validation ends the prompt, the link dropped",
+        "mtu": 247,
+        "device": {
+          "talk_key_only": false,
+          "bad_hello_encrypted": false,
+          "bad_hello_drops_link": true
+        },
+        "note": "A hello on the prompt's own connection whose top-level fields are valid but whose mobile_pub or mobile_nonce fails validation gets its error and ends the prompt: nothing is latched, a press afterwards confirms nothing, and the next valid hello prompts afresh and needs its own press. The error goes out in plaintext, or encrypted under the session still current by a device that refuses before wiping it (bad_hello_encrypted); a device may drop the link after it (bad_hello_drops_link), and the next hello comes on a new connection.",
+        "steps": [
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a re-setup request (hello 1): the prompt shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "invalid": true,
+            "notify": [],
+            "note": "hello 2 on the same connection, a bad mobile_pub: error_pairing_invalid_hello in plaintext, the prompt ends, the link drops",
+            "setup": {
+              "status": "error_pairing_invalid_hello",
+              "plaintext": "6572726f725f70616972696e675f696e76616c69645f68656c6c6f",
+              "prompt": "ended"
+            },
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "reconnect",
+            "notify": [],
+            "note": "the phone connects again",
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "key": "talk",
+            "notify": [],
+            "note": "a talk-key press: no prompt is up, so nothing is confirmed",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a valid hello (1): the prompt shows afresh",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "the confirm key: confirms hello 1, the one it was shown for",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": 1,
+              "confirmed_hello": 1
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "a takeover hello that fails validation ends the prompt, answered encrypted, the link dropped",
+        "mtu": 247,
+        "device": {
+          "talk_key_only": false,
+          "bad_hello_encrypted": true,
+          "bad_hello_drops_link": true
+        },
+        "note": "A hello on the prompt's own connection whose top-level fields are valid but whose mobile_pub or mobile_nonce fails validation gets its error and ends the prompt: nothing is latched, a press afterwards confirms nothing, and the next valid hello prompts afresh and needs its own press. The error goes out in plaintext, or encrypted under the session still current by a device that refuses before wiping it (bad_hello_encrypted); a device may drop the link after it (bad_hello_drops_link), and the next hello comes on a new connection.",
+        "steps": [
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a re-setup request (hello 1): the prompt shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "invalid": true,
+            "notify": [],
+            "note": "hello 2 on the same connection, a bad mobile_pub: error_pairing_invalid_hello encrypted under the current session, the prompt ends, the link drops",
+            "setup": {
+              "status": "error_pairing_invalid_hello",
+              "encrypted": true,
+              "prompt": "ended"
+            },
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "reconnect",
+            "notify": [],
+            "note": "the phone connects again",
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "key": "talk",
+            "notify": [],
+            "note": "a talk-key press: no prompt is up, so nothing is confirmed",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "a valid hello (1): the prompt shows afresh",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "the confirm key: confirms hello 1, the one it was shown for",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": 1,
+              "confirmed_hello": 1
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "an update press opens no window",
+        "mtu": 247,
+        "device": {
+          "proof": false,
+          "talk_key_only": false
+        },
+        "note": "On a set-up gadget's release build the owner's press on an unproven link's update prompt confirms that prompt's upload and nothing else: it opens no window, so an injected tap from that link confirms nothing, and a re-setup prompt it raises stays unconfirmed.",
+        "steps": [
+          {
+            "smp": "0200006000010001a565696d61676500636c656e1840636f666600637368615820fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d915110864646174615820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            "rc": 10,
+            "update_prompt": "confirm",
+            "note": "an unproven link's image upload: rc 10, the update prompt shows",
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "press",
+            "notify": [],
+            "note": "the owner's physical press: confirms that upload",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "smp": "0200006000010001a565696d61676500636c656e1840636f666600637368615820fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d915110864646174615820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            "rc": 0,
+            "update_prompt": "none",
+            "note": "the retry: rc 0, the confirmed upload",
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "smp": "0200006000010001a565696d61676500636c656e1860636f6666006373686158209fffac24726dc6327e9d3551911f5ba7c07c60f09616ee37a3d27bceda322c2864646174615820404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+            "rc": 10,
+            "update_prompt": "none",
+            "note": "another image's upload: rc 10, not covered (no prompt yet: the last showed under 10 s ago)",
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "injected_press",
+            "notify": [],
+            "note": "an injected confirm tap from that link: nothing",
+            "resetup": {
+              "prompt_conn": null,
+              "prompt_hello": null,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "resetup_request",
+            "notify": [],
+            "note": "the same link raises a re-setup prompt (hello 1): it shows",
+            "setup": {
+              "status": "confirm_required",
+              "encrypted": true,
+              "prompt": "shown"
+            },
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
+            },
+            "acted": {
+              "hid_keys": [],
+              "pattern": null,
+              "shown": null
+            }
+          },
+          {
+            "event": "injected_press",
+            "notify": [],
+            "note": "an injected tap: the re-setup prompt stays, unconfirmed",
+            "resetup": {
+              "prompt_conn": 1,
+              "prompt_hello": 1,
+              "confirmed_conn": null,
+              "confirmed_hello": null
             },
             "acted": {
               "hid_keys": [],
@@ -4520,6 +5089,59 @@
             "890c071500000000000002066998ce353f9777a632a68d44d9c08c3a"
           ],
           "note": "the sealed clear (counter 1): erased, the registration dropped, the sealed [1] at once on device counter 2, the registration's; the session ends"
+        }
+      ]
+    },
+    {
+      "name": "sealed credentials that wait for room at MTU 247",
+      "mtu": 247,
+      "device": {
+        "credentials_wait": true
+      },
+      "note": "A board with no room for the sealed credentials when it answers the hello sends them once its stack has room, still on device counter 0: no device counter is skipped.",
+      "steps": [
+        {
+          "write": "890001000001000000010003",
+          "notify": [
+            "890001004000000010000003"
+          ],
+          "note": "sealed hello: answered; the credentials wait (counter 0 unused)"
+        },
+        {
+          "event": "buffer",
+          "notify": [
+            "890607e30000000000000026e59c6cdd66f9a83ba2cf5317f1a4fdd6466dfe61d79bcfc64a68f9ffc813d073584a59c8d1dc3a7378b1b0689db232ed23e8d131e820e6c697e2bb2ed1add12da0b44e337ac8d4b7b11b7140ec5c3ab39fe742def4c4d0c37fe1153aecc57dc4972b0bb5f9f5a34b2a74c2f5ff43d15f6df38517e4adaf2a6b359f929512ca0d516edd3a72e8761207f3a2085da296108184af79517b51e1e820056a721464b57900082fc5646e4c3953c08a4ba7a68a852c110e97febb51400b2584314941d9b474f32bf8e58ab334a78d6f723b44646eca3ea51c96b2b9456e5224fb9f"
+          ],
+          "note": "the stack has room: the credentials, sealed on device counter 0"
+        }
+      ]
+    },
+    {
+      "name": "sealed clear while the credentials wait at MTU 247",
+      "mtu": 247,
+      "device": {
+        "credentials_wait": true
+      },
+      "note": "A device message not yet started never goes out and its counter is never used: here the credentials still wait for room when the clear arrives, so they're dropped and the sealed [1] goes on device counter 0, the next counter the client takes.",
+      "steps": [
+        {
+          "write": "890001000001000000010003",
+          "notify": [
+            "890001004000000010000003"
+          ],
+          "note": "sealed hello: answered; the credentials wait (counter 0 unused)"
+        },
+        {
+          "write": "890c0715000000000000007807d4e32289597d4a051a29a1439da0e0",
+          "notify": [
+            "890c0715000000000000005c5e4301d358aa06bab37f81d758b06f95"
+          ],
+          "note": "the sealed clear (client counter 0): erased, the credentials dropped, the sealed [1] at once on device counter 0; the session ends"
+        },
+        {
+          "event": "buffer",
+          "notify": [],
+          "note": "the stack has room: nothing goes (the credentials were dropped)"
         }
       ]
     },

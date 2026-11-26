@@ -41,7 +41,7 @@ notice covers the `.json` files; the references carry the header themselves.
 
 ## Running the references
 
-Python 3 standard library only. From the repository root, each reference
+Python 3.9+, standard library only. From the repository root, each reference
 checks the JSON file next to it and exits non-zero on a mismatch:
 
 ```sh

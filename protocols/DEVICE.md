@@ -38,10 +38,12 @@ Beside the node id, display name, version and commands, `params` carry:
 
 Family:
 
-- Every device built with this SDK registers `"gadget"`, its Wi-Fi-only
-  builds and the C5 DevKitC-1 build included, and so does the Linux client.
-- Only Muse's own Home Link firmware (no capability bit 1, not a
-  `MuseGadget-*` device) registers `"link"`.
+- Every device built with this SDK registers `"gadget"`, and so does the
+  Linux client. That includes every ESP32 build, the Home Link builds without
+  BLE gadget audio, the Wi-Fi-only builds and the C5 DevKitC-1 build.
+- Only firmware Muse ships for its own Home Link products, which isn't
+  built from this SDK (no capability bit 1, not a `MuseGadget-*` device),
+  registers `"link"`.
 - A set-up device keeps its node id.
 
 The Muse apps tell gadgets from Muse's own devices by the family, never by

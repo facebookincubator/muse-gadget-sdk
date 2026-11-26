@@ -327,8 +327,13 @@ def register_request() -> dict:
 class Device:
     """The device side of mg_command_session, and of the VM session over it."""
 
-    def __init__(self, mtu: int, holds_token=True, proof=True, encrypted=True, vm_binding=False, task=False):
+    def __init__(self, mtu: int, holds_token=True, proof=True, encrypted=True, vm_binding=False, task=False,
+                 credentials_wait=False):
         self.mtu = mtu
+        # credentials_wait: no room for the sealed credentials when the hello is answered; they wait for the board's
+        # stack (event buffer), their counter not yet used.
+        self.credentials_wait = credentials_wait
+        self.creds_waiting = False
         # encrypted is never read: link encryption changes nothing (every session is sealed).
         self.holds_token, self.proof, self.encrypted = holds_token, proof, encrypted
         self.hello_done = False
@@ -418,7 +423,7 @@ class Device:
         """A new proof or a new sealed hello: every sealed message part way in or out goes, with the counters it
         touched, so nothing from the old session completes in the new one or gives one of its counters back."""
         self.cred_in = self.clear_in = None
-        self.clear_pending = False
+        self.clear_pending = self.creds_waiting = False
         self.cred_ctr = self.clear_ctr = self.in_ctr = None
         self.held = []
         self.out_ctr = None
@@ -479,6 +484,7 @@ class Device:
         self.creds = {}          # erased now, whatever is still going out
         self.holds_token = False
         self.clear_pending = True
+        self.creds_waiting = False   # credentials not started never go out; their counter was never used
         if self.out_off == 0:
             # Nothing of a reserved message went out: it never will, and its counter goes back.
             if self.out_ctr is not None:
@@ -578,6 +584,9 @@ class Device:
         self.tx, self.rx, self.rx_hole = 1, 0, 0   # the credentials take device -> client counter 0
         self.saved_sealed = bool(flags & HELLO_FLAG_SEALED_SAVED)
         echo = HELLO_FLAG_SEALED | (HELLO_FLAG_SEALED_SAVED if self.saved_sealed else 0)
+        if self.credentials_wait:
+            self.tx, self.creds_waiting = 0, True   # counter 0 waits with them, unused
+            return [hello(DEVICE_MAX_MESSAGE, DEVICE_WINDOW) + bytes([echo])]
         sealed = s.seal(*self.seal_keys, s.DEVICE_TO_CLIENT, 0, compact(self.creds).encode())
         return [hello(DEVICE_MAX_MESSAGE, DEVICE_WINDOW) + bytes([echo])] + \
             s.fragments(CREDENTIALS, sealed, True, max_value(self.mtu))
@@ -736,6 +745,16 @@ class Device:
         self.send_credit += struct.unpack("<I", p[:4])[0]
         return []
 
+    def buffer(self) -> list:
+        """The board's stack has room: credentials that waited go out now, sealed on the next device counter."""
+        if not (self.creds_waiting and self.seal_keys):
+            return []
+        s = phone_seal()
+        self.creds_waiting = False
+        sealed = s.seal(*self.seal_keys, s.DEVICE_TO_CLIENT, self.tx, compact(self.creds).encode())
+        self.tx += 1
+        return s.fragments(CREDENTIALS, sealed, True, max_value(self.mtu))
+
     def nudge(self) -> list:
         """The keepalive: while a session is open, the credit the device owes for messages it has fully taken
         and not yet given back, or credit 0 when it owes none (a message still arriving earns none); nothing with
@@ -846,6 +865,8 @@ class Device:
         """Sends queued message bytes as far as the client's credit allows."""
         out = []
         sealed = self.seal_keys is not None
+        if sealed and self.creds_waiting:
+            return out   # nothing sealed goes before the credentials
         if sealed and self.out_ctr is None and self.held:
             out += self.release_held()   # an answer owed goes before the next data message is reserved
         while self.open and self.outq:
@@ -935,6 +956,13 @@ class Recorder:
     def nudge(self, note: str = None):
         """The device's keepalive nudge (event nudge)."""
         step = {"event": "nudge", "notify": [f.hex() for f in self.dev.nudge()]}
+        if note:
+            step["note"] = note
+        self.ex["steps"].append(step)
+
+    def buffer(self, note: str = None):
+        """The board's stack has room (event buffer): credentials that waited go out."""
+        step = {"event": "buffer", "notify": [f.hex() for f in self.dev.buffer()]}
         if note:
             step["note"] = note
         self.ex["steps"].append(step)
@@ -1581,6 +1609,28 @@ def clear_unsent_exchange() -> dict:
     r.write(r.frames(r.blob(b"\x00"), CLEAR)[0], f"the sealed clear (counter {clear_ctr}): erased, the registration "
                                                    "dropped, the sealed [1] at once on device counter 2, the "
                                                    "registration's; the session ends")
+    return r.ex
+
+
+def credentials_wait_exchange() -> dict:
+    r = Recorder("sealed credentials that wait for room at MTU 247", 247,
+                 "A board with no room for the sealed credentials when it answers the hello sends them once its "
+                 "stack has room, still on device counter 0: no device counter is skipped.", credentials_wait=True)
+    r.write(hello(65536, 65536) + bytes([SH]), "sealed hello: answered; the credentials wait (counter 0 unused)")
+    r.buffer("the stack has room: the credentials, sealed on device counter 0")
+    return r.ex
+
+
+def clear_credentials_unsent_exchange() -> dict:
+    r = Recorder("sealed clear while the credentials wait at MTU 247", 247,
+                 "A device message not yet started never goes out and its counter is never used: here the "
+                 "credentials still wait for room when the clear arrives, so they're dropped and the sealed [1] "
+                 "goes on device counter 0, the next counter the client takes.", credentials_wait=True)
+    r.write(hello(65536, 65536) + bytes([SH]), "sealed hello: answered; the credentials wait (counter 0 unused)")
+    r.write(r.frames(r.blob(b"\x00"), CLEAR)[0], "the sealed clear (client counter 0): erased, the credentials "
+                                                   "dropped, the sealed [1] at once on device counter 0; the session "
+                                                   "ends")
+    r.buffer("the stack has room: nothing goes (the credentials were dropped)")
     return r.ex
 
 
@@ -2459,6 +2509,22 @@ def skills_ref():
     return mod
 
 
+def update_ref():
+    """mg_update_ref.py (next to this file): the Bluetooth update gate, for where the update prompt meets the rest."""
+    mod = sys.modules.get("mg_update_ref")
+    if mod is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mg_update_ref", Path(__file__).with_name("mg_update_ref.py"))
+        mod = importlib.util.module_from_spec(spec)
+        keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.dont_write_bytecode = keep
+        sys.modules["mg_update_ref"] = mod
+    return mod
+
+
 def hid_key(usage: int) -> bytes:
     return bytes([MG_COMMAND_UI_INPUT, UI_INPUT_HID_KEY]) + le16(usage)
 
@@ -2485,12 +2551,17 @@ class ProofGateDevice(GatedDevice):
     device that doesn't implement that part."""
 
     def __init__(self, mtu: int, hid=True, skills=True, haptics=True, dismiss_drops_link=False, talk_key_only=False,
-                 **flags):
+                 bad_hello_encrypted=False, bad_hello_drops_link=False, **flags):
         super().__init__(mtu, **flags)
+        # A takeover hello that fails validation: refused encrypted under the session still current (a device that
+        # answers before wiping it) instead of in plaintext; the link dropped after the refusal.
+        self.bad_hello_encrypted, self.bad_hello_drops_link = bad_hello_encrypted, bad_hello_drops_link
+        self.setup_encrypted = False   # the last error answer went out encrypted
         self.hid, self.has_skills, self.haptics = hid, skills, haptics
         self.dismiss_drops_link = dismiss_drops_link   # a dismiss ends the setup link (the board's choice)
         self.talk_key_only = talk_key_only             # its only key is its talk key
         self.setup_mode_at = None                      # when it started in setup mode (its button held at boot)
+        self.updates = None                            # mg_update_ref's update gate, once an SMP request comes
         sk = skills_ref()
         self.skills = sk.Device(sk.TEST_SKILLS, sk.TEST_MANIFEST, sk.TEST_PAYLOADS, mtu) if skills else None
         self.hid_keys = []        # usages the HID pressed and released
@@ -2550,6 +2621,18 @@ class ProofGateDevice(GatedDevice):
             return []
         return super().write(frame)
 
+    def update_gate(self):
+        if self.updates is None:
+            self.updates = update_ref().Device(release=self.release, holds_token=self.holds_token)
+        self.updates.proof = self.proof
+        return self.updates
+
+    def smp(self, request: bytes) -> int:
+        return self.update_gate().smp(request)
+
+    def update_prompt(self) -> str:
+        return self.updates.prompt if self.updates else "none"
+
     def in_setup_mode(self) -> bool:
         """Setup mode lasts until the confirmed re-setup or SETUP_MODE_MS after the boot that entered it."""
         return self.setup_mode_at is not None and self.now - self.setup_mode_at < SETUP_MODE_MS
@@ -2563,12 +2646,31 @@ class ProofGateDevice(GatedDevice):
         talk-key-only gadget's one key confirms it)."""
         return self.release and self.holds_token and not (self.talk_key_only and self.in_setup_mode())
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
+        if what == "press" and self.update_prompt() == "confirm":
+            self.updates.event("press")   # the update's own prompt takes the press: that upload, nothing else
+            return []
+        if what == "injected_press":   # a console or Nordic UART word, or a scripted tap: it confirms nothing
+            if self.updates:
+                self.updates.event("injected_press")
+            return []
+        if what in ("time", "reconnect") and self.updates:
+            self.updates.event(what, ms)
         if what == "resetup_request":
             hello = (conn, self.hellos.get(conn, 0) + 1)
             self.hellos[conn] = hello[1]
+            self.setup_encrypted = False
             if self.resetup_closed():   # error_pairing_unavailable, no session, nothing shows
                 self.setup_answer, self.prompt_change = "error_pairing_unavailable", "none"
+            elif invalid and self.prompt is not None and self.prompt[0] == conn:
+                # a takeover hello that fails validation gets its error and ends the prompt: nothing latched
+                self.prompt, self.setup_answer, self.prompt_change = None, "error_pairing_invalid_hello", "ended"
+                self.setup_encrypted = self.bad_hello_encrypted
+                if self.bad_hello_drops_link:
+                    self.event("reconnect", ms, source)   # the link goes after the refusal
+            elif invalid and self.prompt is None:
+                self.setup_answer, self.prompt_change = "error_pairing_invalid_hello", "none"
             elif self.prompt is not None and self.prompt[0] == conn:
                 # never refused while its prompt is up: the newest hello on the prompt's connection takes it over
                 self.prompt, self.setup_answer, self.prompt_change = hello, "confirm_required", "taken_over"
@@ -2621,7 +2723,7 @@ class ProofGateDevice(GatedDevice):
         (no keys yet: its ASCII bytes on the setup TX characteristic); confirm_required goes out encrypted once the
         handshake has its keys. prompt: what the hello did to the prompt (shown; taken_over: the prompt stays on
         screen, now bound to this hello, with no new flash; none)."""
-        if self.setup_answer.startswith("error_"):
+        if self.setup_answer.startswith("error_") and not self.setup_encrypted:
             return {"status": self.setup_answer, "plaintext": self.setup_answer.encode().hex(),
                     "prompt": self.prompt_change}
         return {"status": self.setup_answer, "encrypted": True, "prompt": self.prompt_change}
@@ -2656,6 +2758,14 @@ class ProofGateRecorder(MicGateRecorder):
             self.ex["steps"][-1]["setup"] = self.dev.setup_step()
         if what in RESETUP_EVENTS:
             self.ex["steps"][-1]["resetup"] = self.dev.resetup_state()
+        self._tag()
+
+    def smp(self, request: bytes, note: str = None):
+        """An SMP request to the update gate: its rc and the update prompt after it."""
+        step = {"smp": request.hex(), "rc": self.dev.smp(request), "update_prompt": self.dev.update_prompt()}
+        if note:
+            step["note"] = note
+        self.ex["steps"].append(step)
         self._tag()
 
     def skill_invoke(self, rid: int, request: bytes, note: str = None):
@@ -2736,7 +2846,8 @@ def gate_unset_exchange() -> dict:
     return r.ex
 
 
-RESETUP_EVENTS = ("resetup_request", "dismiss", "press", "setup_ends", "tap_elsewhere", "setup_mode")
+RESETUP_EVENTS = ("resetup_request", "dismiss", "press", "setup_ends", "tap_elsewhere", "setup_mode",
+                  "injected_press")
 
 
 def resetup_prompt_exchange() -> dict:
@@ -2859,6 +2970,45 @@ def resetup_talk_key_automation_exchange() -> dict:
     return r.ex
 
 
+def resetup_bad_takeover_exchange(encrypted: bool = False, drops_link: bool = False) -> dict:
+    name = "a takeover hello that fails validation ends the prompt" + (", answered encrypted" if encrypted else "") \
+        + (", the link dropped" if drops_link else "")
+    r = ProofGateRecorder(name, "A hello on the prompt's own connection whose top-level fields are valid but whose "
+                          "mobile_pub or mobile_nonce fails validation gets its error and ends the prompt: nothing is "
+                          "latched, a press afterwards confirms nothing, and the next valid hello prompts afresh and "
+                          "needs its own press. The error goes out in plaintext, or encrypted under the session still "
+                          "current by a device that refuses before wiping it (bad_hello_encrypted); a device may drop "
+                          "the link after it (bad_hello_drops_link), and the next hello comes on a new connection.",
+                          talk_key_only=False, bad_hello_encrypted=encrypted, bad_hello_drops_link=drops_link)
+    r.event("resetup_request", "a re-setup request (hello 1): the prompt shows")
+    r.event("resetup_request", "hello 2 on the same connection, a bad mobile_pub: error_pairing_invalid_hello "
+            + ("encrypted under the current session" if encrypted else "in plaintext") + ", the prompt ends"
+            + (", the link drops" if drops_link else ""), invalid=True)
+    if drops_link:
+        r.event("reconnect", "the phone connects again")
+    r.event("press", "a talk-key press: no prompt is up, so nothing is confirmed", key="talk")
+    r.event("resetup_request", f"a valid hello ({1 if drops_link else 3}): the prompt shows afresh")
+    r.event("press", f"the confirm key: confirms hello {1 if drops_link else 3}, the one it was shown for")
+    return r.ex
+
+
+def update_press_no_window_exchange() -> dict:
+    u = update_ref()
+    r = ProofGateRecorder("an update press opens no window", "On a set-up gadget's release build the owner's press on "
+                          "an unproven link's update prompt confirms that prompt's upload and nothing else: it opens "
+                          "no window, so an injected tap from that link confirms nothing, and a re-setup prompt it "
+                          "raises stays unconfirmed.", proof=False, talk_key_only=False)
+    r.smp(u.UPLOAD_0, "an unproven link's image upload: rc 10, the update prompt shows")
+    r.event("press", "the owner's physical press: confirms that upload")
+    r.smp(u.UPLOAD_0, "the retry: rc 0, the confirmed upload")
+    r.smp(u.UPLOAD_OTHER_0, "another image's upload: rc 10, not covered (no prompt yet: the last showed under 10 s "
+          "ago)")
+    r.event("injected_press", "an injected confirm tap from that link: nothing")
+    r.event("resetup_request", "the same link raises a re-setup prompt (hello 1): it shows")
+    r.event("injected_press", "an injected tap: the re-setup prompt stays, unconfirmed")
+    return r.ex
+
+
 def resetup_prompt_exempt_exchange() -> dict:
     r = ProofGateRecorder("the re-setup prompt on an automation build", "Automation builds are exempt from the "
                           "dismiss rule: a hello after a dismiss shows the prompt at once. For a device that keeps "
@@ -2901,17 +3051,31 @@ def proof_gate_section() -> dict:
                        "resetup, on those events: the connection and hello (counted from 1 on each "
                        "connection) the prompt is bound to (null: none up) and those the last press confirmed. A "
                        "resetup_request step may carry conn, the connection it arrives on when several are open "
-                       "(default 1). Event setup_ends (with conn) is that connection's confirmed setup ending: its "
+                       "(default 1), and invalid true: a hello whose top-level fields are valid but whose "
+                       "mobile_pub or mobile_nonce fails validation (error_pairing_invalid_hello; on the prompt's own "
+                       "connection it ends the prompt, prompt ended; device flags bad_hello_encrypted, the refusal "
+                       "encrypted under the session still current instead of in plaintext, and "
+                       "bad_hello_drops_link, the link dropped after it, work like dismiss_drops_link). Event "
+                       "setup_ends (with conn) is that "
+                       "connection's confirmed setup ending: its "
                        "provision_v2 committed (auth_ok) or its session ended; until then other connections' hellos "
                        "are refused too. Device flag dismiss_drops_link (default false): a device whose dismiss ends "
                        "the setup link runs the exchanges flagged true and skips those flagged false, and the other "
-                       "way round; an exchange without the flag holds for both.",
+                       "way round; an exchange without the flag holds for both. An smp step is an SMP v1 request to "
+                       "the update gate of mg-update-v2.json (mg_update_ref.py's model) with the rc it answers and "
+                       "update_prompt after it (none or confirm); a press while the update prompt shows answers only "
+                       "that prompt's upload. Event injected_press is a console or Nordic UART word or a scripted "
+                       "tap: it confirms neither prompt.",
         "resetup_prompt_ms": RESETUP_PROMPT_MS,
         "setup_mode_ms": SETUP_MODE_MS,
         "exchanges": [gate_hid_key_exchange(), gate_skills_exchange(), gate_haptics_exchange(), gate_open_exchange(),
                       gate_exempt_exchange(), gate_unset_exchange(), resetup_prompt_exchange(),
                       resetup_prompt_dismiss_drops_link_exchange(), resetup_prompt_two_connections_exchange(),
-                      resetup_prompt_exempt_exchange(), resetup_talk_key_exchange(), resetup_talk_key_only_exchange(),
+                      resetup_bad_takeover_exchange(), resetup_bad_takeover_exchange(encrypted=True),
+                      resetup_bad_takeover_exchange(drops_link=True),
+                      resetup_bad_takeover_exchange(encrypted=True, drops_link=True), update_press_no_window_exchange(),
+                      resetup_prompt_exempt_exchange(), resetup_talk_key_exchange(),
+                      resetup_talk_key_only_exchange(),
                       setup_mode_ends_exchange(), first_setup_talk_key_exchange(),
                       resetup_talk_key_automation_exchange()],
     }
@@ -2925,12 +3089,18 @@ def replay_proof_gates(section: dict, device_cls=None) -> list:
     for ex in section["exchanges"]:
         dev = device_cls(ex["mtu"], **ex["device"])
         for i, step in enumerate(ex["steps"]):
+            if "smp" in step:
+                if dev.smp(bytes.fromhex(step["smp"])) != step["rc"] or dev.update_prompt() != step["update_prompt"] \
+                        or dev.acted() != step["acted"]:
+                    bad.append(f"{ex['name']} step {i}")
+                continue
             if "write" in step:
                 got = dev.write(bytes.fromhex(step["write"]))
             elif step["event"] == "proof":
                 got = dev.new_proof(k, bytes.fromhex(step["client_nonce"]), bytes.fromhex(step["device_nonce"]))
             else:
-                got = dev.event(step["event"], **{a: step[a] for a in ("ms", "source", "conn", "key") if a in step})
+                got = dev.event(step["event"], **{a: step[a] for a in ("ms", "source", "conn", "key", "invalid")
+                                                  if a in step})
             if [f.hex() for f in got] != step["notify"] or dev.acted() != step["acted"] \
                     or step.get("setup") != (dev.setup_step() if step.get("event") == "resetup_request" else None) \
                     or step.get("resetup") != (dev.resetup_state() if step.get("event") in RESETUP_EVENTS else None):
@@ -2948,12 +3118,13 @@ class UngatedDevice(ProofGateDevice):
 class UnlimitedPromptDevice(ProofGateDevice):
     """Shows a new re-setup prompt on every hello, even right after a dismiss: must fail the section."""
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
         if what == "resetup_request":
             self.hellos[conn] = self.hellos.get(conn, 0) + 1
             self.prompt, self.setup_answer, self.prompt_change = (conn, self.hellos[conn]), "confirm_required", "shown"
             return []
-        return super().event(what, ms, source, conn, key)
+        return super().event(what, ms, source, conn, key, invalid)
 
 
 class RefusesWhilePromptUp(ProofGateDevice):
@@ -2962,13 +3133,14 @@ class RefusesWhilePromptUp(ProofGateDevice):
 
     shown_at = None
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
         if what == "resetup_request" and self.release and self.holds_token and self.shown_at is not None \
                 and self.now - self.shown_at < RESETUP_PROMPT_MS:
             self.hellos[conn] = self.hellos.get(conn, 0) + 1
             self.setup_answer, self.prompt_change = "error_operation_in_progress", "none"
             return []
-        out = super().event(what, ms, source, conn, key)
+        out = super().event(what, ms, source, conn, key, invalid)
         if what == "resetup_request" and self.prompt_change == "shown":
             self.shown_at = self.now
         if what == "reconnect":
@@ -2979,20 +3151,22 @@ class RefusesWhilePromptUp(ProofGateDevice):
 class TakeoverAcrossConnections(ProofGateDevice):
     """Lets a hello from any connection take over the prompt: must fail the section."""
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
         if what == "resetup_request" and self.prompt is not None and self.prompt[0] != conn:
             self.hellos[conn] = self.hellos.get(conn, 0) + 1
             self.prompt, self.setup_answer, self.prompt_change = (conn, self.hellos[conn]), "confirm_required", \
                 "taken_over"
             return []
-        return super().event(what, ms, source, conn, key)
+        return super().event(what, ms, source, conn, key, invalid)
 
 
 class PromptsDuringOthersSetup(ProofGateDevice):
     """Lets another connection prompt while a confirmed setup is still provisioning: must fail the section."""
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
-        out = super().event(what, ms, source, conn, key)
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
+        out = super().event(what, ms, source, conn, key, invalid)
         if what == "press":
             self.setup_conn = None
         return out
@@ -3011,12 +3185,45 @@ class SetupModeNeverEnds(ProofGateDevice):
     def in_setup_mode(self) -> bool:
         return self.setup_mode_at is not None
 
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None) -> list:
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
         at = self.setup_mode_at
-        out = super().event(what, ms, source, conn, key)
+        out = super().event(what, ms, source, conn, key, invalid)
         if what == "press" and at is not None and self.setup_mode_at is None:
             self.setup_mode_at = at
         return out
+
+
+class LatchesPressAfterBadTakeover(ProofGateDevice):
+    """Answers a takeover hello that fails validation but keeps the prompt for the earlier hello, so the next press
+    of any key confirms it: must fail the section."""
+
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
+        if what == "resetup_request" and invalid and self.prompt is not None and self.prompt[0] == conn:
+            self.hellos[conn] = self.hellos.get(conn, 0) + 1
+            self.setup_answer, self.prompt_change = "error_pairing_invalid_hello", "none"
+            self.latched = True
+            return []
+        if what == "press" and getattr(self, "latched", False) and self.prompt is not None:
+            self.latched = False
+            key = None   # the latched press confirms, whatever key it was
+        return super().event(what, ms, source, conn, key, invalid)
+
+
+class UpdatePressOpensWindow(ProofGateDevice):
+    """Lets the update-confirm press open the link's other words, so an injected tap then counts as a press: must
+    fail the section."""
+
+    window = False
+
+    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
+              invalid: bool = False) -> list:
+        if what == "press" and self.update_prompt() == "confirm":
+            self.window = True
+        elif what == "injected_press" and self.window:
+            what, key = "press", None
+        return super().event(what, ms, source, conn, key, invalid)
 
 
 class ResetupOutsideSetupMode(ProofGateDevice):
@@ -3029,7 +3236,8 @@ class ResetupOutsideSetupMode(ProofGateDevice):
 def check_proof_gates(section: dict) -> list:
     bad = replay_proof_gates(section)
     for mutant in (UngatedDevice, UnlimitedPromptDevice, RefusesWhilePromptUp, TakeoverAcrossConnections,
-                   PromptsDuringOthersSetup, TalkKeyConfirmsResetup, ResetupOutsideSetupMode, SetupModeNeverEnds):
+                   PromptsDuringOthersSetup, TalkKeyConfirmsResetup, ResetupOutsideSetupMode, SetupModeNeverEnds,
+                   LatchesPressAfterBadTakeover, UpdatePressOpensWindow):
         if not replay_proof_gates(section, mutant):
             bad.append(f"{mutant.__name__} passes proof_gates")
     return bad
@@ -3086,6 +3294,7 @@ def build() -> dict:
             errors_exchange(), malformed_data_exchange(),
             gating_exchange("no token", "A device that holds no token.", holds_token=False),
             no_proof_exchange(), keepalive_exchange(), nudge_exchange(), clear_unsent_exchange(),
+            credentials_wait_exchange(), clear_credentials_unsent_exchange(),
             client_counter_top_exchange(), device_counter_top_exchange(), low_mtu_exchange(),
             unencrypted_exchange(),
             expires_exchange(),
@@ -3124,6 +3333,10 @@ def check() -> list:
                 continue
             if step.get("event") == "nudge":
                 if [f.hex() for f in dev.nudge()] != step["notify"]:
+                    bad.append(f"{ex['name']} step {i}")
+                continue
+            if step.get("event") == "buffer":
+                if [f.hex() for f in dev.buffer()] != step["notify"]:
                     bad.append(f"{ex['name']} step {i}")
                 continue
             frame = bytes.fromhex(step["write"])

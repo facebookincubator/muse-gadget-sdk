@@ -128,10 +128,11 @@ firmware, the public ESP32 Wi-Fi builds and the Linux reference
   for products and deferred: no gadget advertises it, though the bench
   client still accepts it.
 - **Node family.** Every device built with this SDK registers
-  `device_family: "gadget"` (link.register), its Wi-Fi-only builds and the
-  C5 DevKitC-1 build included, and so does the Linux client. Only Muse's
-  own Home Link firmware (no capability bit 1, not a `MuseGadget-*`
-  device) registers `"link"`. A set-up device keeps its node id (Node ids,
+  `device_family: "gadget"` (link.register), and so does the Linux client:
+  every ESP32 build, the Home Link builds without BLE gadget audio, the
+  Wi-Fi-only builds and the C5 DevKitC-1 build included. Only firmware Muse
+  ships for its own Home Link products, which isn't built from this SDK (no
+  capability bit 1, not a `MuseGadget-*` device), registers `"link"`. A set-up device keeps its node id (Node ids,
   below). `model_id` is the board's own lowercase id on every build (ESP32
   `CONFIG_MUSE_DEVICE_MODEL_ID` from the board's overlay; `DEVICE.md`). A
   catalog product code appears only in the advertised name, never as the
@@ -211,20 +212,25 @@ firmware, the public ESP32 Wi-Fi builds and the Linux reference
   `pairing_client_hello` on the prompt's own connection is never refused
   while a re-setup prompt is up: it takes over the prompt (which stays on
   screen, now bound to the newest hello, with no new flash), and the one
-  press confirms that hello's setup. A hello from another connection while a
-  prompt is up gets `error_operation_in_progress` and leaves the prompt
-  bound to the first connection's hello, so nobody else can take over the
-  owner's press; so does one from another connection while a confirmed setup
-  still runs, until its `provision_v2` commits or its session ends. With no
-  prompt up, only a hello within 10 s after a dismiss (the back gesture, or
-  the talk key on the re-setup prompt) gets `error_operation_in_progress`.
-  That code (the one a gadget answers while another operation runs) goes out
-  in plaintext, since no keys exist yet, and shows nothing; a new connection
-  may show the prompt at once. Test and bench builds are exempt from the
-  dismiss rule only.
-- **SAFE and Bluetooth updates.** On a release build of a set-up gadget,
-  SAFE mode the gadget entered by itself (failed boots, a crash guard) takes
-  no Bluetooth image update (SMP rc 11) and never prompts; SAFE entered with
+  press confirms that hello's setup; a takeover hello that fails validation
+  ends the prompt: its error goes out (in plaintext, or encrypted under the
+  session still current if the device refuses it before wiping that
+  session), nothing is confirmed, the device may drop the link, and the next
+  valid hello prompts afresh and needs its own press. A hello from another
+  connection while a prompt is up gets `error_operation_in_progress` and
+  leaves the prompt bound to the first connection's hello, so nobody else
+  can take over the owner's press; so does one from another connection while
+  a confirmed setup still runs, until its `provision_v2` commits or its
+  session ends. With no prompt up, only a hello within 10 s after a dismiss
+  (the back gesture, or the talk key on the re-setup prompt) gets
+  `error_operation_in_progress`. That code (the one a gadget answers while
+  another operation runs) goes out in plaintext, since no keys exist yet,
+  and shows nothing; a new connection may show the prompt at once. Test and
+  bench builds are exempt from the dismiss rule only.
+- **SAFE and Bluetooth updates.** On a release build, set up or not (a
+  gadget that holds no device token, after Forget too), SAFE mode the gadget
+  entered by itself (failed boots, a crash guard) takes no Bluetooth image
+  update (SMP rc 11) and never prompts; SAFE entered with
   the gadget's button stays open, so the way back is the button route into
   SAFE or USB. The owner's app (a link whose token proof matched) updates
   with no confirm; on a release build the gadget, set up or not (after

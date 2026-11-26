@@ -18,16 +18,21 @@
 Python standard library only. On a release build, an update change (image upload, image state write, erase, reset)
 from a link whose token proof hasn't matched needs one physical press on the gadget, set up or not (any key, the talk key included; injected input never counts): the first such write
 gets rc 10 (EBUSY) while the gadget prompts, the client retries, and the first write after the press gets rc 0. The
-press confirms the upload whose write started the prompt and binds to its length and whole-image SHA-256 for 600 s,
-across link drops, not to the link: on any link within the window that upload goes on (started again or resumed with no
-new prompt, its later chunks, the state write that stages it, an erase or the reset on its link), and the state write
-stages the slot only if the slot's bytes hash to the bound SHA-256 (the write's own hash is the image's, not the
-whole-file SHA-256); any other upload, or one without its SHA-256 on a new link, asks again. The prompt times out after
-30 s and shows at most once per 10 s per connection (a sooner write gets rc 10 with no new prompt); a cancel or a
-timeout answers the next write rc 11 once and ends that prompt, binding nothing: the same upload then asks again. A
-matched proof, the wired console's arm, a recovery the user's button entered and bench or automation
-builds need no press; a gadget that holds no device token (not set up, or after Forget) asks for the press like a set-up
-one, and a recovery the gadget entered itself refuses with rc 11. Check the vectors next to this file:
+upload's first chunk must name its length and whole-image SHA-256 (one that names no SHA-256 gets rc 11, no prompt),
+and a chunk with no upload started on its link gets rc 11. The press confirms the upload whose write started the prompt
+and binds to its length and SHA-256 for 600 s, across link drops, not to the link: on any link within the window that
+upload goes on (started again or resumed with no new prompt, its later chunks, the state write that stages it, an erase
+or the reset on its link); a transfer under way when the window ends finishes on its link, but starting it again, on
+that link or another, asks again. A write past the bound length, a last chunk after which the slot's bytes don't hash to
+the bound SHA-256, and a state write while they don't (the write's own hash is the image's, not the whole-file
+SHA-256), get rc 11 and end the binding; any other upload asks again. A press on a prompt that an erase, a reset or a
+state write started covers only that change (the same request body) on its link, for 600 s. Forget ends the link's
+proof and any binding, so after it every unproven change asks again. The prompt times out after 30 s and shows at most
+once per 10 s per connection (a sooner write gets rc 10 with no new prompt); a cancel or a timeout answers the next write
+rc 11 once and ends that prompt, binding nothing: the same upload then asks again. A matched proof, the wired console's
+arm, a recovery the user's button entered and bench or automation builds need no press; a gadget that holds no device
+token (not set up, or after Forget) asks for the press like a set-up one, and a recovery the gadget entered itself
+refuses with rc 11. Check the vectors next to this file:
 
     python3 protocols/test-vectors/mg_update_ref.py
 
@@ -116,6 +121,7 @@ UPLOAD_OTHER_0 = S.smp_request(SMP_WRITE, SMP_GROUP_IMAGE, 1, {"image": 0, "len"
                                                                "sha": hashlib.sha256(OTHER).digest(),
                                                                "data": OTHER[:32]})
 UPLOAD_32 = S.smp_request(SMP_WRITE, SMP_GROUP_IMAGE, 1, {"off": 32, "data": IMAGE[32:]}, seq=1)
+UPLOAD_32_LONG = S.smp_request(SMP_WRITE, SMP_GROUP_IMAGE, 1, {"off": 32, "data": IMAGE[32:] + bytes(8)}, seq=1)
 FORGED_0 = S.smp_request(SMP_WRITE, SMP_GROUP_IMAGE, 1, {"image": 0, "len": len(IMAGE), "off": 0, "sha": IMAGE_SHA,
                                                          "data": FORGED[:32]})
 FORGED_32 = S.smp_request(SMP_WRITE, SMP_GROUP_IMAGE, 1, {"off": 32, "data": FORGED[32:]}, seq=1)
@@ -131,10 +137,10 @@ class Device:
     recovery the user's button entered), self_recovery_unprompted (a recovery it entered itself: it refuses), locked (a
     passcode lock is up). Events: press (a physical press while the prompt shows, any key, the talk key included),
     injected_press (a console or Nordic UART word, or a scripted touch: never a confirm), forget (the device token
-    erased: Forget), unlock (the passcode entered), cancel
-    (the user cancels the prompt), time (ms pass), reconnect (a new link: its proof and any part it had in an upload
-    gone, the press's binding kept). prompt is what the gadget shows: none, keypad or confirm. slot
-    is what image uploads wrote: the bytes a state write would stage."""
+    erased: Forget, which also ends this link's proof and any binding), unlock (the passcode entered), cancel
+    (the user cancels the prompt), time (ms pass), reconnect (a new link: its proof, any part it had in an upload and
+    any change a press covered on it gone, the press's binding kept). prompt is what the gadget shows: none, keypad or
+    confirm. slot is what image uploads wrote: the bytes a state write would stage."""
 
     def __init__(self, release=True, holds_token=True, proof=False, console_arm=False, button_recovery=False,
                  self_recovery_unprompted=False, locked=False):
@@ -145,10 +151,11 @@ class Device:
         self.prompt = "none"
         self.prompt_at = None     # the prompt showing since
         self.shown_at = None      # when this connection last showed a prompt (the re-arm limit)
-        self.armed = None         # the change that started the prompt: (len, sha) of an upload, sha None without one
+        self.armed = None         # what started the prompt: ("upload", len, sha) or ("change", the request's key)
         self.refuse_next = False  # a cancel or timeout: the next update write gets rc 11
-        self.bound = None         # (len, sha, when): the upload a press confirmed; with a sha it survives a link drop
-        self.here = False         # this link carries the confirmed upload (or the change a press covered)
+        self.bound = None         # (len, sha, when): the upload a press confirmed; it survives a link drop
+        self.here = False         # this link carries the confirmed upload
+        self.covered = None       # (key, when): the erase, reset or state write a press covered, on this link only
         self.slot = bytearray()
 
     def needs_press(self) -> bool:
@@ -163,8 +170,16 @@ class Device:
             return body["len"], body.get("sha")
         return None
 
+    @staticmethod
+    def change_key(request: bytes):
+        """What a press on a change other than an upload covers: its group, command and body (not its seq)."""
+        return request[4:6] + request[7:8] + request[8:]
+
     def bound_live(self) -> bool:
         return self.bound is not None and self.now - self.bound[2] < CONFIRM_WINDOW_MS
+
+    def end_binding(self):
+        self.here, self.bound, self.slot = False, None, bytearray()
 
     def write_slot(self, request: bytes):
         body = cbor_map(request[8:])
@@ -173,18 +188,31 @@ class Device:
             self.slot = bytearray(body.get("len", len(data)))
         self.slot[off:off + len(data)] = data
 
+    def in_bound(self, request: bytes) -> bool:
+        """An upload write on the carrying link stays within the bound length."""
+        body = cbor_map(request[8:])
+        return body.get("off", 0) + len(body.get("data", b"")) <= self.bound[0]
+
+    def completes(self, request: bytes) -> bool:
+        """The write ends at the bound length: the upload's last chunk."""
+        body = cbor_map(request[8:])
+        return body.get("off", 0) + len(body.get("data", b"")) == self.bound[0]
+
     def slot_matches(self) -> bool:
-        """The slot's first bound-length bytes hash to the bound SHA-256 (a press that bound no SHA checks nothing)."""
-        if self.bound is None or self.bound[1] is None:
-            return True
+        """The slot's bound-length bytes hash to the bound SHA-256."""
         n = self.bound[0]
-        return len(self.slot) >= n and hashlib.sha256(bytes(self.slot[:n])).digest() == self.bound[1]
+        return len(self.slot) == n and hashlib.sha256(bytes(self.slot)).digest() == self.bound[1]
 
     def fits(self, kind: str, ident) -> bool:
         """Whether an update write on the link that carries the confirmed upload is that upload's."""
         if kind == "upload0":
-            return self.bound is not None and ident == self.bound[:2]
+            return self.bound_live() and ident == self.bound[:2]   # starting it again: within the window only
         return True   # its later chunks, its state write (the slot is checked), an erase or the reset
+
+    def covers(self, request: bytes) -> bool:
+        """The erase, reset or state write a press covered, on this link, within the window."""
+        return self.covered is not None and self.covered[0] == self.change_key(request) \
+            and self.now - self.covered[1] < CONFIRM_WINDOW_MS
 
     def smp(self, request: bytes) -> int:
         op, group, command = request[0] & 7, int.from_bytes(request[4:6], "big"), request[7]
@@ -197,17 +225,29 @@ class Device:
         ident = self.upload_identity(request) if (group, command) == (SMP_GROUP_IMAGE, 1) else None
         kind = ("upload0" if ident else "chunk") if (group, command) == (SMP_GROUP_IMAGE, 1) else \
             "state" if (group, command) == (SMP_GROUP_IMAGE, 0) else "other"
-        if not self.here and ident and ident[1] is not None and self.bound_live() and ident == self.bound[:2]:
+        if kind == "upload0" and ident[1] is None:
+            return RC_EACCESSDENIED   # no SHA-256 to bind a press to: refused, never asked
+        if kind == "chunk" and not self.here:
+            return RC_EACCESSDENIED   # no upload started on this link: nothing to bind a press to
+        if not self.here and kind == "upload0" and self.bound_live() and ident == self.bound[:2]:
             self.here = True   # the bound upload, started again on a new link: no new prompt
         if self.here:
             if self.fits(kind, ident):
-                if kind == "state" and not self.slot_matches():
-                    self.here, self.bound = False, None   # not the bytes the press was for: the binding ends
-                    return RC_EACCESSDENIED
                 if kind in ("upload0", "chunk"):
+                    if not self.in_bound(request):
+                        self.end_binding()
+                        return RC_EACCESSDENIED   # past the bound length
                     self.write_slot(request)
+                    if self.completes(request) and not self.slot_matches():
+                        self.end_binding()
+                        return RC_EACCESSDENIED   # the last chunk: not the bytes the press was for
+                elif kind == "state" and not self.slot_matches():
+                    self.end_binding()
+                    return RC_EACCESSDENIED   # not the bytes the press was for: the binding ends
                 return RC_OK
             self.here = False   # another upload: asks again
+        if kind != "upload0" and self.covers(request):
+            return RC_OK
         if self.refuse_next:
             self.refuse_next = False
             return RC_EACCESSDENIED
@@ -218,7 +258,7 @@ class Device:
             if self.shown_at is not None and self.now - self.shown_at < PROMPT_REARM_MS:
                 return RC_EBUSY   # the last prompt on this connection showed under 10 s ago: none yet
             self.prompt_at = self.shown_at = self.now
-            self.armed = ident
+            self.armed = ("upload",) + ident if ident else ("change", self.change_key(request))
             self.prompt = "keypad" if self.locked else "confirm"
         return RC_EBUSY
 
@@ -234,23 +274,24 @@ class Device:
         elif what == "press":
             if self.prompt == "confirm":
                 self.prompt, self.prompt_at = "none", None
-                # Bound to the armed upload (its length and SHA-256); a change that wasn't an upload naming its
-                # SHA-256 binds to no image and is covered on this link only.
-                self.bound = (self.armed + (self.now,)) if self.armed else None
-                self.here = True
+                if self.armed[0] == "upload":
+                    # Bound to the armed upload (its length and SHA-256), on any link for 600 s.
+                    self.bound, self.here = self.armed[1:] + (self.now,), True
+                else:
+                    self.covered = (self.armed[1], self.now)   # only that change, on this link
         elif what == "injected_press":
             pass   # never a confirm: only a physical press is
         elif what == "forget":
-            self.holds_token = False   # the device token erased: an unproven update still asks for the press
-            self.prompt, self.prompt_at = "none", None
+            # The device token erased: this link's proof and any binding end; an unproven update asks for the press.
+            self.holds_token = self.proof = False
+            self.prompt, self.prompt_at, self.armed = "none", None, None
+            self.bound, self.here, self.covered = None, False, None
         elif what == "cancel":
             if self.prompt != "none":
                 self.prompt, self.prompt_at, self.refuse_next = "none", None, True   # rc 11 once, binds nothing
         elif what == "reconnect":
             self.proof = self.console_arm = self.here = self.refuse_next = False
-            self.prompt, self.prompt_at, self.shown_at = "none", None, None
-            if self.bound is not None and self.bound[1] is None:
-                self.bound = None   # no SHA-256: nothing to resume by
+            self.prompt, self.prompt_at, self.shown_at, self.covered = "none", None, None, None
 
 
 class Recorder:
@@ -305,6 +346,29 @@ def forget_exchange() -> dict:
     r.event("press", "a press confirms it")
     r.smp(UPLOAD_0, "the retry: rc 0")
     transfer(r, "the rest, the state write and the reset: rc 0")
+    return r.ex
+
+
+def forget_ends_binding_exchange() -> dict:
+    r = Recorder("Forget ends the binding", "Forget ends the press's binding, on the link that carries the upload "
+                 "and on any other: the same upload asks again.")
+    confirmed(r)
+    r.event("forget", "the owner forgets the gadget")
+    r.event("time", "10 s later", ms=PROMPT_REARM_MS)
+    r.smp(UPLOAD_0, "the same upload on the same link: rc 10, the prompt again")
+    r.event("cancel", "the user cancels it")
+    r.smp(UPLOAD_0, "a retry: rc 11")
+    r.event("reconnect", "a new link")
+    r.smp(UPLOAD_0, "the same upload on a new link: rc 10, the prompt again")
+    return r.ex
+
+
+def forget_ends_proof_exchange() -> dict:
+    r = Recorder("Forget ends the link's proof", "A link whose proof matched updates with no press until Forget; "
+                 "after it, the same link asks for the press.", proof=True)
+    r.smp(UPLOAD_0, "a proven link: rc 0, no prompt")
+    r.event("forget", "the owner forgets the gadget: the proof is gone with the token")
+    r.smp(UPLOAD_0, "the same upload: rc 10, the prompt shows")
     return r.ex
 
 
@@ -393,11 +457,62 @@ def different_upload_exchange() -> dict:
 
 
 def no_sha_exchange() -> dict:
-    r = Recorder("a new link, an upload without its SHA-256, asks again", "A resume must name the bound image: an "
-                 "upload that carries no SHA-256 on a new link needs a new press.")
+    r = Recorder("an upload without its SHA-256 is refused", "Without the proof an upload's first chunk must name "
+                 "its length and whole-image SHA-256, which a press binds to: one that names no SHA-256 gets rc 11 and "
+                 "no prompt, on a fresh link and on one resuming a bound upload.")
+    r.smp(UPLOAD_0_NO_SHA, "image upload, offset 0, no SHA-256: rc 11, no prompt")
     confirmed(r)
     r.event("reconnect", "a new link")
-    r.smp(UPLOAD_0_NO_SHA, "the same bytes, no SHA-256: rc 10, the prompt again")
+    r.smp(UPLOAD_0_NO_SHA, "the same bytes, no SHA-256: rc 11, no prompt")
+    r.smp(UPLOAD_32, "a later chunk with no upload started on this link: rc 11")
+    r.smp(UPLOAD_0, "the bound upload, naming its SHA-256: rc 0, no prompt")
+    return r.ex
+
+
+def same_link_window_exchange() -> dict:
+    r = Recorder("after 600 s, starting again on the same link asks again", "A transfer under way when the 600 s "
+                 "end finishes on its link, but the upload's first chunk again, even on that link, asks again.")
+    confirmed(r)
+    r.event("time", "600 s pass", ms=CONFIRM_WINDOW_MS)
+    r.smp(UPLOAD_32, "the transfer under way: its last chunk, rc 0")
+    r.smp(UPLOAD_0, "the same upload started again on the same link: rc 10, the prompt again")
+    return r.ex
+
+
+def change_press_exchange() -> dict:
+    r = Recorder("a press on an erase covers only that erase, on its link", "A press on a prompt that an erase, a "
+                 "reset or a state write started covers only that change (the same request) on its link: other "
+                 "changes ask again, a chunk with no upload started is refused, and a new link asks again.")
+    r.smp(ERASE, "erase: rc 10, the prompt shows")
+    r.event("press", "the press: covers this erase on this link")
+    r.smp(ERASE, "the retry: rc 0")
+    r.smp(UPLOAD_32, "a chunk with no upload started on this link: rc 11")
+    r.event("time", "10 s later", ms=PROMPT_REARM_MS)
+    r.smp(STATE_TEST, "a state write: rc 10, the prompt shows")
+    r.event("cancel", "the user cancels it")
+    r.smp(RESET, "the reset: rc 11 (the cancel's one refusal)")
+    r.smp(RESET, "the reset again: rc 10, no prompt yet (the last one showed under 10 s ago)")
+    r.smp(ERASE, "the covered erase: rc 0")
+    r.event("reconnect", "a new link")
+    r.smp(ERASE, "the same erase on a new link: rc 10, the prompt shows")
+    return r.ex
+
+
+def past_len_exchange() -> dict:
+    r = Recorder("a write past the bound length is refused", "A press binds to the upload's length: a chunk that "
+                 "writes past it gets rc 11 and ends the binding.")
+    confirmed(r)
+    r.smp(UPLOAD_32_LONG, "the last chunk with 8 bytes past the length: rc 11")
+    r.smp(STATE_TEST, "the state write: rc 10, no binding, no prompt yet (the last one showed under 10 s ago)")
+    return r.ex
+
+
+def early_state_exchange() -> dict:
+    r = Recorder("a state write before the last chunk doesn't stage", "The state write stages the slot only if its "
+                 "bytes hash to the bound SHA-256: before the last chunk they don't, so rc 11 and the binding ends.")
+    confirmed(r)
+    r.smp(STATE_TEST, "the state write with half the image written: rc 11")
+    r.smp(UPLOAD_32, "the last chunk: rc 11, the binding has ended and no upload is started on this link")
     return r.ex
 
 
@@ -466,15 +581,14 @@ def cancel_asks_again_exchange() -> dict:
 
 
 def forged_exchange() -> dict:
-    r = Recorder("bytes that aren't the bound image don't stage", "An upload names IMAGE's length and SHA-256 but "
-                 "sends other bytes. The state write stages the slot only if its bytes hash to the bound SHA-256: rc "
-                 "11, and the binding ends. (A device that checks the whole-image SHA-256 as the last chunk arrives "
-                 "refuses there instead.)")
+    r = Recorder("bytes that aren't the bound image are refused at the last chunk", "An upload names IMAGE's length "
+                 "and SHA-256 but sends other bytes. When the last chunk arrives the slot's bytes don't hash to the "
+                 "bound SHA-256: rc 11, and the binding ends, so the state write asks again.")
     r.smp(FORGED_0, "image upload, offset 0, naming IMAGE: rc 10, the prompt shows")
     r.event("press", "the press: bound to IMAGE's length and SHA-256")
     r.smp(FORGED_0, "the retry: rc 0")
-    r.smp(FORGED_32, "the last chunk: rc 0")
-    r.smp(STATE_TEST, "the state write: the slot doesn't hash to the bound SHA-256: rc 11")
+    r.smp(FORGED_32, "the last chunk: the slot doesn't hash to the bound SHA-256: rc 11")
+    r.smp(STATE_TEST, "the state write: rc 10, no binding, no prompt yet (the last one showed under 10 s ago)")
     return r.ex
 
 
@@ -484,17 +598,22 @@ def build() -> dict:
                        "request (smp: 8-byte header, CBOR body) with the rc the device answers (0, 10 = EBUSY: "
                        "confirm on the gadget, 11 = EACCESSDENIED), or an event on the device (press: a physical "
                        "press, any key, the talk key included; injected_press: a console or Nordic UART word or a "
-                       "scripted touch, never a confirm; forget: the device token erased; unlock, cancel, time with "
+                       "scripted touch, never a confirm; forget: the device token erased, with the link's proof and any binding; unlock, cancel, time with "
                        "ms, reconnect), each with prompt, what the gadget shows after it (none, "
                        "keypad, confirm). Every exchange starts on a new link without a matched proof to a release "
                        "build that holds a token unless its device flags say otherwise (release false: a bench or "
                        "automation build; holds_token false: not set up, the same press; proof; console_arm: the wired console's arm; "
                        "button_recovery: a recovery the user's button entered; self_recovery_unprompted: a recovery "
-                       "the gadget entered itself with no way to prompt; locked: a passcode lock is up). A press "
-                       "binds to the upload whose write started the prompt (its len and sha) for confirm_window_ms, "
-                       "across reconnects; a state write stages only a slot whose bytes (the bound len of them) hash "
-                       "to the bound sha (its own hash field is the image's, not the whole-image sha); a cancel "
-                       "answers the next update write rc 11 once and binds nothing. "
+                       "the gadget entered itself with no way to prompt; locked: a passcode lock is up). Without a "
+                       "press-free route an upload's first chunk must carry its sha (else rc 11, no prompt), and a "
+                       "chunk with no upload started on its link gets rc 11. A press binds to the upload whose write "
+                       "started the prompt (its len and sha) for confirm_window_ms, across reconnects (a transfer "
+                       "under way at the end finishes on its link; starting it again asks again); a write past the "
+                       "bound len, a last chunk after which the slot's bytes don't hash to the bound sha, and a state "
+                       "write while they don't (its own hash field is the image's, not the whole-image sha) get rc 11 "
+                       "and end the binding. A press on a prompt an erase, a reset or a state write started covers "
+                       "only that request (its body) on its link for confirm_window_ms. forget ends the link's proof "
+                       "and any binding. A cancel answers the next update write rc 11 once and binds nothing. "
                        "On a release build a new prompt shows at most once per prompt_rearm_ms per connection (a "
                        "sooner write that would show one gets rc 10 with no prompt). Generated by mg_update_ref.py.",
         "version": 2,
@@ -510,9 +629,11 @@ def build() -> dict:
             no_press_exchange("a recovery the user's button entered", "The button route was the press.",
                               button_recovery=True),
             no_press_exchange("a bench or automation build", "No press.", release=False),
-            unprompted_recovery_exchange(), unset_recovery_exchange(), locked_exchange(), different_upload_exchange(), no_sha_exchange(),
-            resume_exchange(), window_ends_exchange(), armed_exchange(), rearm_exchange(), cancel_asks_again_exchange(),
-            forged_exchange(),
+            unprompted_recovery_exchange(), unset_recovery_exchange(), locked_exchange(), different_upload_exchange(),
+            no_sha_exchange(), resume_exchange(), window_ends_exchange(), same_link_window_exchange(), armed_exchange(),
+            rearm_exchange(), cancel_asks_again_exchange(), forged_exchange(), past_len_exchange(),
+            early_state_exchange(), change_press_exchange(), forget_ends_binding_exchange(),
+            forget_ends_proof_exchange(),
         ],
     }
 
@@ -608,8 +729,8 @@ class CancelRefusesTheUpload(Device):
     cancelled = None
 
     def event(self, what: str, ms: int = 0):
-        if what == "cancel" and self.prompt != "none":
-            self.cancelled = self.armed
+        if what == "cancel" and self.prompt != "none" and self.armed[0] == "upload":
+            self.cancelled = self.armed[1:]
         super().event(what, ms)
 
     def smp(self, request: bytes) -> int:
@@ -623,8 +744,9 @@ class BindsTheNextUpload(Device):
     """Binds the press to whichever upload comes next, not the one that started the prompt."""
 
     def event(self, what: str, ms: int = 0):
-        if what == "press":
-            self.armed = None
+        if what == "press" and self.prompt == "confirm" and self.armed[0] == "upload":
+            self.prompt, self.prompt_at, self.here, self.bound = "none", None, True, None
+            return
         super().event(what, ms)
 
     def fits(self, kind: str, ident) -> bool:
@@ -634,9 +756,114 @@ class BindsTheNextUpload(Device):
         return super().fits(kind, ident)
 
 
+class ForgetKeepsBinding(Device):
+    """Keeps the press's binding across Forget: must fail."""
+
+    def event(self, what: str, ms: int = 0):
+        keep = (self.bound, self.here)
+        super().event(what, ms)
+        if what == "forget":
+            self.bound, self.here = keep
+
+
+class ForgetKeepsProof(Device):
+    """Keeps the link's proof across Forget: must fail."""
+
+    def event(self, what: str, ms: int = 0):
+        keep = self.proof
+        super().event(what, ms)
+        if what == "forget":
+            self.proof = keep
+
+
+class RestartIgnoresWindow(Device):
+    """Lets the upload start again on the carrying link after 600 s: must fail."""
+
+    def fits(self, kind: str, ident) -> bool:
+        if kind == "upload0":
+            return self.bound is not None and ident == self.bound[:2]
+        return super().fits(kind, ident)
+
+
+class ChangePressCoversAll(Device):
+    """Takes any change on the link after a press on an erase, a reset or a state write: must fail."""
+
+    def covers(self, request: bytes) -> bool:
+        return self.covered is not None
+
+
+class ChangePressSurvivesReconnect(Device):
+    """Keeps the change a press covered on a new link: must fail."""
+
+    def event(self, what: str, ms: int = 0):
+        keep = self.covered
+        super().event(what, ms)
+        if what == "reconnect":
+            self.covered = keep
+
+
+class WritesPastLength(Device):
+    """Takes upload writes past the bound length: must fail."""
+
+    def in_bound(self, request: bytes) -> bool:
+        return True
+
+
+class ChecksOnlyAtStateWrite(Device):
+    """Takes a last chunk whose bytes don't hash to the bound SHA-256 (refuses only at the state write): must fail."""
+
+    def completes(self, request: bytes) -> bool:
+        return False
+
+
+class ChecksOnlyAtLastChunk(Device):
+    """Stages the slot on a state write without checking its bytes: must fail."""
+
+    def smp(self, request: bytes) -> int:
+        if request[0] & 7 == SMP_WRITE and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 0) \
+                and self.needs_press() and self.here:
+            return RC_OK
+        return super().smp(request)
+
+
+class NoShaAsks(Device):
+    """Prompts for an unproven upload that names no SHA-256 and binds the press to its length alone: must fail."""
+
+    def smp(self, request: bytes) -> int:
+        if request[0] & 7 == SMP_WRITE and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 1):
+            ident = self.upload_identity(request)
+            if ident and ident[1] is None and self.needs_press() and not self.self_recovery_unprompted:
+                if self.here and self.bound and self.bound[0] == ident[0]:
+                    self.write_slot(request)
+                    return RC_OK
+                if self.prompt_at is None and (self.shown_at is None or self.now - self.shown_at >= PROMPT_REARM_MS):
+                    self.prompt_at = self.shown_at = self.now
+                    self.armed = ("upload",) + ident
+                    self.prompt = "keypad" if self.locked else "confirm"
+                return RC_EBUSY
+        return super().smp(request)
+
+
+class LoneChunkAsks(Device):
+    """Prompts for a chunk with no upload started on its link: must fail."""
+
+    def smp(self, request: bytes) -> int:
+        if request[0] & 7 == SMP_WRITE and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 1) \
+                and not self.upload_identity(request) and not self.here and self.needs_press() \
+                and not self.self_recovery_unprompted:
+            if self.prompt_at is None and (self.shown_at is None or self.now - self.shown_at >= PROMPT_REARM_MS):
+                self.prompt_at = self.shown_at = self.now
+                self.armed = ("change", self.change_key(request))
+                self.prompt = "keypad" if self.locked else "confirm"
+            return RC_EBUSY
+        return super().smp(request)
+
+
 MUTANTS = (ProofDemandingDevice, UnpromptedDevice, RepromptsSameUpload, StateHashIsTheFileSha, StagesAnyBytes,
            CancelRefusesTheUpload, BindsTheNextUpload, UnsetDeviceNoPress, TakesInjectedPress,
-           PromptsAnyTime)
+           PromptsAnyTime, ForgetKeepsBinding, ForgetKeepsProof, RestartIgnoresWindow, ChangePressCoversAll,
+           ChangePressSurvivesReconnect, WritesPastLength, ChecksOnlyAtStateWrite, ChecksOnlyAtLastChunk, NoShaAsks,
+           LoneChunkAsks)
 
 
 def check() -> list:

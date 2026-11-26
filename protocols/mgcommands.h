@@ -746,24 +746,29 @@
  *   gets rc 10 (EBUSY: confirm on the gadget) while the gadget shows "Press
  *   to confirm update" (on its screen, or by LED on a screenless board), the
  *   client retries about once a second, and the first write after the press
- *   gets rc 0. The press confirms the upload whose write started the prompt
- *   and binds to that upload's length and whole-image SHA-256 for 600 s,
- *   across link drops; it isn't bound to the link. What it allows, on any
- *   link within the 600 s, is that upload: its first chunk (the same length
- *   and SHA-256), started again or resumed on a new link with no new prompt,
- *   its later chunks, the state write that stages it, and an erase or the
- *   reset on the link that carries it. The state write carries the image's
- *   own hash, not the whole-image SHA-256 (MCUboot's covers the image's
- *   header and body, not its trailing TLVs), so the device checks the bytes
- *   it holds instead: it stages the slot only if the slot's first bytes, the
- *   upload's length of them, hash to the bound SHA-256. Bytes that don't get
- *   rc 11 and end the binding (a device that checks the whole-image SHA-256
- *   as the last chunk arrives refuses them there). A transfer under way when
- *   the 600 s end finishes on its link; any other upload, one without its
- *   SHA-256 on a new link, or the same upload started after the 600 s asks
- *   again. A press on a prompt that a change other than an upload naming its
- *   SHA-256 started binds to no image: it covers that transfer or change on
- *   its link only. The console, Link setup and device actions never see this
+ *   gets rc 0. Such an upload's first chunk must name its length and
+ *   whole-image SHA-256: one that names no SHA-256 gets rc 11 and no prompt,
+ *   and so does a later chunk with no upload started on its link. The press
+ *   confirms the upload whose write started the prompt and binds to that
+ *   upload's length and SHA-256 for 600 s, across link drops; it isn't bound
+ *   to the link. What it allows, on any link within the 600 s, is that
+ *   upload: its first chunk (the same length and SHA-256), started again or
+ *   resumed on a new link with no new prompt, its later chunks, the state
+ *   write that stages it, and an erase or the reset on the link that carries
+ *   it. A write past the bound length gets rc 11 and ends the binding. When
+ *   the last chunk arrives the device hashes the slot's bytes, the bound
+ *   length of them: if they don't match the bound SHA-256 that chunk gets
+ *   rc 11 and the binding ends. The state write carries the image's own
+ *   hash, not the whole-image SHA-256 (MCUboot's covers the image's header
+ *   and body, not its trailing TLVs), so the device stages the slot only if
+ *   its bytes hash to the bound SHA-256; else rc 11, and the binding ends. A
+ *   transfer under way when the 600 s end finishes on its link; any other
+ *   upload, or the same upload started again after the 600 s, on its link or
+ *   another, asks again. A press on a prompt that an erase, a reset or a
+ *   state write started covers only that change (the same request body) on
+ *   its link, for 600 s; any other change asks again. Forget ends the link's
+ *   proof and any binding, so after it an update from any link asks again
+ *   until a new proof matches. The console, Link setup and device actions never see this
  *   window. The prompt times out after 30 s, and on a release build a new one
  *   shows at most once per 10 s per connection (a sooner write that would
  *   show one gets rc 10 with no new prompt); a cancel or a timeout answers
@@ -894,8 +899,12 @@
  *   as for any client->device transfer.
  *
  * Device session (the device's own VM session over BLE):
- *   A BLE gadget reaches its owner's VM the way a Wi-Fi gadget does
- *   (esp32/main/noise_control.cpp), with the phone as its network. The
+ *   A BLE gadget reaches its owner's VM with the Noise session a Wi-Fi
+ *   gadget uses (esp32/main/noise_control.cpp), with the phone as its
+ *   network, but on other routes: a Wi-Fi gadget's Link control, tunnel and
+ *   agent name use the VM's Gadget API (/api/gadget/control,
+ *   /api/gadget/tunnel, /api/gadget/me), and a BLE gadget's session uses the
+ *   VM's daemon (POST /link-control). The
  *   device keeps its own credential, as a Wi-Fi gadget does, and hands it
  *   to the app for the session; the app runs TLS, the WebSocket and Noise to
  *   the VM as the gadget's own node, and the device sends and receives that
@@ -904,7 +913,8 @@
  *   client messages are ServiceRequestEnvelopes, client -> device messages
  *   ServiceResponseEnvelopes (esp32/components/noise_core, ServiceCodec.h).
  *   The app never decodes them. So a device's commands are its own
- *   link.register entries on its POST /link-control stream, Muse runs them
+ *   link.register entries on its stream to the daemon's POST /link-control,
+ *   Muse runs them
  *   with link.invoke, and its other requests (GET /fs/raw, POST /fs/upload,
  *   /chat/..., /voice/...) are streams of its own; the VM checks what the
  *   gadget role may do.
@@ -1479,7 +1489,7 @@ MG_ENUM(uint8_t, mg_command_t) {
   // param 3 (optional, after param 2): uint16_t bitrate in kb/s (default
   //         MG_CAPTURE_DEFAULT_BITRATE_KBPS; clamped into the device's range
   //         for the codec and rate). See Capture formats.
-  // param 5..N: reserved, ignored by devices
+  // param 4..N: reserved, ignored by devices
   // The device notifies change_data_type, then streams audio on Data.
   // On a release build of a set-up device, start_mic needs, besides the
   // token proof, a press, gesture or wake word the device itself detected
@@ -2184,8 +2194,13 @@ MG_ENUM(uint8_t, mg_session_command_t) {
   // just to seal it: from the erase on, a credentials_update, data or any
   // other sealed client message gets [session, invalid_value] (data its
   // credit back) and changes nothing, so [1] still means erased, and a
-  // device message not yet started never goes out (its counter is never
-  // used).
+  // device message not yet started (the credentials still waiting for room,
+  // say) never goes out and its counter is never used: the answer is sealed
+  // on that counter, the next one the client takes (a receiver takes only
+  // the next counter, see Sealed credentials). Vectors:
+  // test-vectors/mg-session-v1.json, "sealed clear while the credentials
+  // wait at MTU 247" and "... while a device message is reserved but not
+  // started ...".
   // Unsealed gets [session, insecure];
   // a wrong tag or counter gets [session, invalid_value]; neither erases
   // anything. A link lost after the tag checked still erases. A clear whose
