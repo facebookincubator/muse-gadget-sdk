@@ -450,6 +450,17 @@ ILI9342E panel, which the BSP detects as board version 2. Boot, display,
 touch and the battery gauge were checked on one unit; the rest is inherited
 from the CoreS3 and unverified: `tools/muse/board.sh flash cores3lite`.
 
+The M5Stack Stack-Chan (K151) pairs the CoreS3 with a motorized pan/tilt robot
+body housing dual Feetech serial bus servos (UART1 on GPIO 1/2 at 1 Mbps), 12
+WS2812C RGB LEDs driven by a PY32L020 I2C base expander, and an integrated
+550 mAh battery. The firmware features expressive pan/tilt micro-movements
+synced with Muse's conversational states (listening, thinking, speaking), interactive
+R2-D2 chimes, dynamic caption font scaling (8px to 28px in Settings), and real-time
+touch-to-talk. To preserve battery life and prevent overheating, servo holding torque
+is automatically released after ~1.4 s in idle (0 mA idle draw), and the LEDs power down.
+The base battery powers the system via the M-Bus connector; ensure the base is firmly
+seated and its physical power switch is ON. Flash via `tools/muse/board.sh flash stackchan`.
+
 The M5Stack StickC Plus2 runs the full UI on a classic ESP32, as does the Core2
 below. It has
 8 MB of flash and 2 MB of PSRAM, so it uses the 8 MB partition table too. The
@@ -909,6 +920,7 @@ board's overlays, in order:
 | Seeed XIAO ESP32-S3 1.47 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-seeed-xiao-s3-147`](sdkconfig.muse-seeed-xiao-s3-147) | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3`](sdkconfig.muse-m5stack-cores3) | `tools/muse/board.sh build cores3` |
 | M5Stack CoreS3 Lite | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-cores3lite`](sdkconfig.muse-m5stack-cores3lite) | `tools/muse/board.sh build cores3lite` |
+| M5Stack Stack-Chan | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-stackchan`](sdkconfig.muse-m5stack-stackchan) | `tools/muse/board.sh build stackchan` |
 | Guition JC3248W535 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-guition-jc3248w535`](sdkconfig.muse-guition-jc3248w535) | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd7`](sdkconfig.muse-waveshare-s3-lcd7) | `tools/muse/board.sh build lcd7` |
 | Waveshare ESP32-S3-Touch-LCD-1.28 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-lcd128`](sdkconfig.muse-waveshare-s3-lcd128) | `tools/muse/board.sh build lcd128` |
