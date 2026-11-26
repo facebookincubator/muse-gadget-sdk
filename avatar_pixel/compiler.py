@@ -13,6 +13,8 @@ import zlib
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from .matte import matte_uniform_white
+
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_EDGE = 2048
 MAX_SOURCE_PIXELS = 4_194_304
@@ -42,13 +44,17 @@ class Compilation:
     manifest: dict = field(repr=False)
 
 
-def validate_options(profile=64, colors=24, dither=False, source_key=None):
+def validate_options(
+    profile=64, colors=24, dither=False, source_key=None, remove_white_background=False
+):
     if type(profile) is not int or profile not in PROFILES:
         raise AvatarError("invalid_profile")
     if type(colors) is not int or not 2 <= colors <= 64:
         raise AvatarError("invalid_colors")
     if type(dither) is not bool:
         raise AvatarError("invalid_dither")
+    if type(remove_white_background) is not bool:
+        raise AvatarError("invalid_remove_white_background")
     if source_key is not None and (
         type(source_key) is not str
         or re.fullmatch(r"[0-9a-fA-F]{64}", source_key) is None
@@ -249,24 +255,37 @@ def validate_pack(pack: bytes) -> dict:
 
 
 def compile_image(
-    encoded: bytes, *, profile=64, colors=24, dither=False, source_key=None
+    encoded: bytes,
+    *,
+    profile=64,
+    colors=24,
+    dither=False,
+    source_key=None,
+    remove_white_background=False,
 ) -> Compilation:
     """Compile bytes only. Contain-fit/no crop; source background and A8 kept.
 
     Callers can supply a 64-character opaque digest, never a credential or path.
     Same bytes/options + supported Pillow version yield the same pack/preview.
     No input/output is stored, logged, fetched, or used to infer anatomy.
+    Optional remove_white_background enables only conservative uniform-white
+    matting; false preserves the established pack, preview and manifest bytes.
     """
-    validate_options(profile, colors, dither, source_key)
+    validate_options(profile, colors, dither, source_key, remove_white_background)
     image = _decode(encoded)
     fitted = None
     canvas = None
     preview = None
     try:
         source_width, source_height = image.size
+        matte_stats = None
+        if remove_white_background:
+            matted, matte_stats = matte_uniform_white(image)
+            image.close()
+            image = matted
         longest = max(image.size)
-        fit_width = max(1, (source_width * profile + longest // 2) // longest)
-        fit_height = max(1, (source_height * profile + longest // 2) // longest)
+        fit_width = max(1, (image.width * profile + longest // 2) // longest)
+        fit_height = max(1, (image.height * profile + longest // 2) // longest)
         resample = (
             Image.Resampling.NEAREST if longest <= profile else Image.Resampling.BOX
         )
@@ -331,6 +350,8 @@ def compile_image(
                 "preview_size": len(preview_png),
             }
         )
+        if remove_white_background:
+            manifest["white_background"] = matte_stats
         return Compilation(pack, preview_png, manifest)
     finally:
         image.close()

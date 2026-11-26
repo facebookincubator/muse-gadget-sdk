@@ -33,6 +33,17 @@ menu "Muse"
             default and can be selected without restarting. Requires PSRAM
             for bounded image decoding. Initially validated on the 1.75C.
 
+    config MUSE_AVATAR_WHITE_MATTE
+        bool "Remove uniform white personal-avatar backgrounds (experimental)"
+        depends on MUSE_AVATAR_SYNC
+        default n
+        help
+            Derives a conservative border-connected A8 foreground mask once
+            per still image. Original avatar/cache pixels are preserved.
+            This is not general segmentation; outlined/enclosed white details
+            are retained. Allocation failure keeps the original image and retries.
+            No phone UI, avatar generation, or pixel-style selection is changed.
+
     config MUSE_PIXEL_AVATAR
         bool "Data-only pixel-art personal avatars (experimental)"
         depends on MUSE_AVATAR_SYNC

@@ -31,6 +31,13 @@ bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image, int canvas_px
                                const muse_avatar_transform_t *transform, uint16_t background,
                                uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1);
 
+/* Optional unpremultiplied RGB565+A8. The caller pins image and alpha together
+ * through the last strip. NULL alpha is exactly the existing opaque path. */
+bool muse_avatar_blit_alpha_transform(const muse_avatar_pixels_t *image,const uint8_t *alpha,
+                                     int canvas_px,const muse_avatar_transform_t *transform,
+                                     uint16_t background,uint16_t *dst,int stride_px,
+                                     int x0,int x1,int y0,int y1);
+
 /* Immutable RGB565 input; contain-fit into the current square canvas. zoom is
  * 950..1000, so pet/speech feedback never crops or moves outside the canvas.
  * Coordinates are inclusive, matching muse_pixel_scale. No allocation or I/O. */

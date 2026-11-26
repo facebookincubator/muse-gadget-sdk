@@ -50,16 +50,38 @@ def generation(board):
 
 def read_image(board):
     from PIL import Image
-    board.write_line('pixel.image')
+    board.write_line('avatar')
+    avatar = json.loads(receive(board, '@avatar '))
+    observed_alpha = avatar.get('alpha', False)
+    alpha_export = avatar.get('alpha_export')
+    if type(observed_alpha) is not bool or (alpha_export is not None and type(alpha_export) is not bool):
+        raise ValueError('Invalid avatar alpha capability')
+    if alpha_export is False:
+        raise RuntimeError('The pixel export feature is not enabled on this gadget')
+    # Capability is stable; availability belongs to the actual pinned snapshot.
+    # The old alpha observation is used only with transitional/legacy firmware.
+    with_alpha = alpha_export is True or observed_alpha
+    board.write_line('pixel.image_alpha' if with_alpha else 'pixel.image')
     meta = json.loads(receive(board, '@pixel_image ', 15))
     width, height = meta.get('width'), meta.get('height')
     if type(width) is not int or type(height) is not int or not 1 <= width <= 466 or not 1 <= height <= 466:
         raise ValueError('Image dimensions outside the gadget bound')
-    expected = width * height * 2
+    rgb_size = width * height * 2
+    alpha_size = meta.get('alpha_bytes', 0)
+    if type(alpha_size) is not int or alpha_size not in (0, width * height):
+        raise ValueError('Invalid exported alpha size')
+    snapshot_alpha = meta.get('alpha_available')
+    if snapshot_alpha is not None and type(snapshot_alpha) is not bool:
+        raise ValueError('Invalid exported alpha availability')
+    if snapshot_alpha is False and alpha_size:
+        raise ValueError('Inconsistent exported alpha metadata')
+    missing_alpha = (snapshot_alpha is True and not alpha_size) or (
+        snapshot_alpha is None and with_alpha and observed_alpha and not alpha_size)
+    expected = rgb_size + alpha_size
     if meta.get('bytes') != expected:
         raise ValueError('Invalid exported image size')
     body = bytearray()
-    end = time.monotonic() + 90
+    end = time.monotonic() + 150
     while time.monotonic() < end:
         line = board.read_line(end)
         if not line:
@@ -80,11 +102,15 @@ def read_image(board):
     source_key = generation(board)
     if source_key != meta.get('source_key'):
         raise ValueError('Avatar changed during export; retry with the current image')
+    if missing_alpha:
+        raise ValueError('The pinned export has alpha; retry using alpha export')
     rgb = bytearray()
-    for (pixel,) in struct.iter_unpack('<H', body):
+    for i, (pixel,) in enumerate(struct.iter_unpack('<H', body[:rgb_size])):
         r, g, b = (pixel >> 11) & 31, (pixel >> 5) & 63, pixel & 31
         rgb.extend(((r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)))
-    image = Image.frombytes('RGB', (width, height), bytes(rgb))
+        if alpha_size:
+            rgb.append(body[rgb_size + i])
+    image = Image.frombytes('RGBA' if alpha_size else 'RGB', (width, height), bytes(rgb))
     output = io.BytesIO()
     image.save(output, format='PNG')
     image.close()
@@ -104,13 +130,14 @@ def private_new(path, data):
         raise
 
 
-def compile_current(port, output, preview, profile, colors, dither):
+def compile_current(port, output, preview, profile, colors, dither, remove_white_background=False):
     with chat.Board(port) as board:
         status = board.status(timeout=5)
         if not status or not status.get('device', {}).get('link', {}).get('paired'):
             raise RuntimeError('The paired gadget must answer before exporting its image')
         encoded, key = read_image(board)
-    result = compile_image(encoded, profile=profile, colors=colors, dither=dither, source_key=key)
+    result = compile_image(encoded, profile=profile, colors=colors, dither=dither, source_key=key,
+                           remove_white_background=remove_white_background)
     private_new(output, result.pack)
     if preview:
         private_new(preview, result.preview_png)
@@ -158,15 +185,18 @@ def main():
     comp.add_argument('--profile', type=int, choices=(64, 96), default=64)
     comp.add_argument('--colors', type=int, default=24)
     comp.add_argument('--dither', action='store_true')
+    comp.add_argument('--remove-white-background', action='store_true')
     inst = commands.add_parser('install')
     inst.add_argument('--port', required=True)
+    inst.add_argument('--no-enable', action='store_true', help='Install without changing the selected avatar style')
     inst.add_argument('pack')
     args = parser.parse_args()
     try:
         if args.action == 'compile-current':
-            compile_current(args.port, args.output, args.preview, args.profile, args.colors, args.dither)
+            compile_current(args.port, args.output, args.preview, args.profile, args.colors, args.dither,
+                            args.remove_white_background)
         else:
-            install(args.port, args.pack)
+            install(args.port, args.pack, enable=not args.no_enable)
     except (AvatarError, RuntimeError, ValueError, OSError, TimeoutError, chat.BoardError) as error:
         # No credential or private image content is part of these fixed failures.
         print(str(error), file=sys.stderr)

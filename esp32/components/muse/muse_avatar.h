@@ -31,6 +31,11 @@ void muse_avatar_clear(void);
 const char *muse_avatar_status(void);
 const muse_avatar_image_t *muse_avatar_acquire(void);
 void muse_avatar_release(const muse_avatar_image_t *image);
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+/* Optional A8 from the same pinned canonical image. Clip views are opaque.
+ * The caller keeps the image acquired until the last mask/strip read. */
+const uint8_t *muse_avatar_image_alpha(const muse_avatar_image_t *image);
+#endif
 #if CONFIG_MUSE_PIXEL_AVATAR
 /* Read metadata from the same pinned canonical image, never a newer global
  * identity. The caller keeps the image acquired until copying finishes. */

@@ -386,13 +386,24 @@ static void export_image(void *arg) {
         image->data.width>=1 && image->data.height>=1 && image->data.width<=MUSE_AVATAR_MAX_EDGE && image->data.height<=MUSE_AVATAR_MAX_EDGE;
     if(!ok)printf("@pixel_export_error unavailable\n");
     else {
-        size_t size=(size_t)image->data.width*image->data.height*2;const uint8_t *bytes=(const uint8_t *)image->data.pixels;
+        size_t rgb_size=(size_t)image->data.width*image->data.height*2;
+        const uint8_t *bytes=(const uint8_t *)image->data.pixels,*available_alpha=NULL;
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+        available_alpha=muse_avatar_image_alpha(image);
+#endif
+        const uint8_t *alpha=(uintptr_t)arg?available_alpha:NULL;
+        size_t alpha_size=alpha?rgb_size/2:0,size=rgb_size+alpha_size;
+        uint32_t crc=muse_pixel_pack_crc(bytes,rgb_size);
+        if(alpha)crc=muse_pixel_crc_append(crc,alpha,alpha_size);
         char key[65];for(unsigned i=0;i<32;i++)snprintf(key+2*i,3,"%02x",identity[i]);
-        printf("@pixel_image {\"width\":%d,\"height\":%d,\"bytes\":%u,\"crc\":%u,\"source_key\":\"%s\"}\n",image->data.width,image->data.height,(unsigned)size,(unsigned)muse_pixel_pack_crc(bytes,size),key);
+        printf("@pixel_image {\"width\":%d,\"height\":%d,\"bytes\":%u,\"alpha_bytes\":%u,\"alpha_available\":%s,\"crc\":%u,\"source_key\":\"%s\"}\n",image->data.width,image->data.height,(unsigned)size,(unsigned)alpha_size,available_alpha?"true":"false",(unsigned)crc,key);
         for(size_t off=0;off<size;off+=144) {
             if(!export_current(epoch,identity)) {ok=false;break;}
-            size_t n=size-off;if(n>144)n=144;unsigned char text[193];size_t length=0;
-            if(mbedtls_base64_encode(text,sizeof(text),&length,bytes+off,n)) {ok=false;break;}
+            size_t n=size-off;if(n>144)n=144;uint8_t chunk[144];size_t copied=0;
+            if(off<rgb_size) {copied=rgb_size-off;if(copied>n)copied=n;memcpy(chunk,bytes+off,copied);}
+            if(copied<n)memcpy(chunk+copied,alpha+(off+copied-rgb_size),n-copied);
+            unsigned char text[193];size_t length=0;
+            if(mbedtls_base64_encode(text,sizeof(text),&length,chunk,n)) {ok=false;break;}
             printf("@pixel_bytes %.*s\n",(int)length,text);
         }
         if(ok && export_current(epoch,identity))printf("@pixel_end\n");
@@ -449,11 +460,12 @@ bool muse_pixel_avatar_console(const char *line) {
         else printf("@pixel_export_error identity_unavailable\n");
         return true;
     }
-    if(!strcmp(line,"pixel.image")) {
+    if(!strcmp(line,"pixel.image") || !strcmp(line,"pixel.image_alpha")) {
+        bool with_alpha=!strcmp(line,"pixel.image_alpha");
         bool expected=false;
         if(!atomic_compare_exchange_strong(&s_exporting,&expected,true)) {printf("@pixel_export_error busy\n");return true;}
         muse_state_set_asleep(false);muse_state_poke();
-        if(xTaskCreateWithCaps(export_image,"pixel_export",4096,NULL,2,NULL,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)!=pdPASS) {
+        if(xTaskCreateWithCaps(export_image,"pixel_export",4096,(void *)(uintptr_t)with_alpha,2,NULL,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)!=pdPASS) {
             atomic_store(&s_exporting,false);printf("@pixel_export_error memory\n");
         }
         return true;

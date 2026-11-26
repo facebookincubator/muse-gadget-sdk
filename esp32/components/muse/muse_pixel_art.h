@@ -22,6 +22,8 @@ typedef struct {
     uint16_t width, height, colors;
 } muse_pixel_pack_t;
 uint32_t muse_pixel_pack_crc(const void *data, size_t size);
+/* zlib-style incremental CRC for an RGB565 span followed by optional A8. */
+uint32_t muse_pixel_crc_append(uint32_t previous,const void *data,size_t size);
 bool muse_pixel_pack_parse(const uint8_t *data, size_t size, muse_pixel_pack_t *out);
 
 /* Modes match Muse's BOOT/IDLE/LISTENING/THINKING/SPEAKING/ERROR/OFF.

@@ -758,9 +758,15 @@ static lv_result_t muse_dec_get_area(lv_image_decoder_t *dec, lv_image_decoder_d
         }
 #endif
         if (s_strips[i] == dsc->user_data && s_strip_images[i]) {
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+            personal = muse_avatar_blit_alpha_transform(&s_strip_images[i]->data,muse_avatar_image_alpha(s_strip_images[i]),dsc->header.w,
+                                        &s_strip_transform[i],s_strip_background[i],(uint16_t *)buf->data,
+                                        buf->header.stride / sizeof(uint16_t),full->x1,full->x2,y1,y2);
+#else
             personal = muse_avatar_blit_transform(&s_strip_images[i]->data,dsc->header.w,
                                         &s_strip_transform[i],s_strip_background[i],(uint16_t *)buf->data,
                                         buf->header.stride / sizeof(uint16_t),full->x1,full->x2,y1,y2);
+#endif
             break;
         }
     }

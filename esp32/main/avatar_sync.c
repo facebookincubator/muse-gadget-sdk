@@ -32,6 +32,9 @@
 #include "avatar_identity.h"
 #include "avatar_request.h"
 #include "avatar_webp.h"
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+#include "muse_avatar_matte.h"
+#endif
 #include "avatar_cache.h"
 #include "vm_file_path.h"
 #include "config_store.h"
@@ -68,9 +71,9 @@ static atomic_uint s_path_id, s_revision_id, s_cached_path_id, s_cached_revision
 static atomic_uint s_completions;
 static portMUX_TYPE s_image_guard = portMUX_INITIALIZER_UNLOCKED;
 #if CONFIG_MUSE_PIXEL_AVATAR
-typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; uint8_t pixel_key[32]; bool pixel_key_valid; } image_t;
+typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; uint16_t *raw_pixels; uint8_t *alpha; bool matte_pending; uint8_t pixel_key[32]; bool pixel_key_valid; } image_t;
 #else
-typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; } image_t;
+typedef struct { muse_avatar_image_t view; unsigned refs; uint32_t crc, content_epoch; uint16_t *raw_pixels; uint8_t *alpha; bool matte_pending; } image_t;
 #endif
 static image_t *s_image;
 static avatar_identity_t s_identity;
@@ -146,7 +149,11 @@ static bool s_image_saved;
 #define JOB_REFRESH 1u
 #define JOB_CLEAR 2u
 #define JOB_BINDING 4u
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+#define AVATAR_PEAK (4 * 1024 * 1024)
+#else
 #define AVATAR_PEAK (1536 * 1024)
+#endif
 #define AVATAR_RESERVE (1024 * 1024)
 #if CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
 #define AVATAR_TASK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
@@ -207,14 +214,24 @@ bool avatar_sync_console(const char *line) {
 #endif
     if (!strcmp(line, "avatar")) {
         const muse_avatar_image_t *image = muse_avatar_acquire();
-        printf("@avatar {\"source\":\"%s\",\"status\":\"%s\",\"width\":%d,\"height\":%d,\"revision\":%u,\"peak_bytes\":%u,\"refresh_ms\":%d,\"identity_reads\":%u,\"file_reads\":%u,\"downloaded_bytes\":%u,\"cache_writes\":%u,\"cache_loads\":%u,\"path_id\":%u,\"asset_revision_id\":%u,\"cached_path_id\":%u,\"cached_asset_revision_id\":%u,\"resident_bytes\":%u,\"completed_refreshes\":%u}\n",
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+        bool alpha=muse_avatar_image_alpha(image)!=NULL;
+#else
+        bool alpha=false;
+#endif
+#if CONFIG_MUSE_PIXEL_AVATAR
+        bool alpha_export=true;
+#else
+        bool alpha_export=false;
+#endif
+        printf("@avatar {\"source\":\"%s\",\"status\":\"%s\",\"width\":%d,\"height\":%d,\"revision\":%u,\"peak_bytes\":%u,\"refresh_ms\":%d,\"identity_reads\":%u,\"file_reads\":%u,\"downloaded_bytes\":%u,\"cache_writes\":%u,\"cache_loads\":%u,\"path_id\":%u,\"asset_revision_id\":%u,\"cached_path_id\":%u,\"cached_asset_revision_id\":%u,\"resident_bytes\":%u,\"completed_refreshes\":%u,\"alpha\":%s,\"alpha_export\":%s}\n",
                muse_avatar_source() == MUSE_AVATAR_PERSONAL ? "personal" : "builtin", muse_avatar_status(),
                image ? image->data.width : 0, image ? image->data.height : 0,
                image ? (unsigned)image->revision : 0, (unsigned)atomic_load(&s_last_peak), atomic_load(&s_last_ms),
                atomic_load(&s_identity_reads), atomic_load(&s_file_reads), atomic_load(&s_bytes_received),
                atomic_load(&s_cache_writes), atomic_load(&s_cache_loads),
                atomic_load(&s_path_id), atomic_load(&s_revision_id), atomic_load(&s_cached_path_id), atomic_load(&s_cached_revision_id),
-               (unsigned)avatar_webp_live_bytes(), atomic_load(&s_completions));
+               (unsigned)avatar_webp_live_bytes(), atomic_load(&s_completions),alpha?"true":"false",alpha_export?"true":"false");
         muse_avatar_release(image); return true;
     }
     if (!strcmp(line, "avatar.source=builtin") || !strcmp(line, "avatar.source=personal")) {
@@ -254,7 +271,11 @@ void muse_avatar_release(const muse_avatar_image_t *view) {
     portENTER_CRITICAL(&s_image_guard);
     last = --image->refs == 0;
     portEXIT_CRITICAL(&s_image_guard);
-    if (last) { muse_webp_free((void *)view->data.pixels); heap_caps_free(image); }
+    if (last) {
+        muse_webp_free(image->alpha);
+        if(view->data.pixels!=image->raw_pixels)muse_webp_free((void *)view->data.pixels);
+        muse_webp_free(image->raw_pixels);heap_caps_free(image);
+    }
 }
 static void publish(image_t *image) {
     if (!image) motion_binding(NULL);
@@ -265,13 +286,41 @@ static void publish(image_t *image) {
     if (old) muse_avatar_release(&old->view);
     if (!image) s_image_saved = false;
 }
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+const uint8_t *muse_avatar_image_alpha(const muse_avatar_image_t *view) {
+    if(!view)return NULL;
+#if CONFIG_MUSE_AVATAR_ANIMATIONS
+    if(view->release)return NULL;
+#endif
+    return ((const image_t *)view)->alpha;
+}
+#endif
 static image_t *new_image(uint16_t *pixels, int w, int h, uint32_t content_epoch) {
+    if(!pixels || w<1 || h<1 || w>MUSE_AVATAR_MAX_EDGE || h>MUSE_AVATAR_MAX_EDGE) {muse_webp_free(pixels);return NULL;}
     image_t *image = heap_caps_calloc(1, sizeof(*image), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!image) { muse_webp_free(pixels); return NULL; }
     image->view = (muse_avatar_image_t){.data={pixels, w, h}, .revision=++s_revision};
-    image->refs = 1;
+    image->refs = 1;image->raw_pixels=pixels;
     image->content_epoch = content_epoch;
     image->crc = avatar_cache_crc(pixels, (size_t)w * h * 2);
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+    if(muse_avatar_white_candidate(pixels,w,h)) {
+        size_t count=(size_t)w*h;
+        uint16_t *display=muse_webp_malloc(count*2);
+        uint8_t *alpha=muse_webp_malloc(count);
+        uint32_t *queue=muse_webp_malloc(count*sizeof(*queue));
+        image->matte_pending=true;
+        muse_avatar_matte_stats_t stats;
+        if(display && alpha && queue && muse_avatar_white_mask(pixels,w,h,alpha,queue,count,&stats)) {
+            image->matte_pending=false;
+            if(stats.applied) {
+                memcpy(display,pixels,count*2);muse_avatar_matte_decontaminate(display,alpha,count);
+                image->view.data.pixels=display;image->alpha=alpha;display=NULL;alpha=NULL;
+            }
+        }
+        muse_webp_free(queue);muse_webp_free(display);muse_webp_free(alpha);
+    }
+#endif
     return image;
 }
 static bool busy(void) {
@@ -414,9 +463,9 @@ static bool cache_save(image_t *image, const avatar_identity_t *identity, unsign
     mkdir("/files/.muse-avatar-v1", 0700);
     avatar_cache_header_t h;
     avatar_cache_header_init(&h, s_cache_sequence + 1, image->view.data.width,
-                             image->view.data.height, s_binding, identity, image->view.data.pixels);
+                             image->view.data.height, s_binding, identity, image->raw_pixels);
     int slot = s_cache_slot == 0 ? 1 : 0;
-    bool ok = avatar_cache_write_while(slot ? CACHE_B : CACHE_A, &h, image->view.data.pixels, cache_proceed, &generation);
+    bool ok = avatar_cache_write_while(slot ? CACHE_B : CACHE_A, &h, image->raw_pixels, cache_proceed, &generation);
     if (ok && !cancelled(generation)) {
         s_cache_sequence = h.sequence; s_cache_slot = slot;
         cached_identity(identity); atomic_fetch_add(&s_cache_writes, 1); return true;
@@ -465,7 +514,10 @@ static bool sync_once(unsigned generation) {
     if(!set_image_pixel_key(image,&identity)) {muse_avatar_release(&image->view);return false;}
 #endif
     bool same = s_image && image->crc == s_image->crc && decoded.width == s_image->view.data.width && decoded.height == s_image->view.data.height &&
-                !memcmp(image->view.data.pixels, s_image->view.data.pixels, (size_t)decoded.width * decoded.height * 2);
+                !memcmp(image->raw_pixels, s_image->raw_pixels, (size_t)decoded.width * decoded.height * 2);
+    bool same_display=same && (image->matte_pending ||
+        ((!image->alpha)==(!s_image->alpha) && (!image->alpha ||
+         !memcmp(image->alpha,s_image->alpha,(size_t)decoded.width*decoded.height))));
     bool saved = same ? s_image_saved : cache_save(image, &identity, generation);
     if (same && saved && !busy() && !cancelled(generation) &&
         (strcmp(identity.path, s_identity.path) || strcmp(identity.revision, s_identity.revision))) {
@@ -478,9 +530,9 @@ static bool sync_once(unsigned generation) {
     if (cancelled(generation)) { muse_avatar_release(&image->view); return false; }
 #if CONFIG_MUSE_PIXEL_AVATAR
     bool same_key=s_image && s_image->pixel_key_valid && !memcmp(s_image->pixel_key,image->pixel_key,32);
-    if (same && same_key) muse_avatar_release(&image->view); else publish(image);
+    if (same_display && same_key) muse_avatar_release(&image->view); else publish(image);
 #else
-    if (same) muse_avatar_release(&image->view); else publish(image);
+    if (same_display) muse_avatar_release(&image->view); else publish(image);
 #endif
     s_image_saved = saved;
     s_identity = identity; motion_binding(&s_identity);
@@ -491,10 +543,34 @@ static bool sync_once(unsigned generation) {
     return true;
 }
 
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+static bool retry_matte(unsigned generation) {
+    const muse_avatar_image_t *held=muse_avatar_acquire();
+    if(!held)return false;
+    const image_t *old=(const image_t *)held;
+    if(!old->matte_pending) {muse_avatar_release(held);return true;}
+    size_t count=(size_t)held->data.width*held->data.height;
+    uint16_t *pixels=muse_webp_malloc(count*2);
+    if(!pixels) {muse_avatar_release(held);return false;}
+    memcpy(pixels,old->raw_pixels,count*2);
+    image_t *image=new_image(pixels,held->data.width,held->data.height,old->content_epoch);
+    if(!image) {muse_avatar_release(held);return false;}
+#if CONFIG_MUSE_PIXEL_AVATAR
+    memcpy(image->pixel_key,old->pixel_key,32);image->pixel_key_valid=old->pixel_key_valid;
+#endif
+    bool ok=!image->matte_pending && !cancelled(generation) && s_image==old &&
+        old->content_epoch==atomic_load(&s_content_epoch) && !atomic_load(&s_binding_blocked);
+    if(ok)publish(image);else muse_avatar_release(&image->view);
+    muse_avatar_release(held);return ok;
+}
+#endif
 static void worker_task(void *arg) {
     (void)arg;
-    int64_t next = 0;
-    unsigned retry_s = 60;
+    int64_t next = 0,next_cache=0;
+    unsigned retry_s = 60,cache_retry=1;
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+    int64_t next_matte=0;unsigned matte_retry=1;
+#endif
     bool loaded = false, connected = false;
     avatar_webp_set_budget(AVATAR_PEAK);
     for (;;) {
@@ -517,7 +593,10 @@ static void worker_task(void *arg) {
             if (!have || !s_have_binding || memcmp(current, s_binding, 32)) {
                 atomic_fetch_add(&s_content_epoch, 1);
                 publish(NULL); memset(&s_identity, 0, sizeof(s_identity)); loaded = false;
-                s_cache_slot = -1; s_cache_sequence = 0; next = 0;
+                s_cache_slot = -1; s_cache_sequence = 0; next = 0;next_cache=0;cache_retry=1;
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+                next_matte=0;matte_retry=1;
+#endif
             }
             s_have_binding = have;
             if (have) memcpy(s_binding, current, 32);
@@ -525,7 +604,22 @@ static void worker_task(void *arg) {
         }
         if (jobs & JOB_CLEAR) { publish(NULL); cache_clear(); memset(&s_identity, 0, sizeof(s_identity)); loaded = true; next = 0; }
         if (source == MUSE_AVATAR_BUILTIN) { publish(NULL); memset(&s_identity, 0, sizeof(s_identity)); atomic_store(&s_status, "Built-in"); break; }
-        if (s_have_binding && !loaded && !busy()) { cache_load(); loaded = true; }
+        if (s_have_binding && !loaded && !busy() && esp_timer_get_time()>=next_cache) {
+            loaded=cache_load();
+            if(loaded)cache_retry=1;
+            else {
+                next_cache=esp_timer_get_time()+(int64_t)cache_retry*1000000;
+                cache_retry=cache_retry<30?cache_retry*2:60;
+            }
+        }
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+        if(s_have_binding && s_image && s_image->matte_pending && !muse_state_asleep() && !busy() &&
+           esp_timer_get_time()>=next_matte) {
+            bool done=retry_matte(generation);
+            next_matte=esp_timer_get_time()+(int64_t)matte_retry*1000000;
+            matte_retry=done?1:matte_retry<30?matte_retry*2:60;
+        }
+#endif
         bool online = noise_ctrl_is_connected();
         if (jobs & JOB_REFRESH) next = 0;
         if (online && !connected) { next = 0; atomic_fetch_or(&s_jobs, JOB_BINDING); }
@@ -535,7 +629,12 @@ static void worker_task(void *arg) {
             (esp_timer_get_time() >= next || (jobs & JOB_REFRESH))) {
             atomic_store(&s_status, "Updating");
             bool ok = sync_once(generation);
-            if (ok) { atomic_fetch_add(&s_completions, 1); retry_s = 60; next = esp_timer_get_time() + 900000000; }
+            if (ok) {
+                loaded=true;atomic_fetch_add(&s_completions, 1);retry_s=60;next=esp_timer_get_time()+900000000;
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+                next_matte=0;matte_retry=1;
+#endif
+            }
             else {
                 atomic_store(&s_status, s_image ? "Using saved avatar" : "Unavailable");
                 if (cancelled(generation) || muse_state_asleep() || busy()) next = 0;

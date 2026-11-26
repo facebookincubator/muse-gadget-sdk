@@ -4,9 +4,12 @@ This is **converter/library and development/self-hosting service code, not a
 public hosted deployment**. It implements the frozen
 [`../protocols/PIXEL_AVATAR.md`](../protocols/PIXEL_AVATAR.md) v1 contract. No
 network image fetching, generative model, training, anatomy inference, face rig,
-background removal, device connection, firmware build, or public service is
-included. All test art is synthetic robot, animal, plant and geometric logo art
-created with Pillow; no default Meta character or private avatar is included.
+**general background segmentation**, device connection, firmware build, or
+public service is included. An explicitly opt-in conservative uniform-white
+matte is described below; it does not change the frozen pack layout or default
+output. All test art is synthetic robot, animal, plant, outlined-white and
+geometric logo art created with Pillow; no default Meta character or private
+avatar is included.
 
 ## Run locally
 
@@ -21,6 +24,10 @@ python -m avatar_pixel serve --port 8080
 
 `--profile` is 64 (default) or 96; `--colors` is an integer 2..64 (default 24).
 `--dither` enables deterministic fixed-point Floyd-Steinberg palette dithering.
+`--remove-white-background` explicitly enables the conservative white matte
+(default **false**). Its library/JSON name is `remove_white_background`, a strict
+boolean. Omission or explicit false preserves the previous pack, preview and
+manifest bytes. Existing nonopaque alpha is never replaced by this option.
 `--source-key` accepts exactly 64 hex characters. Without it, the generation
 key is SHA-256 of the **original encoded input**, not resized pixels. The key is
 opaque caller data, not a credential, path, ownership proof or trusted-source
@@ -56,8 +63,9 @@ CRCs, every palette index (even transparent cells), and nonempty A8 alpha.
   is respected; EXIF/ICC/text metadata is not copied into the PNG preview.
 - Contain-fit into a centered 64x64 or 96x96 transparent canvas, **no crop**.
   Enlargement uses nearest-neighbor; reduction uses Pillow BOX resampling.
-  Source backgrounds remain, with no inferred mask. Original A8 transparency
-  is resized, not thresholded; black is a normal color. Extra contain-fit
+  Source backgrounds remain by default, with no inferred mask. Original A8
+  transparency is resized, not thresholded; black is a normal color. Extra
+  contain-fit
   padding is transparent. Fine detail may disappear during downsampling.
 - Fully transparent RGB does not consume the visible palette budget. If all
   distinct visible RGB565 values fit, they are preserved exactly. Otherwise,
@@ -75,6 +83,55 @@ CRCs, every palette index (even transparent cells), and nonempty A8 alpha.
   and state feedback are represented by capability mask 15, not executable
   code or per-avatar anatomy. Device rendering and binding are separate work.
 
+## Optional conservative uniform-white matte (algorithm v1)
+
+```python
+result = compile_image(image_bytes, remove_white_background=True)
+```
+
+Or add `--remove-white-background` to the `compile` CLI. This is deterministic
+border-connected uniform-white matting, **not general background segmentation**,
+a learned model, a global white color key, or an anatomy/white-fur classifier.
+No arbitrary thresholds, URLs or trusted-source overrides are accepted.
+
+1. Only fully opaque RGBA inputs are eligible. Any nonopaque alpha makes the
+   helper return an unchanged copy, including hidden RGB and all alpha values;
+   no matte shrink is performed. Opaque mask work is bounded to longest edge
+   **466**, using contain-fit BOX shrink before masking for larger input, never
+   crop or enlargement. Normal encoded/decoded source bounds remain enforced.
+2. Normalize RGB through RGB565 (5/6/5 bits and bit replication). A core-white
+   pixel has minimum channel >=240 and maximum-minus-minimum <=16. Require all
+   four corners core-white and >=98% of **unique** border pixels core-white.
+   Otherwise skip. Seed every core-white border cell and 4-connected flood-fill
+   core-white cells only. These cells get A8=0; all retained cells start at 255.
+   If no foreground survives, skip instead of manufacturing empty alpha.
+   Enclosed white highlights/foreground are deliberately retained. On any skip,
+   the unchanged original copy is returned; an analysis downsample is discarded.
+3. Using the original immutable normalized RGB/core mask, soften only retained
+   pixels with minimum >=224, chroma <=32 and a 4-neighbor removed core-white
+   cell. Among retained 4-neighbors with minimum <220, select the largest
+   `dF = 255 - minimum`. With `dC = 255 - minimum(current)`, alpha is
+   `clamp(round(dC * 255 / dF), 1, 255)`. No strong neighbor means no softening.
+   Strong foreground cannot itself satisfy the soft criterion, so pass order
+   cannot alter source colors or strength.
+4. Compute **all** alpha first, then remove white contamination. For partial
+   alpha `a`, each channel uses `q = max(0, c - (255 - a))`, then unpremultiplied
+   `clamp(round(q * 255 / a), 0, 255)`. Alpha-zero RGB is black/zero; alpha-255
+   RGB retains the normalized source. Both rounds are nonnegative nearest
+   integer, **ties up**, implemented as `(n + floor(d/2)) // d`, matching C.
+
+Only when the option is true, `metadata.white_background` reports `applied`,
+`removed`, `softened`, `width` and `height`. Counts and dimensions describe the
+bounded **matte-analysis grid**, not final profile cells. Skips report zero
+removed/softened; existing-alpha skips have a zero-sized analysis grid. The
+source dimensions and default source-key digest still refer to the original
+input, and flags/capabilities/binary layout remain unchanged.
+
+White foreground touching/merging into the white border may be lost; the
+algorithm does not promise perfect segmentation. Fine outlines/details can be
+lost during bounded shrink. Colored/nonuniform borders are conservatively
+skipped. No device or phone UI is changed by this converter option.
+
 ## HTTP API
 
 `GET /health` returns `{"status":"ok"}`. `POST /v1/compile` accepts UTF-8 JSON:
@@ -85,6 +142,7 @@ CRCs, every palette index (even transparent cells), and nonempty A8 alpha.
   "profile": 64,
   "colors": 24,
   "dither": false,
+  "remove_white_background": false,
   "source_key": "<optional 64 hex characters; omit for input SHA-256>"
 }
 ```
@@ -93,7 +151,9 @@ Only `image_base64` is required. Omit optional fields for defaults. Explicit
 `null`, booleans in numeric fields, floats, nonfinite values, duplicate keys
 (including escaped duplicates), unexpected fields and invalid types are
 rejected. No `image_url`, URL/data-URI base64, trusted overrides, prompt, file
-path, background-removal or arbitrary runtime parameters are accepted.
+path, general segmentation parameters or arbitrary runtime parameters are
+accepted. `remove_white_background` is the sole bounded, conservative matte
+option; `remove_background` and threshold overrides remain prohibited.
 
 Response keys:
 
@@ -227,8 +287,11 @@ indices; strict JSON types/duplicates/URL refusal; real HTTP compile with fresh
 subprocess workers; bearer/Host/Origin/framing guards; bounded connections,
 slow input/worker timeouts; terminal EOF/reset closure (not a read timeout);
 mocked Darwin valid/invalid requests with unsupported AS limits; Linux AS
-fail-closed protection; no private logs/files; private new-only CLI exports;
-and a real CLI service in an ephemeral local process/port, torn down afterward.
+fail-closed protection; conservative white-matte core/soft vectors, enclosed
+white highlights, arbitrary-border/blank/alpha skips, 466px analysis bounds,
+optional CLI/real-HTTP behavior and unchanged default bytes; no private
+logs/files; private new-only CLI exports; and a real CLI service in an ephemeral
+local process/port, torn down afterward.
 Test filesystem scratch is confined to new `.test-*` directories within this
 package and removed at test completion.
 
@@ -237,5 +300,6 @@ independent of the C reader/ESP32 backend and private paired-device test; it
 neither duplicates those components nor changes protocol/firmware files.
 Future style algorithms belong behind explicit versioned compiler options,
 with security bounds/determinism tests retained. Any future generative model,
-remote input, anatomy rig or background-removal behavior would need a separate
-reviewed contract, not a silent change to v1.
+remote input, anatomy rig or background segmentation beyond the explicit
+conservative-white option would need a separate reviewed contract, not a silent
+change to the frozen binary v1.

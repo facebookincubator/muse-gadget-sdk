@@ -10,7 +10,16 @@ from .compiler import AvatarError, MAX_IMAGE_BYTES, compile_image, validate_opti
 MAX_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 MAX_BODY_BYTES = MAX_BASE64_CHARS + 4096
 MAX_RESPONSE_BYTES = 800 * 1024
-FIELDS = frozenset(("image_base64", "profile", "colors", "dither", "source_key"))
+FIELDS = frozenset(
+    (
+        "image_base64",
+        "profile",
+        "colors",
+        "dither",
+        "source_key",
+        "remove_white_background",
+    )
+)
 
 
 def _object(pairs):
@@ -52,6 +61,7 @@ def parse_request(body: bytes) -> dict:
         request.get("colors", 24),
         request.get("dither", False),
         request.get("source_key"),
+        request.get("remove_white_background", False),
     )
     text = request["image_base64"]
     if not text or len(text) > MAX_BASE64_CHARS:
@@ -71,6 +81,7 @@ def parse_request(body: bytes) -> dict:
         "colors": request.get("colors", 24),
         "dither": request.get("dither", False),
         "source_key": request.get("source_key"),
+        "remove_white_background": request.get("remove_white_background", False),
     }
 
 

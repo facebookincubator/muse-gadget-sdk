@@ -388,6 +388,8 @@ avatar, enable the experimental [data-only pixel-avatar path](docs/pixel-avatars
 The [shared converter/API](../avatar_pixel/README.md) compiles images into bounded
 sprite packs; one local renderer supplies generic reactions. New packs do not
 require a firmware rebuild. Inputs and generated personal assets stay private.
+For a flat white source backdrop, optional [local background matting](docs/avatar-background.md)
+keeps normal rendering and the original cache intact while compositing a foreground mask.
 
 To put your own avatar on a board's screen, plug in the board and run
 `python3 tools/muse/avatar.py`. It asks your Muse to redraw its avatar as the

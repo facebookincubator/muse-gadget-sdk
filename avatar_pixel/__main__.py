@@ -71,6 +71,11 @@ def main(argv=None):
     compile_parser.add_argument("--colors", type=int, default=24)
     compile_parser.add_argument("--dither", action="store_true")
     compile_parser.add_argument(
+        "--remove-white-background",
+        action="store_true",
+        help="opt-in conservative border-connected uniform-white matte",
+    )
+    compile_parser.add_argument(
         "--source-key", help="opaque 64-hex generation digest (not a credential)"
     )
     compile_parser.add_argument(
@@ -104,6 +109,7 @@ def main(argv=None):
                 colors=args.colors,
                 dither=args.dither,
                 source_key=args.source_key,
+                remove_white_background=args.remove_white_background,
             )
             outputs = [(args.output, result.pack)]
             if args.preview:

@@ -15,15 +15,16 @@ static uint16_t u16(const uint8_t *p) { return (uint16_t)((unsigned)p[0] | (unsi
 static uint32_t u32(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
 }
-uint32_t muse_pixel_pack_crc(const void *data, size_t size) {
+uint32_t muse_pixel_crc_append(uint32_t previous,const void *data,size_t size) {
     const uint8_t *bytes = data;
-    uint32_t crc = UINT32_MAX;
+    uint32_t crc = ~previous;
     while (size--) {
         crc ^= *bytes++;
         for (unsigned i=0;i<8;i++) crc=(crc>>1) ^ (0xedb88320u & (0u-(crc&1u)));
     }
     return ~crc;
 }
+uint32_t muse_pixel_pack_crc(const void *data,size_t size) {return muse_pixel_crc_append(0,data,size);}
 bool muse_pixel_pack_parse(const uint8_t *data, size_t size, muse_pixel_pack_t *out) {
     if (!data || !out || size<64 || size>MUSE_PIXEL_PACK_MAX ||
         memcmp(data,"MSPIX01",8) || u32(data+8)!=size || u16(data+18)!=0 ||
