@@ -2187,8 +2187,12 @@ python3 tools/flash_hex.py ~/zephyrproject/build-xiao -o mg-xiao-first.hex --fre
 ```
 
 It merges MCUboot and the signed app, pads every segment to whole 16-byte
-words with 0xff, and blanks the last 16 KB of slot0 (MCUboot's swap state);
-`--fresh` also blanks slot1's header and trailer and the settings partition
+words with 0xff, and blanks MCUboot's swap state in both slots: the last
+16 KB of slot0, and slot1's trailer, so a test image staged in slot1 earlier
+can't swap over the app just flashed (only the trailer: with the offline
+clips in slot1, the `CONFIG_MG_QUEUE_SLOT1_TRAILER` bytes the queue never
+writes, so the clips stay; host run.py `flash_hex`);
+`--fresh` also blanks slot1's first and last 16 KB and the settings partition
 (drops settings and what Link setup stored), which replaces a chip erase on
 a board fresh from the factory.
 

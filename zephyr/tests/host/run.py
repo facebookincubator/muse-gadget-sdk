@@ -227,6 +227,7 @@ def main():
                 print(out)
             failed += run.returncode != 0
         failed += window_check(cc + common + pc, inc, tmp, device_hello["window"])
+        failed += flash_hex_check()
         failed += signing_key_check()
         failed += image_id_check()
         sys.exit(1 if failed else 0)
@@ -248,6 +249,87 @@ def window_check(cc, inc, tmp, vectors_window):
         if built != want or (not want and "CONFIG_MG_VM_SESSION_WINDOW must be 4" not in r.stderr):
             bad.append(f"window {w}: {'built' if built else 'refused'}")
     print(f"window: {'ok' if not bad else 'FAILED'} (4 windows{': ' + '; '.join(bad) if bad else ''})")
+    return 1 if bad else 0
+
+
+def flash_hex_check():
+    """tools/flash_hex.py's flash plan: every flash blanks MCUboot's swap
+    state in both slots, slot0's last 16 KB and slot1's trailer (so a test
+    image staged in slot1 earlier can't swap over the app just flashed),
+    slot1's trailer being only what the clip queue never writes when the
+    clips live in slot1; the rest of slot1 and the settings stay unless
+    --fresh. The hex itself too when intelhex is there (the Zephyr venv)."""
+    import importlib.util
+    import shutil
+    import tempfile
+    spec = importlib.util.spec_from_file_location("flash_hex", HERE.parents[1] / "tools" / "flash_hex.py")
+    fh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fh)
+    K = 16 * 1024
+    s0, s1, st = (0x10000, 0xb2000), (0xc2000, 0xb2000), (0x174000, 0x8000)
+    dts = "".join("%s_partition: partition@%x {\n\tlabel = \"%s\";\n\treg = < %#x %#x >;\n};\n"
+                  % (n, o, n, o, z) for n, (o, z) in (("slot0", s0), ("slot1", s1), ("storage", st)))
+    q = "CONFIG_MG_QUEUE_IN_SLOT1=y\nCONFIG_MG_QUEUE_SLOT1_TRAILER=0x3000\n"
+    noq = "# CONFIG_MG_QUEUE_IN_SLOT1 is not set\n"
+    bad = []
+    cases = 0
+
+    def check(what, ok):
+        nonlocal cases
+        cases += 1
+        if not ok:
+            bad.append(what)
+
+    s1_end = s1[0] + s1[1]
+    try:
+        from intelhex import IntelHex
+    except ImportError:
+        IntelHex = None
+    if IntelHex is not None:
+        d = Path(tempfile.mkdtemp(prefix="mg-flash-hex-"))
+        try:
+            (d / "mcuboot/zephyr").mkdir(parents=True)
+            (d / "zephyr/zephyr").mkdir(parents=True)
+            for f, at in (("mcuboot/zephyr/zephyr.hex", 0), ("zephyr/zephyr/zephyr.signed.hex", s0[0])):
+                ih = IntelHex()
+                ih.frombytes(bytes(range(1, 40)), offset=at)
+                ih.write_hex_file(str(d / f))
+            (d / "zephyr/zephyr/zephyr.dts").write_text(dts)
+            for config, keep in ((q, 0x3000), (noq, K)):
+                (d / "zephyr/zephyr/.config").write_text(config)
+                ih = fh.build_hex(d, False)
+                have = ih.todict()
+                check("the hex blanks slot1's trailer (%#x)" % keep,
+                      all(have.get(a) == 0xFF for a in range(s1_end - keep, s1_end)))
+                check("the hex leaves slot1 below its trailer", (s1_end - keep - 1) not in have)
+                check("the hex leaves slot1's header", s1[0] not in have)
+                check("the hex leaves the settings", st[0] not in have)
+                check("the hex blanks slot0's trailer",
+                      all(have.get(a) == 0xFF for a in range(s0[0] + s0[1] - K, s0[0] + s0[1])))
+        except Exception as e:  # noqa: BLE001 - any failure is a failed row
+            bad.append("the hex: %r" % e)
+        finally:
+            shutil.rmtree(d)
+    try:
+        parts = fh.partitions(dts)
+        check("slot1's trailer with the clips in slot1", fh.slot1_trailer(q) == 0x3000)
+        check("slot1's trailer without", fh.slot1_trailer(noq) == K)
+        try:
+            fh.slot1_trailer("CONFIG_MG_QUEUE_IN_SLOT1=y\n")
+            check("a .config without the queue's trailer is refused", False)
+        except SystemExit:
+            check("a .config without the queue's trailer is refused", True)
+        plan = fh.blank_plan(parts, False, 0x3000)
+        check("plan: slot0's and slot1's trailers only",
+              [(a, z) for a, z, _ in plan] == [(s0[0] + s0[1] - K, K), (s1_end - 0x3000, 0x3000)])
+        fresh = [(a, z) for a, z, _ in fh.blank_plan(parts, True, 0x3000)]
+        check("plan --fresh: slot1's ends and the settings too",
+              (s1[0], K) in fresh and (s1_end - K, K) in fresh and st in fresh)
+    except Exception as e:  # noqa: BLE001
+        bad.append("the plan: %r" % e)
+    note = "" if IntelHex is not None else ", plan only: no intelhex"
+    print(f"flash_hex: {'ok' if not bad else 'FAILED'} ({cases} cases{note}"
+          f"{': ' + '; '.join(bad) if bad else ''})")
     return 1 if bad else 0
 
 
