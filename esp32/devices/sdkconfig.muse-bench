@@ -49,6 +49,8 @@ CONFIG_LV_PROFILER_EVENT=n
 # Test rigs confirm Muse app setup over the console (>pair.confirm): bench
 # builds only, never a shipping one.
 CONFIG_MUSE_PAIR_CONFIRM_CONSOLE=y
+# A bench/debug image: on-screen diagnostics (the calling screen's step line).
+CONFIG_MUSE_BENCH_IMAGE=y
 
 # New setups offer gadget-XXXXXX node ids (off by default; bench builds turn
 # it on). A unit set up with a homelink- id keeps it until it is set up again.

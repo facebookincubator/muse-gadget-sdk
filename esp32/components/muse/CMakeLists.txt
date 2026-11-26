@@ -162,6 +162,13 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_PERF)
         list(APPEND srcs "muse_perf.c")
     endif()
+    if(CONFIG_MUSE_GADGET_BLE_LIVE_CALL)
+        list(APPEND srcs "muse_call.c")   # a live call with the Muse, held by the phone over BLE
+        list(APPEND srcs "muse_call_at.c")   # the bench's timed call (call.at=)
+        list(APPEND srcs "fonts/muse_font_ellipsis_20.c" "fonts/muse_font_ellipsis_28.c")   # its "Calling…"
+        list(APPEND srcs "muse_subs.c" "muse_subs_core.c")   # its subtitles
+        list(APPEND srcs "muse_call_stats.c")   # its video's stats overlay
+    endif()
     if(CONFIG_LV_USE_PROFILER)
         list(APPEND srcs "lvprof/muse_lv_profiler.c")   # LVGL's profiler hooks, for mg.perf
     endif()

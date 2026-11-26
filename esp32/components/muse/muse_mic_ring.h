@@ -19,8 +19,8 @@
 /*
  * The mic ring: a solid red ring along the screen's edge for as long as the
  * mic is capturing for someone (a push-to-talk hold once capture starts, a
- * client's start_mic, a realtime voice call's open mic), drawn over everything: the face,
- * menus, camera video and UI streams. Static,
+ * client's start_mic, a call's open mic), drawn over everything: the face,
+ * menus, a call's controls, camera and call video and UI streams. Static,
  * #E53935, about 2.2% of the screen's short side wide (8 px at 360, 10 at
  * 466, 11 at 480, 5 at 240). Its outer edge is the screen's rectangle
  * (whatever of it the panel shows); its inner edge follows the visible shape

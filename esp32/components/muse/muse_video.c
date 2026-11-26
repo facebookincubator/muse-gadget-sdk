@@ -15,6 +15,9 @@
  */
 #include "sdkconfig.h"
 #include "muse_video.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_subs.h"
+#endif
 #if CONFIG_MUSE_APP_VIEW
 #include "muse_app_view.h"
 #endif
@@ -55,6 +58,12 @@
 #include "muse_vdirty.h"
 #include "muse_mic_ring.h"
 #include "muse_turn_dot.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "mg_lct.h"   /* a live call's start, timed (its video steps) */
+#define LCT_MARK(pt) mg_lct_mark(pt)
+#else
+#define LCT_MARK(pt) ((void)0)
+#endif
 
 static const char *TAG = "muse_video";
 
@@ -105,6 +114,7 @@ static const char *TAG = "muse_video";
 #define UI_POKE_US 1000000             /* keeps the screen on while a UI stream is on */
 #define SHOW_LEAD_US 8000            /* paced pictures go to the panel this early (show_task) */
 #define STALL_US 2500000             /* no picture for this long: the UI gets the screen back (show_task) */
+#define CALL_STOP_HOLD_US 1000000    /* a call's video the client stopped: its last picture this long, then Muse */
 #define DECODE_CORE 0                  /* the UI core converts and sends */
 #define PIECE_ROWS 8                   /* output rows per DMA piece: two source row pairs */
 #define MAX_PLAYOUT_MS 500             /* the ring holds well over this at the suggested bitrate */
@@ -135,7 +145,7 @@ typedef struct {
     int bands;
     volatile int h0;                   /* two bands: the top band's rows (each band's SPS gives its own) */
     uint16_t number;                   /* its frame number (the header's), echoed to the client once shown */
-    uint32_t number32;                 /* ...extended to 32 bits, counted from the stream's start */
+    uint32_t number32;                 /* ...extended to 32 bits, counted from the stream's start (subtitles) */
     /* For the UI stream's per-frame line: its size, kind and each band's decode time. */
     uint32_t bytes, dec_us, top_us, bot_us;
     bool key;
@@ -182,7 +192,7 @@ static muse_video_cover_t s_cov = { NULL, -1 };
 static volatile muse_video_overlay_t s_overlay;
 /* The received frame numbers extended to 32 bits (decode task); reset at each stream's start. */
 static uint32_t s_ext;
-/* The picture on the panel now, its number extended to 32 bits
+/* The picture on the panel now, its number extended as subtitles count it
  * (number32): the A/V anchor's reader (muse_video_shown32). */
 static volatile uint32_t s_shown32;
 static volatile bool s_shown32_ok;
@@ -203,11 +213,25 @@ static volatile bool s_open, s_streaming, s_redraw, s_paused;
 static volatile bool s_view;   /* the user opened the view (muse_video_open); s_open is also set by a client's start */
 static volatile bool s_hold;   /* the passcode lock (muse_video_set_hold()) */
 static volatile bool s_cover;  /* a passcode keypad is up (muse_video_set_cover()) */
-/* Held off the screen: locked, or a passcode keypad is up. */
+/* A live call (muse_video_call): s_call while one is on; s_call_cover from its
+ * start until its first picture is drawn (muse_call's calling screen). */
+static volatile bool s_call, s_call_cover;
+static const char *volatile s_call_fail;   /* muse_video_call_failure() */
+static volatile bool s_call_stalled;       /* muse_video_call_stalled_since() */
+/* Held off the screen: locked, or a passcode keypad is up (a call's video too: a call opens only unlocked). */
 static bool held(void)
 {
     return s_hold || s_cover;
 }
+/* The call's last picture shown, across its streams (an app
+ * that stops its video, or changes size with a stop and a new start, keeps
+ * the call's clock; s_last_shown_t is the stream's, for the latency echo).
+ * 0 until the call's first picture. */
+static volatile int64_t s_call_shown_t;
+/* When the client stopped the call's video (muse_video_end
+ * in a call that had a picture); 0: not stopped. The line's reference until
+ * the next picture of a newer stream, a new start that sends none included. */
+static volatile int64_t s_call_stop_t;
 static volatile bool s_ui_up;          /* the UI's frame tick has run: the panel and its sender exist */
 static volatile bool s_wake_req;       /* begin() found the screen dark: the show task wakes it */
 static volatile int s_refusals;        /* begin() refused in a row: a stuck UI shows up here */
@@ -356,7 +380,7 @@ static void tell_freed(uint8_t avg_ms)
     t->freed(&st);
 }
 
-static volatile uint32_t s_kf_asks;   /* keyframes asked for */
+static volatile uint32_t s_kf_asks;   /* keyframes asked for (muse_video_stats) */
 
 static void ask_keyframe(void)
 {
@@ -421,6 +445,25 @@ void muse_video_set_overlay(muse_video_overlay_t overlay)
     s_overlay = overlay;
 }
 
+void muse_video_stats(muse_video_stats_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    const muse_video_transport_t *t = s_tp;
+    out->streaming = s_streaming && !s_ui && t;
+    out->vp8 = s_params.codec == MUSE_VIDEO_CODEC_VP8;
+    out->coded_w = s_params.width;
+    out->coded_h = s_params.height;
+    if (s_shown && s_win_x2 > s_win_x1) {
+        out->shown_w = (uint16_t)(s_win_x2 - s_win_x1);
+        out->shown_h = (uint16_t)(s_win_y2 - s_win_y1);
+    }
+    out->rx_bytes = t && t->ring ? muse_vstream_received(t->ring) : 0;
+    out->shown = s_shown;
+    out->dropped = s_dropped;
+    out->dec_errors = s_dec_errors;
+    out->kf_requests = s_kf_asks;
+}
+
 /* A piece of the frame, then whatever is drawn over it. */
 static void fill(uint8_t *dst, int stride, int row, int rows, void *arg);
 
@@ -436,6 +479,9 @@ static void fill_piece(uint8_t *dst, int stride, int row, int rows, void *arg)
     int64_t t1 = esp_timer_get_time();
     s_fill_us += (uint32_t)(t1 - t0);
     const fill_arg_t *a = arg;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_overlay(dst, stride, a->x, a->y + row, a->out_w, rows);   /* subtitles, under the controls */
+#endif
     muse_video_overlay_t overlay = s_overlay;
     if (overlay) {
         overlay(dst, stride, a->x, a->y + row, a->out_w, rows);
@@ -729,9 +775,14 @@ static void fill(uint8_t *dst, int stride, int row, int rows, void *arg)
  * picture whole (A/B).
  */
 #define VD_MAX_WIN 24
-#define VD_OVL_MAX 4   /* rectangles from the overlay (plus one more source's) */
+#define VD_OVL_MAX 4   /* rectangles from the call's overlay (plus the subtitles' one) */
 #define VD_ORECT_MAX (2 * (VD_OVL_MAX + 1))   /* before a draw and after it */
 static int frame_x_align(void);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#define VD_SUBS 1      /* BLE calls' subtitles (muse_subs_overlay) */
+#else
+#define VD_SUBS 0
+#endif
 /* On by default; the block lives in PSRAM (the muse_lcd_bands boards: the W175 and the s3 camera build, the
  * StopWatch, the Watcher, the ESP-Mosaico). >vdirty=0|1 either way (bench rows, RAM only). */
 static volatile bool s_vd_on = true;
@@ -788,15 +839,15 @@ typedef struct {
     vd_place_t akey;                /* the place ax, ay were cut for */
     vd_place_t dplace;              /* the place of the picture on the panel (vd_drawn) */
     muse_board_win_t orect[VD_ORECT_MAX];   /* the overlays' rectangles drawn with it */
-    uint8_t okind[VD_ORECT_MAX];    /* each one's source: 1 the second source, 0 the overlay */
+    uint8_t okind[VD_ORECT_MAX];    /* each one's source: 1 the subtitles, 0 the call's overlay */
     int norect;
-    uint32_t sgen, ogen;            /* the second source's and the overlay's gen then */
+    uint32_t sgen, ogen;            /* the subtitles' and the call overlay's gen then */
     bool ovl_force;                 /* an overlay changed during that draw: its rectangles are redrawn */
     int fx, fw, fy;                 /* fill_win: the window being drawn (its next row) */
     /* The last overlay / ring / size change, to tag the shadow's compares after it ("after controls off"). */
     char tag[VD_TAG_LEN];
     int tag_left;                   /* compares still tagged with it */
-    uint32_t tag_state;             /* what showed (bits: second source, overlay kinds, ring) */
+    uint32_t tag_state;             /* what showed (bits: subtitles, controls, stats, bench, ring) */
     int tag_w, tag_h;
     /* The 2 s line's counts (show and decode tasks; the decode task reads and clears them). */
     volatile uint32_t dg_us, dg_n, mb_chg, mb_all;   /* digests: time, pictures, MBs */
@@ -1077,12 +1128,17 @@ static void vd_invalidate(const slot_t *sl)
     }
 }
 
-/* The overlays' rectangles now (panel coordinates), each one's source (kind: 1 the second source, 0 the
+/* The overlays' rectangles now (panel coordinates), each one's source (kind: 1 the subtitles, 0 the call's
  * overlay) and their gens; returns how many. */
 static int vd_overlays(muse_board_win_t *r, uint8_t *kind, uint32_t *sgen, uint32_t *ogen)
 {
     int n = 0;
     *sgen = *ogen = 0;
+#if VD_SUBS
+    if (muse_subs_overlay_rect(&r[n], sgen)) {
+        kind[n++] = 1;
+    }
+#endif
     muse_video_overlay_rects_t f = s_ovl_rects;
     if (f) {
         int k = f(r + n, VD_OVL_MAX, ogen);
@@ -1099,7 +1155,7 @@ static uint32_t vd_token(uint32_t sgen, uint32_t ogen, bool ring_on)
     return sgen * 31u + ogen * 7u + muse_mic_ring_generation() * 3u + (ring_on ? 1u : 0u);
 }
 
-/* What showed, for the shadow compare's tags (bit 0 the second source, 1-3 the overlay's, 4 the ring). */
+/* What showed, for the shadow compare's tags (bit 0 subtitles, 1-3 the call overlay's, 4 the ring). */
 static uint32_t vd_state(uint32_t sgen, uint32_t ogen, bool ring)
 {
     return (sgen & 3u ? 1u : 0u) | (ogen & 7u) << 1 | (ring ? 16u : 0u);
@@ -1108,7 +1164,7 @@ static uint32_t vd_state(uint32_t sgen, uint32_t ogen, bool ring)
 static void vd_tag_change(uint32_t was, uint32_t now, int w, int h)
 {
     vd_mem_t *m = s_vd;
-    static const char *const name[5] = { "second source", "overlay", "overlay 2", "bench mark", "mic ring" };
+    static const char *const name[5] = { "subtitles", "controls", "stats", "bench mark", "mic ring" };
     char t[sizeof(((vd_mem_t *)0)->tag)];
     int o = 0;
     t[0] = 0;
@@ -1293,6 +1349,9 @@ static void fill_win(uint8_t *dst, int stride, int x, int y, int w, int rows, vo
     }
     int64_t t1 = esp_timer_get_time();
     s_fill_us += (uint32_t)(t1 - t0);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_overlay(dst, stride, a->x + x, a->y + y, w, rows);   /* subtitles, under the controls */
+#endif
     muse_video_overlay_t overlay = s_overlay;
     if (overlay) {
         overlay(dst, stride, a->x + x, a->y + y, w, rows);
@@ -1495,6 +1554,9 @@ static void vd_shadow_check(const slot_t *sl, const fill_arg_t *a, int nwin, uin
     s_cov.blk = -1;   /* the cover's block holds a window's columns */
     for (int row = 0; row < h; row++) {
         fill(s_vd_strip, stride, row, 1, (void *)a);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        muse_subs_overlay(s_vd_strip, stride, a->x, a->y + row, w, 1);
+#endif
         muse_video_overlay_t overlay = s_overlay;
         if (overlay) {
             overlay(s_vd_strip, stride, a->x, a->y + row, w, 1);
@@ -1805,6 +1867,9 @@ static void pause_lvgl(bool pause)
     muse_lvgl_hold(MUSE_LVGL_HOLD_VIDEO, pause);
     if (!pause) {
         s_redraw = true;   /* the panel shows the last frame: LVGL draws it all again */
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        muse_subs_video_yield();   /* the GUI's band shows the words now (a stall too: the stream stays open) */
+#endif
     }
 }
 
@@ -1826,6 +1891,64 @@ static void align_rect(muse_ui_rect_t *r, int fw)
     r->x = (uint16_t)x0;
     r->w = (uint16_t)(x1 - x0);
 }
+
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+/* A UI stream through the frame buffer gets the subtitle band too (the camera path's fill_piece does it): the
+ * frame buffer's pixels, then the band over them. px, py: the rectangle's top left on the panel. */
+typedef struct {
+    muse_ui_rect_t r;
+    int px, py;
+} ui_subs_fill_t;
+
+static void ui_fb_fill_subs(uint8_t *dst, int stride, int row, int rows, void *arg)
+{
+    const ui_subs_fill_t *a = arg;
+    muse_ui_fb_fill(dst, stride, row, rows, (void *)&a->r);
+    muse_subs_overlay(dst, stride, a->px, a->py + row, a->r.w, rows);
+}
+
+/* The band changed (or went) with no new UI picture: what it covered, and covers now, drawn again from the
+ * frame buffer. The show task's, between pictures. */
+static void ui_subs_redraw(void)
+{
+    static uint32_t s_band_gen;
+    static muse_board_win_t s_was;
+    static bool s_had;
+    int fw, fh;
+    int wx = s_win_x1, wy = s_win_y1;
+    if (!muse_ui_fb_active() || !muse_ui_fb_pixels(&fw, &fh) || s_win_x2 - wx != fw || s_win_y2 - wy != fh) {
+        return;
+    }
+    muse_board_win_t now;
+    uint32_t gen = 0;
+    bool has = muse_subs_overlay_rect(&now, &gen);
+    if (gen == s_band_gen && has == s_had) {
+        return;
+    }
+    s_band_gen = gen;
+    const muse_board_win_t *rs[2] = { s_had ? &s_was : NULL, has ? &now : NULL };
+    for (int i = 0; i < 2; i++) {
+        if (!rs[i] || (i == 1 && rs[0] && !memcmp(rs[0], rs[1], sizeof(now)))) {
+            continue;
+        }
+        int x0 = rs[i]->x - wx, y0 = rs[i]->y - wy, x1 = x0 + rs[i]->w, y1 = y0 + rs[i]->h;
+        x0 = x0 < 0 ? 0 : x0;
+        y0 = y0 < 0 ? 0 : y0;
+        x1 = x1 > fw ? fw : x1;
+        y1 = y1 > fh ? fh : y1;
+        if (x1 <= x0 || y1 <= y0) {
+            continue;
+        }
+        ui_subs_fill_t a = { .r = { (uint16_t)x0, (uint16_t)y0, (uint16_t)(x1 - x0), (uint16_t)(y1 - y0) } };
+        align_rect(&a.r, fw);
+        a.px = wx + a.r.x;
+        a.py = wy + a.r.y;
+        muse_board->draw_frame(a.px, a.py, a.px + a.r.w, a.py + a.r.h, PIECE_ROWS, ui_fb_fill_subs, &a);
+    }
+    s_had = has;
+    s_was = now;
+}
+#endif
 
 /* A still patch (the show task, between pictures): into the frame buffer, then onto the panel. */
 static void show_still(void)
@@ -1854,7 +1977,12 @@ static void show_still(void)
         s_win_x2 = ox + fw;
         s_win_y2 = oy + fh;
         align_rect(&r, fw);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        ui_subs_fill_t a = { .r = r, .px = ox + r.x, .py = oy + r.y };   /* the band stays over the patch */
+        muse_board->draw_frame(a.px, a.py, a.px + r.w, a.py + r.h, PIECE_ROWS, ui_fb_fill_subs, &a);
+#else
         muse_board->draw_frame(ox + r.x, oy + r.y, ox + r.x + r.w, oy + r.y + r.h, PIECE_ROWS, muse_ui_fb_fill, &r);
+#endif
     }
     int64_t now = esp_timer_get_time();
     free(d);
@@ -1905,13 +2033,19 @@ static void ring_repaint(void)
     int fw, fh;
     if (s_ui && muse_ui_fb_active() && muse_ui_fb_pixels(&fw, &fh) && x2 - x1 == fw && y2 - y1 == fh) {
         muse_ui_rect_t r = { 0, 0, (uint16_t)fw, (uint16_t)fh };
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        ui_subs_fill_t a = { .r = r, .px = x1, .py = y1 };   /* with the subtitle band over it */
+        muse_board->draw_frame(x1, y1, x2, y2, PIECE_ROWS, ui_fb_fill_subs, &a);
+#else
         muse_board->draw_frame(x1, y1, x2, y2, PIECE_ROWS, muse_ui_fb_fill, &r);
+#endif
     }
 }
 
 /*
  * The turn's status dot (muse_turn_dot.h) while video holds the
- * screen (LVGL paused): every band drawn
+ * screen (LVGL paused), outside a call (a call's video never shows it:
+ * s_call here, and the UI's muse_turn_dot_set_in_call): every band drawn
  * to the panel gets it (boards/muse_lcd_bands.c), so camera video breathes
  * it at its own frame rate. A still picture (a UI stream's, or around a smaller picture) gets
  * its box drawn again from here when it breathes or changes: from the UI
@@ -1958,10 +2092,10 @@ static void dot_repaint(void)
     dot_piece(x0, y0, x1, y1);
 }
 
-/* What the dot shows over video now. */
+/* What the dot shows over video now: nothing in a call. */
 static muse_turn_dot_kind_t dot_kind(void)
 {
-    return muse_turn_dot_kind(muse_state_mode(NULL));
+    return s_call ? MUSE_TURN_DOT_OFF : muse_turn_dot_kind(muse_state_mode(NULL));
 }
 
 /* The show task, at each wake while it holds the screen: the dot's look now. */
@@ -2134,12 +2268,47 @@ static void show_task(void *arg)
             /* The stream ended, the view closed, or no picture for a while (a
              * client that stopped sending without ending the stream, a link
              * gone quiet): give the screen back to the UI, which draws the
-             * face over the last picture. The next
+             * face (or the call's controls) over the last picture. The next
              * picture pauses it again. A UI stream is quiet by design (frames
              * only when its picture changes): its last picture stays. */
-            int64_t shown = s_last_shown_t;
-            bool stalled = !s_ui && (!shown || esp_timer_get_time() - shown > STALL_US);
-            if (s_paused && (!s_streaming || !s_open || stalled || held())) {
+            int64_t shown = s_call ? s_call_shown_t : s_last_shown_t;
+            /* A live call's picture stays through a blip (no face
+             * flashing up mid-call), but never freezes: once
+             * its pictures have stopped for STALL_US, Muse animates in their
+             * place (the view steps aside) and the call screen adds its line
+             * after 5 s. Until the first picture the calling screen has it.
+             * The call's own clock: a client's video stop while the call
+             * goes on (an app giving up on video), or a stop and a new start
+             * at another size, is pictures stopping too. */
+            int64_t now_t = esp_timer_get_time();
+            /* The client stopped the call's video and nothing newer is on:
+             * its last picture stays CALL_STOP_HOLD_US
+             * after the stop (a size change's stop and new start fits in
+             * it: no face flashing up), then Muse. With a stream on (open
+             * and quiet, or a new start after the stop) the stall is the
+             * picture clock's, STALL_US. */
+            int64_t stop_t = s_call_stop_t;
+            bool stopped = !s_streaming && stop_t;
+            bool call_stall = s_call && !s_call_cover && shown &&
+                              (stopped ? now_t - stop_t > CALL_STOP_HOLD_US : now_t - shown > STALL_US);
+            /* Until then the ended stream's picture stays, unless the mic
+             * ring changed meanwhile: the decoder's pictures are gone
+             * (ring_check can't draw it again), so the UI takes the screen
+             * to show the ring. */
+            bool call_hold = s_call && !s_ui && s_open && !s_call_cover && shown && !call_stall &&
+                             muse_mic_ring_generation() == s_ring_gen_shown;
+            if (call_stall && !s_call_stalled) {
+                if (stopped) {
+                    ESP_LOGW(TAG, "call: the phone stopped its video %u ms ago: Muse in its place until a picture",
+                             (unsigned)((now_t - stop_t) / 1000));
+                } else {
+                    ESP_LOGW(TAG, "call: no picture for %u ms: Muse in its place until the next one",
+                             (unsigned)((now_t - shown) / 1000));
+                }
+                s_call_stalled = true;
+            }
+            bool stalled = !s_ui && (s_call ? call_stall : (!shown || esp_timer_get_time() - shown > STALL_US));
+            if (s_paused && ((!s_streaming && !call_hold) || !s_open || stalled || held())) {
                 s_show_stage = 8;
                 s_stage_t = esp_timer_get_time();
                 if (s_streaming && s_open) {
@@ -2158,6 +2327,11 @@ static void show_task(void *arg)
             if (retire_tasks()) {
                 vTaskDeleteWithCaps(NULL);   /* its stack goes back (made WithCaps: start_tasks) */
             }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+            if (s_streaming && s_ui && s_paused && !held()) {
+                ui_subs_redraw();   /* subtitles that changed with no new UI picture */
+            }
+#endif
             if (s_streaming && s_ui) {
                 /* A still UI picture stays on screen for as long as the
                  * stream is on: no auto-sleep. If the screen went dark all
@@ -2361,16 +2535,32 @@ static void show_task(void *arg)
                     fb_rects = muse_ui_fb_picture(&sl->p0, sl->bands == 2 ? &sl->p1 : NULL, sl->h0, sl->key || s_fb_all,
                                                   rects);
                     s_fb_all = fb_rects < 0;   /* refused (muse_pic_covers): the next one starts whole */
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+                    if (fb_rects >= 0) {
+                        muse_subs_frame_shown(sl->number32);   /* the words due with this picture join it */
+                    }
+#endif
                     for (int i = 0; i < fb_rects; i++) {
                         muse_ui_rect_t *r = &rects[i];
                         align_rect(r, vis_w);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+                        ui_subs_fill_t a = { .r = *r, .px = x1 + r->x, .py = y1 + r->y };
+                        muse_board->draw_frame(a.px, a.py, a.px + r->w, a.py + r->h, PIECE_ROWS, ui_fb_fill_subs, &a);
+#else
                         muse_board->draw_frame(x1 + r->x, y1 + r->y, x1 + r->x + r->w, y1 + r->y + r->h, PIECE_ROWS,
                                                muse_ui_fb_fill, r);
+#endif
                     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+                    ui_subs_redraw();   /* the band where the picture's rectangles didn't reach */
+#endif
                 }
             }
         }
         if (fb_rects < 0) {
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+            muse_subs_frame_shown(sl->number32);   /* the words due with this frame join it */
+#endif
             bool shot = s_shot_state == 1 && s_shot;
             if (shot) {
                 s_shot_whole = false;   /* overwritten from here: whole again only at state 3 */
@@ -2476,12 +2666,20 @@ static void show_task(void *arg)
         const slot_t done_sl = *sl;   /* read before the slot goes back: the decode task may refill it at once */
         xSemaphoreGive(s_slots);
         s_shown++;
+        s_call_cover = false;   /* the call's first picture replaces the calling screen */
+        s_call_fail = NULL;
+        s_call_stalled = false;   /* pictures again: the view is back */
+        LCT_MARK(MG_LCT_T9_SHOWN);
         int64_t now = esp_timer_get_time();
         s_last_number = done_sl.number;
         s_last_shown_t = now;
         if (!s_ui) {
             s_shown32 = done_sl.number32;   /* drawn: on the panel from now (the A/V anchor waits for it) */
             s_shown32_ok = true;
+        }
+        s_call_shown_t = now;
+        if (s_streaming) {
+            s_call_stop_t = 0;   /* a picture of a stream that's on (not the stopped one's last, still decoding) */
         }
         static int64_t last_shown;
         if (last_shown && now - last_shown < 1000000) {
@@ -2857,6 +3055,7 @@ static void decode_task(void *arg)
             s_dec_holds = dec != NULL;
             if (!dec) {
                 ESP_LOGE(TAG, "no memory for the decoder");
+                if (s_call) s_call_fail = "Video unavailable: low memory";
                 if (s_tp && s_tp->stop) {
                     s_tp->stop();
                 }
@@ -2893,7 +3092,7 @@ static void decode_task(void *arg)
         bool frame_waited = waited;
         waited = false;
         /* Every frame header received, decoded or not, extends the 16-bit
-         * number to 32 bits, from 0 at the stream's start (frame
+         * number to 32 bits, from 0 at the stream's start (subtitles' frame
          * domain, mgcommands.h). */
         if (s_ext_reset) {
             s_ext_reset = false;
@@ -3016,6 +3215,9 @@ static void decode_task(void *arg)
         sl->rows = 0;
         sl->pic1 = NULL;
         sl->rows1 = 0;
+        if (key) {
+            LCT_MARK(MG_LCT_T8K_KEYFRAME);
+        }
         sl->bands = bands;
         sl->h0 = (int)(s_params.height / 2);
         sl->failed = false;
@@ -3062,6 +3264,7 @@ static void decode_task(void *arg)
             ESP_LOGE(TAG, "no memory for the decoder at the stream's size: internal %u free, largest %u",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+            if (s_call) s_call_fail = "Video unavailable: low memory";
             s_vl.refused = "no memory at the stream's own size";
             if (s_tp && s_tp->stop) {
                 s_tp->stop();
@@ -3158,6 +3361,7 @@ static void decode_task(void *arg)
         if (!got) {
             continue;
         }
+        LCT_MARK(MG_LCT_T8D_DECODED);
         if (key && !s_ui) {
             /* Keyframes are few in video: each one's decode time, to tell the
              * first's (which sets up the decoder's pictures) from the rest. */
@@ -3460,6 +3664,7 @@ static bool begin_locked(const muse_video_transport_t *t, const muse_video_param
         return false;
     }
     if (!start_tasks_locked()) {
+        if (s_call) s_call_fail = "Video unavailable: low memory";   /* said on the call screen */
         return false;
     }
     if (vp->tiles == 2 && !start_band_task()) {
@@ -3502,6 +3707,9 @@ static bool begin_locked(const muse_video_transport_t *t, const muse_video_param
     s_last_shown_t = 0;
     s_open = true;   /* a client may start one without the menu: show it */
     s_ext_reset = true;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_video_start();
+#endif
     s_streaming = true;
     xTaskNotifyGive(s_dec_task);
     return true;
@@ -3555,6 +3763,12 @@ void muse_video_end(const muse_video_transport_t *t)
     if (t != s_tp) {
         return;   /* not the stream that's on */
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_video_stop();
+#endif
+    if (s_call && !s_call_cover && s_call_shown_t && s_streaming && !s_ui) {
+        s_call_stop_t = esp_timer_get_time();   /* the client stopped the call's video */
+    }
     s_streaming = false;
     notify_video();
 }
@@ -3579,6 +3793,59 @@ void muse_video_open(void)
             s_transports[i]->request(true);
         }
     }
+}
+
+void muse_video_call(muse_video_call_t state)
+{
+    bool was = s_call;
+    s_call = state != MUSE_VIDEO_CALL_NONE;
+    if (!was && s_call && state == MUSE_VIDEO_CALL_CALLING) {
+        s_call_cover = true;   /* until the call's first picture (show task) */
+    }
+    if (!was || !s_call) {
+        s_call_fail = NULL;
+        s_call_stalled = false;
+        s_call_shown_t = 0;
+        s_call_stop_t = 0;
+    }
+    if (!s_call) {
+        s_call_cover = false;
+    }
+}
+
+const char *muse_video_call_failure(void)
+{
+    return s_call_fail;
+}
+
+int64_t muse_video_call_stalled_since(void)
+{
+    /* The line's clock: from the client's video stop if it
+     * stopped (later than its last picture), else from the last picture. */
+    if (!s_call_stalled) {
+        return 0;
+    }
+    int64_t stop_t = s_call_stop_t;
+    return stop_t ? stop_t : s_call_shown_t;
+}
+
+bool muse_video_call_waiting(void)
+{
+    return s_call_cover;
+}
+
+uint32_t muse_video_gen(void)
+{
+    return s_gen;
+}
+
+void muse_video_close_gen(uint32_t gen)
+{
+    if (!s_open || gen != s_gen) {
+        if (s_open) ESP_LOGI(TAG, "a close for stream %u: stream %u is on, left open", (unsigned)gen, (unsigned)s_gen);
+        return;
+    }
+    muse_video_close();
 }
 
 void muse_video_close(void)
@@ -3639,8 +3906,10 @@ bool muse_video_tick(void)
     if (!s_root) {
         build();
     }
-    /* held: the locked face has the screen. */
-    bool open = s_open && !held();
+    /* Until a call's first picture muse_call's calling screen is up, and the
+     * UI's tick has to reach it (its tap shows the controls). */
+    /* stalled: the face has the screen; held: the locked face has it. */
+    bool open = s_open && !s_call_cover && !s_call_stalled && !held();
     if (lv_obj_has_flag(s_root, LV_OBJ_FLAG_HIDDEN) == open) {
         lv_obj_set_flag(s_root, LV_OBJ_FLAG_HIDDEN, !open);
         if (open) {
@@ -3649,7 +3918,10 @@ bool muse_video_tick(void)
     }
     if (s_open && !held()) {
         /* This tick runs only while the screen is on, so the panel is on:
-         * safe to draw. */
+         * safe to draw. Counted under a call's calling screen too: the show
+         * task drops pictures until it's recent, and only the first picture
+         * takes the calling screen down, so not counting it there deadlocked
+         * (no call video at all on the StopWatch). */
         s_awake_tick = esp_timer_get_time();
     }
     if (!open) {
@@ -3659,11 +3931,12 @@ bool muse_video_tick(void)
         }
         return false;
     }
-    const char *title = s_streaming && s_ui ? "Phone screen" : "Phone camera";
+    const char *title = s_call ? "" : s_streaming && s_ui ? "Phone screen" : "Phone camera";
     if (strcmp(lv_label_get_text(s_title), title) != 0) {
         lv_label_set_text(s_title, title);
     }
-    const char *text = s_streaming               ? "Starting..."
+    const char *text = s_call                    ? ""   /* a call's stream ended: black, not "Starting..." */
+                       : s_streaming             ? "Starting..."
                        : muse_video_has_client() ? "Waiting for the phone..."
                                                  : "Open Muse Gadgets Test on your phone";
     if (strcmp(lv_label_get_text(s_caption), text) != 0) {

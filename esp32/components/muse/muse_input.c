@@ -64,6 +64,9 @@
 #include "muse_console.h"
 #include "muse_link.h"
 #include "muse_mic_ring.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_subs.h"
+#endif
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -117,8 +120,11 @@
 #include "mg_minrise.h"   /* >ptt.minrise (the bench guard) */
 #include "mg_voice.h"
 #endif
-#if CONFIG_MUSE_GADGET_BLE_VIDEO
+#if CONFIG_MUSE_GADGET_BLE_VIDEO || CONFIG_MUSE_GADGET_BLE_LIVE_CALL
 #include "mg_ble.h"
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
 #endif
 
 static atomic_uint s_touch_talk_events;
@@ -360,6 +366,11 @@ static void post(muse_ptt_t type, bool wake)
          * pre-roll doesn't record it: the barge-in echo rule. */
         muse_voice_talk_pressed();
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (type == MUSE_PTT_DOWN) {
+        muse_subs_talk_pause(true);   /* paused with the reply's audio: a tap brings them back, a turn drops them */
+    }
+#endif
     bool pending = type == MUSE_PTT_DOWN && muse_voice_ptt_enabled() && !muse_voice_in_call();
     if (pending) {
         uint32_t mark;
@@ -852,8 +863,9 @@ static void check_sleep(void)
      * the timer starts again from there. A phone's turn alone (its
      * assistant_state) neither wakes a dark panel nor holds a lit one: the
      * user may be chatting on the phone. */
-    /* A reply on the gadget (a client's stream_audio reaching the speaker)
-     * holds a lit panel the same way until it ends; it doesn't wake a dark one. */
+    /* A reply on the gadget (a client's stream_audio reaching the speaker,
+     * or subtitles' band on screen) holds a lit panel the same way until it
+     * ends; neither wakes a dark one (subtitles' state 1 does, muse_subs.c). */
     /* Sleep when charged at Never holds a lit panel while on USB with
      * the battery charged (muse_charged.h: from the charger's first done of
      * the plug-in until unplug, tracked at Always too, so a switch to Never
@@ -1017,8 +1029,9 @@ static bool update_wifi_nap(TickType_t now, bool paused)
 }
 
 /* Independent POWER never goes through PTT, AUX's menu or its setup double
- * click. LONG is supplied by the board only after a validated hold. */
-static bool s_power_down, s_power_swallow;
+ * click. LONG is supplied by the board only after a validated hold. In a
+ * live call a press is volume down instead of sleep (a hold still powers off). */
+static bool s_power_down, s_power_swallow, s_power_call;
 
 static void power_release(void)
 {
@@ -1026,13 +1039,13 @@ static void power_release(void)
     s_power_down = false;
 #if CONFIG_MUSE_APP_VIEW
     /* With an app open, the power key closes it instead of sleeping the screen. */
-    if (!s_power_swallow && muse_app_view_power()) {
-        s_power_swallow = false;
+    if (!s_power_swallow && !s_power_call && muse_app_view_power()) {
+        s_power_swallow = s_power_call = false;
         return;
     }
 #endif
-    if (!s_power_swallow) set_asleep(true, muse_board->power_button);
-    s_power_swallow = false;
+    if (!s_power_swallow && !s_power_call) set_asleep(true, muse_board->power_button);
+    s_power_swallow = s_power_call = false;
 }
 
 static void dedicated_buttons(unsigned ev)
@@ -1048,6 +1061,14 @@ static void dedicated_buttons(unsigned ev)
         s_power_swallow = muse_state_asleep();
         muse_state_poke();
         if (s_power_swallow) set_asleep(false, muse_board->power_button);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        else if (muse_call_owner_active()) {
+            /* The owner's call only: an unproven central's call state shows the call screen but remaps no key,
+             * so power always sleeps the screen and the speaker key toggles the speaker. */
+            s_power_call = true;
+            muse_call_volume_key(-1);
+        }
+#endif
     }
     if (s_power_down && !s_power_swallow && (ev & MUSE_BTN_POWER_LONG)) {
         s_power_swallow = true;   /* no sleep on release after shutdown/failure */
@@ -1079,6 +1100,10 @@ static void dedicated_buttons(unsigned ev)
         muse_state_poke();
         if (muse_state_asleep()) {
             set_asleep(false, muse_board->speaker_button);   /* wake-only press */
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        } else if (muse_call_owner_active()) {
+            muse_call_volume_key(1);   /* in the owner's call: volume up (an unproven one remaps no key) */
+#endif
         } else if (muse_state_mode(NULL) != MUSE_MODE_OFF) {
             bool on = !muse_settings_speaker_on();
             muse_settings_set_speaker_on(on);
@@ -1501,14 +1526,19 @@ static void input_task(void *arg)
 #endif
 #if CONFIG_MUSE_VIDEO
         /* Any press leaves the video view (its release then does nothing),
-         * except while video is on: the video stays until it ends,
+         * except during a live call: the call's video stays until it ends,
          * talk is push-to-talk and the other buttons are its volume. */
         unsigned presses = MUSE_BTN_TALK_PRESS | MUSE_BTN_AUX_PRESS | MUSE_BTN_POWER_PRESS |
                            MUSE_BTN_SPEAKER_PRESS | MUSE_BTN_UP | MUSE_BTN_DOWN | MUSE_BTN_LEFT |
                            MUSE_BTN_RIGHT | MUSE_BTN_ENTER | MUSE_BTN_ESCAPE;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        if (muse_call_owner_active()) {
+            presses = 0;   /* the owner's call only: an unproven call state remaps no key */
+        }
+#endif
 #if CONFIG_MUSE_GADGET_BLE_VIDEO
         /* A UI stream (the phone's screen or a web page): the speaker button
-         * (blue on the StopWatch, else the board's aux)
+         * (blue on the StopWatch with live calls, else the board's aux)
          * opens and closes the stream's menu, drawn by the phone; the others
          * still leave the view. */
         unsigned menu_btn = MUSE_BTN_SPEAKER_PRESS | MUSE_BTN_AUX_PRESS;
@@ -1580,6 +1610,9 @@ static void input_task(void *arg)
             s_restart_requested = false;
             restart();
         }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        muse_call_poll();   /* a call that ended takes its video with it */
+#endif
 
         TickType_t now = xTaskGetTickCount();
         if (now - checked >= pdMS_TO_TICKS(SLEEP_CHECK_MS)) {
@@ -1807,6 +1840,45 @@ static void bench_redraw_lvgl(const char *arg)
     fflush(stdout);
 }
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+/* The subtitle words' work, on the musegadgets worker (mg_ble_run_on_worker),
+ * where a phone's subtitles run: the words, their layout and the band take
+ * about 3 KB of stack, and the console task's 3.5 KB overflowed on sub.now
+ * (the Watcher). The console only copies the text and queues it. */
+#define BENCH_SUB_CLEAR -1
+typedef struct {
+    int ms_per_word;   /* BENCH_SUB_CLEAR: sub.clear */
+    char text[];
+} bench_sub_t;
+
+static void bench_sub_run(void *arg)
+{
+    bench_sub_t *b = arg;
+    if (b->ms_per_word == BENCH_SUB_CLEAR) {
+        muse_subs_call_end();
+    } else {
+        muse_subs_bench(b->text, b->ms_per_word);
+    }
+    free(b);
+}
+
+static bool bench_sub_post(const char *text, int ms_per_word)
+{
+    size_t n = strlen(text);
+    bench_sub_t *b = heap_caps_malloc(sizeof(*b) + n + 1, MUSE_BIG_CAPS);
+    if (!b) {
+        return false;
+    }
+    b->ms_per_word = ms_per_word;
+    memcpy(b->text, text, n + 1);
+    if (!mg_ble_run_on_worker(bench_sub_run, b)) {
+        free(b);
+        return false;
+    }
+    return true;
+}
+#endif
+
 /*
  * Console-only commands; false for setup commands. Their buffers are taken
  * per command: without PSRAM, static ones would hold internal RAM for good.
@@ -1999,8 +2071,9 @@ static bool console_command(char *line, bool whole)
      *                         pass.0 .. pass.9, pass.del, pass.forgot, pass.reset
      *                         (the passcode's keypad, wait and Forgot),
      *                         pass.swipe.<k1>,<k2>[,...] (one stroke through those keys)
+     *                         call.minus, call.plus, call.panel, call.swipe.down, call.swipe.up
      *   key=speaker|power|aux a press and release of that button (never a hold)
-     *   page=face|settings|settings/<page>
+     *   page=face|settings|settings/<page>   (not during a call: it keeps its face)
      *   wake / wake?          the screen on / whether it is ("screen awake|asleep|dark")
      * A press on a sleeping screen is refused ("screen asleep"): wake it first.
      * What reads LVGL's objects (home.*, set.*, page=) runs on the LVGL task
@@ -2033,6 +2106,19 @@ static bool console_command(char *line, bool whole)
             ESP_LOGW("mg.bench", "tap %s: screen asleep", bench_what(what));   /* a tap would only wake it: wake first */
             return true;
         }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        if (!strncmp(what, "call.", 5)) {
+            /* The call's controls are plain arithmetic (no LVGL), so this works
+             * over the call's video too, while LVGL is held. */
+            muse_touch_gesture_t g;
+            if (!muse_call_bench_point(what + 5, &g)) {
+                ESP_LOGW("mg.bench", "tap %s: not on the screen now", bench_what(what));
+            } else {
+                bench_press(what, &g);
+            }
+            return true;
+        }
+#endif
         if (!muse_ui_run_in_lvgl(bench_tap_lvgl, what)) {
             ESP_LOGW("mg.bench", "tap %s: busy (another bench press on its way)", bench_what(what));
         }
@@ -2058,6 +2144,12 @@ static bool console_command(char *line, bool whole)
     }
     if (!strncmp(line, "page=", 5)) {
         const char *page = line + 5;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        if (muse_call_active()) {
+            ESP_LOGW("mg.bench", "page %s: refused during a call", page);
+            return true;
+        }
+#endif
         muse_state_poke();
         if (muse_state_asleep() || muse_ui_dark()) {
             ESP_LOGW("mg.bench", "page %s: screen asleep", page);
@@ -2324,6 +2416,87 @@ static bool console_command(char *line, bool whole)
         return true;
     }
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    /* Live call, for a bench without fingers: "call" starts one (as the
+     * Settings item does), "call=0" ends it, "call?" only reports. */
+    if (!strcmp(line, "framed?")) {
+        mg_ble_framed_log();   /* framed Data's state and counters (a diagnostic) */
+        printf("@framed?\n");
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "credit.coalesce=0") || !strcmp(line, "credit.coalesce=1")) {
+        mg_ble_credit_coalesce(line[16] == '1');   /* bench A/B: request answers coalesced in a live-depth reply */
+        printf("@credit.coalesce %c\n", line[16]);
+        fflush(stdout);
+        return true;
+    }
+    if (muse_call_steps_word(line)) {
+        return true;   /* call.steps: the calling screen's step line on a shipping image */
+    }
+    if (!strcmp(line, "call.fastlink=0") || !strcmp(line, "call.fastlink=1")) {
+        mg_ble_call_fastlink(line[14] == '1');   /* bench A/B: full-speed link from the call's start */
+        printf("@call.fastlink %c\n", line[14]);
+        fflush(stdout);
+        return true;
+    }
+#if CONFIG_MUSE_VIDEO
+    if (muse_call_stats_word(line)) {
+        return true;   /* vstats: the call video's stats overlay */
+    }
+#endif
+#if CONFIG_MUSE_VIDEO
+    if (!strcmp(line, "call.last?")) {
+        /* The last call video's numbers and its last reply's playback, on mg.call (the Nordic UART mirrors it):
+         * a bench reads them after the phone that held the link lets go. A diagnostic. */
+        char out[400];
+        muse_video_last_summary(out, sizeof(out));
+        for (char *p = out, *nl; p && *p; p = nl ? nl + 1 : NULL) {
+            nl = strchr(p, '\n');
+            if (nl) *nl = '\0';
+            ESP_LOGI("mg.call", "last: %s", p);
+            printf("@call.last %s\n", p);
+        }
+        mg_ble_call_stats_t cs;
+        mg_ble_call_stats(&cs);
+        ESP_LOGI("mg.call", "last: reply audio: %u underruns, %u ms silence (stream %u)", (unsigned)cs.underruns,
+                 (unsigned)cs.silence_ms, (unsigned)cs.stream);
+        printf("@call.last reply audio: %u underruns, %u ms silence\n", (unsigned)cs.underruns, (unsigned)cs.silence_ms);
+        fflush(stdout);
+        return true;
+    }
+#endif
+    if (!strncmp(line, "call.at", 7) && (line[7] == '=' || line[7] == '?')) {
+        /* The bench's timed call (muse_call_at.h): call.at=DELAY_S,LEN_S arms it for the next client that
+         * becomes ready, call.at=0 disarms, call.at? reports. RAM only. */
+        if (line[7] == '=') {
+            unsigned d = 0, l = 0;
+            int n = sscanf(line + 8, "%u,%u", &d, &l);
+            muse_call_at_set(n == 2 ? d : 0, n == 2 ? l : 0);
+        }
+        char out[96];
+        muse_call_at_describe(out, sizeof(out));
+        printf("@call.at %s\n", out);
+        fflush(stdout);
+        ESP_LOGI("mg.bench", "call.at %s", out);
+        return true;
+    }
+    if (!strcmp(line, "call") || !strcmp(line, "call=0") || !strcmp(line, "call?")) {
+        /* call? is an open read: it never counts as activity (an idle gadget still locks and sleeps). */
+        if (line[4] == '=') {
+            muse_state_poke();
+            muse_call_end_from("console");
+        } else if (!line[4]) {
+            muse_state_poke();
+            muse_call_start_from("console");
+        }
+        int secs;
+        muse_call_phase_t phase = muse_call_phase(&secs);
+        printf("@call %s %d volume %d\n", muse_call_phase_name(phase), secs, muse_call_volume());
+        fflush(stdout);
+        return true;
+    }
+#endif
     if (!strcmp(line, "status")) {
         size_t cap = 1024;   /* long SSID, host and VM names escaped: past 512 */
         char *json = heap_caps_malloc(cap, MUSE_BIG_CAPS);
@@ -2393,10 +2566,35 @@ static bool console_command(char *line, bool whole)
         fflush(stdout);
         return true;
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    /* Bench: Live call subtitles as if from the phone (muse_subs.h):
+     * "sub=TEXT" reveals it a word every 300 ms, "sub.now=TEXT" at once,
+     * "sub.clear" clears. Queued to the musegadgets worker, where the
+     * phone's subtitles run (bench_sub_post): never done here. */
+    if (!strncmp(line, "sub=", 4) || !strncmp(line, "sub.now=", 8)) {
+        bool now = line[3] == '.';
+        bool queued = bench_sub_post(line + (now ? 8 : 4), now ? 0 : 300);
+        printf("@sub %s\n", queued ? "ok" : "busy");
+        fflush(stdout);
+        return true;
+    }
+    if (!strcmp(line, "sub.clear")) {
+        printf("@sub %s\n", bench_sub_post("", BENCH_SUB_CLEAR) ? "cleared" : "busy");
+        fflush(stdout);
+        return true;
+    }
+#endif
 #if CONFIG_MUSE_VIDEO
-    /* Bench: the next video frame as the panel gets it (overlays
+    /* Bench: the next video frame as the panel gets it (subtitles, controls
      * and the mic ring on it), RGB565 big-endian, base64 lines:
      * "@shot W H" then "@s ..." lines then "@shot end"; tools/muse/shot.py. */
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (!strncmp(line, "shot.auto=", 10)) {
+        muse_subs_auto_shot(line[10] == '1');
+        printf("@shot.auto %c\n", line[10] == '1' ? '1' : '0');
+        return true;
+    }
+#endif
     /* ">shot.last" prints the frame captured last again (a lossy console:
      * ESP-Iris drops records under load), ">shot.rows=A,B" only its rows A..B. */
     bool shot_last = !strcmp(line, "shot.last") || !strncmp(line, "shot.rows=", 10);
@@ -2864,7 +3062,7 @@ esp_err_t muse_input_start(QueueHandle_t queue)
      * firmware (setup, updates, restarts), so the console can't promise it
      * never maps flash (ota? reads the slots' states). 5 KB: 3128 B used at
      * worst on the Watcher (>tasks over Settings' pages, the faces,
-     * and the bench words; 456 B left of the 3.5 KB it
+     * sub.now, call, tap=call.panel and call=0; 456 B left of the 3.5 KB it
      * had), the rest a margin for words that print or log. */
     xTaskCreate(serial_task, "muse_serial", 5120, NULL, 5, NULL);
     return ESP_OK;

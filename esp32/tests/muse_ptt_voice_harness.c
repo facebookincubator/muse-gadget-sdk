@@ -624,8 +624,10 @@ void mg_voice_claim_turn(bool on) {
 }
 static void reply_tick(void) { if (reply_on && !barge_on && !turn_on) reply_pos += 320; }
 static bool client_playing;   /* a client's stream_audio open on the speaker */
+static bool client_audible;   /* ...and audio in it playing (mg_play_audible); unset: the same as open */
+static bool audible_set;
 bool mg_voice_playing(void) { return client_playing; }
-bool mg_voice_audible(void) { return client_playing; }
+bool mg_voice_audible(void) { return audible_set ? client_audible : client_playing; }
 bool mg_voice_client_reports_state(void) { return true; }
 bool mg_voice_client_linked(void) { return client_ready || client_linked; }
 static bool set_up = true;   /* a device token stored */
@@ -1212,6 +1214,25 @@ int main(int argc,char **argv) {
         return 0;
     }
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
+    if (scenario==51) {
+        /* One reply stream per Live call (mgcommands.h): the face and the panel hold
+         * follow audio playing, not the stream open. Open and silent between replies: no speaking face,
+         * no hold, and "playback over" when a reply's audio ends though the stream stays open. */
+        client_ready = true; sleep_state = false; audible_set = true;
+        client_playing = true; client_audible = false;   /* opened at live, nothing yet */
+        face_update();
+        assert(mode != MUSE_MODE_SPEAKING && !muse_voice_reply_holds_panel());
+        client_audible = true;                            /* a reply plays */
+        face_update();
+        assert(mode == MUSE_MODE_SPEAKING && muse_voice_reply_holds_panel());
+        client_audible = false;                           /* its audio over, the stream still open */
+        face_update();
+        assert(mode != MUSE_MODE_SPEAKING && !muse_voice_reply_holds_panel() && client_playing);
+        client_audible = true;                            /* the next reply */
+        face_update();
+        assert(mode == MUSE_MODE_SPEAKING && muse_voice_reply_holds_panel());
+        return 0;
+    }
     if (scenario==44 || scenario==45) {
         /* A client's start_mic while the codecs are still opening (muse_audio
          * retries a refused open once a second): the capture waits up to 1.5 s

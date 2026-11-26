@@ -58,6 +58,10 @@
 #if CONFIG_MUSE_GADGET_BLE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#include "muse_subs.h"
+#endif
 #include "muse_clock.h"
 #endif
 #if CONFIG_HOMEHUB_VOICE && !CONFIG_MUSE_ENABLED
@@ -255,6 +259,15 @@ static bool power_off_ready(void) {
     return !b->power_off_battery_only || muse_state_on_battery_real();   // never a bench nap's as-if battery
 }
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+// Live call's view (the call's controls, its video) and subtitles draw into
+// PSRAM buffers: a board without PSRAM can't show them, so it doesn't offer
+// them (features list only what works; unlisted commands are answered
+// unsupported).
+static bool board_draws_calls(void) {
+    return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+}
+#endif
 #elif CONFIG_HOMEHUB_VOICE
 static const char *model(void) {
     return "Home Assistant Voice PE";
@@ -388,7 +401,7 @@ static bool ble_console(char *line) {
 // The Nordic UART console's !IN <word> (mg_ble.c): presses of the device's
 // own screen and buttons for a Mac client's checks and session.ping
 // (one link.heartbeat on the device session, which changes nothing on either
-// side), the read-only voice?, wake? and mic.gain?, the vibration tests
+// side), the read-only voice?, wake?, call? and mic.gain?, the vibration tests
 // (vib=, vib?), mic.gain=N (the user's Settings mic gain), spk.dsp /
 // spk.dsp= (the speaker's speech chain) and ptt.minrise= / ptt.minrise?
 // (the bench guard), vol=N / vol=saved / vol? (the bench volume, RAM only),
@@ -400,7 +413,7 @@ static bool ble_console(char *line) {
 static int ble_bench_input(char *line) {
     // vib= / vib?: the vibration tests, the same
     // engine and rules as Developer > Tests > Vibration (no settings change).
-    static const char *const exact[] = { "wake", "wake?", "voice?", "ptt=1", "ptt=0", "vib?",
+    static const char *const exact[] = { "call", "call=0", "call?", "wake", "wake?", "voice?", "ptt=1", "ptt=0", "vib?",
                                          "mic.gain?", "dev?", "dev=1", "dev=0", "spk.dsp", "spk.dsp?", "ptt.minrise?",
                                          "vol?",
 #if CONFIG_MUSE_GADGET_BLE_SESSION
@@ -452,6 +465,14 @@ static bool ble_video_begin(const mg_video_params_t *vp) {
         .tiles = vp->tiles,
         .content = vp->content == mg_video_content_ui ? MUSE_VIDEO_CONTENT_UI : MUSE_VIDEO_CONTENT_VIDEO,
     };
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    /* A UI stream and a live call don't run together yet (the S3's internal
+     * RAM for both is unmeasured): the client hears busy. */
+    if (p.content == MUSE_VIDEO_CONTENT_UI && muse_call_active()) {
+        ESP_LOGW("link.mg", "UI stream refused: a live call is on (busy)");
+        return false;
+    }
+#endif
     return muse_video_begin(&s_ble_video, &p);
 }
 
@@ -716,6 +737,16 @@ void mg_glue_start(void) {
 #endif
 #if CONFIG_MUSE_ENABLED && CONFIG_MUSE_GADGET_BLE_VIDEO
     platform.video_caps = ble_video_caps();   // NULL on a panel without draw_frame: no stream_video
+#endif
+#if CONFIG_MUSE_ENABLED && CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (board_draws_calls()) {
+        platform.live_call = muse_call_client_state;   // the face shows the call
+        platform.subtitle_caps = muse_subs_caps;       // its subtitles, drawn over the video or face
+        platform.subtitle = muse_subs_event;
+        platform.subtitle_ready = muse_subs_ready;     // unlisted if the band's buffers didn't allocate
+    } else {
+        ESP_LOGI("link.mg", "no PSRAM: Live call and subtitles not offered");
+    }
 #endif
 #if CONFIG_MUSE_ENABLED
     // A touchscreen: its touches for the client (ui_input) and the HID.

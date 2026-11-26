@@ -688,6 +688,7 @@ static void test_plain(void)
     CHECK(note_is(-1, MG_CH_CONTROL, "19 41 01 0100"));
 }
 
+
 /* ---- assistant_state, and a board without a vibration motor ---- */
 
 static void test_assistant(void)
@@ -1465,7 +1466,7 @@ static void test_recovery(void)
 {
     static mg_proto_t p;
     mg_proto_config_t cfg = { .recovery_mode = mg_device_mode_recovery, .recovery_reason = mg_recovery_reason_user,
-                              .recovery_flags = mg_recovery_flag_restart };
+                              .recovery_flags = mg_recovery_flag_restart, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.reboot = f_reboot;
     ops.battery_status = f_battery;
@@ -1477,11 +1478,11 @@ static void test_recovery(void)
     CHECK(nnotes == 3 && notes[0].d[0] == 0x08);
     CHECK(note_is(1, MG_CH_CONTROL, "10 fe 0a 01 04 01"));
     CHECK(note_is(2, MG_CH_CONTROL, "10 0a 1e"));
-    /* Everything else is refused with recovery (8): the mic, settings, the token proof. */
+    /* Everything else is refused with recovery (8): the mic, settings, the token proof, a call. */
     static const char *const refused[] = { "01", "01 13", "3e 01 00", "3f 00 01", "22 00 0102030405060708", "23 00",
-                                           "1e 0a", "1e 1b" };
+                                           "85 01", "1e 0a", "1e 1b" };
     static const char *const want[] = { "19 01 01 0800", "19 01 01 0800", "19 3e 01 0800", "19 3f 01 0800",
-                                        "19 22 01 0800", "19 23 01 0800", "19 1e 01 0800",
+                                        "19 22 01 0800", "19 23 01 0800", "19 85 01 0800", "19 1e 01 0800",
                                         "19 1e 01 0800" };
     for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
         clear_notes();
@@ -1493,10 +1494,11 @@ static void test_recovery(void)
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "1e 08");
     CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "1e 09 480f 2efb 4c 1b00 3d00 5000 04030201 06"));
-    /* The device starts nothing: no gesture, no capture. */
+    /* The device starts nothing: no gesture, no capture, no call request. */
     clear_notes();
     CHECK(!mg_proto_gesture(&p, mg_gesture_button_down));
     CHECK(!mg_proto_live_begin(&p, mg_data_type_audio_sbc));
+    mg_proto_live_call_request(&p, true);
     CHECK(nnotes == 0);
     /* Restart normally: no answer, the device restarts. */
     clear_notes();
@@ -1940,9 +1942,9 @@ static void test_proof_answer_first(void)
 }
 
 /* The Control reply outbox (one more request_status line once overran a 5-reply
- * reserve on a gadget): request_status with the stack refusing every notify for 500 ms while a token
- * proof challenge arrives: once the stack takes them, the proof answer first, then every line in
- * order, nothing dropped. */
+ * reserve on a gadget): request_status with the stack refusing every notify for 500 ms while a call
+ * start and a token proof challenge arrive: once the stack takes them, the proof answer first, then
+ * every line in order, nothing dropped. */
 static void test_reply_outbox(void)
 {
     static uint8_t vring[8192];
@@ -1953,7 +1955,7 @@ static void test_reply_outbox(void)
                                           .sug_fps = 25, .sug_kbps = 300 };
     static mg_play_t pl;
     mg_play_init(&pl, 4096);
-    mg_proto_config_t cfg = { .video = &caps, .vstream = &vs, .play = &pl };
+    mg_proto_config_t cfg = { .video = &caps, .vstream = &vs, .play = &pl, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.random = f_random;
     ops.proof_key = f_proof_key;
@@ -1970,7 +1972,8 @@ static void test_reply_outbox(void)
     proof_have_key = true;
     now = 90000;
 
-    /* What request_status answers, the stack taking everything. */
+    /* What request_status answers with a call pending, the stack taking everything. */
+    mg_proto_live_call_request(&p, true);
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "0a");
     int want_n = nnotes;
@@ -1982,9 +1985,11 @@ static void test_reply_outbox(void)
         memcpy(want[i].d, notes[i].d, notes[i].len);
         want[i].len = notes[i].len;
     }
+    mg_proto_live_call_request(&p, false);
 
-    /* The stack refuses for 500 ms: request_status, then a proof challenge. */
+    /* The stack refuses for 500 ms: a call start, request_status, a proof challenge. */
     notify_fails = true;
+    mg_proto_live_call_request(&p, true);
     write_hex(&p, MG_CH_CONTROL, "0a");
     unhex(PROOF_VECTORS[0].dn, next_nonce, 16);
     proof_write(&p, mg_token_proof_challenge, cn, 16);
@@ -1992,22 +1997,68 @@ static void test_reply_outbox(void)
         now += 5;
         CHECK(mg_proto_capture_pump(&p));   /* held: the worker keeps looking */
     }
-    /* request_status's lines wait in the outbox, in order; the proof challenge never waits. */
-    CHECK(p.ctlq.n == want_n && p.cmdq.n == 0 && p.ctlq.dropped == 0 && mg_proto_proof_answer_pending(&p));
+    /* The call start waits in the outbox; request_status waits behind it as a command (mg_cmdq_t),
+     * answered once the outbox is empty; the proof challenge never waits. */
+    CHECK(p.ctlq.n == 1 && p.cmdq.n == 1 && p.ctlq.dropped == 0 && mg_proto_proof_answer_pending(&p));
     notify_fails = false;
     clear_notes();
     CHECK(!mg_proto_capture_pump(&p));
-    CHECK(nnotes == 1 + want_n);
+    CHECK(nnotes == 2 + want_n);
     CHECK(notes[0].len == 50 && notes[0].d[0] == 0x22 && notes[0].d[1] == mg_token_proof_response);   /* first */
+    CHECK(note_is(1, MG_CH_CONTROL, "85 01"));   /* the call start, as it came */
     for (int i = 0; i < want_n; i++) {
-        CHECK(notes[1 + i].len == want[i].len && !memcmp(notes[1 + i].d, want[i].d, want[i].len));
+        CHECK(notes[2 + i].len == want[i].len && !memcmp(notes[2 + i].d, want[i].d, want[i].len));
     }
-    CHECK(p.ctlq.n == 0 && p.cmdq.n == 0 && p.ctlq.most == want_n && p.cmdq.direct == 0);
-    printf("reply outbox: request_status %d lines held through 500 ms of refusals, the proof "
-           "answer first, %d of %d slots used\n", want_n, p.ctlq.most, MG_CTLQ_MAX);
+    CHECK(p.ctlq.n == 0 && p.cmdq.n == 0 && p.ctlq.most == 1 && p.cmdq.most == 1 && p.cmdq.direct == 0);
+    printf("reply outbox: request_status %d lines + a call start held through 500 ms of refusals, the proof "
+           "answer first, %d of %d slots used, request_status held as a command\n", want_n, p.ctlq.most, MG_CTLQ_MAX);
     mg_proto_disconnect(&p);
     mg_play_release(&pl);
     proof_have_key = false;
+}
+
+/* The live call features line lists failure_reason (2), and a failed state
+ * may carry why: [85 04 reason]; setup_required (1) is kept for the device to show. */
+static void test_call_failure_reason(void)
+{
+    mg_proto_config_t cfg = { .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    mg_proto_connect(&p);
+    mg_proto_set_mtu(&p, 247);
+    mg_proto_subscribe(&p, MG_CH_CONTROL, true);
+    mg_proto_subscribe(&p, MG_CH_DATA, true);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    bool listed = false;
+    for (int i = 0; i < nnotes; i++) listed |= note_is(i, MG_CH_CONTROL, "10 fe 85 02");
+    CHECK(listed);
+    mg_proto_live_call_request(&p, true);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "85 04 01");   /* failed: setup_required */
+    CHECK(nnotes == 0 && mg_proto_live_call_state(&p) == mg_live_call_state_failed);
+    CHECK(mg_proto_live_call_failure_reason(&p) == mg_live_call_failure_setup_required);
+    write_hex(&p, MG_CH_CONTROL, "85 00");   /* idle: the reason goes */
+    CHECK(mg_proto_live_call_failure_reason(&p) == 0);
+    write_hex(&p, MG_CH_CONTROL, "85 04");   /* failed alone (an older client) */
+    CHECK(nnotes == 0 && mg_proto_live_call_failure_reason(&p) == mg_live_call_failure_unspecified);
+    write_hex(&p, MG_CH_CONTROL, "85 02 01");   /* a reason only counts with failed */
+    CHECK(nnotes == 0 && mg_proto_live_call_failure_reason(&p) == 0);
+    write_hex(&p, MG_CH_CONTROL, "85 04 07");   /* one it doesn't know: kept as given (shown as the usual text) */
+    CHECK(mg_proto_live_call_failure_reason(&p) == 7);
+    mg_proto_disconnect(&p);
+    /* Without live call: no features line. */
+    mg_proto_config_t none = { 0 };
+    mg_proto_init(&p, &none, &ops, NULL);
+    mg_proto_connect(&p);
+    mg_proto_set_mtu(&p, 247);
+    mg_proto_subscribe(&p, MG_CH_CONTROL, true);
+    mg_proto_subscribe(&p, MG_CH_DATA, true);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    for (int i = 0; i < nnotes; i++) CHECK(!(notes[i].len >= 3 && notes[i].d[0] == 0x10 && notes[i].d[1] == 0xfe && notes[i].d[2] == 0x85));
+    mg_proto_disconnect(&p);
 }
 
 static void test_proof(void)
@@ -2202,6 +2253,7 @@ static void test_proof(void)
     /* The constant-time compare. */
     CHECK(mg_token_proof_equal(cmac, cmac, 32) && !mg_token_proof_equal(cmac, bad, 32));
 }
+
 
 static void test_stream(void)
 {
@@ -3197,7 +3249,7 @@ static void test_video_audio_interleave(void)
     /* change_data_type always switches, silently: a type no open stream
      * takes has its Data dropped (and counted) until the next switch. A
      * client's chunks for a playback the device just ended never reach the
-     * video (a barge-in froze the video when they did). The next
+     * video (a live call's barge-in froze its video when they did). The next
      * switch to video takes again. */
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "08 01");
@@ -3398,7 +3450,28 @@ static void test_device_end_hold(void)
     mg_proto_disconnect(&p);
 }
 
-/* A client connected and ready: MTU exchanged, both channels subscribed. */
+/* ---- live call (mg_command_live_call) ---- */
+
+static int call_calls;
+static uint8_t call_last = 0xff;
+static void f_live_call(void *ctx, uint8_t state)
+{
+    (void)ctx;
+    call_calls++;
+    call_last = state;
+}
+
+/* How many notes so far are [live_call, request]. */
+static int call_notes(uint8_t request)
+{
+    int k = 0;
+    for (int i = 0; i < nnotes; i++) {
+        k += notes[i].ch == MG_CH_CONTROL && notes[i].len == 2 && notes[i].d[0] == mg_command_live_call &&
+             notes[i].d[1] == request;
+    }
+    return k;
+}
+
 static void call_ready(mg_proto_t *p)
 {
     mg_proto_connect(p);
@@ -3407,6 +3480,329 @@ static void call_ready(mg_proto_t *p)
     mg_proto_subscribe(p, MG_CH_DATA, true);
 }
 
+/* Call states from a central without this connection's token proof, on a set-up gadget: no proof gate, within
+ * limits. connecting, failed and ended answering this connection's own pending start drive it as usual; with no
+ * owner's call any state goes to the UI marked unproven; an unproven state never cancels or replaces the owner's
+ * pending or live call. */
+static void test_live_call_unproven(void)
+{
+    mg_proto_config_t cfg = { .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    ops.random = f_random;
+    ops.proof_key = f_proof_key;
+    ops.proof_clear = f_proof_clear;
+    ops.live_call = f_live_call;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    uint8_t cn[16], cmac[32];
+    unhex(PROOF_VECTORS[0].k, proof_k, 32);
+    unhex(PROOF_VECTORS[0].cn, cn, 16);
+    unhex(PROOF_VECTORS[0].cmac, cmac, 32);
+    proof_have_key = true;   /* set up: the proof decides */
+    call_ready(&p);
+    mg_proto_set_mtu(&p, 517);
+    call_calls = 0;
+    /* 1. Nothing asked: an unproven connecting and live go to the UI, marked unproven, with no answer. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(nnotes == 0 && call_calls == 2);
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && mg_proto_live_call_unproven(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 03");   /* its own end: taken */
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_ended && nnotes == 0);
+    /* 2. The gadget asks on this link: connecting answers its own start (the owner's call); an unproven live
+     * waits for the proof; failed answering its own start is taken. */
+    mg_proto_live_call_request(&p, true);
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_connecting && !mg_proto_live_call_unproven(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_connecting);
+    write_hex(&p, MG_CH_CONTROL, "85 04");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_failed);
+    /* 3. Asked on the link before this one: a new link's connecting never replaces the owner's pending start
+     * until the start is asked again on it; then an unproven idle never cancels the owner's call. */
+    mg_proto_live_call_request(&p, true);
+    mg_proto_disconnect(&p);
+    call_ready(&p);
+    mg_proto_set_mtu(&p, 517);
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_idle && mg_proto_live_call_pending(&p));
+    write_hex(&p, MG_CH_CONTROL, "0a");   /* request_status: the pending start, asked on this link */
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_connecting);
+    write_hex(&p, MG_CH_CONTROL, "85 00");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_connecting);
+    /* 4. Proven: live is taken, the owner's. */
+    unhex(PROOF_VECTORS[0].dn, next_nonce, 16);
+    proof_write(&p, mg_token_proof_challenge, cn, 16);
+    proof_write(&p, mg_token_proof_confirm, cmac, 32);
+    CHECK(mg_proto_proof_matched(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && !mg_proto_live_call_unproven(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    mg_proto_disconnect(&p);
+    /* 5. With no owner's call an unproven call is taken; once the owner's call is on (proven), an unproven ended
+     * or connecting changes nothing, even after the proof ends; the link going ends it all the same. */
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    call_calls = 0;
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && mg_proto_live_call_unproven(&p) &&
+          call_calls == 1);
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_ended && call_calls == 2);
+    unhex(PROOF_VECTORS[0].dn, next_nonce, 16);
+    proof_write(&p, mg_token_proof_challenge, cn, 16);
+    proof_write(&p, mg_token_proof_confirm, cmac, 32);
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && !mg_proto_live_call_unproven(&p));
+    mg_proto_proof_reset(&p);                /* the proof ends (the call isn't the proof's to end) */
+    int before = call_calls;
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && call_calls == before);
+    mg_proto_disconnect(&p);
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_idle && !mg_proto_live_call_unproven(&p));
+    /* 6. Not set up: no proof to match, every state taken. */
+    proof_have_key = false;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_live && !mg_proto_live_call_unproven(&p));
+    mg_proto_disconnect(&p);
+    if (!failures) printf("PASS live call states: an unproven central's are marked and never touch the owner's call\n");
+}
+
+/* ---- Live call subtitles (mg_command_subtitle 0x87) ---- */
+static mg_subs_event_t sub_ev;
+static int sub_calls;
+static struct {
+    char text[256];   /* the first words' text, cut to fit */
+    char guard[64];   /* stays zero: nothing is written past text */
+} sub_buf;
+#define sub_text sub_buf.text
+static bool sub_text_cut;   /* the words' text didn't all fit */
+static uint32_t sub_at[8];
+/* Each words event's run: its count, offset and flags, and the words' total bytes. */
+static int sub_nruns;
+static int sub_run_count[8];
+static uint16_t sub_run_off[8];
+static uint8_t sub_run_flags[8];
+static int sub_run_bytes;
+
+static void f_subtitle(void *ctx, const mg_subs_event_t *ev)
+{
+    (void)ctx;
+    sub_ev = *ev;
+    sub_calls++;
+    if (ev->sub == mg_subtitle_words && sub_nruns < 8) {
+        sub_run_count[sub_nruns] = ev->count;
+        sub_run_off[sub_nruns] = ev->char_offset;
+        sub_run_flags[sub_nruns] = ev->flags;
+        sub_nruns++;
+        for (int i = 0; i < ev->count; i++) {
+            sub_run_bytes += ev->words[i].len;
+        }
+    }
+    sub_text[0] = 0;
+    sub_text_cut = false;
+    size_t used = 0;
+    for (int i = 0; i < ev->count && i < 8; i++) {
+        size_t n = ev->words[i].len;
+        if (n > sizeof(sub_text) - 1 - used) {
+            n = sizeof(sub_text) - 1 - used;   /* bounded: up to 8 words of 255 bytes don't fit */
+            sub_text_cut = true;
+        }
+        memcpy(sub_text + used, ev->words[i].utf8, n);
+        used += n;
+        sub_text[used] = 0;
+        sub_at[i] = ev->words[i].show_at;
+    }
+    sub_ev.words = NULL;   /* only valid during the call */
+}
+
+static bool subs_ready;
+static bool f_subs_ready(void *ctx) { (void)ctx; return subs_ready; }
+
+static void test_subtitles(void)
+{
+    static const mg_subs_caps_t caps = { .flags = 0x0c, .lines = 2, .chars_per_line = 26, .max_words_bytes = 480 };
+    mg_proto_config_t cfg = { .subtitles = &caps };
+    mg_proto_ops_t ops = base_ops();
+    ops.subtitle = f_subtitle;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    /* Listed in supported_features. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(1, MG_CH_CONTROL, "10 01 02 09 0a 3f 41 1e 87"));
+    /* Capabilities: version 1, flags, lines, chars per line, max words bytes:
+     * min(480, ATT_MTU - 5), so a whole words write fits one ATT payload. */
+    mg_proto_set_mtu(&p, 517);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 00");
+    CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "87 01 01 0c 02 1a e001"));
+    /* The MTU changes after the answer: capabilities again, unsolicited, with
+     * the new bound (247 - 5 = 242); the same MTU again sends nothing. */
+    clear_notes();
+    mg_proto_set_mtu(&p, 247);
+    CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "87 01 01 0c 02 1a f200"));
+    CHECK(mg_proto_subtitle_words_max(&p) == 242);
+    clear_notes();
+    mg_proto_set_mtu(&p, 247);
+    CHECK(nnotes == 0);
+    mg_proto_set_mtu(&p, 23);
+    CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "87 01 01 0c 02 1a 1200"));
+    mg_proto_set_mtu(&p, 517);
+    /* MG_MAX_ATT_VALUE (mgcommands.h): at MTU 517 every payload is bounded by
+     * 512, not 514; the device session and layer 2 compute from this MTU. */
+    CHECK(p.mtu == MG_MAX_ATT_VALUE + 3);
+    CHECK(mg_proto_subtitle_words_max(&p) <= MG_MAX_ATT_VALUE - 2);
+    /* state: active, frame timing. */
+    write_hex(&p, MG_CH_CONTROL, "87 02 01 00");
+    CHECK(sub_calls == 1 && sub_ev.sub == 2 && sub_ev.active == 1 && sub_ev.timing == 0);
+    /* words: reply 7, final, offset 0, two words ("Hi " at frame 0x10, "there." now). */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 01 0000 02 10000000 03 486920 ffffffff 06 74686572652e");
+    CHECK(nnotes == 0 && sub_calls == 2 && sub_ev.sub == 3 && sub_ev.reply_id == 7 && sub_ev.flags == 1 &&
+          sub_ev.char_offset == 0 && sub_ev.count == 2 && !strcmp(sub_text, "Hi there.") && sub_at[0] == 0x10 &&
+          sub_at[1] == 0xFFFFFFFF);
+    /* A word running past the message, trailing bytes, more words than it holds, none: refused, nothing delivered. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 00 0000 01 10000000 09 4869");
+    CHECK(sub_calls == 2 && note_is(0, MG_CH_CONTROL, "19 87 01 0200"));
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 00 0000 01 10000000 02 4869 ff");
+    CHECK(sub_calls == 2 && note_is(1, MG_CH_CONTROL, "19 87 01 0200"));
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 00 0000 ff");
+    CHECK(sub_calls == 2 && note_is(2, MG_CH_CONTROL, "19 87 01 0200"));
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 00 0000 00");
+    CHECK(sub_calls == 2 && note_is(3, MG_CH_CONTROL, "19 87 01 0300"));
+    /* As many words as fit max_words_bytes (the count byte allows 255): 79 one-byte words in 480 bytes, all taken,
+     * delivered in runs of MG_SUBS_MAX_WORDS with consecutive offsets, replace on the first run only and final on
+     * the last only. */
+    {
+        static uint8_t m[2 + 480];
+        size_t n = 0;
+        m[n++] = 0x87;
+        m[n++] = mg_subtitle_words;
+        const uint8_t head[6] = { 0x07, 0x00, mg_subtitle_words_final | mg_subtitle_words_replace, 0x0a, 0x00, 79 };
+        memcpy(m + n, head, sizeof(head));
+        n += sizeof(head);
+        for (int k = 0; k < 79; k++) {
+            const uint8_t w[6] = { (uint8_t)k, 0, 0, 0, 1, (uint8_t)('a' + k % 26) };
+            memcpy(m + n, w, sizeof(w));
+            n += sizeof(w);
+        }
+        CHECK(n == 2 + 480);
+        sub_nruns = 0;
+        sub_run_bytes = 0;
+        clear_notes();
+        mg_proto_write(&p, MG_CH_CONTROL, m, n);
+        CHECK(nnotes == 0 && sub_calls == 4 && sub_nruns == 2 && sub_run_bytes == 79);
+        CHECK(sub_run_count[0] == MG_SUBS_MAX_WORDS && sub_run_off[0] == 10 &&
+              sub_run_flags[0] == mg_subtitle_words_replace);
+        CHECK(sub_run_count[1] == 79 - MG_SUBS_MAX_WORDS && sub_run_off[1] == 10 + MG_SUBS_MAX_WORDS &&
+              sub_run_flags[1] == mg_subtitle_words_final);
+        sub_calls = 2;   /* the counts below as before */
+    }
+    /* reply_end, clear, clock. */
+    write_hex(&p, MG_CH_CONTROL, "87 04 0700 20000000");
+    CHECK(sub_calls == 3 && sub_ev.sub == 4 && sub_ev.reply_id == 7 && sub_ev.show_at == 0x20);
+    write_hex(&p, MG_CH_CONTROL, "87 05 0000 01");
+    CHECK(sub_calls == 4 && sub_ev.sub == 5 && sub_ev.reply_id == 0 && sub_ev.reason == 1);
+    write_hex(&p, MG_CH_CONTROL, "87 06 0700 e8030000");
+    CHECK(sub_calls == 5 && sub_ev.sub == 6 && sub_ev.playout_ms == 1000);
+    /* Unknown sub-command, bad timing. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 09");
+    CHECK(note_is(0, MG_CH_CONTROL, "19 87 01 0300"));
+    write_hex(&p, MG_CH_CONTROL, "87 02 01 05");
+    CHECK(note_is(1, MG_CH_CONTROL, "19 87 01 0300") && sub_calls == 5);
+    /* state's active byte is 0 or 1 (mg_subtitle_ref.py's parse): 2 is refused, as invalid, and changes nothing. */
+    write_hex(&p, MG_CH_CONTROL, "87 02 02 00");
+    CHECK(note_is(2, MG_CH_CONTROL, "19 87 01 0300") && sub_calls == 5);
+    write_hex(&p, MG_CH_CONTROL, "87 02 ff 01");
+    CHECK(note_is(3, MG_CH_CONTROL, "19 87 01 0300") && sub_calls == 5);
+    /* Two 200-byte words: the harness's copy of their text stays inside its buffer (cut, and says so). */
+    {
+        static uint8_t m[2 + 6 + 2 * (5 + 200)];
+        size_t n = 0;
+        m[n++] = 0x87;
+        m[n++] = mg_subtitle_words;
+        const uint8_t head[6] = { 0x08, 0x00, 0, 0x00, 0x00, 2 };
+        memcpy(m + n, head, sizeof(head));
+        n += sizeof(head);
+        for (int k = 0; k < 2; k++) {
+            const uint8_t w[5] = { 0xff, 0xff, 0xff, 0xff, 200 };
+            memcpy(m + n, w, sizeof(w));
+            n += sizeof(w);
+            memset(m + n, 'a' + k, 200);
+            n += 200;
+        }
+        mg_proto_write(&p, MG_CH_CONTROL, m, n);
+        static const char zero[sizeof(sub_buf.guard)];
+        CHECK(sub_calls == 6 && sub_ev.count == 2 && sub_text_cut && strlen(sub_text) == sizeof(sub_text) - 1);
+        CHECK(!memcmp(sub_buf.guard, zero, sizeof(zero)));
+        sub_calls = 5;
+    }
+    mg_proto_disconnect(&p);
+    /* Without cfg.subtitles: not listed, unsupported. */
+    mg_proto_config_t none = { 0 };
+    mg_proto_init(&p, &none, &ops, NULL);
+    call_ready(&p);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 00");
+    CHECK(note_is(0, MG_CH_CONTROL, "19 87 01 0100"));
+    mg_proto_disconnect(&p);
+    /* Configured but the band can't be drawn (no buffers): not listed,
+     * unsupported; listed again once it can. */
+    ops.subtitles_ready = f_subs_ready;
+    subs_ready = false;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(1, MG_CH_CONTROL, "10 01 02 09 0a 3f 41 1e"));
+    write_hex(&p, MG_CH_CONTROL, "87 00");
+    CHECK(note_is(-1, MG_CH_CONTROL, "19 87 01 0100"));
+    subs_ready = true;
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(1, MG_CH_CONTROL, "10 01 02 09 0a 3f 41 1e 87"));
+    mg_proto_disconnect(&p);
+    /* No proof gate: a set-up gadget (a proof key kept) takes an unproven connection's state and words, marked
+     * unproven. The UI shows them only on a screen that's already on: they never wake it, keep it lit, hold the
+     * panel or reset the passcode's idle lock, never draw over the passcode lock, and never over a card that asks
+     * for a press or a code (the pairing confirm, the update prompt, the re-setup prompt, the keypad): the band and
+     * the call's controls are hidden while one is up (muse_subs.c, muse_call.c, muse_ui.c's sync_card). */
+    ops.proof_key = f_proof_key;
+    ops.random = f_random;
+    ops.proof_clear = f_proof_clear;
+    proof_have_key = true;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    int before = sub_calls;
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "87 02 01 00");
+    CHECK(sub_calls == before + 1 && sub_ev.sub == mg_subtitle_state && sub_ev.active && !sub_ev.proven &&
+          nnotes == 0);
+    write_hex(&p, MG_CH_CONTROL, "87 03 0700 00 0000 01 64000000 03 486921");
+    CHECK(sub_calls == before + 2 && sub_ev.sub == mg_subtitle_words && !strcmp(sub_text, "Hi!") && !sub_ev.proven &&
+          nnotes == 0);
+    proof_have_key = false;
+    mg_proto_disconnect(&p);
+    /* A gadget that isn't set up: the central is the owner's (owner_ok), proven. */
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    write_hex(&p, MG_CH_CONTROL, "87 02 01 00");
+    CHECK(sub_ev.sub == mg_subtitle_state && sub_ev.proven);
+    mg_proto_disconnect(&p);
+}
+
+/* During a call (started, connecting, live) and
+ * for 3 s after it ends, a client's start_mic is ignored (no capture, no
+ * answer) and so is its stop_mic; outside, capture works as before. */
 /* Capture formats, start_mic's rate and bitrate,
  * settings 13 and 14 (stored), labels, and LC3 playback at 24 kHz. */
 static void test_rates(void)
@@ -3609,6 +4005,249 @@ static void test_haptics(void)
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "0a");
     CHECK(!typed_has(mg_command_device_action, mg_device_action_haptic_play));
+}
+
+static void test_live_call_mic(void)
+{
+    mg_proto_config_t cfg = { .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    ops.live_call = f_live_call;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    now = 1000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);
+    write_hex(&p, MG_CH_CONTROL, "02");
+    CHECK(!capturing);
+
+    CHECK(mg_proto_turn_codec(&p) == mg_data_type_audio_sbc);   /* outside a call: setting 7 (SBC) */
+    mg_proto_live_call_request(&p, true);   /* started: asked */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(!capturing && nnotes == 0);
+    write_hex(&p, MG_CH_CONTROL, "85 01");   /* connecting */
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(!capturing && nnotes == 0);
+    write_hex(&p, MG_CH_CONTROL, "85 02");   /* live */
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(!capturing && nnotes == 0);
+    write_hex(&p, MG_CH_CONTROL, "02");
+    CHECK(!capturing && nnotes == 0);
+
+#if MG_WITH_LC3
+    CHECK(mg_proto_turn_codec(&p) == mg_data_type_audio_lc3);   /* a talk hold in a call is LC3 */
+#endif
+    write_hex(&p, MG_CH_CONTROL, "85 03");   /* ended at 1000 */
+    CHECK(mg_proto_turn_codec(&p) == mg_proto_capture_codec(&p));   /* after it: setting 7 */
+    now = 3999;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(!capturing && nnotes == 0);        /* within its 3 s */
+    write_hex(&p, MG_CH_CONTROL, "02");      /* that start_mic's stop_mic: ignored too */
+    now = 4000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);                        /* 3 s on: a capture as usual */
+    write_hex(&p, MG_CH_CONTROL, "02");
+    CHECK(!capturing);
+    /* An ignored start whose stop never came doesn't swallow a later real capture's stop. */
+    write_hex(&p, MG_CH_CONTROL, "85 02");   /* live again */
+    write_hex(&p, MG_CH_CONTROL, "01");      /* ignored; no stop_mic for it */
+    write_hex(&p, MG_CH_CONTROL, "85 03");   /* ended at 4000 */
+    now = 7000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);                        /* a real start, past the tail */
+    write_hex(&p, MG_CH_CONTROL, "02");
+    CHECK(!capturing);                       /* its stop ends it */
+    /* A capture begun before the call: the call's start ends it, and a stop_mic for one still on is taken. */
+    now = 20000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);
+    write_hex(&p, MG_CH_CONTROL, "85 01");   /* connecting: the call's start */
+    CHECK(!capturing);
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    now = 30000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);
+    mg_proto_live_call_request(&p, true);    /* the gadget's own start: the same */
+    CHECK(!capturing);
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "02");      /* the stop for it, mid-call: nothing left to stop, no harm */
+    CHECK(!capturing && nnotes == 0);
+    /* The gadget ends the call: over here at once (start_mic ignored for its 3 s tail, the talk codec back),
+     * before the phone's ended comes, and that ended changes nothing. */
+    clear_notes();
+    mg_proto_live_call_request(&p, false);
+    CHECK(note_is(0, MG_CH_CONTROL, "85 00") && mg_proto_live_call_state(&p) == mg_live_call_state_ended);
+    CHECK(mg_proto_turn_codec(&p) == mg_proto_capture_codec(&p));
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(!capturing);
+    write_hex(&p, MG_CH_CONTROL, "02");
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    CHECK(mg_proto_live_call_state(&p) == mg_live_call_state_ended);
+    now = 33000;
+    write_hex(&p, MG_CH_CONTROL, "01");
+    CHECK(capturing);
+    write_hex(&p, MG_CH_CONTROL, "02");
+    CHECK(!capturing);
+    if (!failures) printf("PASS call mic: a capture from before the call ends at its start; a gadget's end is over at once\n");
+    call_calls = 0;   /* test_live_call counts from zero */
+    call_last = 0xff;
+    now = 0;
+}
+
+/* A call held behind the passcode keypad gets no reply audio before the unlock: start_streaming answers busy
+ * while the UI holds it; released (the unlock), it plays; the hold goes with the call. */
+static void test_live_call_held_reply(void)
+{
+    static mg_play_t pl;
+    mg_play_init(&pl, 16384);
+    mg_proto_config_t cfg = { .play = &pl, .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    call_ready(&p);
+    mg_proto_set_mtu(&p, 247);
+    write_hex(&p, MG_CH_CONTROL, "85 02");   /* the phone's live, while locked: the UI holds it */
+    mg_proto_live_call_held(&p, true);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "1d 02 01 01 01");   /* SBC reply */
+    CHECK(note_is(-1, MG_CH_CONTROL, "19 1d 01 0400") && !mg_play_active(&pl));   /* busy */
+    mg_proto_live_call_held(&p, false);   /* unlocked: the call opens */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "1d 02 01 01 01");
+    CHECK(mg_play_active(&pl));
+    write_hex(&p, MG_CH_CONTROL, "1d 03 01");   /* stop, drop */
+    /* A reply stream opened before the hold ends at the hold (the device's own stop): nothing plays behind the
+     * keypad. */
+    write_hex(&p, MG_CH_CONTROL, "1d 02 01 01 01");
+    CHECK(mg_play_active(&pl));
+    clear_notes();
+    mg_proto_live_call_held(&p, true);
+    CHECK(!mg_play_active(&pl) && note_is(-1, MG_CH_CONTROL, "1d 03 01"));
+    mg_proto_live_call_held(&p, false);
+    /* Held again, then the call ends: the hold goes with it, an ordinary reply plays. */
+    mg_proto_live_call_held(&p, true);
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    CHECK(!p.call.held);
+    mg_proto_disconnect(&p);
+    call_calls = 0;
+    call_last = 0xff;
+    if (!failures) printf("PASS a call held behind the keypad: reply audio busy until the unlock\n");
+}
+
+static void test_live_call(void)
+{
+    mg_proto_config_t cfg = { .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    ops.live_call = f_live_call;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    CHECK(call_calls == 0 && mg_proto_live_call_state(&p) == mg_live_call_state_idle);
+    call_ready(&p);
+
+    /* Listed in supported_features; nothing pending, so no start after it. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(1, MG_CH_CONTROL, "10 01 02 09 0a 3f 41 1e 85"));
+    CHECK(call_notes(1) == 0);
+
+    /* The user starts a call: the start goes at once and stays pending until answered. */
+    clear_notes();
+    mg_proto_live_call_request(&p, true);
+    CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "85 01") && mg_proto_live_call_pending(&p));
+    /* Idle (what a client says before it has seen the start) keeps it pending. */
+    write_hex(&p, MG_CH_CONTROL, "85 00");
+    CHECK(call_last == 0 && mg_proto_live_call_pending(&p));
+    /* Connecting answers it; states get no reply. */
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    CHECK(nnotes == 0 && call_last == 1 && !mg_proto_live_call_pending(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(nnotes == 0 && call_last == 2 && mg_proto_live_call_state(&p) == mg_live_call_state_live);
+    /* Starting a call that's on sends nothing; request_status doesn't repeat an answered start. */
+    mg_proto_live_call_request(&p, true);
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(call_notes(1) == 0 && !mg_proto_live_call_pending(&p));
+    /* The user ends it; the client says ended. */
+    clear_notes();
+    mg_proto_live_call_request(&p, false);
+    CHECK(nnotes == 1 && note_is(0, MG_CH_CONTROL, "85 00"));
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    CHECK(call_last == 3 && mg_proto_live_call_state(&p) == mg_live_call_state_ended);
+    /* Ending with no call sends nothing. */
+    clear_notes();
+    mg_proto_live_call_request(&p, false);
+    CHECK(nnotes == 0);
+
+    /* Bad states are refused and reach nobody; trailing bytes are ignored. */
+    int calls = call_calls;
+    write_hex(&p, MG_CH_CONTROL, "85 05");
+    CHECK(note_is(-1, MG_CH_CONTROL, "19 85 01 0300"));
+    write_hex(&p, MG_CH_CONTROL, "85");
+    CHECK(note_is(-1, MG_CH_CONTROL, "19 85 01 0200"));
+    CHECK(call_calls == calls);
+    write_hex(&p, MG_CH_CONTROL, "85 02 ff");
+    CHECK(call_last == 2 && call_calls == calls + 1);
+
+    /* The client going away ends its call: the board hears idle, once. */
+    mg_proto_disconnect(&p);
+    CHECK(call_last == 0 && call_calls == calls + 2 && mg_proto_live_call_state(&p) == mg_live_call_state_idle);
+    mg_proto_disconnect(&p);
+    CHECK(call_calls == calls + 2);
+
+    /* A start with no client waits, and goes to each client that becomes
+     * ready until one answers. */
+    clear_notes();
+    mg_proto_live_call_request(&p, true);
+    CHECK(nnotes == 0 && mg_proto_live_call_pending(&p));
+    mg_proto_connect(&p);
+    mg_proto_subscribe(&p, MG_CH_CONTROL, true);
+    mg_proto_live_call_request(&p, true);   /* not ready (Data unsubscribed): still nothing sent */
+    CHECK(nnotes == 0);
+    mg_proto_subscribe(&p, MG_CH_DATA, true);
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(-1, MG_CH_CONTROL, "85 01"));
+    mg_proto_disconnect(&p);   /* no answer: still pending */
+    CHECK(call_calls == calls + 2 && mg_proto_live_call_pending(&p));
+    call_ready(&p);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(-1, MG_CH_CONTROL, "85 01"));
+    write_hex(&p, MG_CH_CONTROL, "85 04");   /* failed answers it too */
+    CHECK(call_last == 4 && !mg_proto_live_call_pending(&p));
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(call_notes(1) == 0);
+    /* A failed call isn't a call: disconnecting after it doesn't report idle again... */
+    write_hex(&p, MG_CH_CONTROL, "85 00");
+    calls = call_calls;
+    mg_proto_disconnect(&p);
+    CHECK(call_calls == calls);
+
+    /* ...and the user can take back a start nobody has seen. */
+    mg_proto_live_call_request(&p, true);
+    mg_proto_live_call_request(&p, false);
+    call_ready(&p);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(call_notes(1) == 0 && call_notes(0) == 0 && !mg_proto_live_call_pending(&p));
+    mg_proto_disconnect(&p);
+
+    /* A board without it refuses it, doesn't list it, and never sends a start. */
+    mg_proto_config_t none = { 0 };
+    ops.live_call = NULL;
+    mg_proto_init(&p, &none, &ops, NULL);
+    call_ready(&p);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    CHECK(note_is(0, MG_CH_CONTROL, "19 85 01 0100"));
+    mg_proto_live_call_request(&p, true);
+    write_hex(&p, MG_CH_CONTROL, "0a");
+    CHECK(note_is(2, MG_CH_CONTROL, "10 01 02 09 0a 3f 41 1e") && call_notes(1) == 0);
+    mg_proto_disconnect(&p);
 }
 
 /* ---- UI streams and UI input (mgcommands.h, UI streaming, UI input) ---- */
@@ -3890,16 +4529,18 @@ static void test_mic_gain(void)
     CHECK(settings_saves == saves);
 }
 
-/* mg_stream_audio_flush (mgcommands.h): the flush discards in order with Data and answers buffer_update
- * (queued 0, counters running); the stream stays open, and one left starved ends after 10 s. */
+/* One reply-audio stream per Live call (mgcommands.h): the stream a call opens stays
+ * open through its empty gaps, mg_stream_audio_flush discards in order with Data and answers
+ * buffer_update (queued 0, counters running), and the call's end ends the stream. */
 static void test_reply_stream(void)
 {
     static mg_play_t pl;
     mg_play_init(&pl, 16384);
     pl.out_us = 30000;
-    mg_proto_config_t cfg = { .play = &pl };
+    mg_proto_config_t cfg = { .play = &pl, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
     static mg_proto_t p;
     mg_proto_init(&p, &cfg, &ops, NULL);
     mg_proto_connect(&p);
@@ -3912,10 +4553,16 @@ static void test_reply_stream(void)
     write_hex(&p, MG_CH_CONTROL, "1d 06");
     mg_proto_stream_tick(&p);   /* the flush's update goes from the worker's tick */
     CHECK(note_is(-1, MG_CH_CONTROL, "1d 05 00000000 00000000 0000"));
-    /* A stream that starves ends after 10 s (MG_PLAY_STARVE_END_US). */
+    /* Outside a call a stream isn't kept open (the 10 s end stays). */
+    write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");
+    CHECK(mg_play_active(&pl) && !pl.keep_open);
+    write_hex(&p, MG_CH_CONTROL, "1d 03 01");
+    /* Live, then the stream: kept open. */
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    write_hex(&p, MG_CH_CONTROL, "85 02");
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");   /* PCM at 8 kHz: 16 B a ms */
-    CHECK(mg_play_active(&pl));
+    CHECK(mg_play_active(&pl) && pl.keep_open);
     static uint8_t a[640], b[320];
     memset(a, 0x11, sizeof(a));
     memset(b, 0x22, sizeof(b));
@@ -3928,7 +4575,7 @@ static void test_reply_stream(void)
     clear_notes();
     write_hex(&p, MG_CH_CONTROL, "1d 06");
     mg_proto_stream_tick(&p);   /* the flush's update goes from the worker's tick */
-    /* 16384 free (no live depth asked: the whole ring), 960 received, queued 0. */
+    /* 16384 free (no live depth asked: the whole ring, in a call too), 960 received, queued 0. */
     CHECK(note_is(-1, MG_CH_CONTROL, "1d 05 00400000 c0030000 0000"));
     CHECK(pl.len == 0 && pl.st.flushes == 1 && pl.flush_us == 50000 && mg_play_active(&pl));
     mg_proto_write(&p, MG_CH_DATA, b, sizeof(b));   /* the new reply */
@@ -3938,8 +4585,39 @@ static void test_reply_stream(void)
     mg_play_set_pending(&pl, 0);
     CHECK(mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US) == 160 && out[0] == 0x22);
     mg_play_set_pending(&pl, 0);
-    /* Left starved, the stream ends after 10 s (the device's own end: stop_streaming). */
+    /* Between replies: a long empty gap, the stream stays (no stop notified). */
     clear_notes();
+    for (int i = 0; i < 2000; i++) {   /* 20 s */
+        mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US);
+        now += 10;
+        mg_proto_stream_tick(&p);
+    }
+    CHECK(mg_play_active(&pl) && pl.state == MG_PLAY_PLAYING && pl.st.underruns == 0);
+    for (int i = 0; i < nnotes; i++) {
+        CHECK(!(notes[i].d[0] == 0x1d && notes[i].d[1] == 0x03));   /* buffer_updates only */
+    }
+    /* A talk press in the call barges in by flushing the stream, never ending it: what it held goes, a
+     * buffer_update (queued 0) says so, no stop_streaming; the next reply, written during the turn,
+     * waits for it and plays at once after. */
+    mg_proto_write(&p, MG_CH_DATA, a, 320);
+    uint32_t flushes = pl.st.flushes;
+    clear_notes();
+    mg_proto_claim_turn(&p, true);
+    CHECK(mg_play_active(&pl) && pl.keep_open && pl.len == 0 && pl.st.flushes == flushes + 1);
+    CHECK(nnotes == 1 && notes[0].d[0] == 0x1d && notes[0].d[1] == 0x05 && notes[0].d[10] == 0 && notes[0].d[11] == 0);
+    mg_proto_write(&p, MG_CH_DATA, b, 160);   /* the next reply, during the turn: buffered */
+    CHECK(pl.len == 160);
+    mg_proto_claim_turn(&p, false);
+    got = mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US);
+    CHECK(got == 160 && out[0] == 0x22);
+    mg_play_set_pending(&pl, 0);
+    /* The call's end: the device doesn't end the stream itself (mgcommands.h: only when it
+     * can't go on); the client stops it, and a stream left starved outside a call ends after 10 s. */
+    mg_proto_write(&p, MG_CH_DATA, b, 160);
+    clear_notes();
+    write_hex(&p, MG_CH_CONTROL, "85 03");
+    CHECK(!pl.keep_open && pl.state == MG_PLAY_PLAYING && nnotes == 0);
+    CHECK(mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US) == 160);
     int pops = 0;
     while (pl.state == MG_PLAY_PLAYING && pops < 2000) {
         mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US);
@@ -3948,6 +4626,77 @@ static void test_reply_stream(void)
     CHECK(pl.state == MG_PLAY_DONE && !pl.done_keep && pops == 1000);   /* 10 s starved */
     mg_proto_stream_finished(&p);
     CHECK(note_is(-1, MG_CH_CONTROL, "1d 03 01") && !mg_play_active(&pl));
+}
+
+/* ---- the device's own sound in a Live call (mgcommands.h) ----
+ * A chirp (or any sound of the device's) during a call's reply pauses the call's one stream and resumes it
+ * after: no stop_streaming, no flush, nothing lost; Data during the sound is kept, and a start_streaming
+ * then is taken and waits the same way. Outside a call the sound still ends a reply (test_stream). */
+static void test_own_sound_in_call(void)
+{
+    static mg_play_t pl;
+    mg_play_init(&pl, 16384);
+    pl.out_us = 30000;
+    mg_proto_config_t cfg = { .play = &pl, .live_call = true };
+    mg_proto_ops_t ops = base_ops();
+    ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
+    static mg_proto_t p;
+    mg_proto_init(&p, &cfg, &ops, NULL);
+    mg_proto_connect(&p);
+    mg_proto_set_mtu(&p, 247);
+    mg_proto_subscribe(&p, MG_CH_CONTROL, true);
+    mg_proto_subscribe(&p, MG_CH_DATA, true);
+    now = 9000;
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    write_hex(&p, MG_CH_CONTROL, "85 02");
+    write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");   /* PCM at 8 kHz: 16 B a ms */
+    CHECK(mg_play_active(&pl) && pl.keep_open);
+    static uint8_t a[640], b[320], out[MG_PLAY_MAX_POP];
+    for (size_t i = 0; i < sizeof(a); i++) a[i] = (uint8_t)(i / 2);   /* each sample numbered, in order */
+    for (size_t i = 0; i < sizeof(b); i++) b[i] = (uint8_t)(0x80 + i / 2);
+    mg_proto_write(&p, MG_CH_DATA, a, sizeof(a));   /* 40 ms of the reply */
+    CHECK(mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US) == 160 && out[0] == 0 && out[159] == 79);
+    mg_play_set_pending(&pl, 0);
+    /* The chirp: the stream waits with what it holds; nothing notified, nothing flushed. */
+    clear_notes();
+    int k = kicks;
+    mg_proto_claim_audio(&p, true);
+    CHECK(mg_play_active(&pl) && pl.keep_open && mg_proto_play_held(&p) && p.audio_paused);
+    CHECK(pl.len == 480 && pl.st.flushes == 0 && nnotes == 0);
+    mg_proto_write(&p, MG_CH_DATA, b, sizeof(b));   /* the reply goes on arriving during the sound: kept */
+    CHECK(pl.len == 800 && pl.st.bytes_dropped == 0);
+    mg_proto_stream_tick(&p);   /* credits still flow */
+    /* Over: it resumes where it was, and every frame plays in order. */
+    mg_proto_claim_audio(&p, false);
+    CHECK(!mg_proto_play_held(&p) && !p.audio_paused && kicks > k);
+    size_t got = 0;
+    uint8_t seq[800];
+    while (pl.len) {
+        size_t n = mg_play_pop(&pl, out, sizeof(out), MG_PLAY_CHUNK_US);
+        CHECK(n && got + n <= sizeof(seq));
+        if (!n || got + n > sizeof(seq)) break;
+        memcpy(seq + got, out, n);
+        got += n;
+        mg_play_set_pending(&pl, 0);
+    }
+    CHECK(got == 800 && !memcmp(seq, a + 160, 480) && !memcmp(seq + 480, b, 320));
+    CHECK(pl.st.bytes_received == 960 && pl.st.bytes_dropped == 0 && pl.st.underruns == 0 && mg_play_active(&pl));
+    for (int i = 0; i < nnotes; i++) {
+        CHECK(!(notes[i].d[0] == 0x1d && notes[i].d[1] == 0x03));   /* never a stop_streaming */
+    }
+    /* A start during the sound in a call is taken (not busy) and waits for it. */
+    write_hex(&p, MG_CH_CONTROL, "1d 03 01");
+    clear_notes();
+    mg_proto_claim_audio(&p, true);
+    CHECK(!p.audio_paused);   /* nothing open: nothing to pause */
+    write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");
+    CHECK(mg_play_active(&pl) && p.audio_paused && mg_proto_play_held(&p));
+    CHECK(nnotes >= 1 && notes[nnotes - 1].d[0] == 0x1d && notes[nnotes - 1].d[1] == 0x05);   /* buffer_update, not busy */
+    mg_proto_claim_audio(&p, false);
+    CHECK(!mg_proto_play_held(&p));
+    write_hex(&p, MG_CH_CONTROL, "1d 03 01");
+    mg_play_release(&pl);
 }
 
 /* ---- the barge-in echo rule ----
@@ -4006,9 +4755,10 @@ static void test_barge_pause(void)
     static mg_play_t pl;
     mg_play_init(&pl, 16384);
     pl.out_us = 30000;
-    mg_proto_config_t cfg = { .play = &pl };
+    mg_proto_config_t cfg = { .play = &pl, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
     static mg_proto_t p;
     mg_proto_init(&p, &cfg, &ops, NULL);
     mg_proto_connect(&p);
@@ -4018,11 +4768,11 @@ static void test_barge_pause(void)
     now = 20000;
     uint16_t next = 0;
 
-    /* 1. A hold during a reply. Touch-down: not one more reply sample reaches the output;
+    /* 1. A hold during a reply (outside a call). Touch-down: not one more reply sample reaches the output;
      * the reply goes on arriving and is kept, credits flow, nothing counted as an underrun. At the hold
      * threshold (250 ms) the turn is claimed as before: stop_streaming drop. */
     write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");   /* PCM at 8 kHz: 80 samples a 10 ms */
-    CHECK(mg_play_active(&pl));
+    CHECK(mg_play_active(&pl) && !pl.keep_open);
     bp_nout = 0;
     bp_write(&p, &next, 320);   /* 40 ms */
     for (int i = 0; i < 2; i++) {
@@ -4090,10 +4840,34 @@ static void test_barge_pause(void)
            bp_out[at_down], paused_at, bp_nout);
     write_hex(&p, MG_CH_CONTROL, "1d 03 01");
 
-    /* 3. The client's own flush during the pause: the ring goes at once (buffer_update queued
-     * 0), and after the tap the next reply plays, nothing of the flushed one. */
+    /* 3. In a Live call: the call's one stream is held the same way; at the threshold the turn flushes it
+     * (buffer_update queued 0, the stream stays open, no stop), and nothing of it played from touch-down. */
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    write_hex(&p, MG_CH_CONTROL, "85 02");
     write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");
-    CHECK(mg_play_active(&pl));
+    CHECK(mg_play_active(&pl) && pl.keep_open);
+    next = 0;
+    bp_nout = 0;
+    bp_write(&p, &next, 320);
+    bp_round(&p, &pl);
+    at_down = bp_nout;
+    mg_proto_barge_pause(&p, true);
+    for (int i = 0; i < 25; i++) {
+        bp_write(&p, &next, 80);
+        bp_round(&p, &pl);
+    }
+    CHECK(bp_nout == at_down);
+    uint32_t flushes = pl.st.flushes;
+    clear_notes();
+    mg_proto_claim_turn(&p, true);
+    CHECK(mg_play_active(&pl) && pl.keep_open && pl.len == 0 && pl.st.flushes == flushes + 1);
+    CHECK(nnotes == 1 && notes[0].d[0] == 0x1d && notes[0].d[1] == 0x05 && notes[0].d[10] == 0 && notes[0].d[11] == 0);
+    for (int i = 0; i < 10; i++) bp_round(&p, &pl);
+    CHECK(bp_nout == at_down);
+    mg_proto_claim_turn(&p, false);
+
+    /* 4. The client's own flush during the pause (in the call): the ring goes at once (buffer_update queued
+     * 0), and after the tap the next reply plays, nothing of the flushed one. */
     next = 1000;
     bp_write(&p, &next, 320);
     bp_round(&p, &pl);
@@ -4112,7 +4886,7 @@ static void test_barge_pause(void)
     while (pl.len) bp_round(&p, &pl);
     CHECK(bp_nout == before_tap + 160 && bp_in_order(before_tap, 5000));
 
-    /* 4. The client's stop during the pause: the stream ends as usual (answered once, as every audio stop
+    /* 5. The client's stop during the pause: the stream ends as usual (answered once, as every audio stop
      * is); the tap then resumes nothing. */
     bp_write(&p, &next, 160);
     mg_proto_barge_pause(&p, true);
@@ -4121,8 +4895,9 @@ static void test_barge_pause(void)
     CHECK(!mg_play_active(&pl) && nnotes == 1 && notes[0].d[0] == 0x1d && notes[0].d[1] == 0x03);
     mg_proto_barge_pause(&p, false);
     CHECK(!mg_proto_play_held(&p));
+    write_hex(&p, MG_CH_CONTROL, "85 03");
 
-    /* 5. A pause nobody ends lapses after MG_PROTO_BARGE_PAUSE_MAX_MS: the reply is never left stuck. */
+    /* 6. A pause nobody ends lapses after MG_PROTO_BARGE_PAUSE_MAX_MS: the reply is never left stuck. */
     write_hex(&p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");
     next = 0;
     bp_nout = 0;
@@ -4527,13 +5302,14 @@ static void full_proto(mg_proto_t *p)
     static mg_queue_t q;
     memset(flash, 0x00, sizeof(flash));
     CHECK(mg_queue_mount(&q, &store) && mg_queue_clear(&q));
+    static const mg_subs_caps_t subs = { .flags = 0x0c, .lines = 2, .chars_per_line = 26, .max_words_bytes = 480 };
     static const uint8_t erm[4] = { mg_haptic_actuator_erm, mg_haptic_actuator_flag_timing, 30, 0 };
     static uint8_t sbuf[MG_SESSION_BUF_SIZE(4096)];
     static mg_session_config_t scfg;
     scfg = (mg_session_config_t){ .buf = sbuf, .max_message = 4096, .window = 4096, .out_max = 1u << 16 };
     mg_proto_config_t cfg = {
-        .queue = &q, .play = &pl, .haptics = true, .haptic_actuator = erm, .assistant = true,
-        .video = &caps, .vstream = &vs, .ui_input = 0xFE, .capture_24k = true, .session = &scfg,
+        .queue = &q, .subtitles = &subs, .play = &pl, .haptics = true, .haptic_actuator = erm, .assistant = true,
+        .video = &caps, .vstream = &vs, .live_call = true, .ui_input = 0xFE, .capture_24k = true, .session = &scfg,
     };
     mg_proto_ops_t ops = base_ops();
     ops.random = f_random;
@@ -4546,6 +5322,7 @@ static void full_proto(mg_proto_t *p)
     ops.video_begin = f_video_begin;
     ops.video_end = f_video_end;
     ops.hid_map = f_hid_map;
+    ops.subtitle = f_subtitle;
     ops.clock_set = f_clock_set;
     ops.clock_get = f_clock_get;
     ops.battery_status = f_battery;
@@ -4919,18 +5696,20 @@ static void test_minrise(void)
  * rule): the reply is paused at the touch-down; the
  * turn's claim at the threshold waits for its release, so the reply stays
  * held (not dropped or flushed) while the turn is held. A turn that rises
- * claims then: button_down, then the claim (stop_streaming drop), then
- * change_data_type and its audio, the order of a turn that isn't held. A turn that never rises is
+ * claims then: button_down, then the claim (stop_streaming drop; in a Live
+ * call the stream's flush and buffer_update), then change_data_type and its
+ * audio, the order of a turn that isn't held. A turn that never rises is
  * treated like a tap: nothing of it goes, and once it's over the reply
  * plays on from the very sample it paused at.
  */
-static void mr_play_setup(mg_proto_t *p, mg_play_t *pl)
+static void mr_play_setup(mg_proto_t *p, mg_play_t *pl, bool call)
 {
     mg_play_init(pl, 16384);
     pl->out_us = 30000;
-    mg_proto_config_t cfg = { .play = pl };
+    mg_proto_config_t cfg = { .play = pl, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
     ops.notify = cs_notify;
     ops.capq_alloc = cs_alloc;
     ops.capq_free = cs_free;
@@ -4944,8 +5723,12 @@ static void mr_play_setup(mg_proto_t *p, mg_play_t *pl)
     mg_proto_subscribe(p, MG_CH_CONTROL, true);
     mg_proto_subscribe(p, MG_CH_DATA, true);
     write_hex(p, MG_CH_CONTROL, "05 0c 01");   /* push-to-talk on */
+    if (call) {
+        write_hex(p, MG_CH_CONTROL, "85 01");
+        write_hex(p, MG_CH_CONTROL, "85 02");
+    }
     write_hex(p, MG_CH_CONTROL, "1d 02 03 01 06 02 401f0000 04 01");   /* PCM at 8 kHz: 80 samples a 10 ms */
-    CHECK(mg_play_active(pl));
+    CHECK(mg_play_active(pl) && pl->keep_open == call);
     cs_nctl = 0;
     cs_inflight = 0;
 }
@@ -4966,100 +5749,107 @@ static void test_minrise_reply(void)
 {
     static mg_play_t pl;
     static mg_proto_t p;
-    for (int rises = 0; rises < 2; rises++) {
-        mr_play_setup(&p, &pl);
-        mg_capture_meter_set_ring(&mr_meter, mr_ring);
-        mg_capture_meter_reset(&mr_meter);
-        mr_out_t o;
-        memset(&o, 0, sizeof(o));
-        mr_seed = 7;
-        now = 20000;
-        uint16_t next = 0;
-        bp_nout = 0;
-        bp_write(&p, &next, 320);
-        for (int i = 0; i < 2; i++) {
-            bp_round(&p, &pl);
-            bp_write(&p, &next, 80);
-        }
-        size_t at_down = bp_nout;
-        uint16_t paused_at = bp_out[at_down - 1];
-        uint32_t flushes = pl.st.flushes;
-        mg_proto_barge_pause(&p, true);   /* touch-down (the input task) */
-        bool held = false;
-        for (int i = 0; i < 25; i++) {     /* to the hold threshold */
-            bp_write(&p, &next, 80);
-            bp_round(&p, &pl);
-        }
-        /* The threshold (the voice task): the hold, button_down, the claim, change_data_type. */
-        cs_nctl = 0;   /* the reply's credits so far */
-        held = mg_proto_turn_hold(&p, 15);
-        CHECK(held);
-        CHECK(mg_proto_gesture(&p, mg_gesture_button_down));
-        mg_proto_claim_turn(&p, true);
-        CHECK(mg_proto_live_begin(&p, mg_data_type_audio_sbc));
-        CHECK(p.claim_deferred && mg_play_active(&pl) && mg_proto_play_held(&p));
-        CHECK(pl.st.flushes == flushes && cs_nctl == 0);   /* nothing dropped, flushed or notified yet */
-        uint32_t loud_from = rises ? 30 * 128 : UINT32_MAX;   /* 240 ms into the capture */
-        for (int i = 0; i < 40; i++) {    /* 400 ms of the turn */
-            mr_play_round(&p, &pl, &next, &held, &o, loud_from, true);
-        }
-        if (rises) {
-            CHECK(o.rose && !p.claim_deferred);
-            /* button_down, then the claim, then change_data_type: a turn that isn't held's order (the
-             * held reply's credits, buffer_updates with queued ms, aside). */
-            int seq[8], ns = 0;
-            for (int i = 0; i < cs_nctl && ns < 8; i++) {
-                const uint8_t *m = cs_ctl[i].m;
-                bool credit = m[0] == 0x1d && m[1] == 0x05 && cs_ctl[i].len >= 12 && (m[10] || m[11]);
-                if (!credit) {
-                    seq[ns++] = i;
-                }
+    for (int call = 0; call < 2; call++) {
+        for (int rises = 0; rises < 2; rises++) {
+            mr_play_setup(&p, &pl, call);
+            mg_capture_meter_set_ring(&mr_meter, mr_ring);
+            mg_capture_meter_reset(&mr_meter);
+            mr_out_t o;
+            memset(&o, 0, sizeof(o));
+            mr_seed = 7;
+            now = 20000;
+            uint16_t next = 0;
+            bp_nout = 0;
+            bp_write(&p, &next, 320);
+            for (int i = 0; i < 2; i++) {
+                bp_round(&p, &pl);
+                bp_write(&p, &next, 80);
             }
-            CHECK(ns >= 3 && cs_ctl[seq[0]].m[0] == mg_command_gesture && cs_ctl[seq[0]].m[1] == mg_gesture_button_down);
-            if (ns >= 3) {
-                const uint8_t *m = cs_ctl[seq[1]].m;
-                CHECK(cs_ctl[seq[1]].len == 3 && m[0] == 0x1d && m[1] == 0x03 && m[2] == 0x01);   /* stop_streaming drop */
-                CHECK(!mg_play_active(&pl));
-            }
-            CHECK(ns >= 3 && cs_ctl[seq[2]].m[0] == mg_command_change_data_type);
-            CHECK(cs_data_t0 >= o.rose_at);   /* no capture Data before the rise */
-            CHECK(bp_nout == at_down);   /* not one reply sample from touch-down on */
-            CHECK(mg_proto_gesture(&p, mg_gesture_button_up));
-            mg_proto_live_end(&p, true);
-            mg_proto_claim_turn(&p, false);
-            CHECK(!mg_proto_capture_pump(&p) && cs_frames_are(0, o.frames));
-            printf("minrise and a reply: rose at %u frames; button_down, stop_streaming drop, change_data_type, %u frames "
-                   "in order; 0 reply samples played from touch-down\n", (unsigned)o.rose_frame, (unsigned)o.frames);
-        } else {
-            CHECK(!o.rose && cs_rx_len == 0);
-            for (int i = 0; i < cs_nctl; i++) {   /* the held reply's credits only */
-                CHECK(cs_ctl[i].m[0] == 0x1d && cs_ctl[i].m[1] == 0x05);
-            }
-            CHECK(bp_nout == at_down);   /* held all through the turn */
-            CHECK(mg_proto_turn_drop(&p, true));   /* the turn's end: never rose */
-            mg_proto_claim_turn(&p, false);        /* the voice loop's top: the turn is over */
-            CHECK(!mg_proto_play_held(&p) && !p.claim_deferred);
-            while (pl.len) {
+            size_t at_down = bp_nout;
+            uint16_t paused_at = bp_out[at_down - 1];
+            uint32_t flushes = pl.st.flushes;
+            mg_proto_barge_pause(&p, true);   /* touch-down (the input task) */
+            bool held = false;
+            for (int i = 0; i < 25; i++) {     /* to the hold threshold */
+                bp_write(&p, &next, 80);
                 bp_round(&p, &pl);
             }
-            CHECK(bp_nout > at_down && bp_out[at_down] == (uint16_t)(paused_at + 1));
-            CHECK(bp_in_order(0, 0) && bp_nout == next);   /* every sample, once, in order */
-            CHECK(pl.st.underruns == 0 && pl.st.bytes_dropped == 0 && mg_play_active(&pl) && pl.st.flushes == flushes);
-            CHECK(cs_rx_len == 0 && p.ptt_nothing == 1);
-            for (int i = 0; i < cs_nctl; i++) {   /* credits only: no gesture, change_data_type, stop, flush */
-                CHECK(cs_ctl[i].m[0] == 0x1d && cs_ctl[i].m[1] == 0x05);
+            /* The threshold (the voice task): the hold, button_down, the claim, change_data_type. */
+            cs_nctl = 0;   /* the reply's credits so far */
+            held = mg_proto_turn_hold(&p, 15);
+            CHECK(held);
+            CHECK(mg_proto_gesture(&p, mg_gesture_button_down));
+            mg_proto_claim_turn(&p, true);
+            CHECK(mg_proto_live_begin(&p, mg_data_type_audio_sbc));
+            CHECK(p.claim_deferred && mg_play_active(&pl) && mg_proto_play_held(&p));
+            CHECK(pl.st.flushes == flushes && cs_nctl == 0);   /* nothing dropped, flushed or notified yet */
+            uint32_t loud_from = rises ? 30 * 128 : UINT32_MAX;   /* 240 ms into the capture */
+            for (int i = 0; i < 40; i++) {    /* 400 ms of the turn */
+                mr_play_round(&p, &pl, &next, &held, &o, loud_from, true);
             }
-            printf("minrise and a reply, never rose: the reply held through the turn, then resumed at sample "
-                   "%u right after %u; %zu samples in order, 0 underruns, 0 turn messages\n",
-                   bp_out[at_down], paused_at, bp_nout);
+            if (rises) {
+                CHECK(o.rose && !p.claim_deferred);
+                /* button_down, then the claim, then change_data_type: a turn that isn't held's order (the
+                 * held reply's credits, buffer_updates with queued ms, aside). */
+                int seq[8], ns = 0;
+                for (int i = 0; i < cs_nctl && ns < 8; i++) {
+                    const uint8_t *m = cs_ctl[i].m;
+                    bool credit = m[0] == 0x1d && m[1] == 0x05 && cs_ctl[i].len >= 12 && (m[10] || m[11]);
+                    if (!credit) {
+                        seq[ns++] = i;
+                    }
+                }
+                CHECK(ns >= 3 && cs_ctl[seq[0]].m[0] == mg_command_gesture && cs_ctl[seq[0]].m[1] == mg_gesture_button_down);
+                if (ns >= 3 && call) {
+                    const uint8_t *m = cs_ctl[seq[1]].m;
+                    CHECK(m[0] == 0x1d && m[1] == 0x05 && m[10] == 0 && m[11] == 0);   /* the flush: queued 0 */
+                    CHECK(mg_play_active(&pl) && pl.keep_open && pl.st.flushes == flushes + 1);
+                } else if (ns >= 3) {
+                    const uint8_t *m = cs_ctl[seq[1]].m;
+                    CHECK(cs_ctl[seq[1]].len == 3 && m[0] == 0x1d && m[1] == 0x03 && m[2] == 0x01);   /* stop_streaming drop */
+                    CHECK(!mg_play_active(&pl));
+                }
+                CHECK(ns >= 3 && cs_ctl[seq[2]].m[0] == mg_command_change_data_type);
+                CHECK(cs_data_t0 >= o.rose_at);   /* no capture Data before the rise */
+                CHECK(bp_nout == at_down);   /* not one reply sample from touch-down on */
+                CHECK(mg_proto_gesture(&p, mg_gesture_button_up));
+                mg_proto_live_end(&p, true);
+                mg_proto_claim_turn(&p, false);
+                CHECK(!mg_proto_capture_pump(&p) && cs_frames_are(0, o.frames));
+                printf("minrise and a reply%s: rose at %u frames; button_down, %s, change_data_type, %u frames in "
+                       "order; 0 reply samples played from touch-down\n", call ? " (Live call)" : "",
+                       (unsigned)o.rose_frame, call ? "the call's flush" : "stop_streaming drop", (unsigned)o.frames);
+            } else {
+                CHECK(!o.rose && cs_rx_len == 0);
+                for (int i = 0; i < cs_nctl; i++) {   /* the held reply's credits only */
+                    CHECK(cs_ctl[i].m[0] == 0x1d && cs_ctl[i].m[1] == 0x05);
+                }
+                CHECK(bp_nout == at_down);   /* held all through the turn */
+                CHECK(mg_proto_turn_drop(&p, true));   /* the turn's end: never rose */
+                mg_proto_claim_turn(&p, false);        /* the voice loop's top: the turn is over */
+                CHECK(!mg_proto_play_held(&p) && !p.claim_deferred);
+                while (pl.len) {
+                    bp_round(&p, &pl);
+                }
+                CHECK(bp_nout > at_down && bp_out[at_down] == (uint16_t)(paused_at + 1));
+                CHECK(bp_in_order(0, 0) && bp_nout == next);   /* every sample, once, in order */
+                CHECK(pl.st.underruns == 0 && pl.st.bytes_dropped == 0 && mg_play_active(&pl) && pl.st.flushes == flushes);
+                CHECK(cs_rx_len == 0 && p.ptt_nothing == 1);
+                for (int i = 0; i < cs_nctl; i++) {   /* credits only: no gesture, change_data_type, stop, flush */
+                    CHECK(cs_ctl[i].m[0] == 0x1d && cs_ctl[i].m[1] == 0x05);
+                }
+                printf("minrise and a reply%s, never rose: the reply held through the turn, then resumed at sample "
+                       "%u right after %u; %zu samples in order, 0 underruns, 0 turn messages\n",
+                       call ? " (Live call)" : "", bp_out[at_down], paused_at, bp_nout);
+            }
+            mg_proto_disconnect(&p);
         }
-        mg_proto_disconnect(&p);
     }
 
     /* A press in a dropped turn's post-roll, the guard off by then (the speaker still claimed, so the
      * voice task claims nothing again): the claim the dropped turn deferred happens at this turn's
      * button_down, as for any turn that isn't held. */
-    mr_play_setup(&p, &pl);
+    mr_play_setup(&p, &pl, false);
     uint16_t next = 0;
     bp_write(&p, &next, 320);
     bp_round(&p, &pl);
@@ -5150,7 +5940,7 @@ static void test_reply_sizes(void)
         long_ok &= notes[i].ch == MG_CH_CONTROL && notes[i].len <= MG_CTL_REPLY_MAX && notes[i].len <= MG_MIN_ATT_MTU - 3;
         total += 2 + notes[i].len;
     }
-    CHECK(long_ok && lines >= 8 && total <= MG_CTLQ_RING);
+    CHECK(long_ok && lines >= 9 && total <= MG_CTLQ_RING);
     const note_t *feat = NULL, *list[256] = { 0 };
     for (int i = 0; i < nnotes; i++) {
         if (notes[i].d[0] == mg_command_supported_features && notes[i].len > 1 && notes[i].d[1] != mg_command_sub_feature) {
@@ -5165,7 +5955,7 @@ static void test_reply_sizes(void)
     CHECK(list[mg_command_set_settings] && list[mg_command_set_settings]->len <= MG_REPLY_SETTINGS_MAX);
     CHECK(list[mg_command_device_action] && list[mg_command_device_action]->len == MG_REPLY_ACTIONS_MAX);
     CHECK(list[mg_command_ui_input] && list[mg_command_ui_input]->len == MG_REPLY_UI_INPUT_MAX);
-    CHECK(list[mg_command_session]);
+    CHECK(list[mg_command_session] && list[mg_command_live_call]);
     /* No setting past MG_SETTING_PARAM_LAST (the settings list's room depends on it). */
     bool none_past = true;
     for (unsigned s = MG_SETTING_PARAM_LAST + 1; s <= 0xFF; s++) {
@@ -6285,9 +7075,10 @@ static void flush_burst_one(const char *start, const uint8_t *old, size_t nold, 
 {
     static mg_play_t pl;
     mg_play_init(&pl, 16384);
-    mg_proto_config_t cfg = { .play = &pl };
+    mg_proto_config_t cfg = { .play = &pl, .live_call = true };
     mg_proto_ops_t ops = base_ops();
     ops.play_kick = f_kick;
+    ops.live_call = f_live_call;
     static mg_proto_t p;
     mg_proto_init(&p, &cfg, &ops, NULL);
     mg_proto_connect(&p);
@@ -6295,6 +7086,8 @@ static void flush_burst_one(const char *start, const uint8_t *old, size_t nold, 
     mg_proto_subscribe(&p, MG_CH_CONTROL, true);
     mg_proto_subscribe(&p, MG_CH_DATA, true);
     now = 20000;
+    write_hex(&p, MG_CH_CONTROL, "85 01");
+    write_hex(&p, MG_CH_CONTROL, "85 02");
     write_hex(&p, MG_CH_CONTROL, start);
     CHECK(mg_play_active(&pl));
     clear_notes();
@@ -7221,6 +8014,7 @@ int main(void)
     test_proof_clears_ptt();
     test_proof_answer_first();
     test_reply_outbox();
+    test_call_failure_reason();
     test_link();
     test_throughput();
     test_throughput_open();
@@ -7235,6 +8029,8 @@ int main(void)
     test_haptics();
     test_haptic_needs_proof();
     test_skills_unsupported();
+    test_live_call_mic();
+    test_live_call_held_reply();
     test_rates();
     test_setting_report();
     test_spk_owed();
@@ -7248,8 +8044,12 @@ int main(void)
     test_device_end_hold();
     test_video_playout();
     test_video_bands();
+    test_live_call();
     test_reply_stream();
+    test_own_sound_in_call();
     test_barge_pause();
+    test_subtitles();
+    test_live_call_unproven();
     test_ui();
     test_mic_gain();
     test_ptt_ordering();

@@ -18,7 +18,7 @@
 /*
  * Which speaker_volume changes the client hears (mgcommands.h, Settings
  * reports): every change made on the device (a key,
- * a slider, a mute) is reported unsolicited, and a
+ * a slider, a mute, the call's controls) is reported unsolicited, and a
  * change the client made itself with set_settings is not reported back.
  *
  * A client's set can take two settings writes (the level, then the speaker

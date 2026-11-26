@@ -105,7 +105,7 @@ void muse_input_set_safe_console_hook(bool (*hook)(const char *line));
  * input task, never on the caller's. False: too long, or the queue is full. */
 bool muse_input_console_post(const char *line);
 /* From any task: the screen on now (and its idle timer reset), as a press
- * would, for something the user must see (a reply's text). */
+ * would, for something the user must see (a Live call's subtitles). */
 void muse_input_wake(const char *why);
 /* An update over Bluetooth asks for its confirm press: wake the screen (to the keypad with "Unlock to update"
  * when locked). Any task. */

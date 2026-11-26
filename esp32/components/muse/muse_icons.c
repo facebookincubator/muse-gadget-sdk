@@ -35,34 +35,41 @@ typedef struct {
 
 /*
  * The sizes a board draws (the ESP-Mosaico's app slot is tight, so each of
- * the four catalog boards compiles only its own): Speaker glyphs at
- * 52 % of the button (the largest mask that fits), the
+ * the four catalog boards compiles only its own): Speaker / Call glyphs at
+ * 52 % of the button (the largest mask that fits), the call controls' 28, the
  * StopWatch's rim hints 32, the charging bolt and the top row's ink at the
  * battery's height (MUSE_ICON_PX, MUSE_ICON_INK), and the Settings rows' icon
  * box (MUSE_ICON_MENU): 24 s on other boards, grown to the menu's
  * millimeter minimums on the four.
  * MUSE_TYPE_ALL (the simulator, every board): all of them. Any other board:
  * every button and hint size and the 20/21/24 menu masks.
- * Every icon a board draws must be in its set.
+ * Every icon a board draws must be in its set. The Live call's own icons
+ * (call, call_end, add, remove, and with them the call controls' 28) only in
+ * a build with Live call (MUSE_ICON_CALLS): one without carries none.
  */
+#if MUSE_TYPE_ALL || CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#define MUSE_ICON_CALLS 1
+#else
+#define MUSE_ICON_CALLS 0
+#endif
 #if MUSE_TYPE_ALL
 #define MUSE_ICON_PX(px) 1
 #define MUSE_ICON_MENU(px) 1
 #define MUSE_ICON_INK(h) 1
 #elif CONFIG_MUSE_BOARD_M5STACK_STOPWATCH   /* 466: buttons 92 -> 42, rim 32, bolt 23, ink 18; menu 29; passcode 29/51/27, phone 22 */
-#define MUSE_ICON_PX(px) ((px) == 42 || (px) == 32 || (px) == 23 || (px) == 29 || (px) == 51 || (px) == 27 || (px) == 22)
+#define MUSE_ICON_PX(px) ((px) == 42 || ((px) == 28 && MUSE_ICON_CALLS) || (px) == 32 || (px) == 23 || (px) == 29 || (px) == 51 || (px) == 27 || (px) == 22)
 #define MUSE_ICON_MENU(px) ((px) == 29)
 #define MUSE_ICON_INK(h) ((h) == 18)
 #elif CONFIG_MUSE_BOARD_ESP_MOSAICO         /* 480: buttons 95 -> 48, bolt 24, ink 18; menu 35; passcode 30/53/33, phone 38 */
-#define MUSE_ICON_PX(px) ((px) == 48 || (px) == 24 || (px) == 30 || (px) == 53 || (px) == 33 || (px) == 38)
+#define MUSE_ICON_PX(px) ((px) == 48 || ((px) == 28 && MUSE_ICON_CALLS) || (px) == 24 || (px) == 30 || (px) == 53 || (px) == 33 || (px) == 38)
 #define MUSE_ICON_MENU(px) ((px) == 35)
 #define MUSE_ICON_INK(h) ((h) == 18)
 #elif CONFIG_MUSE_BOARD_SENSECAP_WATCHER    /* 412: buttons 82 -> 42, bolt 21, ink 16; menu 28; passcode 26/45/26, phone 23 */
-#define MUSE_ICON_PX(px) ((px) == 42 || (px) == 21 || (px) == 26 || (px) == 45 || (px) == 23)
+#define MUSE_ICON_PX(px) ((px) == 42 || ((px) == 28 && MUSE_ICON_CALLS) || (px) == 21 || (px) == 26 || (px) == 45 || (px) == 23)
 #define MUSE_ICON_MENU(px) ((px) == 28)
 #define MUSE_ICON_INK(h) ((h) == 16)
 #elif CONFIG_MUSE_BOARD_WAVESHARE_C6_18     /* 368: buttons 73 -> 36, bolt 18, ink 14; menu 32; passcode 23/40/32, phone 29 */
-#define MUSE_ICON_PX(px) ((px) == 36 || (px) == 18 || (px) == 23 || (px) == 40 || (px) == 32 || (px) == 29)
+#define MUSE_ICON_PX(px) ((px) == 36 || ((px) == 28 && MUSE_ICON_CALLS) || (px) == 18 || (px) == 23 || (px) == 40 || (px) == 32 || (px) == 29)
 #define MUSE_ICON_MENU(px) ((px) == 32)
 #define MUSE_ICON_INK(h) ((h) == 14)
 #else

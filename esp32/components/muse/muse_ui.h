@@ -51,8 +51,8 @@ bool muse_ui_has_hold_region(void);
  * swipe: it moved past the slop from where it went down, or a page or list
  * started scrolling with it (muse_swipe.h). The control under its start
  * gets no tap or hold: LVGL's clicks and long presses are stopped here, and
- * the controls that time their own holds (the home's hold region) ask
- * this. LVGL task. */
+ * the controls that time their own holds (the home's Call button and hold
+ * region) ask this. LVGL task. */
 bool muse_ui_touch_swiped(void);
 
 /* Bench and renderer: shows "face", "status", "settings" or
@@ -104,6 +104,14 @@ void muse_ui_image_hide_after(int ms);
  * and every control work as on the plain face.
  */
 void muse_ui_face_bg_set(uint16_t *px);
+/* The avatar's plain picture (the JPEG decoded at the panel's size: no Size,
+ * no scrim), handed over like muse_ui_face_bg_set's (takes px, NULL for none;
+ * any task). The calling screen shows it at 40 % behind
+ * "Calling…" while the avatar face is picked and stored. */
+void muse_ui_face_plain_set(uint16_t *px);
+/* That picture for LVGL (an lv_image_dsc_t *), NULL with none; *ver changes
+ * whenever it does: set the image's source again then (LVGL task only). */
+const void *muse_ui_face_image(uint32_t *ver);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
 void muse_ui_camera_hint(bool visible);
 

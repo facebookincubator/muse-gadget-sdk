@@ -79,7 +79,7 @@ bool mg_unlock_auto_take(mg_unlock_t *u, int64_t now_us);
 bool mg_unlock_pause_parse(const char *text, uint32_t *secs, uint8_t addr[6], bool *has_addr);
 /*
  * A Nordic UART console line that changes state: every "!" or "?"
- * word, every !IN word but the read-only voice?, wake?, vib?,
+ * word, every !IN word but the read-only voice?, wake?, call?, vib?,
  * mic.gain?, ..., and the plain words that act (vib=, safe.off, the bench
  * tunings with "="). False for the reads (status, version, guard?, ota?,
  * vib?, ...).

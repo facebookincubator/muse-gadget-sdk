@@ -588,7 +588,8 @@ menu "Muse"
             Places the zero-initialized statics of the avatar renderer
             (muse_pixel.c: its frame, mask and lookup tables) and the audio
             path (muse_audio.c: the I2S staging and chirp buffers), about
-            17 KB, in PSRAM instead of internal RAM (linker.lf). The musegadgets
+            17 KB, in PSRAM instead of internal RAM (linker.lf). The
+            captions' state (muse_subs.c, 4.7 KB) and the musegadgets
             playback and encoder buffers (mg_ble.c, mg_voice.c, about 8 KB)
             go too, on Wi-Fi and BLE-only builds alike. Only the CPU touches them: the avatar is
             scaled into LVGL's draw buffer, and the I2S driver copies to and
@@ -639,6 +640,18 @@ menu "Muse"
         depends on MUSE_PERF
         range 1000 60000
         default 5000
+
+    config MUSE_BENCH_IMAGE
+        bool "A bench/debug image (on-screen diagnostics)"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Bench and debug images only (devices/sdkconfig.muse-bench,
+            MUSE_BENCH=1): on-screen diagnostics a shipping image keeps off,
+            such as the calling screen's step line (what the call start
+            is doing and the seconds since the tap). A shipping image shows
+            that line only while the console word call.steps=1 is set (RAM
+            only, off at every boot).
 
     config MUSE_PAIR_CONFIRM_CONSOLE
         bool "Test rigs: confirm Muse app setup from the serial console (bench)"

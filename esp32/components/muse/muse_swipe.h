@@ -16,16 +16,16 @@
 #pragma once
 
 /*
- * A swipe that starts on a control is a swipe (a slow drag that begins on a
- * home button must not press it): once a touch has moved past the slop from where it went down, it
- * belongs to the swipe, and the control under its start gets neither its tap
- * nor its hold, however long the finger stays down. Once a talk turn has
+ * A swipe that starts on a control is a swipe: once a touch has moved past
+ * the slop from where it went down, it belongs to the swipe, and the control
+ * under its start gets neither its tap nor its hold, however long the finger
+ * stays down. Once a talk turn has
  * begun (held 250 ms within the slop), movement doesn't end it and
  * swipes are off until release.
  *
  * Plain C, for the host tests: muse_ui.c feeds it the pointer's samples (its
  * touch-down and lift, a timer at LVGL's read period while it's down, and
- * every ask); a video's own touch path (LVGL paused)
+ * every ask); the call video's own touch path (muse_call.c, LVGL paused)
  * uses muse_swipe_past_slop.
  */
 

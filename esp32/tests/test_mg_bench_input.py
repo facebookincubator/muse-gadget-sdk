@@ -74,8 +74,8 @@ static int forwarded;
 static bool muse_input_console_post(const char *line) { (void)line; forwarded++; return true; }
 @ALLOW@
 int main(void) {
-    static const char *ok[] = { "tap=home.speaker", "tap=home.speaker.hold", "press=1,2", "key=speaker", "key=talk,400", "key=talk,400,30", "key=talk?", "page=settings/sound",
-                                "wake", "wake?", "ptt=1", "ptt=0", "mic.gain?", "mic.gain=30",
+    static const char *ok[] = { "tap=call.minus", "tap=home.speaker.hold", "press=1,2", "key=speaker", "key=talk,400", "key=talk,400,30", "key=talk?", "page=settings/sound",
+                                "call", "call=0", "call?", "wake", "wake?", "ptt=1", "ptt=0", "mic.gain?", "mic.gain=30",
                                 "spk.dsp", "spk.dsp?", "spk.dsp=off", "spk.dsp=700,-30,4,20", "ptt.minrise?",
                                 "ptt.minrise=15", "ptt.minrise=0", "vol?", "vol=0", "vol=100", "vol=saved" };
     static const char *no[] = { "setup.reset", "power.off=5", "restart", "restart=panic", "sdk_token=x", "crash",
@@ -92,7 +92,89 @@ int main(void) {
             h = Path(tmp) / "a.c"
             h.write_text(harness)
             out = compile_and_run(self, [h], [], []).strip()
-        self.assertEqual(out, "0 25", out)
+        self.assertEqual(out, "0 28", out)
+
+
+class SubtitleWordsTest(unittest.TestCase):
+    """The subtitle words (sub=, sub.now=, sub.clear) only copy and queue on
+    the console task: the work goes to the musegadgets worker, where a
+    phone's subtitles run. sub.now's words, layout and band (~3 KB of
+    stack) overflowed the console task's 3.5 KB on the Watcher."""
+
+    def test_console_queues_and_the_worker_renders(self) -> None:
+        inp = (MUSE / "muse_input.c").read_text()
+        start = inp.index("#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL\n/* The subtitle words' work")
+        bench = inp[start:inp.index("\n#endif\n", start)].split("\n", 1)[1]
+        start = inp.index('    if (!strncmp(line, "sub=", 4) || !strncmp(line, "sub.now=", 8)) {')
+        words = inp[start:inp.index("\n#endif", start)]
+        # The console's part calls no subtitle code itself.
+        for call in ("muse_subs_bench(", "muse_subs_call_end(", "muse_subs_event("):
+            self.assertNotIn(call, words)
+        mg = (ROOT / "components/muse_gadget_ble/mg_ble.c").read_text()
+        self.assertIn("            case EV_RUN:\n                ev.run(ev.data);\n                break;", mg)
+        harness = r"""
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define MUSE_BIG_CAPS 0
+static void *heap_caps_malloc(size_t n, int caps) { (void)caps; return malloc(n); }
+static int bench_calls, clear_calls, got_ms;
+static char got[256];
+static void muse_subs_bench(const char *text, int ms) { bench_calls++; snprintf(got, sizeof(got), "%s", text); got_ms = ms; }
+static void muse_subs_call_end(void) { clear_calls++; }
+static void (*queued_fn)(void *);
+static void *queued_arg;
+static bool queue_full;
+static bool mg_ble_run_on_worker(void (*fn)(void *arg), void *arg) {
+    if (queue_full || queued_fn) return false;
+    queued_fn = fn;
+    queued_arg = arg;
+    return true;
+}
+static void worker_runs(void) { void (*fn)(void *) = queued_fn; queued_fn = NULL; fn(queued_arg); }
+""" + bench + r"""
+static bool console(char *line) {
+""" + words + r"""
+    return false;
+}
+int main(void) {
+    char line[128];
+    strcpy(line, "sub.now=Hello 你好 world");
+    console(line);
+    printf("inline %d %d queued %d\n", bench_calls, clear_calls, queued_fn != NULL);
+    memset(line, 'x', sizeof(line) - 1);   /* the console's buffer is gone by the time the worker runs */
+    worker_runs();
+    printf("worker %d [%s] %d\n", bench_calls, got, got_ms);
+    strcpy(line, "sub=one two");
+    console(line);
+    worker_runs();
+    printf("reveal [%s] %d\n", got, got_ms);
+    strcpy(line, "sub.clear");
+    console(line);
+    printf("clear inline %d\n", clear_calls);
+    worker_runs();
+    printf("clear worker %d\n", clear_calls);
+    queue_full = true;
+    strcpy(line, "sub.now=dropped");
+    console(line);
+    printf("full %d\n", bench_calls);
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="mg-subwords-") as tmp:
+            h = Path(tmp) / "t.c"
+            h.write_text(harness)
+            out = compile_and_run(self, [h], [], [], extra=["-fsanitize=address,undefined", "-g"])
+        self.assertIn("inline 0 0 queued 1", out)
+        self.assertIn("@sub ok", out)
+        self.assertIn("worker 1 [Hello 你好 world] 0", out)
+        self.assertIn("reveal [one two] 300", out)
+        self.assertIn("clear inline 0", out)
+        self.assertIn("@sub cleared", out)
+        self.assertIn("clear worker 1", out)
+        self.assertIn("@sub busy", out)
+        self.assertIn("full 2", out)
 
 
 class LvglPostTest(unittest.TestCase):

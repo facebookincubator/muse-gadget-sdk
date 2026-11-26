@@ -260,8 +260,9 @@ class MgBleTest(unittest.TestCase):
                              "minrise 15, never rose (rise ", "0 control messages, 0 Data bytes, ptt_nothing 1",
                              "minrise 15, rose at ", "minrise long hold, ready link: ",
                              "minrise long hold, sleep link: ", "minrise long hold, ready link, 32 KB (C6): ",
-                             "minrise grow: ", "minrise and a reply: rose",
-                             "minrise and a reply, never rose: the reply held through the turn, then resumed"):
+                             "minrise grow: ", "minrise and a reply: rose", "minrise and a reply (Live call): rose",
+                             "minrise and a reply, never rose: the reply held through the turn, then resumed",
+                             "minrise and a reply (Live call), never rose: the reply held"):
                     self.assertIn(line, out)
                 for line in out.splitlines():
                     if line.startswith("minrise long hold"):
@@ -390,6 +391,19 @@ class MgBleTest(unittest.TestCase):
                 extra=["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g"], vendor=srcs)
             self.assertIn("PASS no over-read", out)
 
+    def test_live_call_is_on_only_where_a_call_works(self) -> None:
+        # On by default for the full-UI BLE boards with PSRAM; compiled out elsewhere, with no Call disc on the
+        # home (nor the menu row, which the option compiles).
+        kc = (MG / "Kconfig").read_text()
+        opt = kc[kc.index("    config MUSE_GADGET_BLE_LIVE_CALL\n"):]
+        opt = opt[:opt.index("\n    config ", 10)]
+        self.assertIn("        default y if SPIRAM\n", opt)
+        self.assertNotIn("        default y\n", opt)
+        home = (ROOT / "components/muse/muse_home.c").read_text()
+        self.assertNotIn("s_call_off", home)   # no dimmed disc where there's no call
+        menu = (ROOT / "components/muse/muse_menu.c").read_text()
+        i = menu.index("    ITEM_CALL,")
+        self.assertIn("#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL\n", menu[i - 60:i])
 
     def test_output_proof_wiring(self) -> None:
         # The output proof's gate is on in every firmware build (mg_ble sets

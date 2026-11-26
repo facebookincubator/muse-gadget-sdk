@@ -42,6 +42,9 @@
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#endif
 #if CONFIG_MUSE_APP_VIEW
 #include "muse_app_view.h"
 #endif
@@ -87,6 +90,9 @@ typedef enum {
 #if CONFIG_MUSE_VIDEO
     ITEM_CAMERA,
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    ITEM_CALL,
+#endif
 #if CONFIG_MUSE_APP_VIEW
     ITEM_APPS_ON,
     ITEM_APPS,
@@ -117,6 +123,9 @@ static const char *const ITEM_NAMES[ITEM_COUNT] = {
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Phone camera",
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    [ITEM_CALL] = "Live call",
+#endif
 #if CONFIG_MUSE_APP_VIEW
     [ITEM_APPS_ON] = "Run apps",
     [ITEM_APPS] = "Apps",
@@ -146,6 +155,9 @@ static const char *const ITEM_ACTIONS[ITEM_COUNT] = {
     [ITEM_WIFI] = "Toggle",
 #if CONFIG_MUSE_VIDEO
     [ITEM_CAMERA] = "Open",
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    [ITEM_CALL] = "Select",   /* starts a call, or ends the one that's on */
 #endif
 #if CONFIG_MUSE_APP_VIEW
     [ITEM_APPS_ON] = "Toggle",
@@ -332,6 +344,18 @@ static void value_text(int item, char *buf, size_t n)
         strlcpy(buf, muse_video_has_client() ? "Ready" : "No phone", n);
         break;
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    case ITEM_CALL: {
+        int secs;
+        muse_call_phase_t call = muse_call_phase(&secs);
+        if (call == MUSE_CALL_LIVE) {
+            snprintf(buf, n, "End %d:%02d", secs / 60, secs % 60);
+        } else {
+            strlcpy(buf, call != MUSE_CALL_NONE ? "End" : muse_call_available() ? "Start" : "No phone", n);
+        }
+        break;
+    }
+#endif
 #if CONFIG_MUSE_APP_VIEW
     case ITEM_APPS_ON:
         strlcpy(buf, muse_settings_apps_on() ? "On" : "Off", n);
@@ -416,6 +440,28 @@ static void battery_text(char *buf, size_t n)
              wakes, busy);
 }
 
+/* A row the board offers: the call's only where a call works (muse_call_supported, as Settings and the home). */
+static bool item_shown(int i)
+{
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (i == ITEM_CALL) {
+        return muse_call_supported();
+    }
+#endif
+    (void)i;
+    return true;
+}
+
+/* Its place in the list as shown (a hidden row takes none). */
+static int item_vis(int i)
+{
+    int v = 0;
+    for (int k = 0; k < i; k++) {
+        v += item_shown(k);
+    }
+    return v;
+}
+
 static void refresh(void)
 {
     char buf[256];   /* a page whose labels and names are UTF-8 (status_text) */
@@ -429,10 +475,11 @@ static void refresh(void)
                 lv_obj_set_style_bg_opa(s_rows[i], i == s_sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
             }
             /* Scroll by whole rows so none is ever cut in half. */
-            if (s_sel < s_first) {
-                s_first = s_sel;
-            } else if (s_sel >= s_first + s_visible_rows) {
-                s_first = s_sel - s_visible_rows + 1;
+            int v = item_vis(s_sel);
+            if (v < s_first) {
+                s_first = v;
+            } else if (v >= s_first + s_visible_rows) {
+                s_first = v - s_visible_rows + 1;
             }
             lv_obj_scroll_to_y(s_list, s_first * s_row_h, LV_ANIM_OFF);
             select_hint(ITEM_ACTIONS[s_sel]);
@@ -503,6 +550,9 @@ static void open_menu(void)
 {
     ESP_LOGI(TAG, "open");
     s_sel = s_first = 0;
+    while (!item_shown(s_sel)) {
+        s_sel++;
+    }
     lv_obj_move_foreground(s_root);
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_HIDDEN);
     show(VIEW_LIST);
@@ -549,6 +599,16 @@ static void activate(int item, int direction)
     case ITEM_CAMERA:
         muse_menu_close();
         muse_video_open();
+        return;
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    case ITEM_CALL:
+        muse_menu_close();   /* the face shows the call */
+        if (muse_call_active()) {
+            muse_call_end_from("menu");
+        } else {
+            muse_call_start_from("menu");
+        }
         return;
 #endif
 #if CONFIG_MUSE_APP_VIEW
@@ -600,7 +660,9 @@ static void handle(muse_menu_key_t key)
         if (key == MUSE_MENU_BACK) {
             muse_menu_close();
         } else if (key == MUSE_MENU_DOWN || key == MUSE_MENU_UP) {
-            s_sel = (s_sel + (key == MUSE_MENU_UP ? ITEM_COUNT - 1 : 1)) % ITEM_COUNT;
+            do {
+                s_sel = (s_sel + (key == MUSE_MENU_UP ? ITEM_COUNT - 1 : 1)) % ITEM_COUNT;
+            } while (!item_shown(s_sel));
             refresh();
         } else if (key == MUSE_MENU_SELECT) {
             activate(s_sel, 1);
@@ -732,6 +794,9 @@ void muse_menu_build(lv_obj_t *parent, int w, int h)
         s_values[i] = label(r, font, COLOR_ACCENT, "");
         lv_obj_align(s_values[i], LV_ALIGN_RIGHT_MID, 0, 0);
         s_rows[i] = r;
+        if (!item_shown(i)) {
+            lv_obj_add_flag(r, LV_OBJ_FLAG_HIDDEN);   /* (a board without a call: no row) */
+        }
     }
 
     /* Down to the hints' rule: a longer page scrolls (page_scroll). */

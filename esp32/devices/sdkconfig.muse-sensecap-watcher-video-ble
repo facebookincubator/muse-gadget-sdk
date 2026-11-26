@@ -17,7 +17,7 @@
 
 # The two LVGL draw threads (swdraw) render into LVGL's buffers from
 # internal-RAM stacks, 8 KB each by default. Measured 1.7 KB worst case on
-# the Watcher (Settings pages, faces;
+# the Watcher (Settings pages, faces, subtitles, call screens;
 # 1696 B, >tasks): text here is bitmap fonts (no FreeType or vector
 # graphics). That plus 1 KB, rounded up to 512: 10 KB of internal RAM back.
 # The Wi-Fi watcher build keeps the 8 KB default until its Wi-Fi screens are

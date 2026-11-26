@@ -116,7 +116,13 @@ int main(int argc, char **argv) {
 }
 '''
         inp = common + r'''
-static bool s_power_down, s_power_swallow, s_talk_down;
+#define CONFIG_MUSE_GADGET_BLE_LIVE_CALL 1
+static bool s_power_down, s_power_swallow, s_power_call, s_talk_down;
+static bool in_call;
+static int volume_steps, volume_keys;
+static bool call_unproven;
+static bool muse_call_owner_active(void) { return in_call && !call_unproven; }
+static void muse_call_volume_key(int steps) { volume_steps += steps; ++volume_keys; }
 static bool asleep, speaker = true;
 static int shutdowns, ptt_releases, toggles, pokes;
 static muse_mode_t mode = MUSE_MODE_IDLE;
@@ -154,6 +160,24 @@ int main(int argc, char **argv) {
         mode = MUSE_MODE_SPEAKING; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(speaker && toggles == 2);
         asleep = true; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(!asleep && toggles == 2);
         mode = MUSE_MODE_OFF; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(toggles == 2);
+    } else if (test == 4) {
+        /* In a live call: speaker = volume up, power = volume down (no sleep), a hold still powers off. */
+        in_call = true;
+        dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(volume_steps == 1 && toggles == 0 && speaker);
+        dedicated_buttons(MUSE_BTN_POWER_PRESS); assert(volume_steps == 0 && volume_keys == 2);
+        dedicated_buttons(MUSE_BTN_POWER_RELEASE); assert(!asleep);
+        dedicated_buttons(MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE); assert(!asleep && volume_steps == -1);
+        dedicated_buttons(MUSE_BTN_POWER_PRESS); dedicated_buttons(MUSE_BTN_POWER_LONG); assert(shutdowns == 1);
+        dedicated_buttons(MUSE_BTN_POWER_RELEASE); assert(!asleep);
+        asleep = true; dedicated_buttons(MUSE_BTN_POWER_PRESS); assert(!asleep && volume_steps == -2);
+        dedicated_buttons(MUSE_BTN_POWER_RELEASE); assert(!asleep);   /* the waking press only woke */
+        asleep = true; dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(!asleep && volume_steps == -2);
+        in_call = false;   /* after the call, as before */
+        dedicated_buttons(MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE); assert(asleep && volume_steps == -2);
+        /* A call state from a link without the proof remaps no keys: the speaker key toggles, power sleeps. */
+        in_call = call_unproven = true; asleep = false;
+        dedicated_buttons(MUSE_BTN_SPEAKER_PRESS); assert(volume_steps == -2 && toggles == 1 && !speaker);
+        dedicated_buttons(MUSE_BTN_POWER_PRESS | MUSE_BTN_POWER_RELEASE); assert(asleep && volume_steps == -2);
     } else {
         dedicated_buttons(MUSE_BTN_AUX_PRESS | MUSE_BTN_AUX_RELEASE | MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE);
         assert(!asleep && toggles == 0 && shutdowns == 0 && pokes == 0); /* other boards untouched */
@@ -290,6 +314,7 @@ int main(int argc, char **argv) {
     def test_power_hold_consumed_after_failure_and_ends_ptt(self): self.run_case('input', 1)
     def test_speaker_toggle_and_wake_only(self): self.run_case('input', 2)
     def test_legacy_aux_and_talk_not_reinterpreted(self): self.run_case('input', 3)
+    def test_live_call_volume_keys(self): self.run_case('input', 4)
     def test_icon_hints_all_modes_mute_and_settings(self): self.run_case('ui', 0)
     def test_led_usb_battery_transitions_preserve_rails(self): self.run_case('power', 0)
     def test_led_vin_read_failure_is_not_a_transition(self): self.run_case('power', 1)

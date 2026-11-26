@@ -196,8 +196,9 @@ target_include_directories(muse_simulator PRIVATE
     "${MUSE_COMPONENT_DIR}/../../../protocols"
 )
 
-# The v1.0 screens (home, Status, Settings, the passcode, haptics tests), with
-# the simulator's stand-ins for the services under them.
+# The v1.0 screens (home, Status, Settings, the passcode, haptics tests) and
+# Live call (its screens and subtitles), with the simulator's stand-ins for the
+# services under them.
 target_sources(muse_simulator PRIVATE
     src/sim_stubs.c
     src/sim_haptics.c
@@ -215,7 +216,18 @@ target_sources(muse_simulator PRIVATE
     "${MUSE_COMPONENT_DIR}/muse_passcode_core.c"
     "${MUSE_COMPONENT_DIR}/muse_passcode.c"
     "${MUSE_COMPONENT_DIR}/muse_passcode_ui.c"
+    "${MUSE_COMPONENT_DIR}/muse_call.c"
+    "${MUSE_COMPONENT_DIR}/muse_call_at.c"
+    "${MUSE_COMPONENT_DIR}/muse_subs.c"
+    "${MUSE_COMPONENT_DIR}/muse_subs_core.c"
+    "${MUSE_COMPONENT_DIR}/fonts/muse_font_ellipsis_20.c"
+    "${MUSE_COMPONENT_DIR}/fonts/muse_font_ellipsis_28.c"
 )
+
+# The subtitles' band: the board's band font as the firmware's
+# Kconfig enables it (LVGL's own config here has both).
+set_source_files_properties("${MUSE_COMPONENT_DIR}/muse_subs.c" PROPERTIES
+    COMPILE_DEFINITIONS "CONFIG_LV_FONT_MONTSERRAT_20=1;CONFIG_LV_FONT_MONTSERRAT_28=1")
 
 # Every board's type set (muse_type.c picks by the panel's size).
 file(GLOB MUSE_TYPE_FONTS "${MUSE_COMPONENT_DIR}/fonts/type/*.c")
@@ -561,9 +573,21 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     # in the 16 px caption font), on compact and full-size screens.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/menu_fakes/esp_app_desc.h"
          "#include \"${CMAKE_CURRENT_SOURCE_DIR}/../tests/link_fakes/esp_app_desc.h\"\n")
+    # The simulator's sdkconfig has Live call on, so the menu has its Live call
+    # row (laid out as on a board that offers calls): no call here (the phone
+    # isn't there to take one).
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/menu_fakes/muse_call_stubs.c"
+         "#include \"muse_call.h\"\n"
+         "void muse_call_start_from(const char *why) { (void)why; }\n"
+         "void muse_call_end_from(const char *why) { (void)why; }\n"
+         "bool muse_call_active(void) { return false; }\n"
+         "muse_call_phase_t muse_call_phase(int *live_s) { if (live_s) *live_s = 0; return MUSE_CALL_NONE; }\n"
+         "bool muse_call_available(void) { return false; }\n"
+         "bool muse_call_supported(void) { return true; }\n")
     foreach(lang en vi)
         add_executable(muse_menu_layout_${lang}
             tests/menu_layout_harness.c
+            "${CMAKE_CURRENT_BINARY_DIR}/menu_fakes/muse_call_stubs.c"
             "${MUSE_COMPONENT_DIR}/muse_lang.c"
             "${MUSE_COMPONENT_DIR}/muse_text.c"
         )

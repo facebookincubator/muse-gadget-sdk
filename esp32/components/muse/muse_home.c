@@ -44,6 +44,9 @@
 #include "muse_ui.h"
 #include "muse_vol_show.h"
 #include "muse_wifi.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#endif
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
 #include "mg_ble.h"
 #endif
@@ -53,13 +56,17 @@
 #define COLOR_DIM 0x8b84a8
 #define COLOR_CARD 0x1a1530
 #define COLOR_OK 0x6ff0bf
-#define COLOR_CONNECTED 0x2fbf71
+#define COLOR_CALL 0x2fbf71
+#define COLOR_CALL_PRESSED 0x249a5a
+#define COLOR_CALL_OFF 0x232328
+#define COLOR_CALL_OFF_ICON 0x6b6b73
 #define COLOR_SPEAKER 0x2e2552
 #define COLOR_MUTED 0x8e2426
 #define COLOR_BATTERY 0xc8c8c8
 #define COLOR_BATTERY_LOW 0xe53935
 #define COLOR_ACCENT 0xa77dff
 
+#define CALL_HOLD_MS 600        /* a long press starts (or ends) a Live call */
 #define TALK_HOLD_MS 250        /* the hold threshold, as muse_voice.c's */
 #define CAPTION_SHOW_MS 3000    /* a caption holds the state line this long */
 #define SLIDER_SHOW_MS 3000     /* the volume slider closes this long after the last touch */
@@ -75,9 +82,13 @@ static lv_obj_t *s_bolt;   /* the charging bolt while external power is connecte
 static lv_obj_t *s_time, *s_line, *s_name;
 static lv_obj_t *s_hold;
 static lv_obj_t *s_spk, *s_spk_icon;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+static lv_obj_t *s_call, *s_call_icon, *s_call_ring;
+#endif
 static lv_obj_t *s_slider_box, *s_slider, *s_slider_val;
 static lv_obj_t *s_slider_card, *s_slider_by;   /* "Set by phone" under the level, for an outside change */
 static uint32_t s_slider_touched;
+static int s_line_y;
 static int s_line_caps_top;   /* the state line's capitals' top */
 static uint32_t s_line_color = UINT32_MAX;   /* its color as last set (a rebuild resets it) */
 static lv_obj_t *s_state;     /* not set up: "Open Muse app" */
@@ -97,6 +108,13 @@ static struct {
     uint32_t t0;
 } s_press;
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+static struct {
+    bool down, fired;
+    uint32_t t0;
+    lv_point_t at;    /* where it went down (the call's log: touch(x,y,hold)) */
+} s_call_press;
+#endif
 
 static int clampi(int v, int lo, int hi)
 {
@@ -158,10 +176,9 @@ void muse_home_geom(int w, int h, bool round, int corner_px, muse_home_geom_t *g
     g->dot_d = clampi(pr(8 * k), 4, 100);
     g->dot_pitch = clampi(pr(20 * k), 10, 100);
     g->dot_cy = h - pr(31.5 * k);
-    /* Speaker beside Muse, on its center line, the hold disc 10 px clear of
-     * it (the spot mirrored on the right stays clear too, the layout
-     * symmetric); Muse's ink centered between the date and the dots, then
-     * raised where needed to keep the button inside the mic ring. */
+    /* Speaker and Call beside Muse, on its center line, the hold disc 10 px
+     * clear of both; Muse's ink centered between the date and the dots, then
+     * raised where needed to keep the buttons inside the mic ring. */
     double d = g->button_d;
     double dx = g->hold_d / 2.0 + 10 + d / 2.0;
     if (dx < 164.5 / 466.0 * s) dx = 164.5 / 466.0 * s;
@@ -435,16 +452,31 @@ void muse_ui_notify_low_battery(int pct, muse_battery_level_t level)
 
 /* ---- the screen's hold region ------------------------------ */
 
+/* A press on the call's shown controls (End call, − or +) is theirs: the
+ * home's Speaker, Call and hold region under them yield (their hit areas
+ * never overlap). LVGL task. */
+static bool call_controls_take(void)
+{
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    lv_point_t p = { 0 };
+    if (lv_indev_active()) {
+        lv_indev_get_point(lv_indev_active(), &p);
+        return muse_call_controls_at(p.x, p.y);
+    }
+#endif
+    return false;
+}
+
 static bool screen_talks(void)
 {
     return s_talks && (!muse_input_talk_choice() || muse_settings_talk_mode() != MUSE_TALK_BUTTON);
 }
 
 /*
- * A tap on the idle home, on Muse or anywhere but Speaker, plays the happy
- * bounce (muse_state_make_happy: the avatar's hop and
+ * A tap on the idle home, on Muse or anywhere but Speaker and
+ * Call, plays the happy bounce (muse_state_make_happy: the avatar's hop and
  * hearts, once, 1.6 s). It sends nothing and opens no mic. During a turn,
- * a realtime voice call or a setup prompt a tap does what that screen does (their own
+ * a call or a setup prompt a tap does what that screen does (their own
  * screens take it; a turn on the home ignores it).
  */
 static void happy_tap(void)
@@ -500,6 +532,9 @@ static void on_hold(lv_event_t *e)
             ESP_LOGW(TAG, "hold region: a bench press: real press needed");   /* an injected one, on a release image */
             return;
         }
+        if (call_controls_take()) {
+            return;   /* the call's shown controls take it */
+        }
         s_press.down = true;
         s_press.talking = s_press.cancelled = false;
         s_press.at = p;
@@ -537,6 +572,23 @@ static void on_hold(lv_event_t *e)
     default:
         break;
     }
+}
+
+bool muse_home_talk_at(int x, int y)
+{
+    if (!s_root || !s_hold || !screen_talks() || lv_obj_has_flag(s_root, LV_OBJ_FLAG_HIDDEN) ||
+        lv_obj_has_flag(s_hold, LV_OBJ_FLAG_HIDDEN) || !muse_ui_face_active()) {
+        return false;   /* no hold region showing, or it doesn't talk (Settings > Talk: Button) */
+    }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_controls_at(x, y)) {
+        return false;   /* the call's shown controls take it */
+    }
+#endif
+    lv_area_t a;
+    lv_obj_get_coords(s_hold, &a);
+    long r2 = (long)(a.x2 - a.x1 + 1), dx = 2L * x + 1 - (a.x1 + a.x2 + 1), dy = 2L * y + 1 - (a.y1 + a.y2 + 1);
+    return dx * dx + dy * dy <= r2 * r2;   /* doubled, inside the disc */
 }
 
 bool muse_home_holding(void)
@@ -678,6 +730,9 @@ int muse_home_top_h(void)
 
 static void on_speaker(lv_event_t *e)
 {
+    if (call_controls_take()) {
+        return;
+    }
     switch (lv_event_get_code(e)) {
     case LV_EVENT_SHORT_CLICKED:
         slider_open();
@@ -692,6 +747,87 @@ static void on_speaker(lv_event_t *e)
         break;
     }
 }
+
+/* ---- Call: 600 ms long press with a filling ring ----------------- */
+
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+static bool call_ready(void)
+{
+    return muse_call_active() || muse_call_available();
+}
+
+static void show_call(void)
+{
+    bool ready = call_ready();
+    bool pressed = s_call_press.down && !s_call_press.fired;
+    /* In a call it's End call: the red disc with call_end. */
+    uint32_t bg = !ready ? COLOR_CALL_OFF : muse_call_active() ? 0xe0393b : pressed ? COLOR_CALL_PRESSED : COLOR_CALL;
+    lv_obj_set_style_bg_color(s_call, lv_color_hex(bg), 0);
+    muse_icon_set(s_call_icon, muse_call_active() ? MUSE_ICON_CALL_END : MUSE_ICON_CALL,
+                  muse_icon_button_glyph(s_g.button_d), ready ? 0xffffff : COLOR_CALL_OFF_ICON);
+}
+
+static void on_call(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        if (call_controls_take()) {
+            return;   /* never down: its hold and caption don't run */
+        }
+        s_call_press.down = true;
+        s_call_press.fired = false;
+        s_call_press.t0 = lv_tick_get();
+        s_call_press.at = (lv_point_t){ 0, 0 };
+        if (lv_indev_active()) {
+            lv_indev_get_point(lv_indev_active(), &s_call_press.at);
+        }
+        if (call_ready()) {
+            lv_arc_set_value(s_call_ring, 0);
+            lv_obj_remove_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+        }
+        show_call();
+        break;
+    case LV_EVENT_PRESSING: {
+        if (!s_call_press.down || s_call_press.fired || !call_ready()) {
+            return;
+        }
+        if (muse_ui_touch_swiped()) {
+            /* A swipe that began on the button is a swipe, however long it stays down.
+             * Consumed: no call, and no "Hold to call" at the lift. */
+            s_call_press.fired = true;
+            lv_obj_add_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+            ESP_LOGI(TAG, "Call button: a swipe, no call");
+            show_call();
+            return;
+        }
+        uint32_t t = lv_tick_elaps(s_call_press.t0);
+        lv_arc_set_value(s_call_ring, (int)(t > CALL_HOLD_MS ? 1000 : t * 1000 / CALL_HOLD_MS));
+        if (t >= CALL_HOLD_MS) {
+            s_call_press.fired = true;
+            lv_obj_add_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+            if (muse_call_active()) {
+                muse_call_end_touch("Call button", s_call_press.at.x, s_call_press.at.y, t);
+            } else {
+                muse_call_start_touch("touch: the home Call button", s_call_press.at.x, s_call_press.at.y, t);
+            }
+            show_call();
+        }
+        break;
+    }
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        if (s_call_press.down && !s_call_press.fired) {
+            muse_state_set_caption(call_ready() ? "Hold to call" : "Open Muse app");
+        }
+        s_call_press.down = false;
+        lv_obj_add_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+        show_call();
+        break;
+    default:
+        break;
+    }
+}
+#endif
 
 /* ---- building ------------------------------------------------------------ */
 
@@ -723,7 +859,7 @@ void muse_home_build(lv_obj_t *face, const muse_home_geom_t *g)
     lv_obj_remove_style_all(s_root);
     lv_obj_set_size(s_root, lv_pct(100), lv_pct(100));
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
-    /* A tap on the home outside Speaker and the hold region: the happy
+    /* A tap on the home outside Speaker, Call and the hold region: the happy
      * bounce. Swipes still reach the pager (gesture bubble). */
     lv_obj_add_flag(s_root, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(s_root, on_home_tap, LV_EVENT_SHORT_CLICKED, NULL);
@@ -752,6 +888,7 @@ void muse_home_build(lv_obj_t *face, const muse_home_geom_t *g)
     s_line_caps_top = g->date_top;
     lv_label_set_text(s_line, "");
     lv_obj_align(s_line, LV_ALIGN_TOP_MID, 0, line_top);
+    s_line_y = line_top + lv_font_get_line_height(type->date) / 2 - s_h / 2;
 
     /* Not set up: "Open Muse app" in the
      * small role, dim, in the time's band; the device's name as the phone
@@ -802,6 +939,34 @@ void muse_home_build(lv_obj_t *face, const muse_home_geom_t *g)
         lv_obj_add_event_cb(s_spk, on_speaker, LV_EVENT_LONG_PRESSED, NULL);
         show_speaker();
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_supported()) {
+        s_call = button_disc(s_root, g->button_x, g->button_y, g->button_d, COLOR_CALL);
+        s_call_icon = muse_icon_create(s_call, MUSE_ICON_CALL, muse_icon_button_glyph(g->button_d), 0xffffff);
+        int rw = clampi((int)lroundf(4 * k * 466 / 360), 3, 6);
+        s_call_ring = lv_arc_create(s_root);
+        lv_obj_set_size(s_call_ring, g->button_d + 2 * rw + 4, g->button_d + 2 * rw + 4);
+        lv_obj_align(s_call_ring, LV_ALIGN_CENTER, g->button_x, g->button_y);
+        lv_arc_set_rotation(s_call_ring, 270);
+        lv_arc_set_bg_angles(s_call_ring, 0, 360);
+        lv_arc_set_range(s_call_ring, 0, 1000);
+        lv_arc_set_value(s_call_ring, 0);
+        lv_obj_remove_style(s_call_ring, NULL, LV_PART_KNOB);
+        lv_obj_remove_flag(s_call_ring, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_arc_opa(s_call_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(s_call_ring, rw, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(s_call_ring, lv_color_hex(0xffffff), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(s_call_ring, false, LV_PART_INDICATOR);
+        lv_obj_add_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+        static const lv_event_code_t CALL_EVENTS[] = { LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_RELEASED,
+                                                       LV_EVENT_PRESS_LOST };
+        for (size_t i = 0; i < sizeof(CALL_EVENTS) / sizeof(CALL_EVENTS[0]); i++) {
+            lv_obj_add_event_cb(s_call, on_call, CALL_EVENTS[i], NULL);
+        }
+        show_call();
+    }
+#endif
+    /* No Live call on this board: no Call disc at all. */
     /* The passcode's locked face: a
      * lock glyph (Material lock, #8B84A8) 6.2 % of S where the page dots
      * were, its bottom on theirs. */
@@ -823,15 +988,21 @@ void muse_home_set_locked(bool locked)
         hold_release();
         slider_close();
     }
-    /* No Speaker button (nothing on it starts a turn), no hold region; the
-     * lock glyph instead of the page dots (muse_ui.c). */
+    /* No Speaker or Call buttons (nothing on it starts a turn or a call), no
+     * hold region; the lock glyph instead of the page dots (muse_ui.c). */
     lv_obj_t *const objs[] = {
         s_spk,
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        s_call,
+#endif
         s_hold,
     };
     for (size_t i = 0; i < sizeof(objs) / sizeof(objs[0]); i++) {
         if (objs[i]) lv_obj_set_flag(objs[i], LV_OBJ_FLAG_HIDDEN, locked);
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (s_call_ring && locked) lv_obj_add_flag(s_call_ring, LV_OBJ_FLAG_HIDDEN);
+#endif
     lv_obj_set_flag(s_lock, LV_OBJ_FLAG_HIDDEN, !locked);
 }
 
@@ -840,7 +1011,9 @@ void muse_home_set_locked(bool locked)
  * "Bench" in amber, the board's small type, in the page dots' place (the
  * dots hide while it shows), one line above the lock glyph on the locked
  * face: on LVGL's top layer, so it stands over every screen LVGL draws (the
- * home and its talk screen, Settings). Shown while the switch is on for the connected
+ * home and its talk screen, the calling screen, the call's face, Settings);
+ * over a call's video muse_call.c draws the same glyphs into each frame
+ * (muse_home_bench_mark). Shown while the switch is on for the connected
  * central (mg_ble's bench_mark), so wherever the mic can send to an
  * unproven central it says so.
  */
@@ -921,6 +1094,11 @@ void muse_home_set_hidden(bool hidden)
 bool muse_home_clock_shown(void)
 {
     return s_root && s_time && !lv_obj_has_flag(s_root, LV_OBJ_FLAG_HIDDEN) && lv_label_get_text(s_time)[0] != 0;
+}
+
+int muse_home_line_y(void)
+{
+    return s_line_y;
 }
 
 /* ---- every tick ------------------------------------------------------------ */
@@ -1051,6 +1229,11 @@ void muse_home_tick(const muse_home_state_t *st)
         lv_tick_elaps(s_slider_touched) > SLIDER_SHOW_MS && !lv_obj_has_state(s_slider, LV_STATE_PRESSED)) {
         slider_close();
     }
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (s_call) {
+        show_call();
+    }
+#endif
 }
 
 static bool status_bench_point(muse_touch_gesture_t *g);
@@ -1194,7 +1377,7 @@ static void status_conn(void)
         ci.gap_name = peer.gap_name;
         ci.app_name = peer.app_name;
         ci.app_version = peer.app_version;
-        color = COLOR_CONNECTED;   /* the reference's "Connected" green: the app is ready */
+        color = COLOR_CALL;   /* the reference's "Connected" green: the app is ready */
     }
 #endif
     muse_wifi_status_t w;

@@ -55,12 +55,14 @@
  * of data if the whole clip is shorter: stop_streaming keep, or no data for
  * MG_PLAY_SLOW_END_US with less held. The owner sets mg_play_t.slow_link
  * while the link in effect isn't active's set; once active is granted the
- * normal start applies (to a stream still prebuffering too).
+ * normal start applies (to a stream still prebuffering too). A Live call's
+ * stream (keep_open) holds active for the whole call and keeps the normal
+ * start.
  */
 #define MG_PLAY_SLOW_START_US 150000
 /*
  * Adaptive start: per connection, a reply
- * starts at mg_play_t.start_us held, MG_PLAY_PREBUFFER_US
+ * outside a Live call starts at mg_play_t.start_us held, MG_PLAY_PREBUFFER_US
  * at connect. A reply that underran in its first second of audio
  * (MG_PLAY_EARLY_US; st.early_underruns) raises the next one's start
  * MG_PLAY_START_STEP_UP_US, up to the live depth's floor
@@ -68,8 +70,8 @@
  * underrun at all) eases it back MG_PLAY_START_STEP_DOWN_US, never below
  * MG_PLAY_PREBUFFER_US. A reply with only later underruns leaves it. Judged
  * when the next stream starts (mg_play_start), on the stream before it if it
- * played audio and wasn't kept open; mg_play_live_forget (a new connection)
- * resets it. A kept-open stream keeps MG_PLAY_PREBUFFER_US and the slow
+ * played audio and wasn't a call's; mg_play_live_forget (a new connection)
+ * resets it. A Live call's stream keeps MG_PLAY_PREBUFFER_US and the slow
  * link's MG_PLAY_SLOW_START_US is unchanged. Each move is left in
  * mg_play_t.start_note for the owner to log (`start threshold 50 ms (early
  * underrun last reply)`); early underruns still count as underruns.
@@ -82,11 +84,17 @@
 #define MG_PLAY_CONCEAL_MAX_US 60000       /* a gap concealed this long, then silence until data */
 #define MG_PLAY_DEPTH_UNKNOWN UINT32_MAX   /* mg_play_t.out_us: the output path's depth isn't known */
 #define MG_PLAY_QUEUED_UNKNOWN 0xffff      /* buffer_update's queued ms: unknown */
-#define MG_PLAY_STARVE_END_US 10000000     /* starved this long: the device ends the stream */
+#define MG_PLAY_STARVE_END_US 10000000     /* starved this long outside a Live call: the device ends the stream */
 /*
- * A gap this long is the space between replies in one stream, not an
- * underrun: an underrun is counted when audio comes back within it (at the
- * gap's start on the stream's clock).
+ * One reply-audio stream per Live call (mgcommands.h, Live reply audio):
+ * the client keeps the stream open from the call's start to its
+ * end and writes nothing between replies, so the ring runs empty for seconds
+ * to minutes. While mg_play_t.keep_open is set (mg_proto: the call is
+ * connecting or live) the stream never ends for want of data: it plays
+ * silence (after the concealment fade) however long the gap, and the next
+ * reply's first frame plays at the next chunk. A gap this long is the space
+ * between replies, not an underrun: an underrun is counted when audio comes
+ * back within it (at the gap's start on the stream's clock).
  */
 #define MG_PLAY_IDLE_US 400000
 /* "Playing" for the face and the panel hold (mg_play_audible): audio held,
@@ -97,7 +105,7 @@
  * capability live_depth). The
  * cap is the client's choice: only a stream started with parameter 6 holds a
  * depth (mg_play_params_t.live_depth_ms); without it the credit is the whole
- * ring (an app that doesn't pace live never underruns
+ * ring, in a call or not (an app that doesn't pace live never underruns
  * against a cap it didn't ask for).
  *
  * - The depth is audio held on the device (queued ms: the ring, what the
@@ -202,6 +210,7 @@ typedef struct {
     bool starving;              /* ran dry while playing: the playback task conceals (mg_play_concealing) */
     uint32_t gap_at;            /* clock_us where this gap began */
     uint32_t starve_us;
+    bool keep_open;             /* a Live call's stream: never ended for want of data (MG_PLAY_IDLE_US) */
     bool slow_link;             /* set by the owner: the link isn't active, a stream starts at MG_PLAY_SLOW_START_US */
     uint32_t write_clock_us;    /* clock_us at the stream's latest write (the slow start's end of data) */
     /* mg_stream_audio_flush: the playback task discards its FIFO and resets
@@ -212,7 +221,7 @@ typedef struct {
     bool flushed;
     uint32_t audio_clock_us;    /* clock_us after the latest chunk that carried audio */
     /* What the stream's writes brought (accepted, whole frames): its byte
-     * rate for the live depth's credit when the codec doesn't fix one (SBC). */
+     * rate for the call's credit when the codec doesn't fix one (SBC). */
     uint64_t in_bytes, in_us;
     /* Live depth (above): the depth held (0: none, the whole ring), the
      * in-flight allowance (kept across streams) and the audio played since
@@ -220,16 +229,17 @@ typedef struct {
     uint32_t live_us;
     uint32_t live_allow_us;
     uint32_t live_clean_us;
-    /* Adaptive start (above): the start threshold for a reply
-     * (0: MG_PLAY_PREBUFFER_US), kept across streams until a new connection,
-     * and this stream's first audio on its clock. */
+    /* Adaptive start (above): the start threshold for a reply outside a call
+     * (0: MG_PLAY_PREBUFFER_US), kept across streams until a new connection;
+     * this stream's first audio on its clock, and whether it ran in a call. */
     uint32_t start_us;
     uint32_t play_at_us;
+    bool stream_call;
     bool start_skip;            /* a new link since the last stream: that stream isn't judged */
     const char *start_note;     /* the last move's reason, for the owner's log ("early underrun last reply"); it clears */
     /* A/V anchor (mg_stream_audio_video_anchor): the owner's reader of
-     * the picture showing now (the video frame number extended to 32 bits;
-     * false: none showing), set once; NULL: no video. The
+     * the picture showing now (the video frame number extended to 32 bits, as
+     * subtitles count it; false: none showing), set once; NULL: no video. The
      * anchor names the first sample of the next write after it (anchor_at, on
      * the written-bytes count wr_total; rd_total counts what was popped). */
     bool (*shown32)(uint32_t *frame);
@@ -242,7 +252,7 @@ typedef struct {
      * anchor that comes meanwhile names the held sample. */
     bool pre_holding;
     uint32_t pre_wait_us;
-    /* The audio clock the reply's picture follows (mg_play_av_pos): the
+    /* The audio clock the call picture follows (mg_play_av_pos): the
      * latest resolved anchor's picture and its sample's place in the stream's
      * content (in_us's count), taken at the anchor's Control write
      * (av_*_next) and made current when that sample comes up; av_ok from then
@@ -256,7 +266,7 @@ typedef struct {
 /* An anchor holds a reply's first sample at most this long. */
 #define MG_PLAY_ANCHOR_MAX_US 500000
 /* A reply's first audio waits this long for an anchor that hasn't come:
- * only with video showing (shown32), only at a stream's start or after the gap between replies. */
+ * only with call video showing (shown32), only at a stream's start or after the gap between replies. */
 #define MG_PLAY_ANCHOR_WAIT_US 60000
 
 void mg_play_init(mg_play_t *p, uint32_t buffer_bytes);
@@ -295,7 +305,7 @@ bool mg_play_flush(mg_play_t *p);
  * ((int32_t)(shown - frame) < 0), silence plays until it does, at most
  * MG_PLAY_ANCHOR_MAX_US; an anchor whose sample comes up while audio plays is
  * only measured. Never pauses or skips audio. A newer anchor replaces a
- * pending one. A reply's first audio that came before its anchor (with
+ * pending one. A reply's first audio that came before its anchor (with call
  * video showing) waits up to MG_PLAY_ANCHOR_WAIT_US for it, and an anchor in
  * that time names that held sample. False with no stream or no reader of the
  * picture (shown32).
@@ -305,7 +315,7 @@ bool mg_play_anchor(mg_play_t *p, uint32_t frame);
  * and the audio plays at once. */
 void mg_play_anchor_drop(mg_play_t *p);
 /*
- * The audio clock for the reply's picture: true while a reply's audio
+ * The audio clock for the call picture: true while a reply's audio
  * plays steadily after a resolved anchor (playing or draining, not starved,
  * not held for an anchor, the output path's depth known, no flush since),
  * with *frame the anchor's picture and *pos_us where the sound being heard
@@ -346,7 +356,7 @@ uint32_t mg_play_live_floor_us(const mg_play_t *p);
 /* A new link: the in-flight allowance starts over (mg_proto's measurement
  * too), and the adaptive start goes back to MG_PLAY_PREBUFFER_US. */
 void mg_play_live_forget(mg_play_t *p);
-/* The start threshold a reply takes now (adaptive start). */
+/* The start threshold a reply outside a call takes now (adaptive start). */
 uint32_t mg_play_start_threshold_us(const mg_play_t *p);
 uint32_t mg_play_received(const mg_play_t *p);
 
@@ -383,7 +393,7 @@ uint16_t mg_play_queued_ms(const mg_play_t *p);
 int32_t mg_play_frames_us(const mg_play_params_t *params, const uint8_t *data, size_t len, uint32_t *frames);
 
 /*
- * The once-a-second playback line, for bench tools,
+ * The once-a-second playback line (tools/av60.py reads it),
  * logged on mg.play (the Nordic UART mirror) while a stream plays, and once
  * more at its end (end = true):
  *
@@ -604,7 +614,7 @@ size_t mg_dec_conceal(mg_dec_t *d, int16_t *out, size_t cap, uint32_t us);
  * samples, already boosted: written as they are). A tap's resume writes them
  * first, ramped in over MG_REWIND_RAMP (they start mid-waveform after
  * silence), then the reply goes on from the FIFO; a hold's claim
- * (stop_streaming drop, or a flush), a client's stop drop or flush,
+ * (stop_streaming drop, or the call's flush), a client's stop drop or flush,
  * or a new stream drop them. A stop keep plays them, then the rest.
  */
 #define MG_REWIND_MAX (MG_PLAY_OUT_RATE * 40 / 1000)   /* 40 ms: the live boards' 30 ms DMA, and room */

@@ -377,6 +377,21 @@ bool mg_linkpol_collision(int status)
     return status == MG_LINKPOL_HCI_COLLISION || status == MG_LINKPOL_HS_HCI_BASE + MG_LINKPOL_HCI_COLLISION;
 }
 
+void mg_linkpol_call_note(mg_linkpol_call_t *c, int64_t now_us, mg_linkpol_call_phase_t phase)
+{
+    c->phase = (uint8_t)phase;
+    c->since_us = now_us;
+}
+
+const char *mg_linkpol_call_busy(const mg_linkpol_call_t *c, int64_t now_us)
+{
+    if (c->phase == MG_LINKPOL_CALL_LIVE ||
+        (c->phase == MG_LINKPOL_CALL_STARTING && now_us - c->since_us < MG_LINKPOL_CALL_STARTING_US)) {
+        return "call";
+    }
+    return NULL;
+}
+
 bool mg_linkpol_link_active(const mg_linkpol_t *p)
 {
     return p->on && p->cur_itvl && p->cur_itvl <= p->itvl && p->cur_latency == MG_LINKPOL_LATENCY_ACTIVE;

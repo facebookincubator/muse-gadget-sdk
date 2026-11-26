@@ -79,12 +79,12 @@ class MgConsoleWords(unittest.TestCase):
         # SAFE) stay open; the reads stay open; the USB console stays open.
         words = ["!PAIR AUTO", "!PAIR AUTO 0", "!RESTART 5000", "!SAFEID", "!SILENCE", "!SETUP ADV", "!SETUP ADV 0",
                  "!LOCK", "!UNLOCK 00", "?UNLOCK", "!IN key=talk,400", "!IN key=talk,400,30", "!IN key=aux", "!IN ptt=1",
-                 "!IN tap=home.speaker", "!IN press=1,2", "!IN page=settings", "!IN wake",
-                 "!IN session.ping", "!IN vib=pulse,50", "!IN ble.pause=30",
+                 "!IN tap=home.speaker", "!IN press=1,2", "!IN page=settings", "!IN wake", "!IN call",
+                 "!IN call=0", "!IN session.ping", "!IN vib=pulse,50", "!IN ble.pause=30",
                  "!IN ble.pause=30,AA:BB:CC:DD:EE:FF", "vib=stop", "safe.off", "safe=0", "ui.lat=5", "ui.md5=1",
                  "video.itvl=12,0", "!IN mic.gain=30", "!IN spk.dsp=off", "!IN spk.dsp=700,-30,4,20", "!IN ptt.minrise=15", "!IN ptt.minrise=0", "!IN vol=0", "!IN vol=50", "!IN vol=saved", "link.wake=0", "link.wake=1", "link.sleep=160,320,2",
                  "link.sleep=0", "bench.out=1", "bench.out=0"]
-        reads = ["status", "version", "guard?", "ota?", "vib?", "!IN voice?", "!IN wake?",
+        reads = ["status", "version", "guard?", "ota?", "vib?", "!IN voice?", "!IN wake?", "!IN call?",
                  "!IN vib?", "!IN mic.gain?", "!IN spk.dsp", "!IN spk.dsp?", "!IN ptt.minrise?", "!IN vol?", "link.wake?",
                  "link.sleep?", "bench.out?"]
         out = self.run_lines(["auto? " + w for w in words + reads])

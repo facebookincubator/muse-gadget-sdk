@@ -22,6 +22,7 @@
 
 #include "mg_codec.h"
 #include "mg_config.h"
+#include "mg_lct.h"
 #include "mg_link.h"
 #include "mg_loud1s.h"
 #include "mg_play.h"
@@ -74,6 +75,8 @@ typedef struct {
 void mg_settings_defaults(mg_settings_t *s);
 
 #include "mg_battery.h"   /* report_battery_status's fields */
+
+#include "mg_subs.h"   /* Live call subtitles' types */
 
 
 typedef struct {
@@ -155,6 +158,12 @@ typedef struct {
      * of it, once per episode, at that change_data_type. NULL: not told. */
     void (*rx_held)(void *ctx, uint32_t bytes);
     /*
+     * ---- live call (mg_command_live_call; cfg.live_call false: unsupported) ----
+     * The call's state (mg_live_call_state_t) as the client reports it, and
+     * idle when a client with a call goes away.
+     */
+    void (*live_call)(void *ctx, uint8_t state);
+    /*
      * ---- UI input (mg_command_ui_input; cfg.ui_input 0: unsupported) ----
      * hid_map: the client's map for the gadget's HID (parsed and checked);
      * returns the mg_hid_status_flags_t and sets *mode to the mode in use.
@@ -163,6 +172,14 @@ typedef struct {
     uint8_t (*hid_map)(void *ctx, const mg_hid_map_t *m, uint8_t *mode);
     /* hid_key: press and release a consumer-control key (usage) on the HID. False: no HID host. NULL: unsupported. */
     bool (*hid_key)(void *ctx, uint16_t usage);
+    /* mark: a live call's step (mg_lct_point_t) happened, for its timeline. May be NULL. */
+    void (*mark)(void *ctx, uint8_t point);
+    /*
+     * ---- subtitles (mg_command_subtitle; cfg.subtitles NULL: unsupported) ----
+     * Each phone -> device message, checked and parsed (words point into the
+     * message: copy what you keep).
+     */
+    void (*subtitle)(void *ctx, const mg_subs_event_t *ev);
     /*
      * ---- clock (device_action set/get_unix_time, mgcommands.h, Clock) ----
      * NULL: the device has no clock (both answered unsupported). clock_set
@@ -176,6 +193,13 @@ typedef struct {
     void (*clock_set)(void *ctx, int64_t unix_ms, bool has_offset, int16_t offset_min, bool has_flags, uint8_t flags,
                       bool store);
     void (*clock_get)(void *ctx, int64_t *unix_ms, int16_t *offset_min, uint8_t *flags);
+    /*
+     * ---- subtitles ready (optional) ----
+     * False while the device can't draw subtitles (its band's buffers didn't
+     * allocate): mg_command_subtitle is then unlisted and refused. NULL: the
+     * configured cfg.subtitles is always drawn.
+     */
+    bool (*subtitles_ready)(void *ctx);
     /*
      * ---- battery and power (device_action 8/9 and 10) ----
      * battery_status fills the latest reading; false: none yet (answered
@@ -239,6 +263,7 @@ typedef struct {
 
 typedef struct {
     mg_queue_t *queue;           /* the offline clip queue, or NULL */
+    const mg_subs_caps_t *subtitles; /* Live call subtitles drawn (mg_command_subtitle), or NULL */
     mg_play_t *play;             /* playback (the board has a speaker), or NULL */
     bool haptics;                /* a vibration motor: haptics_enabled and ptt_buzz_* */
     /* Haptics: setting 15's four bytes (kind, flags, min_on_ms, strength
@@ -251,6 +276,7 @@ typedef struct {
     /* Streams to a set-up gadget (start_streaming) without the token proof on a connection whose bench override is
      * on (automation builds; mgcommands.h, Token proof). A release build takes them only after the proof. */
     bool bench_streams;
+    bool live_call;              /* the user can start a live call: mg_command_live_call */
     /* mg_command_ui_input: a bit (1 << mg_ui_input_feature_t) for each part
      * offered (touch events, the HID modes); 0: not offered. */
     uint8_t ui_input;
@@ -450,8 +476,8 @@ typedef struct {
 #define MG_PLAY_CODECS_MAX 8      /* stream_audio's codecs (mg_play_codecs' cap; 3 today) */
 #define MG_PLAY_RATES_MAX 8       /* stream_audio's sample rates (mg_play_rates' cap; 6 today) */
 #define MG_SETTING_PARAM_LAST mg_setting_parameter_client_app   /* the last setting mgcommands.h defines */
-/* [supported_features, 6 commands always, 8 optional] */
-#define MG_REPLY_FEATURES_MAX (1 + 6 + 8)
+/* [supported_features, 6 commands always, 10 optional] */
+#define MG_REPLY_FEATURES_MAX (1 + 6 + 10)
 /* [10 FE 01, codecs] */
 #define MG_REPLY_START_MIC_MAX (3 + MG_CAPTURE_CODECS_MAX)
 /* [10 FE 08, (codec, count, count x (rate, min, max))...] */
@@ -547,6 +573,7 @@ typedef struct {
     bool connected;
     bool setup_changing;   /* mg_proto_proof_reset running: a sealed clear the old session took is dropped */
     uint16_t mtu;
+    bool subs_caps_sent;         /* subtitle capabilities answered on this connection (resent if the MTU changes) */
     bool sub[MG_CH_COUNT];
     bool ptt_enabled;
     /* A new token proof's challenge on this connection (an iOS
@@ -606,6 +633,7 @@ typedef struct {
     uint8_t *creds_in;           /* storage lent for an incoming credentials_update */
 
     bool audio_claimed;          /* the device's own sound (a chirp, a bench test, a saved note) has the audio path */
+    bool audio_paused;           /* ...and a Live call's reply stream waits for it, its audio kept (mg_proto_play_held) */
     bool turn;                   /* a push-to-talk turn holds the speaker: playback waits, starts are taken */
     uint8_t stops_owed;          /* client stop_streaming answers owed for the playing stream (each answered once) */
     bool barge_paused;           /* a talk press's touch-down holds the reply until tap or turn (mg_proto_barge_pause) */
@@ -701,6 +729,7 @@ typedef struct {
         uint8_t decode_ms;
         uint8_t content;         /* mg_video_content_t of the stream that's on */
         bool have_shown;         /* a picture has been drawn: last_number and its time */
+        bool got_bytes;          /* the stream's first Data bytes came (the call timeline) */
         uint16_t last_number;
         uint32_t last_shown_ms;
     } video;
@@ -710,6 +739,27 @@ typedef struct {
      * back around). */
     bool press_seen;
     int64_t press_ms;
+    bool audio_got_bytes;        /* the playback stream's first Data bytes came (the call timeline) */
+
+    /* mg_command_live_call (mgcommands.h, Live call). */
+    struct {
+        uint8_t state;           /* mg_live_call_state_t, as the client last reported it */
+        bool pending;            /* the user started one and no client has answered yet */
+        bool asked_here;         /* that pending start was sent to this connection (cleared at each link) */
+        bool ended;              /* a call ended at ended_ms (its 3 s tail) */
+        uint32_t ended_ms;
+        bool mic_ignored;        /* a start_mic during a call went unanswered: its stop_mic is too */
+        bool mic_taken;          /* a capture this client's start_mic began is on: its stop_mic is taken, and a
+                                    call's start ends it */
+        uint8_t fail_reason;     /* mg_live_call_failure_reason_t with the last failed */
+        /* The owner's call is on (a state from a proven central, or the answer to this connection's own pending
+         * start, turned it on); and the last state came from a central without this connection's proof (not that
+         * answer). */
+        bool owner_on;
+        bool unproven;
+        bool own_start;          /* the call on is the one this connection's own pending start began */
+        bool held;               /* the UI holds the call behind the passcode keypad: its reply audio waits */
+    } call;
 
     /* mg_command_ui_input (mgcommands.h, UI input). */
     bool touch_enabled;          /* per connection */
@@ -761,6 +811,8 @@ const mg_settings_t *mg_proto_settings(const mg_proto_t *p);
 void mg_proto_connect(mg_proto_t *p);
 void mg_proto_disconnect(mg_proto_t *p);
 void mg_proto_set_mtu(mg_proto_t *p, uint16_t mtu);
+/* The subtitle max_words_bytes reported now: min(configured, ATT_MTU - 3 - 2). */
+uint16_t mg_proto_subtitle_words_max(const mg_proto_t *p);
 void mg_proto_subscribe(mg_proto_t *p, mg_ch_t ch, bool on);
 void mg_proto_write(mg_proto_t *p, mg_ch_t ch, const uint8_t *data, size_t len);
 /* Timeouts (the throughput test). Call about once a second. */
@@ -796,7 +848,8 @@ bool mg_proto_proof_take_nonces(mg_proto_t *p, uint8_t client_nonce[MG_TOKEN_PRO
  *
  * mg_proto_output_ok: output may go to the connected central now (no gate,
  * the bench switch on, or this connection's token proof matched). While it
- * may not, a capture (a press's, a client's start_mic) is held whole in the capture's outbox (MG_CAPTURE_GUARD_S of its
+ * may not, a capture (a press's, a client's start_mic, a Live call's talk
+ * hold) is held whole in the capture's outbox (MG_CAPTURE_GUARD_S of its
  * format, the bench guard's size; without PSRAM what ops.capq_alloc gives),
  * nothing of it sent and the worker not woken for it; the match sends it all
  * in order (its change_data_type, the audio, its gestures and stop_mic queued
@@ -943,7 +996,8 @@ void mg_proto_video_credit_overruns(const mg_proto_t *p, uint32_t *writes, uint3
 bool mg_proto_live_begin(mg_proto_t *p, uint8_t codec);
 /* The same at a format (mg_proto_turn_format, or a start_mic's): its label says it. */
 bool mg_proto_live_begin_fmt(mg_proto_t *p, const mg_audio_format_t *fmt);
-/* The format of the user's push-to-talk: setting 7, at capture_sample_rate where that codec takes it (else 16 kHz),
+/* The format of the user's push-to-talk: LC3 in a call else
+ * setting 7, at capture_sample_rate where that codec takes it (else 16 kHz),
  * at capture_bitrate_kbps clamped into its range. */
 void mg_proto_turn_format(const mg_proto_t *p, mg_audio_format_t *out);
 /* A start_mic's format from its parameters (codec, rate, kb/s; 0: omitted):
@@ -988,7 +1042,7 @@ bool mg_proto_live_discard(mg_proto_t *p);
  * (loud1s; the whole capture while it's under a second; rms where no ring)
  * over the floor (the quietest 20 ms window since the turn's first sample,
  * pre-roll included), in dB. At N or more the turn is released: the claim
- * happens now (stop_streaming drop), and everything
+ * happens now (stop_streaming drop, or the call's flush), and everything
  * held goes in order as the link takes it (button_down, change_data_type,
  * the held audio as a burst in whole frames per notification, then the rest
  * as it comes): the pump's usual pacing. True when this call released it.
@@ -1035,25 +1089,34 @@ int mg_reply_stats_format(const mg_reply_stats_t *s, bool json, char *out, size_
 /*
  * The device's own sound (a chirp, a bench test, a saved note) takes the
  * speaker: a stream in progress ends with stop_streaming drop, and
- * start_streaming is refused as busy until it's released.
+ * start_streaming is refused as busy until it's released. In a Live call
+ * (mgcommands.h: the device ends a call's stream only when it
+ * can't go on) the call's reply stream is paused
+ * instead and resumes where it was when the sound is over: nothing it holds
+ * is flushed or lost, Data and credits go on as usual (the call's depth cap
+ * bounds what piles up), and a start_streaming meanwhile is taken and waits
+ * the same way (mg_proto_play_held). No ESP32 board mixes two sources into
+ * its output path (the reply's player and the voice loop each write the
+ * speaker), so the reply pauses rather than ducks under the sound.
  */
 void mg_proto_claim_audio(mg_proto_t *p, bool claim);
 /* The playback task holds the stream (it plays nothing and pops nothing): a
- * push-to-talk turn, or a talk press's touch-down (mg_proto_barge_pause). */
+ * push-to-talk turn, the device's own sound pausing a Live call's reply, or
+ * a talk press's touch-down (mg_proto_barge_pause). */
 bool mg_proto_play_held(const mg_proto_t *p);
 /*
  * The barge-in echo rule: a gadget with
  * pre-roll and a speaker mutes its reply at a talk press's touch-down, so
  * the pre-roll it records before the hold threshold carries none of the
- * Muse's own words. on: the playback task holds whatever plays (a reply, or
- * one that starts meanwhile) exactly as for a turn:
+ * Muse's own words. on: the playback task holds whatever plays (a reply, a
+ * Live call's stream, one that starts meanwhile) exactly as for a turn:
  * nothing popped or played, the ring and the task's decoded FIFO kept, Data
  * and credits (buffer_update) going on, no underrun counted (the stream's
  * clock stops with it), and the client's stop_streaming or flush still
  * applies. off (the press was a tap, released before the hold threshold):
  * playback resumes from the very sample it paused at. At the threshold the
- * turn is claimed as before (mg_proto_claim_turn: stop_streaming drop),
- * which ends the pause. A pause
+ * turn is claimed as before (mg_proto_claim_turn: stop_streaming drop
+ * outside a call, the call's flush in one), which ends the pause. A pause
  * nobody ends lapses after MG_PROTO_BARGE_PAUSE_MAX_MS (a press the voice
  * task never decided: the reply is never left stuck).
  */
@@ -1066,7 +1129,10 @@ bool mg_proto_barge_held(const mg_proto_t *p);
  * drop or flush waits for its release, mg_proto_turn_hold: until then the
  * reply is held as for a turn, and a dropped turn's off resumes it); a start_streaming
  * during the turn is accepted and buffered under credits, and plays once the
- * turn (with its tail) is over and this goes off. */
+ * turn (with its tail) is over and this goes off. A Live call's one reply
+ * stream (keep_open) is flushed instead, as mg_stream_audio_flush does, and
+ * a buffer_update sent: it stays open, and the next reply on it waits for
+ * the turn the same way. */
 void mg_proto_claim_turn(mg_proto_t *p, bool on);
 /*
  * Sends the periodic buffer_update while streaming. Call every 5 ms. While a
@@ -1123,7 +1189,27 @@ uint8_t mg_proto_video_content(const mg_proto_t *p);
 #define MG_VIDEO_KEEPALIVE_MS 250
 void mg_proto_video_tick(mg_proto_t *p);
 
-/* The codec of the user's push-to-talk: setting 7. */
+/* ---- live call (mg_command_live_call) ---- */
+
+/*
+ * The device's user starts (true) or ends (false) a live call. A start no
+ * client has answered (with connecting, live, ended or failed) stays pending
+ * and goes again to each client that becomes ready (request_status).
+ */
+void mg_proto_live_call_request(mg_proto_t *p, bool start);
+/* The call's state as the client last reported it (idle with no client). */
+uint8_t mg_proto_live_call_state(const mg_proto_t *p);
+/* Why the last failed state came (mg_live_call_failure_reason_t): 0 when the client said nothing. */
+uint8_t mg_proto_live_call_failure_reason(const mg_proto_t *p);
+/* The last live_call state came from a central without this connection's token proof, and wasn't the answer to
+ * its own pending start: the UI shows it only on an unlocked, awake gadget, never wakes
+ * the screen for it, and never lets it hold off the passcode lock. */
+bool mg_proto_live_call_unproven(const mg_proto_t *p);
+/* The UI holds the phone's call behind the passcode keypad: until it's released (the unlock), the call's
+ * reply audio is refused busy. Ends with the call. */
+void mg_proto_live_call_held(mg_proto_t *p, bool held);
+bool mg_proto_live_call_pending(const mg_proto_t *p);
+/* The codec of the user's push-to-talk: LC3 in a call, else setting 7. */
 uint8_t mg_proto_turn_codec(const mg_proto_t *p);
 
 /* ---- UI input (mg_command_ui_input) ---- */

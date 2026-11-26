@@ -98,11 +98,11 @@ measurements of C6 gesture FPS.
 `MUSE_SIM_BOARD=stopwatch|w175|watcher|mosaico|c6` picks the panel (466 round,
 466 round with side keys, 412 round, 480 rounded square, 368x448). `render_screens.sh OUT_DIR`
 renders every v1.0 screen of those four boards (home with and without the
-clock, unpaired, mic ring, muted, captions, low battery, charging,
-Status, Settings and its pages) into `OUT_DIR/<code>/`.
+clock, unpaired, mic ring, muted, captions, low battery, charging, Call
+unavailable, Status, Settings and its pages) into `OUT_DIR/<code>/`.
 Scenario keys it adds:
-`clock=HH:MM[/24]|none`,
-`talk=both|screen|button` (Settings > Talk; the simulator starts on both, the firmware on button), `bench.out=true|false` (the bench switch on for the connected central: "Bench" in the top row), `volume=N` (as restored at boot: no change shown), `phone.volume=N` and `bench.volume=N` (a speaker change made from outside, the phone's set_settings or the console's `vol=N`: the gadget shows it), `device.volume=N` (the gadget's own change), `ssid=NAME` (Wi-Fi connected to NAME: the Status row's name, to
+`clock=HH:MM[/24]|none`, `call=none|asked|connecting|live|unavailable`,
+`talk=both|screen|button` (Settings > Talk; the simulator starts on both, the firmware on button), `bench.out=true|false` (the bench switch on for the connected central: "Bench" in the top row), `subs=TEXT` (a muted reply's subtitles as the phone sends them, all shown now; `subs.ms=N` paces its words), `subs.more=TEXT` (the same reply's next words: the tall band grows and scrolls), `subs=off`, `volume=N` (as restored at boot: no change shown), `phone.volume=N` and `bench.volume=N` (a speaker change made from outside, the phone's set_settings or the console's `vol=N`: the gadget shows it), `device.volume=N` (the gadget's own change), `ssid=NAME` (Wi-Fi connected to NAME: the Status row's name, to
 check its wrap), `page=status|settings[/<page>]`, `ring=true|false` (the mic
 ring), `avatar_face=FILE.ppm|none` (the avatar face: a panel-sized P6
 picture as the firmware draws it at either Size, which `tests/test_mg_face.py`'s

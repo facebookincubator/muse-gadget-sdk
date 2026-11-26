@@ -85,7 +85,7 @@ a *companion*. This is a second companion (`main/mg_glue.c` registers it):
     central's update can go unanswered and the controller drops the link
     40 s later).
   - **Active on the gadget's own activity**: its talk press (at touch-down),
-    a stream the app starts (video, a UI stream
+    a call (from Calling... on), a stream the app starts (video, a UI stream
     while its picture changes, audio playback, a clip transfer or throughput
     test), push-to-talk capture, Link setup (a pairing session, and any
     connection while the gadget isn't set up) and an MCUmgr update. A touch,
@@ -94,15 +94,15 @@ a *companion*. This is a second companion (`main/mg_glue.c` registers it):
     any key press, a touch, the screen lit by the user, and the bench's
     injected input alike, go from sleep to ready (never active) and restart
     the 10 min in ready; a sleep the app wrote is ready again until 10 min
-    after the last one, then sleep. From sleep a gadget otherwise waited
+    after the last one, then sleep. A call from sleep otherwise waited
     11.75 s for the central to schedule the active update (a gadget and an S22).
     A talk press still goes straight to active. Logged `link mode sleep ->
     ready (touch)` (`key`, `wake`).
   - **The gadget's own turn is activity** (mgcommands.h): from its talk
     press (the press the client heard,
     `mg_ble_link_turn()` at button_down) until its reply has played (the
-    reply stream that started after the press stopped: closed, or no longer
-    audible), or assistant_state done or error,
+    reply stream that started after the press stopped: closed, or in a Live
+    call's one stream no longer audible), or assistant_state done or error,
     or 20 s with no reply (`MG_LINKPOL_TURN_WAIT_US`, counted from the
     capture's end). On the Watcher, without it, the policy dropped to ready 5 s
     after the release while Muse was still thinking, and the reply started
@@ -155,14 +155,14 @@ a *companion*. This is a second companion (`main/mg_glue.c` registers it):
     500 ms of any connection update. With the first request, 2M PHY and
     251-byte packets; the ATT MTU is 247 in the BLE gadget overlays (the
     video one included), 256 in other full-UI builds.
-  - **Stream-start toggle** (kept with the modes): a video
+  - **Call-start toggle** (kept with the modes): a call or video
     stream that starts while already active toggles idle -> fast so the
     central re-plans the link: the idle half 24/36/0/400, then, once its
     connection update event arrives (granted or refused), the fast half no
     sooner than 500 ms after it (a gadget and an S22: a fast half asked 1 ms
     after the idle half's grant lost the link at its instant) and 2 s after
     the idle half; if the idle half gets no answer in 2 s the toggle is
-    skipped for that stream (logged) and the fast set stays. A mode change in
+    skipped for that call (logged) and the fast set stays. A mode change in
     between supersedes it, a disconnect cancels it.
   - The screen and USB power don't matter (no mode follows the screen or
     USB power).
@@ -437,7 +437,7 @@ rows. With it off nothing below happens: the turn goes exactly as before.
   only move one way (the loudest window up, the quietest down), so a turn
   once released stays released.
 - At N or more the turn is released (`mg_proto_turn_rise`): its `button_down`
-  goes, then its claim (`stop_streaming` drop), then
+  goes, then its claim (`stop_streaming` drop, or a Live call's flush), then
   `change_data_type` and the held audio from the touch-down on, as a burst in
   whole frames per notification (at most MTU - 3, 4 msys blocks kept for
   control: the outbox's own pacing), then the live audio, `button_up` and
@@ -452,6 +452,8 @@ rows. With it off nothing below happens: the turn goes exactly as before.
   `status` line, and the face says "Didn't catch that" (idle, never
   thinking). The claim's off then lets a reply held since the touch-down play
   on from the very sample it paused at, as after a tap.
+- A Live call's talk hold is the same turn: held, released with the call's
+  flush, or dropped with the call's stream playing on.
 
 `test_mg_ble`'s harness (`test_minrise`, `test_minrise_reply`) runs it off
 (today's messages, bytes and instants exactly), a silent capture (nothing on
@@ -459,7 +461,7 @@ Control or Data, counted, the buffer back, `request_status` unchanged), a
 rise at 0.8 s and a 3 s hold before the rise on a ready link, a sleep link and
 the C6's 32 KB (every frame from the touch-down in order, 0 dropped, whole
 frames within the MTU), the buffer grown under an earlier utterance, and a
-reply at the touch-down (held, then dropped or
+reply or a Live call's stream at the touch-down (held, then dropped or
 flushed after `button_down` on a rise, resumed on a drop).
 
 **Haptics.** Only a board with a vibration motor (`mg_ble_platform_t.vibrate`)
@@ -483,8 +485,8 @@ stops it.
 **The Nordic UART console** has no owner unlock. In an automation build
 every word works as sent: `status`, `version`, `guard?`,
 `ota?`, every `!IN` word of the platform's allowlist (`voice?`, `wake?`,
-`vib=...`, `vib?`, `key=`, including talk holds that open the mic,
-`ptt=`, `tap=`, `press=`, `page=`, `wake`, `ble.pause=`,
+`call?`, `vib=...`, `vib?`, `key=`, including talk holds that open the mic,
+`ptt=`, `tap=`, `press=`, `page=`, `call`, `call=0`, `wake`, `ble.pause=`,
 `session.ping`, `mic.gain?`, `mic.gain=`, `spk.dsp`, `spk.dsp?`, `spk.dsp=`, `ptt.minrise=`,
 `ptt.minrise?`, `vol=`, `vol?`), `!PAIR AUTO` (the USB console's `>pair.auto` too),
 `!RESTART`, `!SAFEID`, `!SILENCE` and `!SETUP ADV`, all open so benches
@@ -502,7 +504,7 @@ connection whose token proof matched and are refused otherwise
 stay open). Identity and status reads (`status`, `version`, `guard?`,
 `ota?`) stay open, and their answer goes back to the asking connection,
 proven or not, SAFE included; so do the other `!IN` reads (`wake?` /
-`vib?` / `mic.gain?` / `spk.dsp` / `spk.dsp?` / `ptt.minrise?` / `vol?`).
+`call?` / `vib?` / `mic.gain?` / `spk.dsp` / `spk.dsp?` / `ptt.minrise?` / `vol?`).
 The owner's content (`!IN voice?`, voice activity, and `!IN img?`, the
 shown image's path) answers only a proven connection on a set-up release
 gadget (`mg_unlock_owner_word()`); refused, it's logged on the gadget and
@@ -572,6 +574,84 @@ thinking if a turn follows). Boards with the full UI apply this in the voice loo
 `mg.face: face <mode>` (`ring <state>` on the Voice PE), which the Nordic
 UART mirror carries: `tools/mg_ble_client.py ptt` and `state` print them.
 
+## Live call
+
+The client is the Muse app, which implements the call on its own session; the SDK's reference apps don't.
+
+`CONFIG_MUSE_GADGET_BLE_LIVE_CALL` (on by default on boards with the full
+UI) offers `mg_command_live_call` (0x85) and lists it in supported_features:
+the client (the Muse app) holds a live voice call with the Muse, and
+the gadget starts it, ends it and shows it.
+
+- **Starting:** Live call in Settings (touch boards) or the menu sends
+  `[live_call, start]` and the screen goes black with only "Calling…"
+  centered ("Waiting for phone…" with no client) until the
+  call's first picture is drawn, which replaces it directly. A start no client has answered stays pending:
+  it goes again after each request_status, and a disconnect keeps it. Any
+  state but idle answers it (idle is what a client may say before it has
+  seen the start); with no answer in 30 s the gadget drops it and says
+  "No answer".
+- **States:** connecting keeps "Calling…"; live keeps it until the first
+  picture (on a build without video the face takes over at once, with a
+  green "Live m:ss" pill under the state line; a phone that sends no picture
+  for 15 s gets the same); ended and failed close it with banners
+  ("Call ended" 1.5 s; "Couldn't start the call", "Call dropped", "No
+  answer" 3 s), then the home. The connecting backstop:
+  connecting for 60 s with no newer state from the
+  client ends the call from the gadget: `[live_call, end]` as for the
+  user's end, "Couldn't start the call" for 3 s, then the home; every
+  connecting the client sends (a re-sent one too) restarts the 60 s
+  (`muse_call_backstop.h`, `test_muse_call_backstop`). For the link policy
+  Calling... and connecting are activity for at most 30 s
+  from the start or the client's last connecting, live for as long as it's
+  live (`mg_linkpol_call_busy`, `test_mg_linkpol`). A failed state may carry why (the
+  live call features line `10 FE 85 02` lists
+  failure_reason; `[85 04 reason]`): setup_required (1) shows "Open the Muse
+  app to finish setting up calls" for 5 s instead (the phone needs the user
+  first: the Muse app's voice intro, the microphone permission); the banner
+  wraps inside 70 % of the panel. A client may start a call itself: connecting or live
+  shows it the same way. A client that disconnects ends its call (the board
+  hears idle).
+- **Controls:** during a call, on screens of 320 px or more, a panel near
+  the bottom holds volume − and + buttons around a level bar and a red End
+  call button. It shows for 3 s at a time and comes back on a tap (the
+  first tap only brings it up, and a tap on the top half hides it at once;
+  never by itself); the first tap once the call shows its picture adds
+  the hint "Hold to talk • tap for controls" for 5 s (the calling screen
+  has no hint). It's one LVGL canvas: shown
+  as itself on the face, and blended into each video frame while video
+  plays (`muse_video_set_overlay()`; LVGL is paused then, so the level bar
+  is drawn at the current volume each frame and the touch controller is
+  read directly, every 10 ms on the input task).
+- **Ending:** End call, Live call again, or `>call=0` on the console sends
+  `[live_call, end]` and clears the call at once.
+- **Volume:** − / + step a sixteenth; so does a vertical swipe anywhere,
+  face or video (up louder, one step for a short swipe of 30 px and another
+  for each 60 px further). The board's other buttons are volume keys in a
+  call: on the StopWatch the top-left button (speaker) is up and the red
+  bottom-left one down (a hold still powers off). Levels are kept like any
+  volume change (the phone's `speaker_volume` reads them); down to 0 turns
+  the speaker off. A call that starts (connecting or live) with the speaker
+  at 0 or off raises it to 50%.
+- **In a call:** push-to-talk, assistant_state and stream_audio work as
+  outside one, and the face doesn't slide off to settings. Video the client
+  streams (stream_video start_streaming) shows full screen without opening
+  Phone camera, as any client-started stream does, and no button closes it
+  (talk is push-to-talk, the others are the volume). When the call ends the
+  view closes (stop_streaming, then request_streaming 0), from the input
+  task.
+- **Bench:** the console's `>call` / `>call=0` / `>call?` start, end and
+  report (`@call <none|asked|connecting|live> <secs> volume <0-100>`); on a
+  bench build (`MUSE_BENCH=1`) `>drag=233,350,233,230,300` is a swipe up
+  and `>tap=X,Y` a tap (on the face; video's taps are read from the
+  controller itself); call changes are
+  logged as `mg.call:` on the Nordic UART mirror. `tools/mg_ble_client.py
+  call` plays the phone: it answers a start with connecting then live
+  (`--answer failed|none`), an end with ended, and can start a call itself
+  (`--start`), send states (`--state`) or end after a while (`--end-after`).
+  The state machine is `components/muse/muse_call.c`; the protocol side is
+  `mg_proto_live_call_request()` and `cmd_live_call()` in `mg_proto.c`.
+
 ## Audio playback
 
 A board with a speaker lists `mg_command_stream_audio` (29) and plays what
@@ -586,7 +666,7 @@ Voice PE doesn't offer it yet.
   `speaker_chain_reset` (`components/muse/muse_spk_dsp.c`: 700 Hz
   4th-order high-pass, compressor -30 dBFS 4:1 3/120 ms +20 dB, -1 dBFS
   look-ahead limiter and clamp; the console's `>spk.dsp`), and the player
-  runs it after the boost on every reply chunk, push-to-talk and stream_audio
+  runs it after the boost on every reply chunk, push-to-talk and Live call
   alike (`mg_chain.h`): silence goes through it while it still holds audio,
   so a reply's last 2 ms play; a barge-in pause leaves it alone (the rewind
   `speaker_clear` hands back is post-chain and is written as it is, and the
@@ -634,8 +714,8 @@ Voice PE doesn't offer it yet.
   stream (below). **Live depth** (mgcommands.h parameter 6 and capability 7):
   the cap is the client's
   choice. A stream started without parameter 6 gets the whole ring as
-  credit, so an app that doesn't pace live never
-  underruns against a cap it didn't ask for (a fixed 100 ms cap
+  credit, in a Live call or not, so an app that doesn't pace live never
+  underruns against a cap it didn't ask for (a 100 ms call cap
   underran ~200 blocks a reply against apps that don't pace). With it the device
   holds its queued ms at max(asked, the floor) (`mg_play_t.live_us`; asked
   below the floor holds the floor), and audio in flight doesn't count
@@ -686,7 +766,7 @@ Voice PE doesn't offer it yet.
   alone, and the reply plays with 0 underruns.
   `test_mg_ble` runs a client that writes 20 ms only when credit allows
   over a 15 ms link with 0-30 ms of delivery jitter: without parameter 6,
-  it fills the ring; with a live depth of 100 ms, 60 s:
+  in a call or not, it fills the ring; with a live depth of 100 ms, 60 s:
   0 underruns, queued settling at ~88 ms (50-120), ~40 ms measured in
   flight, the allowance untouched, one update per connection event; two
   forced 150 ms outages each underrun once, the allowance grows to 40 ms
@@ -711,7 +791,7 @@ Voice PE doesn't offer it yet.
   arrives plays at the next chunk. An underrun is counted when audio comes
   back within 400 ms of the gap's start (`MG_PLAY_IDLE_US`), at that start on
   the stream's clock, its length added to `gap_us`; a longer gap is a reply
-  boundary (`idle_gaps`), not an underrun. It ends a
+  boundary (`idle_gaps`), not an underrun. Outside a Live call it ends a
   stream the client went quiet on without stop_streaming after 10 s
   (stop_streaming drop).
 - **A reply that starts on a link that isn't active** (on the Watcher,
@@ -724,7 +804,9 @@ Voice PE doesn't offer it yet.
   `mg_play_t.slow_link` from the link in effect (`mg_linkpol_link_active`:
   15 ms, latency 0) at every policy round, connect and connection update.
   start_streaming asks for active before its first buffer_update
-  (`ops.stream_starting`: the request ahead of the answer). `test_mg_ble` replays the trace on a
+  (`ops.stream_starting`: the request ahead of the answer). A Live call
+  holds active for the whole call, and its stream (`keep_open`) keeps the
+  normal start whatever the link. `test_mg_ble` replays the trace on a
   modeled link (connection events, slave latency skipped unless a
   notification is pending, three writes an event): the 7.7 KB reply written
   in 65 ms on a 30 ms / latency 5 link, active granted after 0.9 s, plays
@@ -733,7 +815,7 @@ Voice PE doesn't offer it yet.
   reply): active throughout, the reply at the normal start, 0 underruns,
   ready 5 s after it played.
 - **Adaptive start** (`mg_play_t.start_us`,
-  `mg_play.h`): per connection, a reply starts at
+  `mg_play.h`): per connection, a reply outside a Live call starts at
   30 ms held at connect. One that underran in its first second of audio
   (`MG_PLAY_EARLY_US`, from its first audio; `st.early_underruns`) makes the
   next one start 20 ms higher (`MG_PLAY_START_STEP_UP_US`), up to the live
@@ -741,15 +823,51 @@ Voice PE doesn't offer it yet.
   clean reply (no underrun at all) eases it back 10 ms
   (`MG_PLAY_START_STEP_DOWN_US`), never below 30 ms; a reply with only later
   underruns leaves it. It's judged when the next stream starts, on the one
-  before if that played audio; `mg_play_live_forget()`
-  (a new connection) resets it, and the last link's reply isn't judged. The
-  slow link's 150 ms start is unchanged. Each move is logged at the new stream's start, `mg.play: start
+  before if that played audio and wasn't a call's; `mg_play_live_forget()`
+  (a new connection) resets it, and the last link's reply isn't judged. A
+  Live call's stream keeps 30 ms and the slow link's 150 ms start is
+  unchanged. Each move is logged at the new stream's start, `mg.play: start
   threshold 50 ms (early underrun last reply)` (`clean reply` going down);
   early underruns still count as underruns, and the `av play end` line adds
   `early=N`, so app-side gaps still show on the bench. `test_mg_play`: an
   underrun in a reply's first second raises the next start 20 ms, clean
-  replies lower it, it stops at the floor, a later underrun leaves it, and
-  a new connection resets it.
+  replies lower it, it stops at the floor, a later underrun leaves it, a
+  call's stream is neither judged nor raised, and a new connection resets
+  it.
+- **One reply stream per Live call** (mgcommands.h "Live reply audio"): the app opens stream_audio once (at live or the first
+  reply) and keeps it open to the call's end, writing nothing between
+  replies. A stream started while the call is connecting or live is kept
+  open (`mg_play_t.keep_open`, also set and cleared as the call's state
+  changes): silence after the concealment fade however long it runs empty,
+  the next reply's first frame at the next chunk (10 ms, then the 30 ms
+  DMA), no re-buffering. It ends on stop_streaming or a disconnect: the
+  device ends a call's stream only when it can't go on (mgcommands.h). **The device's own sound in a call** (a chirp, the Sound
+  page's test, the MP3 or loopback test, a saved note going out: whatever
+  takes the speaker through `mg_proto_claim_audio`) pauses the call's
+  stream and resumes it after: what it holds stays
+  (no flush, nothing lost), Data and credits go on as usual (the call's
+  live depth, where asked, bounds what piles up), a start_streaming meanwhile is taken and
+  waits the same way (`mg_proto_play_held`), and the playback task logs
+  `paused for the device's sound (N ms kept)` / `resumed after the device's
+  sound`. It pauses rather than ducks: no ESP32 board mixes two sources in
+  its output path (the reply's player and the voice loop each write the
+  speaker). Outside a call the sound still ends a reply (stop_streaming
+  drop) and refuses a start as busy. The call's end only clears keep_open, so a stream the client
+  leaves starved after the call ends 10 s later as any other. A talk
+  press barges in by flushing it, never ending it (`mg_proto_claim_turn`,
+  the same as a flush below, with its buffer_update): the app keeps the
+  stream and never reopens it, so ending it would lose every later reply;
+  the next reply's audio, written during the turn, waits for the turn and
+  its tail and then plays. Outside a call a press still ends the stream
+  (stop_streaming drop). A mid-call mute is the app's (it stops writing and
+  flushes; the gadget's speaker_volume report starts it). "Playing" for the speaking face, the panel hold and
+  "playback over" is audio playing (`mg_play_audible` / `mg_voice_audible`:
+  the stream holds some, or played decoded audio within 300 ms of its
+  clock), not the stream open (`mg_voice_playing`, which keeps the codecs
+  from resting so the next reply starts at once). The `av play` line runs
+  while the stream is open. An empty ring between replies grants the whole
+  ring, or with a live depth the depth less the DMA's 30 ms (plus what's
+  measured in flight and the allowance).
 - **Flush (`mg_stream_audio_flush` = 6, capability 6 = 1, listed):**
   barge-in. Handled where the Control write is (the NimBLE host task, like
   Data), so in order with the Data writes around it: Data before it goes,
@@ -867,6 +985,13 @@ Voice PE doesn't offer it yet.
   ESP-Mosaico lists it only on battery (`power_off_battery_only`: USB holds
   its latch on). Unknown commands and actions get
   `[error, cmd, code, unsupported]`, never silence.
+- **What a board can draw:** Live call (0x85) and subtitles (0x87)
+  draw into PSRAM buffers, so a board without PSRAM (the Waveshare C6) neither
+  lists nor accepts them (`board_draws_calls()` in `main/mg_glue.c`;
+  `mg_ble_live_call_offered()` tells the UI), and subtitles drop out of the
+  list while their band's buffers aren't allocated
+  (`mg_ble_platform_t.subtitle_ready`). Video (0x84) is listed only with a
+  `draw_frame` panel and its ring allocated.
 - **A phone's indications:** the Muse boards build NimBLE without the
   central role, so without its GATT client, which leaves an incoming Handle
   Value Indication (a phone's Service Changed right after connecting) with
@@ -886,7 +1011,7 @@ Voice PE doesn't offer it yet.
   kept, Data and credits going on, no underrun counted; a client's stop or
   flush still applies), a tap resumes it from the sample it paused at
   (`mg.play: paused at the talk press (N ms kept)` / `resumed after the talk
-  press`), and the hold threshold claims the turn (stop_streaming drop, or a flush); a pause nobody
+  press`), and the hold threshold claims the turn (stop_streaming drop, or the call's flush); a pause nobody
   ends lapses after 1.5 s (`test_mg_ble`'s barge pause, `test_muse_ptt_ui`'s
   touch-down cases). The touch-down also silences what the speaker's I2S
   DMA already held (~30 ms, which played into the pre-roll: +5.1 dB over
@@ -900,7 +1025,7 @@ Voice PE doesn't offer it yet.
   and a hold's claim, a client's flush or drop
   discards them (`paused at the talk press (N ms kept, M ms back from the
   speaker)`; `test_muse_audio_tx` against a model of ESP-IDF's TX driver,
-  `test_muse_spk_dsp`'s barge through the chain). Every board
+  `test_muse_spk_dsp`'s barge through the chain, `test_mg_ble`'s barge DMA clear). Every board
   with a speaker attaches its TX channel
   (`muse_audio_attach_tx`, before `i2s_channel_enable`).
 - **Speaker volume:** `mg_setting_parameter_speaker_volume` (10) is the
@@ -913,8 +1038,8 @@ Voice PE doesn't offer it yet.
   in RAM only, never saved: `vol=saved` or a reboot puts the saved volume
   back, and a user's or a client's change ends it (the saved values back,
   then that change saved); `vol?` reads both (`@vol N saved M`).
-  `mg_ble_client.py play --volume` sets a run's volume this way and puts it
-  back. The gadget shows every
+  `mg_ble_client.py play --volume` and `av60.py --volume`
+  set a run's volume this way and put it back. The gadget shows every
   change it didn't make: a client's set opens the volume overlay
   with "Set by phone" (a console's `vol=`: "Set by bench"), and muted shows
   in the top row and on the Sound page for as long as it lasts

@@ -25,3 +25,10 @@ void mg_ble_update_ui_clear(void);
 const char *mg_ble_update_stop_text(void);
 void mg_ble_update_ui_shown(uint8_t state);
 bool mg_ble_ptt_ready(void);
+/* Live call (muse_call.c; the simulator's sim_stubs.c defines them). */
+void mg_ble_live_call(bool start);
+uint8_t mg_ble_live_call_failure_reason(void);
+bool mg_ble_live_call_unproven(void);
+void mg_ble_live_call_held(bool held);
+bool mg_ble_live_call_offered(void);
+bool mg_ble_live_call_client(void);

@@ -46,7 +46,7 @@ float muse_state_idle_secs(void) { return idle_s; }
 static bool own_turn;   /* The turn is the gadget's own (its talk press) */
 void muse_state_set_own_turn(bool v) { own_turn=v; }
 bool muse_state_own_turn(void) { return own_turn; }
-static bool reply_hold;   /* A client's stream_audio reaching the speaker */
+static bool reply_hold;   /* A client's stream_audio reaching the speaker, or subtitles' band on screen */
 bool muse_voice_reply_holds_panel(void) { return reply_hold; }
 void muse_state_set_caption(const char *fmt,...) {
     va_list ap; va_start(ap,fmt); vsnprintf(caption,sizeof(caption),fmt,ap); va_end(ap);

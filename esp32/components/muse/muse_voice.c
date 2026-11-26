@@ -64,6 +64,36 @@
 #endif
 
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#include "muse_subs.h"   /* the band on screen holds the panel */
+/* Walkie-talkie. In a call (asked, connecting
+ * or live) the mic opens only while the user holds talk, with the ring, and
+ * that hold is the call's speech, never a turn; a client's start_mic during
+ * a call and 3 s after is ignored (mg_proto). */
+__attribute__((unused)) static bool call_pending(void)
+{
+    muse_call_phase_t ph = muse_call_phase(NULL);
+    return ph == MUSE_CALL_ASKED || ph == MUSE_CALL_CONNECTING;
+}
+__attribute__((unused)) static bool call_on(void)
+{
+    /* A call's capture, or one that starts within 3 s after a call ended
+     * (narrowed): not a turn. Other client captures may be an
+     * app-driven turn, as before. */
+    return muse_call_active() || muse_call_ended_within(3000);
+}
+#else
+__attribute__((unused)) static bool call_pending(void)
+{
+    return false;
+}
+__attribute__((unused)) static bool call_on(void)
+{
+    return false;
+}
+#endif
+
 static const char *TAG = "muse_voice";
 
 /* Where the voice task is, for a stuck-task report from the input task
@@ -345,6 +375,11 @@ bool muse_voice_reply_holds_panel(void)
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
     if (mg_voice_audible()) {
         return true;   /* a client's reply audio reaching the speaker (not an open stream's silence) */
+    }
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_subs_band_holds()) {
+        return true;   /* its words on screen (the owner's: an unproven central's band never holds it) */
     }
 #endif
     return false;
@@ -643,6 +678,9 @@ static void barge_resume(void)
         s_barge_owed = false;
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
         mg_voice_barge_pause(false);
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        muse_subs_talk_pause(false);   /* the reply's subtitles go on with its audio */
 #endif
     }
 }
@@ -2251,7 +2289,7 @@ static void face_show(face_t face)
 /* Applies the client's state, playback and timeouts. */
 static void face_update(void)
 {
-    bool playing = mg_voice_audible();   /* audio playing, not the stream open (a stream can stay open between replies) */
+    bool playing = mg_voice_audible();   /* audio playing, not the stream open (a Live call keeps one open) */
     if (playing != s_face_playing) {
         s_face_playing = playing;
         if (playing) {
@@ -2274,6 +2312,11 @@ static void face_update(void)
         s_face_pending = -1;
         switch (pending) {
         case mg_assistant_state_thinking:
+            if (call_on()) {
+                /* A call (or the 3 s after one) is never a turn. */
+                mg_voice_face("thinking ignored: a call's capture");
+                break;
+            }
             face_show(FACE_THINKING);
             break;
         case mg_assistant_state_responding:
@@ -2331,16 +2374,22 @@ static void mg_turn(mg_route_t route, bool from_client, bool barge_in, bool wake
 {
     (void)wake;   /* a waking press passed the hold threshold too */
     bool ble = route == MG_ROUTE_BLE || route == MG_ROUTE_HELD;   /* a held live turn is a BLE turn */
+    /* A call's capture is never a talk turn, the user's own talk hold in a call included (it's the call's
+     * speech): no listening face, no own turn, no turn face after it (the call screen has the display; nothing
+     * is left latched once the hold and the call end). */
+    bool in_call = call_on();
     /* A press's turn keeps the panel lit until it's done; a client's
      * start_mic is the phone's turn, but its capture wakes a dark panel:
      * the ring shows whenever the mic captures for the app. */
-    muse_state_set_own_turn(!from_client);
+    muse_state_set_own_turn(!from_client && !in_call);
     if (from_client) {
         muse_input_wake("start_mic");
     }
-    set_mode(MUSE_MODE_LISTENING);
-    muse_state_set_progress(0);
-    muse_state_set_caption(ble ? "" : "Recording for later");
+    if (!in_call) {
+        set_mode(MUSE_MODE_LISTENING);
+        muse_state_set_progress(0);
+        muse_state_set_caption(ble ? "" : "Recording for later");
+    }
     if (!mg_voice_begin(route, from_client)) {
         go_idle(ble ? "Open Muse app" : "Couldn't record");
         return;
@@ -2419,20 +2468,27 @@ static void mg_turn(mg_route_t route, bool from_client, bool barge_in, bool wake
              unsent ? "not sent (nothing heard)" : ble ? "sent to the BLE client" : "queued for the BLE client",
              (double)n / MUSE_AUDIO_RATE + (double)held / MUSE_AUDIO_RATE);
     muse_state_set_progress(0);
-    if (unsent) {
+    if (unsent && !call_on()) {
         /* No turn reached the client: no thinking face, the idle one with
          * why (a reply paused at the touch-down plays on, as after a tap). */
         s_face = FACE_NONE;
         go_idle(CAPTION_NOTHING_HEARD);
+    } else if (unsent) {
+        /* A talk hold in a call that never rose: nothing went; the call's face stays. */
     } else if (!ble) {
         /* Saved to the queue with nobody to answer: that's the end of it. */
         s_face = FACE_NONE;
         make_happy();
         go_idle("Saved for your phone");
-    } else if (!from_client) {
+    } else if (!from_client && !call_on()) {
         /* The utterance is with the assistant now; assistant_state takes it from here. */
         s_face_pending = -1;
         face_show(FACE_THINKING);
+    } else if (!from_client) {
+        /* A talk hold in a call (connecting, live, or just ended): the call's
+         * speech, never a turn; the face stays as it was. */
+    } else if (in_call || call_on()) {
+        /* A call's capture: not a turn; the face stays as it was. */
     } else {
         /* A capture the client drove: it sends thinking itself if a turn follows. */
         face_show(s_face);
@@ -2475,12 +2531,21 @@ static void claim_audio(bool claim)
 static void claim_turn(void)
 {
     s_barge_owed = false;   /* the turn ends the press's pause (mg_proto_claim_turn) */
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_talk_press();   /* the user talks over the reply: its subtitles go now */
+#endif
     set_claim(2);
 }
 #define client_playing() mg_voice_playing()
 #else
 #define claim_audio(claim) ((void)0)
-#define claim_turn() (s_barge_owed = false)
+static void claim_turn(void)
+{
+    s_barge_owed = false;
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    muse_subs_talk_press();   /* the user talks over the reply: its subtitles go now */
+#endif
+}
 #define client_playing() false
 #endif
 

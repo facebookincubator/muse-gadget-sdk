@@ -125,7 +125,7 @@ typedef struct {
     /* A small speaker that needs speech made loud for it: the speech
      * loudness chain (muse_spk_dsp.h: 700 Hz high-pass, compressor, -1 dBFS
      * limiter) on everything it plays, the musegadgets player's replies
-     * (stream_audio and push-to-talk) and the device's own sounds
+     * (stream_audio, push-to-talk and Live call) and the device's own sounds
      * (muse_audio_write). The ESP-Mosaico (its volume curve tops at DAC -5
      * dB, the amp's clip). false: audio reaches the codec as it comes. */
     bool speaker_speech_chain;

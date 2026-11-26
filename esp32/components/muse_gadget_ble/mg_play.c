@@ -186,12 +186,12 @@ uint32_t mg_play_start_threshold_us(const mg_play_t *p)
     return p->start_us > MG_PLAY_PREBUFFER_US ? p->start_us : MG_PLAY_PREBUFFER_US;
 }
 
-/* Adaptive start: judges the stream that just ended (it played audio on this link). */
+/* Adaptive start: judges the stream that just ended (it played audio outside a call, on this link). */
 static void adapt_start(mg_play_t *p)
 {
     bool skip = p->start_skip;
     p->start_skip = false;
-    if (skip || !p->st.frames_popped) {
+    if (skip || p->stream_call || !p->st.frames_popped) {
         return;
     }
     uint32_t cur = mg_play_start_threshold_us(p), next = cur;
@@ -215,6 +215,7 @@ bool mg_play_start(mg_play_t *p, const mg_play_params_t *params)
         return false;
     }
     adapt_start(p);
+    p->stream_call = false;
     p->play_at_us = 0;
     p->params = *params;
     p->head = p->len = p->buffered_us = p->pending_us = 0;
@@ -279,7 +280,7 @@ uint32_t mg_play_available(const mg_play_t *p)
     return p->state == MG_PLAY_PREBUFFER || p->state == MG_PLAY_PLAYING ? p->size - p->len : 0;
 }
 
-/* The stream's bytes per second, for the live depth's credit. */
+/* The stream's bytes per second, for the call's credit. */
 static uint64_t stream_bytes_per_s(const mg_play_t *p)
 {
     const mg_play_params_t *pp = &p->params;
@@ -495,6 +496,10 @@ static bool front_frame(const mg_play_t *p, uint32_t off, size_t *bytes, uint32_
 static uint32_t silence(mg_play_t *p, uint32_t chunk_us)
 {
     p->st.silence_us += chunk_us;
+    if (p->keep_open) {
+        p->starve_us = 0;   /* a Live call's stream: open until stop_streaming, a disconnect or the call's end */
+        return 0;
+    }
     p->starve_us += chunk_us;
     if (p->starve_us >= MG_PLAY_STARVE_END_US) {
         /* The client stopped sending without stop_streaming: end it (drop). */
@@ -518,9 +523,10 @@ size_t mg_play_pop(mg_play_t *p, uint8_t *out, size_t cap, uint32_t chunk_us)
         /* Only at the start: a gap later is concealed, never re-buffered. On a link that isn't active
          * the start is 150 ms, or the clip's end of data when it's shorter (no data for 100 ms). */
         if (p->len < p->size / 2) {
-            bool slow = p->slow_link && !p->live_us;   /* a live stream paces live */
-            /* Adaptive start: a reply starts at start_us. */
-            uint32_t need = slow ? MG_PLAY_SLOW_START_US : mg_play_start_threshold_us(p);
+            bool slow = p->slow_link && !p->keep_open && !p->live_us;   /* a live stream paces live */
+            /* Adaptive start: a reply outside a call starts at start_us; a call's at 30 ms. */
+            uint32_t need = slow ? MG_PLAY_SLOW_START_US : p->keep_open ? MG_PLAY_PREBUFFER_US
+                                                                        : mg_play_start_threshold_us(p);
             if (p->live_us) {
                 /* A live stream's credit lets the buffer reach its depth less the output path, no more when
                  * nothing is in flight: a start that needs more would wait for bytes it never grants. */
@@ -543,7 +549,7 @@ size_t mg_play_pop(mg_play_t *p, uint8_t *out, size_t cap, uint32_t chunk_us)
         return 0;
     }
     bool anchored = false;   /* this chunk starts a reply an anchor held or released: its gap isn't an underrun */
-    /* A reply's first audio (the stream's, or after the gap between replies) with video showing and no
+    /* A reply's first audio (the stream's, or after the gap between replies) with call video showing and no
      * anchor yet: wait up to MG_PLAY_ANCHOR_WAIT_US for one. */
     if (!p->anchor_on && p->len && p->shown32 && (p->pre_holding || reply_start(p, at))) {
         uint32_t shown = 0;
@@ -598,6 +604,9 @@ size_t mg_play_pop(mg_play_t *p, uint8_t *out, size_t cap, uint32_t chunk_us)
         n += fb;
         got_us += us;
         p->st.frames_popped++;
+    }
+    if (p->keep_open) {
+        p->stream_call = true;   /* a Live call's stream: not judged by the adaptive start */
     }
     if (n) {
         /* Back from a gap: an underrun if it was short; one of MG_PLAY_IDLE_US or more was the space

@@ -197,3 +197,11 @@ phone, so the encoder's references never break. Latency, capture to shown,
 comes from the gadget's echo of the last frame it drew (`LatencyMeter.java`;
 logcat `latency capture->shown ...` each second). The screen shows the link
 and both sides' rates; logcat tag `MuseCam` has the same each second.
+
+### Live call
+
+Live call (a video call with your Muse, started from a gadget) is in the
+Muse app only, on the app's own sign-in. This app doesn't implement it. A
+gadget's side of it (`mg_command_live_call`, video and subtitles in
+[`../../protocols/mgcommands.h`](../../protocols/mgcommands.h)) is tested
+with the Muse app.

@@ -200,6 +200,7 @@ def gen_fonts():
 # Material Icons (filled, 24x24 viewBox; https://github.com/google/material-design-icons,
 # Apache License 2.0): the standard glyphs every Muse Gadget draws.
 ICON_PATHS = {
+    "add": "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
     "battery": (
         "M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 "
         "1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"),
@@ -207,6 +208,17 @@ ICON_PATHS = {
         "M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 "
         "14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 "
         "18.17v-3.76l1.88 1.88z"),
+    "call": (
+        "M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 "
+        "2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 "
+        "1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"),
+    "call_end": (
+        "M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 "
+        "1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 "
+        "0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 "
+        ".28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 "
+        "0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 "
+        "9 12 9z"),
     "charging": (
         "M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 "
         "3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"),
@@ -236,6 +248,7 @@ ICON_PATHS = {
         "M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 "
         "7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 "
         "9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"),
+    "remove": "M19 13H5v-2h14v2z",
     "touch": (
         "M9,11.24V7.5C9,6.12,10.12,5,11.5,5S14,6.12,14,7.5v3.74c1.21-0.81,2-2.18,2-3.74C16,5.01,13.99,3,11.5,3S7,5.01,7,7.5 "
         "C7,9.06,7.79,10.43,9,11.24z "
@@ -272,9 +285,10 @@ EXTRA_PATHS = {
                   "10.41 7 14 10.59 17.59 7 19 8.41 15.41 12 19 15.59z"),
 }
 SQUARE = [   # (px, names)
-    (36, ["volume_up", "volume_off"]),                       # 52 % of a 72 px button
-    (42, ["volume_up", "volume_off"]),                       # 81 px
-    (48, ["volume_up", "volume_off"]),                       # 92-95 px
+    (36, ["call", "call_end", "volume_up", "volume_off"]),   # 52 % of a 72 px button
+    (42, ["call", "call_end", "volume_up", "volume_off"]),   # 81 px
+    (48, ["call", "call_end", "volume_up", "volume_off"]),   # 92-95 px
+    (28, ["call_end", "add", "remove"]),                     # call controls
     (32, ["mic", "volume_up", "volume_off", "power"]),       # StopWatch rim hints
     # The charging bolt, an 18 px box at 360 (5 % of S)
     (18, ["charging"]), (21, ["charging"]), (23, ["charging"]), (24, ["charging"]),
@@ -285,8 +299,10 @@ SQUARE = [   # (px, names)
     (45, ["lock"]), (51, ["lock"]), (53, ["lock"]), (27, ["backspace"]), (32, ["backspace"]),
     (33, ["backspace"]),
 ]
-MENU = ["volume_up", "display", "mic", "battery", "bluetooth", "wifi", "home", "info", "power",
-        "developer", "videocam", "lock", "touch"]
+# The Live call's own icons: behind MUSE_ICON_CALLS too (muse_icons.c), so a build without Live call carries none.
+CALL_ICONS = {"call", "call_end", "add", "remove"}
+MENU = ["call", "volume_up", "display", "mic", "battery", "bluetooth", "wifi", "home", "info", "power",
+        "developer", "videocam", "add", "remove", "lock", "touch"]
 # 24 s on the other boards (MUSE_ICON_MENU in muse_icons.c: 20, 21, 24); the four
 # catalog boards' icon box grown to its minimum physical size: 29 StopWatch, 28 Watcher, 35 ESP-Mosaico, 32 C6 1.8
 MENU_PX = [20, 21, 24, 28, 29, 32, 35]
@@ -317,11 +333,12 @@ def gen_icons():
     out = ["/*",
            " * Muse Gadgets standard icons, generated from Material Icons",
            " * by tools/muse/gen_ui_assets.py --icons at the drawn sizes:",
-           " * button glyphs 36/42/48 px (52 % of a 72/81/92 px button),",
+           " * button glyphs 36/42/48 px (52 % of a 72/81/92 px button), call controls 28 px,",
            " * menu-row glyphs %s px, the StopWatch rim hints 32 px, and the top" % "/".join(map(str, MENU_PX)),
            " * row's Wi-Fi, Bluetooth and muted speaker cropped to their ink at 14/16/18 px tall, each behind",
-           " * MUSE_ICON_PX (buttons, hints), MUSE_ICON_MENU (menu rows) or",
-           " * MUSE_ICON_INK (muse_icons.c: a board compiles its own). Material Icons",
+           " * MUSE_ICON_PX (buttons, call controls, hints), MUSE_ICON_MENU (menu rows) or",
+           " * MUSE_ICON_INK (muse_icons.c: a board compiles its own), the Live call's",
+           " * own (call, call_end, add, remove) behind MUSE_ICON_CALLS too. Material Icons",
            " * (https://github.com/google/material-design-icons), Apache License 2.0;",
            " * `home` is Material's, redrawn for the Muse row; `lock` and `backspace`",
            " * Material's, redrawn for the passcode lock. Don't edit: regenerate.",
@@ -346,6 +363,8 @@ def gen_icons():
         for px in sorted(sq[n]):
             data = list(mask(n, px).tobytes())
             guards[(n, px)] = " || ".join(why[(n, px)])
+            if n in CALL_ICONS:
+                guards[(n, px)] = "MUSE_ICON_CALLS && (%s)" % guards[(n, px)]
             out.append("#if %s" % guards[(n, px)])
             out.append("static const uint8_t muse_icon_%s_%d[%d * %d] = {" % (n, px, px, px))
             for i in range(0, len(data), px):

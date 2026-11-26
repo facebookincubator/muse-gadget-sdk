@@ -49,6 +49,9 @@
 #include "muse_ui.h"
 #include "noise_control.h"
 #include "muse_voice.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#endif
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
@@ -374,12 +377,60 @@ static uint16_t *face_render(const uint8_t *jpeg, size_t len, face_size_t size, 
     return px;
 }
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+/* The picture as it came, at the panel's size (no Size,
+ * no scrim), for the calling screen, which shows it at 40 % behind
+ * "Calling…": all avatar, no dark bands where the home's clock sits. Made
+ * beside each face_render() (PSRAM, the worker's), handed to muse_ui by
+ * face_apply(). */
+static uint16_t *s_plain FACE_PSRAM_BSS;
+static void face_plain_render(const uint8_t *jpeg, size_t len)
+{
+    free(s_plain);
+    int w = muse_board->width, h = muse_board->height, iw, ih, sc;
+    s_plain = FACE_MALLOC((size_t)w * h * sizeof(uint16_t));
+    if (s_plain && mg_face_jpeg_decode(jpeg, len, s_plain, w, h, &iw, &ih, &sc)) {
+        free(s_plain);
+        s_plain = NULL;
+    }
+}
+static void face_plain_apply(bool show)
+{
+    if (show && s_plain) {
+        muse_ui_face_plain_set(s_plain);   /* takes it */
+    } else {
+        free(s_plain);
+        if (!show) {
+            muse_ui_face_plain_set(NULL);   /* the pixel face or no picture: the calling screen stays black */
+        }
+    }
+    s_plain = NULL;
+}
+static void face_plain_drop(void)
+{
+    free(s_plain);
+    s_plain = NULL;
+}
+#else
+static void face_plain_render(const uint8_t *jpeg, size_t len)
+{
+    (void)jpeg;
+    (void)len;
+}
+static void face_plain_apply(bool show)
+{
+    (void)show;
+}
+static void face_plain_drop(void) {}
+#endif
+
 /* What shows now: the avatar face over the picture, or the default. */
 static void face_apply(uint16_t *rendered)
 {
     taskENTER_CRITICAL(&s_mux);
     bool show = face_avatar_shown(s_pick, s_have);
     taskEXIT_CRITICAL(&s_mux);
+    face_plain_apply(show && rendered);
     if (show && rendered) {
         muse_ui_face_bg_set(rendered);   /* takes it */
         s_shown = true;
@@ -410,6 +461,7 @@ static void face_show_stored(void)
     const char *why;
     int iw, ih, sc;
     uint16_t *px = face_render(jpeg, hdr.jpeg_len, size_now(), &why, &iw, &ih, &sc);
+    face_plain_render(jpeg, hdr.jpeg_len);
     free(blob);
     if (!px) {
         ESP_LOGW(TAG, "stored picture not drawn: %s", why);
@@ -435,10 +487,12 @@ static void face_boot_load(void)
     int iw = 0, ih = 0, sc = 1;
     if (c == FACE_REC_OK) {
         px = face_render(jpeg, hdr.jpeg_len, size_now(), &why, &iw, &ih, &sc);
+        face_plain_render(jpeg, hdr.jpeg_len);
     }
     free(blob);
     if (c != FACE_REC_OK || (!px && why && strcmp(why, "out of memory") != 0)) {
         ESP_LOGW(TAG, "stored picture damaged (%s): erasing it", c != FACE_REC_OK ? face_rec_check_name(c) : why);
+        face_plain_drop();
         rec_erase("damaged");
         name_save("");
         s_name[0] = '\0';
@@ -660,6 +714,7 @@ static const char *fetch_store(const face_head_t *probe, uint32_t *out_len, int 
         free(jpeg);
         return why;
     }
+    face_plain_render(jpeg, total);
     size_t cap = sizeof(face_rec_t) + total;
     uint8_t *blob = FACE_MALLOC(cap);
     size_t blen = blob ? face_rec_build(blob, cap, jpeg, total, iw, ih, etag, s_node, s_name) : 0;
@@ -672,6 +727,7 @@ static const char *fetch_store(const face_head_t *probe, uint32_t *out_len, int 
     if (!blen || !rec_write(blob, blen)) {
         free(blob);
         free(px);
+        face_plain_drop();   /* not stored: the old picture's plain one stays with muse_ui */
         return "couldn't store it (the old picture is kept)";
     }
     if (face_forgot()) {
@@ -807,6 +863,7 @@ static void face_forget_now(void)
         muse_ui_face_bg_set(NULL);
         s_shown = false;
     }
+    face_plain_apply(false);
 }
 
 /* A Size change (Settings or the console): saved, and the stored picture
@@ -829,6 +886,9 @@ static void face_size_changed(void)
 static bool face_busy_elsewhere(void)
 {
     bool busy = muse_voice_in_call();
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    busy = busy || muse_call_active();
+#endif
 #if CONFIG_MUSE_VIDEO
     busy = busy || muse_video_decoding();
 #endif
@@ -1144,6 +1204,9 @@ void mg_face_pick(bool avatar)
     ESP_LOGI(TAG, "face picked: %s", avatar ? "avatar" : "pixel");
     if (!avatar) {
         muse_ui_face_bg_set(NULL);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+        muse_ui_face_plain_set(NULL);   /* any task; s_plain stays the worker's */
+#endif
     }
     atomic_store(&s_pick_dirty, true);
     face_kick();

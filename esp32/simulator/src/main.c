@@ -34,6 +34,7 @@
 
 #include "mgcommands.h"
 #include "muse_board.h"
+#include "muse_call.h"
 #include "muse_home.h"
 #include "muse_link.h"
 #include "muse_mic_ring.h"
@@ -42,6 +43,7 @@
 #include "muse_settings.h"
 #include "muse_passcode.h"
 #include "muse_settings_ui.h"
+#include "muse_subs.h"
 #include "muse_ui.h"
 #include "muse_options.h"
 #include "mg_haptic_test.h"
@@ -75,6 +77,10 @@ static void usage(FILE *out, const char *argv0)
             "Scenario lines are key=value. Supported keys:\n"
             "  face=boot|idle|listening|thinking|speaking|error|off|happy\n"
             "  caption=TEXT       level=0..1        progress=0..1\n"
+            "  subs=TEXT|off      subs.more=TEXT    subs.ms=N (a muted reply's subtitles)\n"
+            "  subs.unproven=true|false (the next subtitles come from an unproven central)\n"
+            "  subs.holds=1       (@holds 0|1: the band holds the panel lit)\n"
+            "  reconfirm=true|false (link=confirm is a re-setup's prompt: @confirm on Confirm, @dismiss on a swipe)\n"
             "  battery=-1..100    battery_mv=MV     usb=true|false\n"
             "  charging=true|false                  asleep=true|false\n"
             "  wifi=off|no_network|connecting|connected|failed|not_nearby\n"
@@ -86,6 +92,7 @@ static void usage(FILE *out, const char *argv0)
             "  bench.out=true|false (the bench switch on for the central: \"Bench\" in the top row)\n"
             "  talk=both|screen|button (Settings > Talk)\n"
             "  call=true|false    (a Wi-Fi voice call: muse_voice_in_call, muted reply captions)\n"
+            "  call=asked|end|idle|connecting|live|ended|failed|available|unavailable (Live call)\n"
             "  tap=X,Y            (a finger down and up there)\n"
             "  sdk_token=true|false (false: a gadget without its SDK token)\n"
             "  developer=true|false (Developer mode)\n"
@@ -102,6 +109,7 @@ static void usage(FILE *out, const char *argv0)
             "  vib=WORD           (a console vib word: vib=pulse,50 / vib=preset,ring / vib=stop / vib?)\n"
             "  update=true|false  turn=true|false (the haptics gates)\n"
             "  dump=1             (the settings page on show and its visible labels)\n"
+            "  dump=all|sys|every (also the top layer, the system layer, or both)\n"
             "\n"
             "Interactive keys: F1..F7 select face states, H is happy, Space is\n"
             "push-to-talk, +/- change level, [/] change progress, S sleeps,\n"
@@ -124,6 +132,7 @@ static void render_for(uint32_t duration_ms, bool real_time)
             step = FRAME_STEP_MS;
         }
         sim_time_advance_us((int64_t)step * 1000);
+        muse_call_poll();   /* the input task's part: a call no one answers */
         sim_haptics_poll(); /* the haptics engine's timer */
         lv_timer_handler();
         if (real_time) {
@@ -680,6 +689,68 @@ static void bench_dot(int n)
            pixels * 100.0 / all, full, step, step * 100.0 / full, paint, 12.5 * step * 100.0 / full);
 }
 
+/* subs=TEXT: a muted reply as the phone sends it: state 1 in ms
+ * timing, the playout clock from 0, the words subs.ms=N apart (0: all at
+ * once), in messages of up to 60 words; subs.more=TEXT: the same reply's
+ * next words, shown at once (a reply streaming in, to watch it scroll);
+ * subs=off: state 0. */
+static int s_subs_ms;
+static uint16_t s_subs_reply = 2000;
+static uint16_t s_subs_off;
+static bool s_subs_gap;   /* the last word had no space after it (a scenario line's end is trimmed) */
+static bool s_subs_unproven;   /* subs.unproven=true: from a central whose token proof didn't match */
+static void sim_subs_words(const char *text)
+{
+    if (s_subs_gap) {
+        s_subs_off++;   /* the reply's text has the space there: the offsets' gap says so */
+    }
+    mg_subs_word_t words[60];
+    const char *p = text;
+    int index = 0;
+    while (*p) {
+        int count = 0;
+        uint16_t off = s_subs_off;
+        while (*p && count < 60) {
+            const char *e = p;
+            while (*e && *e != ' ') e++;
+            while (*e == ' ') e++;
+            int len = (int)(e - p);
+            words[count].utf8 = (const uint8_t *)p;
+            words[count].len = (uint8_t)(len > 255 ? 255 : len);
+            words[count].show_at = s_subs_ms > 0 ? (uint32_t)(index * s_subs_ms) : 0xFFFFFFFFu;
+            s_subs_off = (uint16_t)(s_subs_off + words[count].len);
+            s_subs_gap = len == 0 || p[len - 1] != ' ';
+            count++;
+            index++;
+            p = e;
+        }
+        mg_subs_event_t w = { .sub = 3, .reply_id = s_subs_reply, .flags = 0, .char_offset = off,
+                              .count = (uint8_t)count, .words = words, .proven = !s_subs_unproven };
+        muse_subs_event(&w);
+    }
+}
+
+static void sim_subs(const char *text, bool more)
+{
+    if (!strcmp(text, "off")) {
+        mg_subs_event_t st = { .sub = 2, .active = 0, .timing = 1, .proven = !s_subs_unproven };
+        muse_subs_event(&st);
+        return;
+    }
+    if (!more) {
+        s_subs_reply++;
+        s_subs_off = 0;
+        s_subs_gap = false;
+        mg_subs_event_t st = { .sub = 2, .active = 1, .timing = 1, .proven = !s_subs_unproven };
+        muse_subs_event(&st);
+    }
+    sim_subs_words(text);
+    if (!more) {
+        mg_subs_event_t clk = { .sub = 6, .reply_id = s_subs_reply, .playout_ms = 0, .proven = !s_subs_unproven };
+        muse_subs_event(&clk);
+    }
+}
+
 static bool apply_setting(const char *key, const char *value, bool real_time)
 {
     bool flag;
@@ -803,6 +874,27 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
     if (!strcmp(key, "image")) {
         return draw_test_image(value);
     }
+    if (!strcmp(key, "subs") || !strcmp(key, "subs.more")) {
+        sim_subs(value, key[4] == '.');
+        return true;
+    }
+    if (!strcmp(key, "subs.unproven") && parse_bool(value, &flag)) {
+        s_subs_unproven = flag;
+        return true;
+    }
+    if (!strcmp(key, "subs.holds")) {
+        printf("@holds %d\n", muse_subs_band_holds() ? 1 : 0);
+        return true;
+    }
+    if (!strcmp(key, "reconfirm") && parse_bool(value, &flag)) {
+        extern bool g_sim_reconfirm;
+        g_sim_reconfirm = flag;
+        return true;
+    }
+    if (!strcmp(key, "subs.ms") && parse_long(value, 0, 10000, &number)) {
+        s_subs_ms = (int)number;
+        return true;
+    }
     if (!strcmp(key, "clock")) {
         /* "10:09", "22:09/24", or "none" (never synced). */
         int hh, mm;
@@ -813,6 +905,38 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
         if (sscanf(value, "%d:%d", &hh, &mm) == 2 && hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
             sim_stubs_set_clock(hh, mm, strstr(value, "/24") != NULL);
             return true;
+        }
+        return false;
+    }
+    if (!strcmp(key, "call")) {
+        /* The production muse_call.c: the user asks for or ends a call, the
+         * client (the phone) answers with its states, or the client that can
+         * take a call goes and comes back. */
+        static const struct {
+            const char *name;
+            int state;
+        } CLIENT[] = {
+            { "idle", mg_live_call_state_idle },     { "connecting", mg_live_call_state_connecting },
+            { "live", mg_live_call_state_live },     { "ended", mg_live_call_state_ended },
+            { "failed", mg_live_call_state_failed },
+        };
+        if (!strcmp(value, "asked")) {
+            muse_call_start_from("scenario");
+            return true;
+        }
+        if (!strcmp(value, "end")) {
+            muse_call_end();
+            return true;
+        }
+        if (!strcmp(value, "unavailable") || !strcmp(value, "available")) {
+            sim_stubs_set_call_available(value[0] == 'a');
+            return true;
+        }
+        for (size_t i = 0; i < sizeof(CLIENT) / sizeof(CLIENT[0]); i++) {
+            if (!strcmp(value, CLIENT[i].name)) {
+                muse_call_client_state((uint8_t)CLIENT[i].state);
+                return true;
+            }
         }
         return false;
     }
@@ -838,6 +962,10 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
     }
     if (!strcmp(key, "passlock") && parse_bool(value, &flag)) {
         if (flag) muse_passcode_lock_now();
+        return true;
+    }
+    if (!strcmp(key, "passenter") && strlen(value) == MUSE_PASS_DIGITS) {   /* passenter=DDDD: the keypad's code */
+        printf("@passenter %d\n", (int)muse_passcode_check(value));
         return true;
     }
     if (!strcmp(key, "stroke")) {
@@ -911,8 +1039,11 @@ static bool apply_setting(const char *key, const char *value, bool real_time)
         lv_timer_handler();
         printf("@page %s\n", muse_settings_ui_page_name());
         dump_labels(lv_screen_active());
-        if (!strcmp(value, "all")) {
+        if (!strcmp(value, "all") || !strcmp(value, "every")) {
             dump_labels(lv_layer_top());   /* dump=all: the overlays too (the volume card) */
+        }
+        if (!strcmp(value, "sys") || !strcmp(value, "every")) {
+            dump_labels(lv_layer_sys());   /* dump=sys: the system layer too (the subtitles' tall band) */
         }
         printf("@settings_writes %u\n", sim_stubs_settings_writes);
         return true;

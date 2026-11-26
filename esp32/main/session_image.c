@@ -34,6 +34,9 @@
 #include "muse_input.h"
 #include "muse_ui.h"
 #include "session_image_core.h"
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#endif
 
 /* "mg" prefixed, as the device session's mg.session: the Nordic UART mirrors
  * it (CONFIG_MUSE_GADGET_BLE_NUS_LOG_TAGS), so a phone-side tester reads the
@@ -121,6 +124,11 @@ static void on_drawn(const image_fetch_result_t *r, void *user)
 static cJSON *start_show(const char *path, int duration_ms, const char *request_id,
                          noise_ctrl_session_generation_t generation)
 {
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_active()) {
+        return error_result("busy", "a Live call is on the gadget's screen; try again after it ends");
+    }
+#endif
     show_ctx_t *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) {
         return error_result("out_of_memory", "failed to allocate");

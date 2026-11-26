@@ -58,6 +58,7 @@
 
 #include "mg_ble_priv.h"
 #include "mg_haptic_test_core.h"   /* the haptics core (mg_haptics.h) and the vibration tests */
+#include "mg_lct.h"
 #include "mg_codec.h"
 #include "mg_chain.h"   /* the board's speech chain on the player's output */
 #include "mg_play.h"
@@ -617,6 +618,56 @@ static void op_assistant_state(void *ctx, uint8_t state)
     s_platform.assistant_state(state);
 }
 
+/* Live call. The client is the Muse app, which implements the call on its own session. */
+static void call_link(bool on);
+/* A call as link activity, and for how long: Calling... and
+ * connecting count for at most 30 s, live for as long as it's live
+ * (mg_linkpol_call_busy). Under mg_lock. */
+static mg_linkpol_call_t s_call_act;
+
+/* Why the last call failed, for the platform's failed handler; set
+ * under mg_lock just before it runs (mg_ble_live_call_failure_reason()). */
+static volatile uint8_t s_call_fail_reason;
+
+uint8_t mg_ble_live_call_failure_reason(void)
+{
+    return s_call_fail_reason;
+}
+
+static volatile bool s_call_unproven;
+
+bool mg_ble_live_call_unproven(void)
+{
+    return s_call_unproven;
+}
+
+static void op_live_call(void *ctx, uint8_t state)
+{
+    (void)ctx;
+    s_call_fail_reason = mg_proto_live_call_failure_reason(&s_proto);
+    s_call_unproven = mg_proto_live_call_unproven(&s_proto);
+    if (state == mg_live_call_state_failed) {
+        ESP_LOGI(TAG, "live call: %u (failed, reason %u)", state, s_call_fail_reason);
+    } else {
+        ESP_LOGI(TAG, "live call: %u", state);
+    }
+    /* The phone has a call for us (it may have started it): the link goes
+     * fast now, so its video's first frames don't wait for the update. */
+    call_link(state == mg_live_call_state_connecting || state == mg_live_call_state_live);
+    /* Every connecting (a re-sent one too) restarts its 30 s as link activity. */
+    mg_linkpol_call_note(&s_call_act, esp_timer_get_time(),
+                         state == mg_live_call_state_live         ? MG_LINKPOL_CALL_LIVE
+                         : state == mg_live_call_state_connecting ? MG_LINKPOL_CALL_STARTING
+                                                                  : MG_LINKPOL_CALL_NONE);
+    s_platform.live_call(state);
+}
+
+static void op_mark(void *ctx, uint8_t point)
+{
+    (void)ctx;
+    mg_lct_mark((mg_lct_point_t)point);
+}
+
 static void op_play_kick(void *ctx)
 {
     (void)ctx;
@@ -630,7 +681,7 @@ static void op_play_kick(void *ctx)
  * Link modes (mgcommands.h "Link modes", mg_linkpol.h):
  * sleep 100/160/4/600, ready 24/36/5/400, active 12/12/0/400. Ready at
  * connect (after the central's first update or 1 s); active on the device's
- * own activity (its talk press at touch-down, a
+ * own activity (its talk press at touch-down, a call from Calling... on, a
  * stream the app starts, push-to-talk capture, Link setup, an MCUmgr update)
  * and back to the app's mode (setting link_mode 16) 5 s after it ends; sleep
  * by itself after 10 min in ready; a user's wake or touch (a key, a touch,
@@ -644,7 +695,7 @@ static void op_play_kick(void *ctx)
  * asked once more after 5 s; one refused for an LL procedure collision
  * (0x2A, status 554) after 300 ms; one with no answer at all in 2 s is asked
  * again then, BLE_HS_EALREADY (NimBLE still holding it, up to 40 s)
- * meaning again 2 s later, for at most 45 s a mode. A video stream
+ * meaning again 2 s later, for at most 45 s a mode. A call or video stream
  * starting while active toggles idle -> fast: the idle half
  * 24/36/0/400, then, once its connection update event came (granted or
  * refused), the fast half no sooner than 500 ms after it and 2 s after the
@@ -660,6 +711,7 @@ _Static_assert((int)MG_LINKPOL_SLEEP == (int)mg_link_mode_sleep && (int)MG_LINKP
                "mg_linkpol's modes are mgcommands.h's mg_link_mode_t");
 static mg_linkpol_t s_linkpol;
 static bool s_link_phy_asked;           /* 2M + DLE asked on this connection */
+static volatile bool s_call_on;         /* a live call: active */
 static uint16_t s_conn_itvl;            /* the interval in effect, 1.25 ms units */
 static uint32_t s_conn_gen;             /* connections so far: a queued write's */
 static uint16_t s_conn_latency;         /* the latency in effect */
@@ -1109,8 +1161,10 @@ static void link_policy_check(const char *busy)
     }
     mg_linkpol_params_t w;
     mg_lock();
-    /* A reply playing ends the gadget's turn when it stops: a reply stream open. */
-    mg_linkpol_in_t in = { .busy = busy, .reply = mg_play_active(&s_play) };
+    /* A reply playing ends the gadget's turn when it stops: a reply stream open, or in a Live call's one
+     * stream (open all call) audio playing. */
+    mg_linkpol_in_t in = { .busy = busy,
+                           .reply = mg_play_active(&s_play) && (!s_play.keep_open || mg_play_audible(&s_play)) };
     bool go = mg_linkpol_step(&s_linkpol, esp_timer_get_time(), &in, &w);
     const char *note = s_linkpol.note;
     s_linkpol.note = NULL;
@@ -1254,11 +1308,18 @@ static int coc_event(struct ble_l2cap_event *ev, void *arg)
          * take part in change_data_type interleaving. */
         mg_lock();
         bool video = mg_proto_video_active(&s_proto);
+        bool first = video && !s_proto.video.got_bytes && OS_MBUF_PKTLEN(om);
+        if (first) {
+            s_proto.video.got_bytes = true;
+        }
         mg_unlock();
         for (struct os_mbuf *seg = om; video && seg; seg = SLIST_NEXT(seg, om_next)) {
             if (seg->om_len) {
                 muse_vstream_write(&s_vstream, seg->om_data, seg->om_len);
             }
+        }
+        if (first) {
+            mg_lct_mark(MG_LCT_T8R_BYTES);
         }
         os_mbuf_free_chain(om);
         coc_give_buffer(ev->receive.chan);
@@ -1336,7 +1397,7 @@ static void op_rx_held(void *ctx, uint32_t bytes)
 }
 
 
-/* The clock is no video: builds without CONFIG_MUSE_GADGET_BLE_VIDEO take it too. */
+/* The clock and subtitles are no video: builds without CONFIG_MUSE_GADGET_BLE_VIDEO take them too. */
 static void op_clock_set(void *ctx, int64_t ms, bool has_off, int16_t off, bool has_flags, uint8_t flags, bool store)
 {
     (void)ctx;
@@ -1347,6 +1408,12 @@ static void op_clock_get(void *ctx, int64_t *ms, int16_t *off, uint8_t *flags)
 {
     (void)ctx;
     s_platform.clock_get(ms, off, flags);
+}
+
+static void op_subtitle(void *ctx, const mg_subs_event_t *ev)
+{
+    (void)ctx;
+    s_platform.subtitle(ev);
 }
 
 static bool op_battery_status(void *ctx, mg_battery_status_t *out)
@@ -1374,6 +1441,12 @@ static void op_reboot(void *ctx)
     (void)ctx;
     ESP_LOGW(TAG, "recovery: restarting normally (device_action reboot from the client)");
     restart_after(200, MUSE_RESTART_CONSOLE);   /* closes the link cleanly first */
+}
+
+static bool op_subtitles_ready(void *ctx)
+{
+    (void)ctx;
+    return s_platform.subtitle_ready();
 }
 
 void mg_ble_ui_tune(uint16_t latency)
@@ -1469,6 +1542,21 @@ void mg_ble_video_stop(void)
     mg_lock();
     mg_proto_video_stop(&s_proto);
     mg_unlock();
+}
+
+/*
+ * A live call starting (the user's press, from Calling... on, or the phone's
+ * connecting) makes the link active at once (12/12/0/400), so the
+ * start, the phone's answer, its capabilities question and the video's
+ * first frames don't wait for an update. Back to the app's mode 5 s after
+ * the call (and anything else) ends. Under mg_lock.
+ */
+static bool s_call_fastlink = true;   /* the console's >call.fastlink=0 turns it off (A/B) */
+
+void mg_ble_call_fastlink(bool on)
+{
+    s_call_fastlink = on;
+    ESP_LOGI(TAG, "live call: link to full speed at the call's start %s", on ? "on" : "off (at the stream's start)");
 }
 
 bool mg_ble_output_ok(void)
@@ -1610,6 +1698,18 @@ void mg_ble_credit_coalesce(bool on)
              on ? "by the stream tick's next update (<= 10 ms)" : "at once");
 }
 
+static void call_link(bool on)
+{
+    /* A call is activity for the link policy: active from its start,
+     * and if already active the idle -> fast toggle (mg_linkpol.h). */
+    bool was = s_call_on;
+    s_call_on = on && s_call_fastlink;
+    if (s_call_on && !was) {
+        mg_linkpol_stream_start(&s_linkpol, esp_timer_get_time(), "call start");
+        kick();
+    }
+}
+
 /* speaker_volume reports logged as they leave (owed until then); the
  * worker logs an owed one that left later. */
 static uint32_t s_spk_logged;
@@ -1641,6 +1741,16 @@ void mg_ble_press(uint8_t src)
     mg_unlock();
 }
 
+void mg_ble_live_call_held(bool held)
+{
+    if (!s_ready) {
+        return;
+    }
+    mg_lock();
+    mg_proto_live_call_held(&s_proto, held);
+    mg_unlock();
+}
+
 void mg_ble_report_battery(void)
 {
     if (!s_ready) {
@@ -1649,6 +1759,34 @@ void mg_ble_report_battery(void)
     mg_lock();
     mg_proto_report_battery(&s_proto);
     mg_unlock();
+}
+
+void mg_ble_live_call(bool start)
+{
+    if (!s_ready) {
+        return;
+    }
+    mg_lock();
+    uint8_t st = mg_proto_live_call_state(&s_proto);
+    bool in_call = st == mg_live_call_state_connecting || st == mg_live_call_state_live;
+    mg_proto_live_call_request(&s_proto, start);
+    call_link(start);
+    if (!start) {
+        mg_linkpol_call_note(&s_call_act, esp_timer_get_time(), MG_LINKPOL_CALL_NONE);
+    } else if (!in_call) {
+        mg_linkpol_call_note(&s_call_act, esp_timer_get_time(), MG_LINKPOL_CALL_STARTING);   /* Calling... */
+    }
+    mg_unlock();
+}
+
+bool mg_ble_live_call_offered(void)
+{
+    return s_ready && s_platform.live_call;
+}
+
+bool mg_ble_live_call_client(void)
+{
+    return s_ready && s_platform.live_call && mg_ble_link() >= MG_LINK_SESSION;
 }
 
 bool mg_ble_video_client(void)
@@ -3874,7 +4012,7 @@ void mg_ble_peer(mg_ble_peer_t *out)
 
 /* A disconnect with reason 0x216 (local host) that our code didn't ask for (no ble_gap_terminate() within
  * MG_LINK_CLOSE_ASK_US): NimBLE closed the link itself, in practice its 30 s L2CAP reassembly timeout (the peer
- * stopped partway through a packet: two link drops on the bench). Logged once and counted
+ * stopped partway through a packet: two Live call drops seen on a bench). Logged once and counted
  * (host_closed); the timeout itself is unchanged. */
 static void host_close_check(int reason)
 {
@@ -3902,6 +4040,28 @@ int mg_ble_reply_stats(bool json, char *out, size_t n)
     st.nus_dropped = s_nus_dropped;
     st.host_closed = s_host_closed;
     return mg_reply_stats_format(&st, json, out, n);
+}
+
+void mg_ble_call_stats(mg_ble_call_stats_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (!s_ready) {
+        return;
+    }
+    mg_lock();
+    out->link = s_conn != BLE_HS_CONN_HANDLE_NONE;
+    if (out->link) {
+        out->itvl = s_conn_itvl;
+        out->mode = mg_linkpol_mode_name((uint8_t)s_linkpol.mode);
+    }
+    out->play = s_platform.speaker_write != NULL;
+    out->stream = s_play.stream;
+    out->underruns = s_play.st.underruns;
+    out->silence_ms = s_play.st.silence_us / 1000;
+    uint16_t q = mg_play_queued_ms(&s_play);
+    out->depth_ms = q != MG_PLAY_QUEUED_UNKNOWN ? q
+                    : mg_play_active(&s_play) ? (s_play.buffered_us + s_play.pending_us) / 1000 : 0;
+    mg_unlock();
 }
 
 /* Call with mg_lock held. */
@@ -3994,6 +4154,7 @@ int mg_ble_gap_event(struct ble_gap_event *ev)
              * link dropped. The policy asks for ready after the
              * central's first update, or 1 s after connect if none came. */
             s_link_phy_asked = false;
+            s_call_on = false;
             mg_proto_connect(&s_proto);
             s_nus_owner = !NUS_MIRROR_RELEASE || !s_set_up;   /* a new link waits for its own proof */
             nus_ring_reset();   /* nothing queued for an earlier link goes to this one */
@@ -4526,8 +4687,8 @@ static void nus_command(char *line)
          * client's checks (every mute path), read-only diagnostics and
          * the vibration tests (a release build gates the state-changing
          * ones in nus_command), by the
-         * platform's allowlist (tap=, press=, key=, page=,
-         * ptt=, wake, session.ping, voice?, wake?, vib=, vib?,
+         * platform's allowlist (tap=, press=, key=, page=, call, call=0,
+         * ptt=, wake, session.ping, voice?, wake?, call?, vib=, vib?,
          * mic.gain?, mic.gain=, spk.dsp, spk.dsp=, ptt.minrise=, ptt.minrise?),
          * queued to the input task (this is the NimBLE host); each word logs
          * its outcome on mg.bench (session.ping on mg.session). */
@@ -4747,7 +4908,7 @@ static void worker(void *arg)
         bool transfer = mg_proto_transfer_active(&s_proto);
         bool streaming = mg_play_active(&s_play) || s_proto.flush_update_owed;   /* a flush's update owed too */
         /* Every reply stream's credit goes out every 10 ms of playout as it changes (mg_proto_stream_tick:
-         * a live depth is capped at 100 ms, and a pending notification keeps a ready link
+         * a Live call's depth is capped at 100 ms, and a pending notification keeps a ready link
          * listening at every event), so the worker looks every 5 ms while one plays. */
         bool video = mg_proto_video_active(&s_proto);
         bool session = mg_proto_session_pump(&s_proto);   /* what a full stack held back */
@@ -4767,6 +4928,10 @@ static void worker(void *arg)
         /* A capture held for an unproven central doesn't move the link (its mode report and interval
          * would tell the central one exists). */
         bool capture_visible = mg_proto_capture_visible(&s_proto);
+        /* A call keeps it active while live, and while starting (Calling...,
+         * connecting) for at most 30 s since the start or the client's last
+         * connecting (every activity source has a bound). */
+        const char *call_busy = s_call_on ? mg_linkpol_call_busy(&s_call_act, esp_timer_get_time()) : NULL;
         mg_capture_note();
         mg_unlock();
         if (ht_clip) {
@@ -4781,12 +4946,13 @@ static void worker(void *arg)
 #else
         bool hid = false;
 #endif
-        /* What keeps the link active: a
+        /* What keeps the link active: a call (call_busy), a
          * stream the app started (audio playback, video, a UI stream while
          * its picture changes, a clip transfer or throughput test), the
          * mic capturing, an update. Not the log mirror, nor a GATT write
          * alone (background app traffic would hold it active forever). */
-        const char *busy = (s_capture.requested || held_capture) && capture_visible ? "push-to-talk capture"
+        const char *busy = call_busy ? call_busy
+                           : (s_capture.requested || held_capture) && capture_visible ? "push-to-talk capture"
                            : streaming ? "audio playback"
                            : transfer ? "transfer"
                            : NULL;
@@ -4992,7 +5158,7 @@ static void play_tick(bool end, const mg_play_stats_t *st, uint32_t buffered_us,
  * the depth once a chunk and trims the decoded audio while the output clock
  * runs off the reply's rate.
  */
-/* The audio clock for the picture (mg_ble_av_clock): one writer, the playback task; readers on any task
+/* The audio clock for the call picture (mg_ble_av_clock): one writer, the playback task; readers on any task
  * retry while seq is odd or moved (no lock on either side). */
 static volatile uint32_t s_av_seq;
 static uint32_t s_av_frame;
@@ -5065,6 +5231,7 @@ static void player(void *arg)
     bool trim_playing = false;
     uint32_t flush_seen = 0, flush_seq = 0, flush_us = 0;   /* mg_stream_audio_flush (barge-in) */
     uint32_t gap_seen = 0, idle_seen = 0;   /* the stream's concealed gaps (repaid) and reply boundaries */
+    bool was_paused = false;                /* the device's own sound paused a Live call's reply */
     bool was_barge = false;                 /* a talk press's touch-down paused the reply (barge-in echo rule) */
     static int16_t rewind[MG_REWIND_MAX];   /* what the speaker's DMA held unplayed at the touch-down (mg_play.h) */
     size_t nrewind = 0;
@@ -5090,12 +5257,14 @@ static void player(void *arg)
         uint32_t new_flush_seq = s_play.flush_seq;
         mg_play_params_t new_pp = s_play.params;
         size_t n = 0;
-        /* A push-to-talk turn holds the speaker: the stream waits in
+        /* A push-to-talk turn holds the speaker, and the device's own sound a
+         * Live call's reply (paused, mg_proto_claim_audio): the stream waits in
          * the ring and the FIFO, nothing lost (credits still flow while it has
          * room; no starvation counted). */
         bool held = mg_proto_play_held(&s_proto) && (state == MG_PLAY_PREBUFFER || state == MG_PLAY_PLAYING ||
                                                      state == MG_PLAY_DRAINING);
-        bool barge = held && !s_proto.turn && mg_proto_barge_held(&s_proto);
+        bool paused = held && s_proto.audio_paused && !s_proto.turn;
+        bool barge = held && !s_proto.turn && !s_proto.audio_paused && mg_proto_barge_held(&s_proto);
         uint32_t kept_us = s_play.buffered_us + s_play.pending_us;
         if (!fresh && !held && (state == MG_PLAY_PREBUFFER || state == MG_PLAY_PLAYING || state == MG_PLAY_DRAINING)) {
             n = mg_play_pop(&s_play, frames, sizeof(frames), MG_PLAY_CHUNK_US);
@@ -5149,6 +5318,14 @@ static void player(void *arg)
             mg_unlock();
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
+        }
+        if (paused != was_paused && !fresh && dec) {
+            was_paused = paused;
+            if (paused) {
+                ESP_LOGI(PLAY_TAG, "paused for the device's sound (%lu ms kept)", (unsigned long)(kept_us / 1000));
+            } else {
+                ESP_LOGI(PLAY_TAG, "resumed after the device's sound (%lu ms held)", (unsigned long)(kept_us / 1000));
+            }
         }
         if (barge != was_barge && !fresh && dec) {
             was_barge = barge;
@@ -5328,6 +5505,9 @@ static void player(void *arg)
             mg_chain_audio(&chain, fifo, whole);
             mg_level_add(&spk, fifo, whole, speaker_muted());
             speaker(fifo, whole);
+            if (n) {
+                mg_lct_mark(MG_LCT_T6P_AUDIO_PLAYED);   /* a call's first reply audio (once per call) */
+            }
             memmove(fifo, fifo + whole, (nfifo - whole) * sizeof(int16_t));
             nfifo -= whole;
             mg_lock();
@@ -5662,9 +5842,11 @@ void mg_ble_init(const mg_ble_platform_t *platform)
         .bench_streams = true,   /* bench, automation and lab tools stream to a set-up gadget unproven, with the bench
                                   * override on */
 #endif
+        .live_call = s_platform.live_call != NULL,
         .recovery_mode = s_platform.recovery_mode,
         .recovery_reason = s_platform.recovery_reason,
         .recovery_flags = s_platform.recovery_flags,
+        .subtitles = s_platform.subtitle && s_platform.subtitle_caps ? s_platform.subtitle_caps() : NULL,
     };
     /* UI input: touch events on a touchscreen, and the HID beside them. */
     if (s_platform.touch_w && s_platform.touch_h) {
@@ -5768,6 +5950,16 @@ void mg_ble_init(const mg_ble_platform_t *platform)
             ops.haptic = op_haptic;
         } else {
             cfg.haptic_actuator = NULL;
+        }
+    }
+    if (cfg.live_call) {
+        ops.live_call = op_live_call;
+        ops.mark = op_mark;
+    }
+    if (cfg.subtitles) {
+        ops.subtitle = op_subtitle;
+        if (s_platform.subtitle_ready) {
+            ops.subtitles_ready = op_subtitles_ready;
         }
     }
     if (s_platform.clock_set && s_platform.clock_get) {

@@ -241,7 +241,7 @@ void heap_caps_free(void *memory)
 
 size_t heap_caps_get_total_size(uint32_t caps)
 {
-    /* The C6 has no PSRAM. */
+    /* The C6 has no PSRAM (so no Live call, muse_call_supported()). */
     const char *which = getenv("MUSE_SIM_BOARD");
     if ((caps & MALLOC_CAP_SPIRAM) && which && !strcmp(which, "c6")) {
         return 0;

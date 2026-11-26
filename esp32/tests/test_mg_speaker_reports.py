@@ -19,7 +19,7 @@ Every way the device's user mutes or changes the level reports speaker_volume
 unsolicited (0 when muted, the new level when unmuted), and the client's own
 set_settings is never reported back. The firmware's own code runs here: the
 glue's set_speaker_volume and speaker_observer (main/mg_glue.c) over
-mg_spk_report.h, the home
+mg_spk_report.h, the live call's volume_set_quiet (muse_call.c), the home
 slider's release (muse_home.c), against settings that notify the way
 muse_settings.c does (each write notifies once, on the writer's task).
 """
@@ -100,6 +100,13 @@ static void mg_ble_report_setting(uint8_t param)
 /* ---- main/mg_glue.c ---- */
 @GLUE@
 
+/* ---- muse_call.c ---- */
+static long long s_controls_until_us;
+#define CONTROLS_SHOW_US 3000000LL
+static long long now_us(void) { return 0; }
+static const char *TAG = "call";
+@CALL@
+
 /* ---- muse_home.c: the slider's release ---- */
 static void home_slider_release(int v)
 {
@@ -128,7 +135,7 @@ static void bench_restore(void) { vol = saved_vol; spk = saved_spk; saved_vol = 
 int main(void)
 {
     observer = speaker_observer;
-    /* The StopWatch's blue key, the home Speaker's long press,
+    /* The StopWatch's blue key outside a call, the home Speaker's long press,
      * the Sound page's switch: a toggle reports 0, then the level. */
     from(40, true);
     blue_or_long_press(); expect("toggle mutes", 1, (int[]){0});
@@ -141,6 +148,18 @@ int main(void)
     from(40, true);
     muse_settings_set_volume(0); expect("sound slider to 0", 1, (int[]){0});
     muse_settings_set_volume(55); expect("sound slider to 55", 1, (int[]){55});
+    /* The live call: volume − (the panel, the StopWatch's red key) and a swipe
+     * down to 0, then + up again: each step reports, 0 once, then the level. */
+    from(13, true);
+    volume_set_quiet(6, "-", true); volume_set_quiet(0, "-", true);
+    expect("call volume - to 0", 2, (int[]){6, 0});
+    volume_set_quiet(6, "+", true); expect("call volume + from 0", 1, (int[]){6});
+    from(100, true);
+    volume_set_quiet(0, "swipe", true); expect("call swipe to 0", 1, (int[]){0});
+    volume_set_quiet(19, "swipe", true); expect("call swipe up", 1, (int[]){19});
+    /* A step that changes nothing reports nothing. */
+    from(0, false);
+    volume_set_quiet(0, "-", true); expect("call - at 0", 0, NULL);
     /* The bench's vol=0 and vol=saved: changes made on the device, reported like a key's. */
     from(40, true);
     bench_vol(0); expect("bench vol=0", 1, (int[]){0});
@@ -180,6 +199,7 @@ int main(void)
 class SpeakerReportsTest(unittest.TestCase):
     def test_every_mute_path_reports_and_the_client_set_does_not(self) -> None:
         glue = (ROOT / "main/mg_glue.c").read_text()
+        call = (MUSE / "muse_call.c").read_text()
         home = (MUSE / "muse_home.c").read_text()
         glue_code = "\n".join([
             function(glue, "static int speaker_volume(void) {"),
@@ -188,9 +208,13 @@ class SpeakerReportsTest(unittest.TestCase):
             function(glue, "static void set_speaker_volume(uint8_t volume) {"),
             function(glue, "static void speaker_observer(muse_setting_t what) {"),
         ])
+        call_code = "\n".join([
+            function(call, "static int volume_now(void)\n{"),
+            function(call, "static void volume_set_quiet(int pct, const char *why, bool show)\n{"),
+        ])
         slider = branch(home, "static void on_slider(lv_event_t *e)\n{",
                         "if (lv_event_get_code(e) == LV_EVENT_RELEASED) {")
-        src = HARNESS.replace("@GLUE@", glue_code).replace("@SLIDER@", slider)
+        src = HARNESS.replace("@GLUE@", glue_code).replace("@CALL@", call_code).replace("@SLIDER@", slider)
         import tempfile
         with tempfile.TemporaryDirectory(prefix="mg-spk-") as tmp:
             h = Path(tmp) / "spk.c"
@@ -198,7 +222,7 @@ class SpeakerReportsTest(unittest.TestCase):
             out = compile_and_run(self, [h], [], [MG / "include"], extra=["-Wno-unused-function"])
         bad = [line for line in out.splitlines() if not line.startswith("ok")]
         self.assertEqual(bad, [], out)
-        self.assertEqual(len(out.splitlines()), 19, out)
+        self.assertEqual(len(out.splitlines()), 24, out)
 
 
 if __name__ == "__main__":

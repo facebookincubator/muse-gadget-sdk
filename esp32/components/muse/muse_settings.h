@@ -70,7 +70,7 @@ typedef enum {
  * make itself). A boot's restore
  * from NVS is no change at all. */
 typedef enum {
-    MUSE_VOL_BY_DEVICE = 0,   /* the gadget's own keys and sliders */
+    MUSE_VOL_BY_DEVICE = 0,   /* the gadget's own keys, sliders, a call's controls */
     MUSE_VOL_BY_PHONE,        /* an app's set_settings speaker_volume, Muse's phone setup */
     MUSE_VOL_BY_BENCH,        /* the console's vol= (RAM only) */
 } muse_vol_by_t;

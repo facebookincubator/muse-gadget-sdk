@@ -254,9 +254,11 @@ static const char *purpose_prompt(void)
 {
     switch (s_purpose) {
     case P_UNLOCK:
-        return s_why == MUSE_PASS_WHY_TALK     ? "Unlock to talk"
-               : s_why == MUSE_PASS_WHY_UPDATE ? "Unlock to update"
-                                               : "Enter passcode";
+        return s_why == MUSE_PASS_WHY_TALK         ? "Unlock to talk"
+               : s_why == MUSE_PASS_WHY_UPDATE     ? "Unlock to update"
+               : s_why == MUSE_PASS_WHY_CALL       ? "Unlock to call"
+               : s_why == MUSE_PASS_WHY_PHONE_CALL ? "Call from phone"
+                                                   : "Enter passcode";
     case P_CHOOSE:
         return "Choose a passcode";
     case P_CONFIRM:
@@ -904,7 +906,7 @@ void muse_passcode_ui_build(void)
         /* The grid never moves between prompts: fitted once for the longest. */
         static const char *const PROMPTS[] = { "Choose a passcode", "Enter it again", "Enter passcode",
                                                "Wrong passcode",    "Didn't match",   "Unlock to talk",
-                                               "Unlock to update" };
+                                               "Unlock to update",  "Unlock to call",  "Call from phone" };
         int top = s_g.ring + s_g.m + s_g.gap, lines = 1;
         for (size_t i = 0; i < sizeof(PROMPTS) / sizeof(PROMPTS[0]); i++) {
             if (text_w(s_f_prompt, PROMPTS[i]) > room(top, s_prompt_caps)) lines = 2;

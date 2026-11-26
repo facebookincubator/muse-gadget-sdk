@@ -289,7 +289,7 @@ static atomic_bool s_unpair_pending;
 static bool s_ble_started = false;
 static const char *s_setup_stage = "idle";
 
-// the pieces the extracted paths call (the passcode, the boot
+// The firmware's pieces the extracted paths call (the passcode, the boot
 // guard's SAFE way out, a Wi-Fi gadget's token pair lock and expiry): not what this
 // harness checks.
 static void pair_lock_take(void) {}

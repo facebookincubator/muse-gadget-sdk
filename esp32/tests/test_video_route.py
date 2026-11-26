@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Video beside reply audio on Data, replayed through the
+"""A Live call's video beside reply audio on Data, replayed through the
 gadget's own code (tests/video_route_harness.c): mg_proto.c's routing, the
 muse_vstream ring, muse_vgate.h (the decode task's keyframe gate) and
 muse_vdec.c on the real tinyh264, every picture checked byte for byte against

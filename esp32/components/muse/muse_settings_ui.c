@@ -71,6 +71,9 @@
 #if CONFIG_MUSE_VIDEO
 #include "muse_video.h"
 #endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+#include "muse_call.h"
+#endif
 /* Developer > Tests > Vibration: through the
  * production haptics engine, which runs with musegadgets BLE (mg_ble.c); the
  * simulator's stands in for it (sim_haptics.c, the same core). */
@@ -259,6 +262,9 @@ static lv_obj_t *s_home_face;   /* Watch face */
 static int64_t s_power_armed_us, s_restart_armed_us;
 #if CONFIG_MUSE_VIDEO
 static lv_obj_t *s_home_camera;
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+static lv_obj_t *s_home_call;
 #endif
 
 /* Wi-Fi page. */
@@ -3037,6 +3043,20 @@ static void on_camera(lv_event_t *e)
 }
 #endif
 
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+/* Live call: starts one (back to the face, which shows it) or ends it. */
+static void on_call(lv_event_t *e)
+{
+    (void)e;
+    if (muse_call_active()) {
+        muse_call_end_from("Live call row");
+    } else {
+        muse_call_start_from("touch: the Live call row");
+        muse_ui_show_face();
+    }
+}
+#endif
+
 #if CONFIG_MUSE_APP_VIEW
 /* Apps: the launcher of the apps installed on the gadget (muse_app_view.h). */
 static void on_apps(lv_event_t *e)
@@ -3052,7 +3072,7 @@ static void on_apps_sw(lv_event_t *e)
 #endif
 
 /* The rows in this order, each left out when the board lacks it:
- * Sound, Display, Talk, Battery, Bluetooth, Wi-Fi, Muse, About,
+ * Live call, Sound, Display, Talk, Battery, Bluetooth, Wi-Fi, Muse, About,
  * Power off, Developer. Sound is left out with no speaker and no mic
  * (screen_only(): the brightness is on Display); with CONFIG_MUSE_APP_VIEW,
  * Run apps and Apps follow Muse. */
@@ -3060,6 +3080,11 @@ static void build_home(lv_obj_t *tile)
 {
     lv_obj_t *list;
     s_home = page(tile, "Settings", false, &list);
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (muse_call_supported()) {
+        icon_row(list, MUSE_ICON_CALL, "Live call", &s_home_call, on_call, NULL);
+    }
+#endif
     s_home_sound = NULL;
     if (!screen_only()) {
         icon_row(list, MUSE_ICON_VOLUME_UP, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
@@ -3188,6 +3213,19 @@ static void tick_home(void)
 #if CONFIG_MUSE_VIDEO
     if (s_home_camera) {
         set_text(s_home_camera, muse_video_has_client() ? "Ready" : "No phone");
+    }
+#endif
+#if CONFIG_MUSE_GADGET_BLE_LIVE_CALL
+    if (s_home_call) {
+        int call_s;
+        muse_call_phase_t call = muse_call_phase(&call_s);
+        if (call == MUSE_CALL_LIVE) {
+            char t[32];
+            snprintf(t, sizeof(t), "End %d:%02d", call_s / 60, call_s % 60);
+            set_text(s_home_call, t);
+        } else {
+            set_text(s_home_call, call != MUSE_CALL_NONE ? "End" : muse_call_available() ? "Start" : "No phone");
+        }
     }
 #endif
     set_text(s_home_about, esp_app_get_description()->version);

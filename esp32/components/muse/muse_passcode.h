@@ -46,6 +46,8 @@ typedef enum {
     MUSE_PASS_WHY_TOUCH = 1,   /* "Enter passcode" */
     MUSE_PASS_WHY_TALK,        /* "Unlock to talk" */
     MUSE_PASS_WHY_UPDATE,      /* "Unlock to update": an update over Bluetooth asks for its confirm press */
+    MUSE_PASS_WHY_CALL,        /* "Unlock to call" */
+    MUSE_PASS_WHY_PHONE_CALL,  /* "Call from phone": the phone started a call */
 } muse_pass_why_t;
 
 #if MUSE_HOME_UI

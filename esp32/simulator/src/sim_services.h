@@ -42,9 +42,10 @@ void sim_services_set_speaker(bool on);
 /* A speaker change, and who made it (sim_stubs.c keeps the count). */
 void sim_stubs_count_volume(muse_vol_by_t by);
 
-/* sim_stubs.c: the clock (hour < 0: never synced), whether a client is
- * connected, the volume. */
+/* sim_stubs.c: the clock (hour < 0: never synced), whether a client that can
+ * take a Live call is connected, the volume. */
 void sim_stubs_set_clock(int hour, int min, bool h24);
+void sim_stubs_set_call_available(bool available);
 void sim_stubs_set_volume(int pct);
 /* The avatar face (avatar_face=PATH|none): a panel-sized P6 picture as
  * mg_face.c draws it, shown as the home's face; false if it isn't one. */

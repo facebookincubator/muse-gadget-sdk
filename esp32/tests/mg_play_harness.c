@@ -505,6 +505,68 @@ static void test_boost(void)
     CHECK(one[0] == 1234);
 }
 
+/* The stream's clock, the latest underrun's time on it, and the once-a-second line. */
+static void test_tick(void)
+{
+    static uint8_t sbc[16 * 1024];
+    size_t fb;
+    sbc_tone(16000, 26, sbc, sizeof(sbc), &fb, 1.0);   /* 8 ms frames */
+    mg_play_t p;
+    mg_play_init(&p, 4096);
+    mg_play_params_t pp = { .codec = mg_data_type_audio_sbc };
+    CHECK(mg_play_check(&pp) == 0 && mg_play_start(&p, &pp));
+    CHECK(p.st.clock_us == 0 && p.st.last_underrun_us == MG_PLAY_NO_UNDERRUN);
+    uint8_t out[MG_PLAY_MAX_POP];
+    char line[160];
+    int n = mg_play_format_tick(line, sizeof(line), false, &p.st, 0, 0, 0, 0, 1, 1);
+    CHECK(strcmp(line, "av play: t=0 span=0 underruns=0 new=0 last=-1 buf=0 queued=0 int=1 low=1") == 0);
+    /* 13 frames (104 ms) start it; each pop is a 20 ms chunk on the clock, played or
+     * not; the gap after them is concealed, the next frames play at once, and the
+     * gap counts as an underrun then, at its start on the clock. */
+    for (int round = 0; round < 3; round++) {
+        uint32_t gap = p.gap_at;
+        CHECK(mg_play_write(&p, sbc, (round < 2 ? 13 : 1) * fb));
+        uint32_t at = 0;
+        size_t got;
+        int i = 0;
+        do {
+            at = p.st.clock_us;
+            got = mg_play_pop(&p, out, sizeof(out), 20000);
+            CHECK(p.st.clock_us == at + 20000);
+            if (i == 0 && round) {
+                CHECK(got && p.st.underruns == (uint32_t)round && p.st.last_underrun_us == gap);   /* the gap, counted */
+            }
+        } while (got && ++i < 12 && round < 2);
+        if (round < 2) {
+            /* Five chunks play the 104 ms, the sixth runs dry: at 100 ms, then 220 ms (after the first 200);
+             * not an underrun yet. */
+            CHECK(!got && p.starving && p.gap_at == at && p.st.underruns == (uint32_t)round);
+            CHECK(at == (round ? 220000u : 100000u));
+        }
+    }
+    p.out_us = 30000;
+    mg_play_set_pending(&p, 0);
+    n = mg_play_format_tick(line, sizeof(line), false, &p.st, 1, 1002, p.buffered_us, mg_play_queued_ms(&p), 23456,
+                            21000);
+    CHECK(n > 0 && n < 130);   /* fits the Nordic UART mirror's 160-character line with its prefix */
+    CHECK(strcmp(line, "av play: t=260 span=1002 underruns=2 new=1 last=220 buf=0 queued=30 int=23456 low=21000") == 0);
+    printf("SAMPLE I (5260) mg.play: %s\n", line);
+    /* Silence while starved still moves the clock; the end line says so. */
+    mg_play_pop(&p, out, sizeof(out), 20000);
+    CHECK(p.st.clock_us == 280000 && p.st.underruns == 2);
+    mg_play_format_tick(line, sizeof(line), true, &p.st, 2, 20, 0, MG_PLAY_QUEUED_UNKNOWN, 23456, 20900);
+    CHECK(strcmp(line, "av play end: t=280 span=20 underruns=2 new=0 last=220 buf=0 queued=-1 int=23456 low=20900") == 0);
+    printf("SAMPLE I (5280) mg.play: %s\n", line);
+    /* A new stream starts its clock over. */
+    CHECK(mg_play_start(&p, &pp) && p.st.clock_us == 0 && p.st.underruns == 0 &&
+          p.st.last_underrun_us == MG_PLAY_NO_UNDERRUN);
+    mg_play_stop(&p, false);
+    mg_play_release(&p);
+    /* Idle: no clock. */
+    mg_play_pop(&p, out, sizeof(out), 20000);
+    CHECK(p.st.clock_us == 0);
+}
+
 /* ---- live reply audio: start threshold, concealment, depth ---- */
 
 static double rms(const int16_t *x, size_t n)
@@ -761,6 +823,7 @@ static size_t resync_fresh(const mg_play_params_t *pp, const uint8_t *b, size_t 
     size_t nraw = 0;
     mg_play_init(&p, 32768);
     CHECK(mg_play_start(&p, pp) && mg_dec_open(&d, pp));
+    p.keep_open = true;
     resync_write(&p, b, nb, fb);
     size_t o = resync_drain(&p, &d, pcm, cap, raw, &nraw);
     CHECK(nraw == nb && memcmp(raw, b, nb) == 0 && d.bad == 0);
@@ -782,6 +845,7 @@ static size_t resync_barge(const mg_play_params_t *pp, const uint8_t *a, size_t 
     uint8_t buf[MG_PLAY_MAX_POP];
     mg_play_init(&p, 32768);
     CHECK(mg_play_start(&p, pp) && mg_dec_open(&d, pp));
+    p.keep_open = true;   /* a Live call's one reply stream: the flush keeps it open */
     size_t half = na / fb / 2 * fb;   /* reply A's first half is written ... */
     resync_write(&p, a, half, fb);
     uint32_t seen = p.flush_seq;
@@ -884,6 +948,7 @@ static void test_flush_signed(void)
         mg_play_init(&p, 16384);
         p.out_us = 30000;
         CHECK(mg_play_start(&p, &pp));
+        p.keep_open = true;
         CHECK(mg_play_write(&p, z, 480));   /* 30 ms */
         CHECK(mg_play_pop(&p, out, sizeof(out), MG_PLAY_CHUNK_US) == 160);
         mg_play_set_pending(&p, 400000);   /* the task says it holds far more than was ever queued */
@@ -945,6 +1010,7 @@ int main(int argc, char **argv)
     test_ring();
     test_decode();
     test_boost();
+    test_tick();
     test_live();
 #if MG_WITH_LC3
     test_live_start_within_credit();
