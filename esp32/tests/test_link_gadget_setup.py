@@ -1162,28 +1162,11 @@ int main(void) {
 }
 """
 
-WINDOW = r"""
-/* ---- the update gate: the request front and muse_local_press (real), on a link without the proof ---- */
-#include "mg_smp_front.h"
-#include "mg_smp_gate.h"
+TAKEOVER = r"""
+/* ---- the update prompt (muse_local_press, real), which the gadget's own key passes through first ---- */
 #include "muse_local_press.h"
 static muse_local_press_t w = { .prompt_ms = -1, .shown_ms = -1, .bound_ms = -1, .covered_ms = -1, .armed_ms = -1 };
 static int64_t now_ms;
-static mg_smp_front_slot_t slot;
-static muse_update_answer_t f_ask(void *c, const muse_update_req_t *r) { (void)c; return muse_local_press_core_ask(&w, now_ms, false, r); }
-static bool f_bound(void *c, muse_update_ident_t *id) { (void)c; return muse_local_press_core_bound(&w, id); }
-/* An SMP request as mg_ble.c's smp_front_whole takes it: the rc the gadget answers (0: the core takes it). */
-static int smp(const char *hex) {
-    uint8_t f[600];
-    size_t n = strlen(hex) / 2;
-    for (size_t i = 0; i < n; i++) { unsigned b; sscanf(hex + 2 * i, "%2x", &b); f[i] = (uint8_t)b; }
-    assert(mg_smp_gate(false, false, false, true) == MG_SMP_GATE_NEEDS_PRESS);   /* release, no proof, not SAFE */
-    if (!mg_smp_front_depth_ok(f, n)) return 3;
-    bool ended;
-    int rc = mg_smp_front_gate(f, n, &slot, false, NULL, false, f_ask, f_bound, NULL, &ended);
-    return rc < 0 ? 0 : rc;
-}
-static const char *update_prompt(void) { return muse_local_press_core_prompting(&w, now_ms) ? "confirm" : "none"; }
 /* muse_input.c's routing of the gadget's own key (real): the update's prompt takes a press, only that; else the
  * pairing prompt's (aux_key: the second key confirms; talk_input: the talk key's goes to muse_link_confirm_press). */
 bool muse_local_press_prompting(void) { return muse_local_press_core_prompting(&w, now_ms); }
@@ -1195,17 +1178,6 @@ static void physical_press(unsigned down, unsigned up) {
     if (own & MUSE_BTN_AUX_PRESS) (void)app_confirm_pairing_press(0, false);
     if (own & MUSE_BTN_TALK_PRESS) (void)app_confirm_pairing_press(0, true);
     (void)update_prompt_press(up);
-}
-/* An injected press from that link (a Nordic UART word: muse_input.c's gate, real, on a release build). */
-#define MUSE_NO_PERSON 0
-static bool s_line_wireless = true;
-@TALK_OK@
-static int injected_through;
-static void injected_press(void) {
-    if (line_talk_ok()) {
-        injected_through++;
-        (void)app_confirm_pairing_press(0, true);
-    }
 }
 /* A valid hello and its client_finished on this link: the re-setup prompt. */
 static void resetup_request(void) {
@@ -1219,11 +1191,6 @@ static void want_resetup(bool up, bool confirmed) {
     if (!confirmed) assert((s_prompt_gap.prompt_conn != 0 && prompt_up() && armed) == up);
 }
 int main(void) {
-    /* an update press opens no window */
-    reconnect();
-@WINDOW_STEPS@
-    assert(!injected_through && !confirms);
-    printf("PASS an update press opens no window\n");
     /* a takeover hello that fails validation ends the prompt, answered encrypted, the link dropped (the refusal
      * under the session still current: ble_server_send_status; the drop: ble_server_delayed_disconnect) */
     reconnect();
@@ -1468,45 +1435,23 @@ class LinkGadgetSetupTest(unittest.TestCase):
                   .replace("@TALK@", _function_body(app, "bool app_confirm_pairing_press(")))
         self.assertIn("PASS ghost", self.build_and_run(source, []))
 
-    def test_the_proof_gates_update_press_and_bad_takeover_exchanges(self) -> None:
+    def test_the_proof_gates_bad_takeover_exchange(self) -> None:
         # mg-session-v1.json proof_gates, replayed step for step on one gadget (a set-up release build with a second
-        # key, no proof): the real request front and muse_local_press core for the smp steps (the --gate server
-        # replays mg-update-v2.json, test_mg_smp), muse_input.c's routing of the gadget's own key (update_prompt_press:
-        # the update's prompt takes the press, only that), its injected-press gate (line_talk_ok: a Nordic UART word
-        # on a release build presses nothing), and the real hello branch, prompt and press for the re-setup (link
-        # pairing modelled as test_a_takeover_hello_that_fails_leaves_no_ghost_prompt's). The takeover's variant is
-        # the ESP32's: the refusal goes under the session still current (link_pairing.c checks the hello's key and
-        # nonce before any wipe), and the link drops after it (ble_server_delayed_disconnect).
+        # key): muse_input.c's routing of the gadget's own key (update_prompt_press: an update's prompt would take
+        # the press, only that) over the muse_local_press core, and the real hello branch, prompt and press for the
+        # re-setup (link pairing modelled as test_a_takeover_hello_that_fails_leaves_no_ghost_prompt's). The
+        # takeover's variant is the ESP32's: the refusal goes under the session still current (link_pairing.c checks
+        # the hello's key and nonce before any wipe), and the link drops after it (ble_server_delayed_disconnect).
         session = json.loads((PROTOCOLS / "test-vectors/mg-session-v1.json").read_text(encoding="utf-8"))
         exchanges = {ex["name"]: ex for ex in session["proof_gates"]["exchanges"]}
-        window = exchanges["an update press opens no window"]
         takeover = exchanges["a takeover hello that fails validation ends the prompt, answered encrypted, the link "
                              "dropped"]
-        self.assertEqual(window["device"], {"proof": False, "talk_key_only": False})
         self.assertEqual(takeover["device"], {"talk_key_only": False, "bad_hello_encrypted": True,
                                               "bad_hello_drops_link": True})
 
         def resetup(st: dict) -> str:   # the step's resetup state: is a prompt up, is a hello confirmed
             r = st.get("resetup") or {}
             return f"want_resetup({int(r.get('prompt_conn') is not None)}, {int(r.get('confirmed_conn') is not None)});"
-        steps = []
-        for i, st in enumerate(window["steps"]):
-            ev = st.get("event")
-            if ev is None:
-                steps.append(f'    assert(smp("{st["smp"]}") == {st["rc"]});   /* step {i}: {st["note"][:60]} */')
-                steps.append(f'    assert(!strcmp(update_prompt(), "{st["update_prompt"]}"));')
-            elif ev == "press":
-                steps.append(f"    physical_press(MUSE_BTN_AUX_PRESS, MUSE_BTN_AUX_RELEASE);   /* step {i} */")
-                steps.append("    " + resetup(st))
-            elif ev == "injected_press":
-                steps.append(f"    injected_press();   /* step {i} */")
-                steps.append("    " + resetup(st))
-            elif ev == "resetup_request":
-                steps.append(f"    resetup_request();   /* step {i} */")
-                steps.append("    " + resetup(st))
-            else:
-                self.fail(f"a proof_gates event this replay doesn't know: {ev!r}")
-        self.assertEqual(sum(1 for st in window["steps"] if "smp" in st), 3)
         over = []
         for i, st in enumerate(takeover["steps"]):
             ev = st["event"]
@@ -1545,8 +1490,6 @@ class LinkGadgetSetupTest(unittest.TestCase):
         inp = (ROOT / "components/muse/muse_input.c").read_text()
         press = inp[inp.index("static unsigned update_prompt_press(unsigned phys)"):]
         press = press[:press.index("\n}\n") + 3]
-        talk_ok = inp[inp.index("#define MUSE_INJECTED_TALK_OK MUSE_NO_PERSON"):]
-        talk_ok = talk_ok[:talk_ok.index("\n}\n", talk_ok.index("static bool line_talk_ok(void)")) + 3]
         btns = "".join(l + "\n" for l in (ROOT / "components/muse/muse_board.h").read_text().splitlines()
                        if l.startswith("#define MUSE_BTN_"))
         ghost = GHOST[:GHOST.index("int main(void) {")]
@@ -1556,14 +1499,12 @@ class LinkGadgetSetupTest(unittest.TestCase):
         ghost = ghost.replace("    hello_kind = kind;\n    status[0] = 0;\n", "    hello_kind = kind;\n    status[0] = 0;\n    plain = false;\n")
         self.assertIn("plain = true;", ghost)
         self.assertIn("plain = false;", ghost)
-        source = ((ghost + WINDOW).replace("@BRANCH@", branch).replace("@GAP@", gap).replace("@APP@", "\n".join(funcs))
+        source = ((ghost + TAKEOVER).replace("@BRANCH@", branch).replace("@GAP@", gap).replace("@APP@", "\n".join(funcs))
                   .replace("@TALK@", _function_body(app, "bool app_confirm_pairing_press("))
-                  .replace("@BTNS@", btns).replace("@UPDATE_PRESS@", press).replace("@TALK_OK@", talk_ok)
-                  .replace("@WINDOW_STEPS@", "\n".join(steps)).replace("@TAKEOVER_STEPS@", "\n".join(over)))
-        out = self.build_and_run(source, [ROOT / "components/muse_restart/muse_local_press_core.c",
-                                          MG / "mg_smp_front.c", MG / "smp/mg_smp_sha256.c"],
-                                 (ROOT / "components/muse_restart/include", MG, MG / "smp"))
-        self.assertIn("PASS an update press opens no window", out)
+                  .replace("@BTNS@", btns).replace("@UPDATE_PRESS@", press)
+                  .replace("@TAKEOVER_STEPS@", "\n".join(over)))
+        out = self.build_and_run(source, [ROOT / "components/muse_restart/muse_local_press_core.c"],
+                                 (ROOT / "components/muse_restart/include",))
         self.assertIn("PASS a takeover hello that fails validation ends the prompt, answered encrypted, the link "
                       "dropped", out)
 

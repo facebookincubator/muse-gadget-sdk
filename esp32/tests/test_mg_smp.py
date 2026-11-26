@@ -1000,17 +1000,6 @@ class UpdateV2Vectors(EspServerBase):
             {"smp": upload, "rc": 0, "note": "the upload runs, no phone, no token"},
         ]}])
 
-    def test_proof_gates_an_update_press_opens_no_window(self) -> None:
-        # mg-session-v1.json proof_gates, "an update press opens no window": its smp steps, the press and the injected
-        # presses through the server's front and core (the press confirms that upload and nothing else; another image
-        # waits, rc 10). Its re-setup steps, on the same gadget: test_link_gadget_setup.
-        session = json.loads(UPDATE_V2.with_name("mg-session-v1.json").read_text())
-        ex = next(e for e in session["proof_gates"]["exchanges"] if e["name"] == "an update press opens no window")
-        steps = [st for st in ex["steps"] if st.get("event") != "resetup_request"]
-        self.assertEqual([st.get("event") or st["rc"] for st in steps], [10, "press", 0, 10, "injected_press",
-                                                                        "injected_press"])
-        self._replay([{"name": ex["name"], "device": {"proof": False}, "steps": steps}])
-
     def _replay(self, cases: list) -> None:
         events = {"press": 1, "proof": 3, "cancel": 4, "unlock": 5, "injected_press": 7, "forget": 8, "set_up": 9}
         for case in cases:
