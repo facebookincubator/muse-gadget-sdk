@@ -555,6 +555,101 @@ static void center_row_caps(lv_obj_t *t, lv_obj_t *v, int icon_h)
     }
 }
 
+/* 240 px wide and narrower (the round 240s, the 172 px portrait): a label and
+ * its value don't fit side by side, so the rows stack them, in 16 px type that
+ * wraps rather than ends in "...", the cards growing with it (main's look). */
+static bool stacked_rows(void)
+{
+    return muse_board->width < 300;
+}
+
+/* Make a card grow with what it holds (stacked panels): at least min_h. */
+static void card_grows(lv_obj_t *c, int min_h)
+{
+    lv_obj_set_height(c, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(c, min_h, 0);
+    lv_obj_set_style_pad_ver(c, 6, 0);
+}
+
+/* A label the given width that wraps: nothing cut. */
+static void wraps(lv_obj_t *l, int32_t width)
+{
+    lv_obj_set_width(l, width);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+}
+
+/* A stacked row's label and value column (its user data): row_card() steps over it. */
+static const char ROW_COLUMN[] = "row column";
+
+/* The card a row's value sits on, on one line or stacked. */
+__attribute__((unused)) static lv_obj_t *row_card(lv_obj_t *value)   /* the bench's actions; the tests */
+{
+    lv_obj_t *p = lv_obj_get_parent(value);
+    return lv_obj_get_user_data(p) == (void *)ROW_COLUMN ? lv_obj_get_parent(p) : p;
+}
+
+/* A row's label, a row with no icon (on one line, or stacked). */
+static lv_obj_t *row_label(lv_obj_t *c)
+{
+    lv_obj_t *l = lv_obj_get_child(c, 0);
+    return lv_obj_get_user_data(l) == (void *)ROW_COLUMN ? lv_obj_get_child(l, 0) : l;
+}
+
+/* A row on a stacked panel (main's): the icon (a symbol, or one of the
+ * standard icons if img), then the label and its value under it in 16 px,
+ * each wrapping, the card growing with them. */
+static lv_obj_t *stacked_row(lv_obj_t *list, const char *icon, bool img, muse_icon_t img_icon, const char *text,
+                             lv_obj_t **value_out, lv_event_cb_t cb, void *user)
+{
+    lv_obj_t *c = card(list, cb != NULL);
+    card_grows(c, value_out ? 60 : 48);
+#if MUSE_HOME_UI
+    if (img) {
+        muse_icon_create(c, img_icon, s_icon_px, COLOR_ACCENT);
+    }
+#else
+    (void)img;
+    (void)img_icon;
+#endif
+    if (icon) {
+        label(c, &lv_font_montserrat_20, COLOR_ACCENT, icon);
+    }
+    lv_obj_t *col = lv_obj_create(c);
+    lv_obj_remove_style_all(col);
+    lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* a tap is the card's */
+    lv_obj_set_user_data(col, (void *)ROW_COLUMN);
+    lv_obj_set_flex_grow(col, 1);
+    lv_obj_set_height(col, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 2, 0);
+    lv_obj_t *t = label(col, &lv_font_montserrat_16, COLOR_TEXT, text);
+    wraps(t, lv_pct(100));
+    /* "Other network..." too long for its line: the line breaks at its last space, not inside the "..." (a '.' is
+     * a place LVGL may break). */
+    const char *shown = lv_label_get_text(t);
+    size_t n = strlen(shown);
+    const char *space = strrchr(shown, ' ');
+    if (n > 3 && !strcmp(shown + n - 3, "...") && space && n < SHOWN_MAX) {
+        int room = s_list_w - 2 * s_pad - (img ? s_icon_px + s_icon_gap : icon ? 20 + s_icon_gap : 0);
+        lv_point_t sz;
+        lv_text_get_size(&sz, shown, &lv_font_montserrat_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (sz.x > room) {
+            char broken[SHOWN_MAX];
+            memcpy(broken, shown, n + 1);
+            broken[space - shown] = '\n';
+            lv_label_set_text(t, broken);
+        }
+    }
+    if (value_out) {
+        *value_out = label(col, &lv_font_montserrat_16, COLOR_DIM, "");
+        wraps(*value_out, lv_pct(100));
+    }
+    if (cb) {
+        lv_obj_add_event_cb(c, cb, LV_EVENT_CLICKED, user);
+    }
+    return c;
+}
+
 /* Tappable row: icon, text, right-aligned value. */
 /* Without cb, the row only shows its value. `img` says an icon_row() will
  * put an icon image in front. */
@@ -600,13 +695,16 @@ static lv_obj_t *row_with(lv_obj_t *list, const char *icon, bool img, const char
 static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_t **value_out,
                      lv_event_cb_t cb, void *user)
 {
+    if (stacked_rows()) {
+        return stacked_row(list, icon, false, 0, text, value_out, cb, user);
+    }
     return row_with(list, icon, false, text, value_out, cb, user);
 }
 
 /* A row led by one of the standard icons rather than a symbol (without the
  * icon set, muse_home_ui.h: the font's symbol for it, as row() draws one). */
-static lv_obj_t *icon_row(lv_obj_t *list, muse_icon_t icon, const char *text, lv_obj_t **value_out,
-                          lv_event_cb_t cb, void *user)
+static lv_obj_t *icon_row_line(lv_obj_t *list, muse_icon_t icon, const char *text, lv_obj_t **value_out,
+                               lv_event_cb_t cb, void *user)
 {
 #if MUSE_HOME_UI
     lv_obj_t *c = row_with(list, NULL, true, text, value_out, cb, user);
@@ -619,13 +717,32 @@ static lv_obj_t *icon_row(lv_obj_t *list, muse_icon_t icon, const char *text, lv
 #endif
 }
 
+/* A Settings row led by an icon: stacked on stacked panels, else on one line. */
+static lv_obj_t *icon_row(lv_obj_t *list, muse_icon_t icon, const char *text, lv_obj_t **value_out,
+                          lv_event_cb_t cb, void *user)
+{
+    if (stacked_rows()) {
+#if MUSE_HOME_UI
+        return stacked_row(list, NULL, true, icon, text, value_out, cb, user);
+#else
+        return stacked_row(list, muse_icon_symbol(icon), false, 0, text, value_out, cb, user);
+#endif
+    }
+    return icon_row_line(list, icon, text, value_out, cb, user);
+}
+
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
 {
     lv_obj_t *c = card(list, false);
-    lv_obj_t *t = label(c, s_font_label, COLOR_TEXT, text);
+    lv_obj_t *t = label(c, stacked_rows() ? &lv_font_montserrat_16 : s_font_label, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
     lv_obj_t *sw = lv_switch_create(c);
     lv_obj_set_size(sw, 60, 32);
+    if (stacked_rows()) {
+        card_grows(c, 48);
+        wraps(t, 1);   /* its width: the flex grow's */
+        lv_obj_set_size(sw, 44, 24);
+    }
     muse_theme_set_style_bg_color(sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     muse_theme_set_style_bg_color(sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (on) {
@@ -640,7 +757,15 @@ static lv_obj_t *button(lv_obj_t *list, const char *text, uint32_t color, lv_eve
     lv_obj_t *b = card(list, true);
     lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     /* A grown list (the millimeter minimums) sets its buttons at the label size. */
-    lv_obj_t *l = label(b, s_menu_factor > 1.0 ? s_font_label : &lv_font_montserrat_20, color, text);
+    lv_obj_t *l = label(b, stacked_rows()      ? &lv_font_montserrat_16
+                           : s_menu_factor > 1.0 ? s_font_label
+                                                 : &lv_font_montserrat_20,
+                        color, text);
+    if (stacked_rows()) {
+        card_grows(b, 48);
+        wraps(l, lv_pct(100));
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    }
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     if (label_out) {
         *label_out = l;
@@ -659,8 +784,9 @@ static lv_obj_t *slider(lv_obj_t *list, const char *text, int lo, int hi, int va
     lv_obj_set_style_pad_ver(c, 6, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
 
-    label(c, &lv_font_montserrat_20, COLOR_TEXT, text);
-    lv_obj_t *v = label(c, &lv_font_montserrat_20, COLOR_ACCENT, "");
+    const lv_font_t *font = stacked_rows() ? &lv_font_montserrat_16 : &lv_font_montserrat_20;
+    label(c, font, COLOR_TEXT, text);
+    lv_obj_t *v = label(c, font, COLOR_ACCENT, "");
     lv_obj_align(v, LV_ALIGN_TOP_RIGHT, 0, 0);
     *value_out = v;
 
@@ -695,13 +821,6 @@ static lv_obj_t *column(lv_obj_t *list)
     lv_obj_set_style_pad_row(l, 10, 0);
     lv_obj_remove_flag(l, LV_OBJ_FLAG_SCROLLABLE);
     return l;
-}
-
-/* 240 px wide and narrower (the round 240s, the 172 px portrait): a label and
- * its value don't fit side by side, so an info row stacks them. */
-static bool stacked_rows(void)
-{
-    return muse_board->width < 300;
 }
 
 /* Label and value, not tappable. */
@@ -2026,7 +2145,7 @@ static void build_face_page(lv_obj_t *tile)
     char name[48];
     muse_link_face_label(name, sizeof(name));
     s_face_rows[1] = row(list, NULL, name, &s_face_checks[1], on_face_choice, (void *)(intptr_t)1);
-    s_face_avatar_lbl = lv_obj_get_child(s_face_rows[1], 0);
+    s_face_avatar_lbl = row_label(s_face_rows[1]);
     for (int i = 0; i < 2; i++) {
         lv_obj_set_style_text_color(s_face_checks[i], lv_color_hex(COLOR_ACCENT), 0);
     }
@@ -2109,6 +2228,9 @@ static const page_t PASS_LOCK = { &s_pass_lockp, build_pass_lock_page, &PASS };
 /* A label that fits beside the icon on a card, else the short one. */
 static const char *fit_label(const char *full, const char *shorter)
 {
+    if (stacked_rows()) {
+        return full;   /* it wraps */
+    }
     lv_point_t sz;
     lv_text_get_size(&sz, full, s_font_label, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     return sz.x <= s_list_w - 2 * s_pad - s_icon_px - s_icon_gap ? full : shorter;
@@ -2117,6 +2239,9 @@ static const char *fit_label(const char *full, const char *shorter)
 /* A value that fits beside its label (at most 130 s), else the short one. */
 static const char *fit_value(const char *label_text, const char *full, const char *shorter)
 {
+    if (stacked_rows()) {
+        return full;   /* on its own line under the label */
+    }
     lv_point_t lw, vw;
     lv_text_get_size(&lw, label_text, s_font_label, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     lv_text_get_size(&vw, full, s_font_value, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
@@ -2171,26 +2296,38 @@ static void build_pass_page(lv_obj_t *tile)
     s_pass_on = s_pass_sw = s_pass_change = s_pass_lock = s_pass_lock_val = NULL;
     if (!muse_passcode_on()) {
         s_pass_on = icon_row(list, MUSE_ICON_LOCK, "Turn passcode on", NULL, on_pass_on, NULL);
-        muse_settings_ui_card_fit(s_pass_on, s_list_w, 0);
+        if (!stacked_rows()) {
+            muse_settings_ui_card_fit(s_pass_on, s_list_w, 0);   /* a stacked row's label wraps */
+        }
         return;
     }
     lv_obj_t *c = card(list, false);
     muse_icon_create(c, MUSE_ICON_LOCK, s_icon_px, COLOR_ACCENT);
-    lv_obj_t *t = label(c, s_font_label, COLOR_TEXT, "Passcode");
+    lv_obj_t *t = label(c, stacked_rows() ? &lv_font_montserrat_16 : s_font_label, COLOR_TEXT, "Passcode");
     lv_obj_set_flex_grow(t, 1);
-    center_row_caps(t, NULL, s_icon_px);
+    if (!stacked_rows()) {
+        center_row_caps(t, NULL, s_icon_px);
+    }
     s_pass_sw = lv_switch_create(c);
     lv_obj_set_size(s_pass_sw, 60, 32);
     lv_obj_set_style_bg_color(s_pass_sw, lv_color_hex(0x3a3358), LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_pass_sw, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_add_state(s_pass_sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(s_pass_sw, on_pass_sw, LV_EVENT_VALUE_CHANGED, NULL);
-    muse_settings_ui_card_fit(c, s_list_w, 60 + s_icon_gap);
+    if (stacked_rows()) {
+        card_grows(c, 48);
+        wraps(t, 1);   /* its width: the flex grow's */
+        lv_obj_set_size(s_pass_sw, 44, 24);
+    } else {
+        muse_settings_ui_card_fit(c, s_list_w, 60 + s_icon_gap);
+    }
     s_pass_lock = icon_row(list, MUSE_ICON_DISPLAY, "Lock", &s_pass_lock_val, on_nav, (void *)&PASS_LOCK);
     set_text(s_pass_lock_val, pass_lock_name(muse_passcode_lock_mode()));
     s_pass_change = icon_row(list, MUSE_ICON_TOUCH, fit_label("Change passcode", "Change code"), NULL, on_pass_change,
                              NULL);
-    muse_settings_ui_card_fit(s_pass_change, s_list_w, 0);
+    if (!stacked_rows()) {
+        muse_settings_ui_card_fit(s_pass_change, s_list_w, 0);
+    }
 }
 
 static void tick_pass(void)
@@ -2655,7 +2792,7 @@ static void build_vib_page(lv_obj_t *tile)
         s_vib_pulse[i] = row(list, NULL, buf, &v, on_vib_pulse, (void *)(intptr_t)i);
         if (VIB_PULSES[i] < s_vib_caps.min_on_ms) {
             /* Shorter than the actuator renders: drawn dim, played lengthened. */
-            lv_obj_set_style_text_color(lv_obj_get_child(s_vib_pulse[i], 0), lv_color_hex(COLOR_DIM), 0);
+            lv_obj_set_style_text_color(row_label(s_vib_pulse[i]), lv_color_hex(COLOR_DIM), 0);
             lv_obj_set_style_max_width(v, s_list_w * 2 / 3, 0);
             snprintf(buf, sizeof(buf), "lengthened to %u ms", (unsigned)mght_pulse_played_ms(&s_vib_caps, VIB_PULSES[i]));
             set_text(v, buf);
@@ -3132,7 +3269,7 @@ static void bench_action_pending(void)
     lv_obj_t *target = NULL;
     if (s_current == s_appearance || s_current == s_avatar) {
         if (action == 2) target = lv_obj_get_user_data(s_current);   /* the title's chevron (named("back")) */
-        else target = lv_obj_get_parent(s_current == s_appearance ? s_appearance_mode : s_avatar_source);
+        else target = row_card(s_current == s_appearance ? s_appearance_mode : s_avatar_source);
     }
     if (target) lv_obj_send_event(target,LV_EVENT_CLICKED,NULL);
     printf("@ui_settings_action {\"action\":\"%s\",\"ok\":%s,\"page\":\"%s\"}\n",
@@ -3392,7 +3529,7 @@ void muse_settings_ui_geom(muse_settings_ui_geom_t *g)
 lv_obj_t *muse_settings_ui_card(lv_obj_t *parent, muse_icon_t icon, uint32_t icon_color, const char *text,
                                 uint32_t text_color, lv_obj_t **value_out, lv_event_cb_t cb, void *user)
 {
-    lv_obj_t *c = icon_row(parent, icon, text, value_out, cb, user);
+    lv_obj_t *c = icon_row_line(parent, icon, text, value_out, cb, user);   /* the passcode screens' card: one line */
     muse_icon_set(lv_obj_get_child(c, 0), icon, s_icon_px, icon_color);
     lv_obj_set_style_text_color(lv_obj_get_child(c, 1), lv_color_hex(text_color), 0);
     return c;

@@ -535,6 +535,23 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
                  COMMAND muse_settings_text_test ${w} ${h} ${round} ${diag} info
                          "${CMAKE_CURRENT_BINARY_DIR}/settings-info-${name}.ppm")
     endforeach()
+    # 240 px wide and narrower, every page: no label cut short with "...", none outside its card; and
+    # Wi-Fi's "Other network..." and Talk's longest choice drawn whole, a screenshot of each.
+    foreach(panel "round_240;240;240;1;1.28" "xiao;172;320;0;1.47" "portrait;240;320;0;2.8")
+        list(GET panel 0 name)
+        list(GET panel 1 w)
+        list(GET panel 2 h)
+        list(GET panel 3 round)
+        list(GET panel 4 diag)
+        add_test(NAME muse_settings_${name}_sweep COMMAND muse_settings_text_test ${w} ${h} ${round} ${diag} sweep)
+        if(NOT name STREQUAL "portrait")
+            foreach(shot other talk)
+                add_test(NAME muse_settings_${name}_shot_${shot}
+                         COMMAND muse_settings_text_test ${w} ${h} ${round} ${diag} shot-${shot}
+                                 "${CMAKE_CURRENT_BINARY_DIR}/settings-${shot}-${name}.ppm")
+            endforeach()
+        endif()
+    endforeach()
     add_test(NAME muse_settings_xiao_rows COMMAND muse_settings_text_test 172 320 0 1.47 rows)
     add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
     add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
