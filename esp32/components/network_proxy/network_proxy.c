@@ -8,6 +8,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1   /* strnlen: glibc declares it only with this (macOS and newlib do anyway) */
+#endif
 #include "network_proxy.h"
 
 #include <sys/socket.h>

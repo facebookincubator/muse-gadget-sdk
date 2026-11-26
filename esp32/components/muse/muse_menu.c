@@ -467,7 +467,7 @@ static void show(view_t view)
     switch (view) {
     case VIEW_STATUS:
     case VIEW_BATTERY:
-        set_text(s_title, view == VIEW_STATUS ? "STATUS" : "BATTERY");
+        set_text(s_title, view == VIEW_STATUS ? "Status" : "Battery");
         set_text(s_hint_down, muse_board->keyboard ? "Esc Back" : "Back");
         select_hint("Back");
         break;
@@ -477,7 +477,7 @@ static void show(view_t view)
                  muse_board->keyboard      ? "GO"
                  : muse_board->wake_button ? muse_board->wake_button
                                            : muse_board->aux_button);
-        set_text(s_title, "POWER OFF");
+        set_text(s_title, "Power off");
         set_text(s_page, text);
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
         select_hint("Power off");
@@ -485,7 +485,7 @@ static void show(view_t view)
         break;
     }
     case VIEW_RESET:
-        set_text(s_title, "RESET PAIRING");
+        set_text(s_title, "Reset pairing");
         set_text(s_page, "Forget Wi-Fi and the Muse app pairing, then restart?");
         set_text(s_hint_down, muse_board->keyboard ? "Esc Cancel" : "Cancel");
         select_hint("Reset");
@@ -540,7 +540,7 @@ static void activate(int item, int direction)
         break;
 #endif
     case ITEM_PHONE:
-        muse_settings_set_ble_on(!muse_settings_ble_on());
+        muse_ble_phone_setup(!muse_settings_ble_on());
         break;
     case ITEM_WIFI:
         muse_settings_set_wifi_on(!muse_settings_wifi_on());
@@ -630,7 +630,7 @@ static void handle(muse_menu_key_t key)
             muse_menu_close();
             if (power) muse_input_request_power_off();
             else {
-                muse_state_set_caption("RESETTING...");
+                muse_state_set_caption("Resetting...");
                 muse_link_reset_setup();
             }
         }

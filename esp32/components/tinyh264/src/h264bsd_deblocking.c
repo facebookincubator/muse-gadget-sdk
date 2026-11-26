@@ -718,7 +718,9 @@ void FilterVerLumaEdge(
                     tmp++;
                 }
 
-                val = (((q0 - p0) << 2) + (p1 - q1) + 4) >> 3;
+                /* OPT: (q0 - p0) * 4, not << 2: a left shift of a negative
+                 * value is undefined (the same result) */
+                val = (((q0 - p0) * 4) + (p1 - q1) + 4) >> 3;
                 delta = CLIP3(-tmp, tmp, val);
 
                 p0 = clp[p0 + delta];
@@ -831,7 +833,7 @@ void FilterHorLumaEdge(
                 tmp++;
             }
 
-            val = ((((q0 - p0) << 2) + (p1 - q1) + 4) >> 3);
+            val = ((((q0 - p0) * 4) + (p1 - q1) + 4) >> 3);
             delta = CLIP3(-tmp, tmp, val);
 
             p0 = clp[p0 + delta];
@@ -910,7 +912,7 @@ void FilterHorLuma(
                     tmp++;
                 }
 
-                val = ((((q0 - p0) << 2) + (p1 - q1) + 4) >> 3);
+                val = ((((q0 - p0) * 4) + (p1 - q1) + 4) >> 3);
                 delta = CLIP3(-tmp, tmp, val);
 
                 p0 = clp[p0 + delta];
@@ -1002,7 +1004,7 @@ void FilterVerChromaEdge(
         if (bS < 4)
         {
             tc = thresholds->tc0[bS-1] + 1;
-            delta = CLIP3(-tc, tc, ((((q0 - p0) << 2) +
+            delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
             p0 = clp[p0 + delta];
             q0 = clp[q0 - delta];
@@ -1025,7 +1027,7 @@ void FilterVerChromaEdge(
         if (bS < 4)
         {
             tc = thresholds->tc0[bS-1] + 1;
-            delta = CLIP3(-tc, tc, ((((q0 - p0) << 2) +
+            delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
             p0 = clp[p0 + delta];
             q0 = clp[q0 - delta];
@@ -1078,7 +1080,7 @@ void FilterHorChromaEdge(
              ((u32)ABS(p1-p0) < thresholds->beta)  &&
              ((u32)ABS(q1-q0) < thresholds->beta) )
         {
-            delta = CLIP3(-tc, tc, ((((q0 - p0) << 2) +
+            delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
             p0 = clp[p0 + delta];
             q0 = clp[q0 - delta];
@@ -1128,7 +1130,7 @@ void FilterHorChroma(
                  ((u32)ABS(p1-p0) < thresholds->beta)  &&
                  ((u32)ABS(q1-q0) < thresholds->beta) )
             {
-                delta = CLIP3(-tc, tc, ((((q0 - p0) << 2) +
+                delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                           (p1 - q1) + 4) >> 3));
                 p0 = clp[p0 + delta];
                 q0 = clp[q0 - delta];

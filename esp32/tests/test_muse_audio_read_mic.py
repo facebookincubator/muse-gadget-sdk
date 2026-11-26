@@ -91,6 +91,11 @@ static float s_mic_scale = 1.0f;
 static int16_t s_in_stereo[MUSE_AUDIO_CHUNK * CHANNELS];
 static int16_t s_in_mono[MUSE_AUDIO_CHUNK];
 static float s_hpf_a, s_hpf_x1, s_hpf_y1;
+/* muse_audio_read's prologue: the codecs open (a closed read waits and
+ * fails), and a mic gain set from another task applied first. */
+static bool ensure_open(void) { return true; }
+static esp_err_t closed_wait(size_t frames) { (void)frames; return ESP_FAIL; }
+static void apply_pending_mic_gain(void) {}
 '''
 
 MAIN = r'''

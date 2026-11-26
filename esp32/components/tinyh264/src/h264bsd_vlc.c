@@ -192,7 +192,8 @@ u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
         if (bits == END_OF_STREAM)
             return(HANTRO_NOK);
 
-        *codeNum = (1 << numZeros) - 1 + bits;
+        /* OPT: unsigned, as the result is: 1 << 31 overflowed an int */
+        *codeNum = (1U << numZeros) - 1 + bits;
 
     }
 

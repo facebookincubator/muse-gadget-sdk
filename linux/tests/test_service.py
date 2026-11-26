@@ -543,7 +543,7 @@ def warnings_for(sdk_token, pairing, caplog) -> list[str]:
 def test_a_token_changed_since_pairing_says_to_pair_again_once(caplog):
     pairing = {**fresh_pairing(), "sdk_token_hint": "mgst_AAAAAAA"}
     assert warnings_for("mgst_BBBBBBBtoken", pairing, caplog) == [
-        "paired with SDK token mgst_AAAAAAA, not this one; run `musegadget pair --force` to use it"]
+        "paired with another SDK token, not this one; run `musegadget pair --force` to use it"]
 
 
 def test_the_token_pairing_used_or_an_older_pairing_says_nothing(caplog):
@@ -559,6 +559,15 @@ def test_api_root_uses_api_url_v2_or_the_muse_api(monkeypatch):
     assert muse_api.api_root() == "https://api.muse.ai"
     monkeypatch.setenv(config.CUSTOM_SERVER_HOSTS_ENV, "1")
     assert muse_api.api_root("https://api.example/") == "https://api.example"
+
+
+def test_output_shows_no_sdk_token_characters():
+    # Its length and a SHA-256 prefix, as the ESP32 firmware logs it; never a prefix.
+    from musegadget import config
+    token = "mgst_FAKEfakeFAKEfake0123456789abcdefghijklmnopq"
+    shown = config.sdk_token_fingerprint(token)
+    assert shown.startswith("48 chars, sha256 ") and len(shown) == 25 and "mgst" not in shown
+    assert config.sdk_token_fingerprint(None) == "none"
 
 
 def test_reconnected_sessions_share_command_slots(monkeypatch):
@@ -746,6 +755,8 @@ def test_repeated_rejection_backoff_is_bounded_in_the_run_loop(tmp_path, monkeyp
     ({}, "homelink-000001"),                                # paired before ids were stored
 ])
 def test_a_token_refresh_names_and_keeps_the_paired_node_id(monkeypatch, stored, used):
+    # The stored id is never renamed: a refresh asks for it and the
+    # rotated pairing still holds it.
     calls = []
 
     def refresh(refresh_token, node_id, api, sdk_token):

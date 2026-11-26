@@ -107,6 +107,7 @@ def build_harness(out: Path, *defines: str) -> Path:
             "-I",
             str(ROOT / "components" / "muse"),
             str(ROOT / "tests" / "muse_battery_harness.c"),   # includes muse_battery.c
+            str(ROOT / "components" / "muse" / "muse_battery_policy.c"),
             "-o",
             str(out),
         ],
@@ -144,6 +145,51 @@ class HarnessCase(unittest.TestCase):
 
     def run_harness(self, *commands: str, binary: Path | None = None) -> list[dict]:
         return [json.loads(line) for line in self.run_harness_raw(*commands, binary=binary)]
+
+
+class LowBatteryTest(HarnessCase):
+    """Low battery: warn at 15 % (icon) and 10 % (a toast, once per
+    discharge), shut down cleanly at the board's voltage, never on USB."""
+
+    def events(self, *commands: str) -> list[str]:
+        return [l for l in self.run_harness_raw(*commands) if l.startswith(("@ui.", "@poweroff", "level"))]
+
+    def test_warnings(self) -> None:
+        ev = self.events("p 0 40 3900", "p 0 15 3700", "level", "p 0 14 3690", "p 0 10 3660", "level",
+                         "p 0 11 3670", "p 0 12 3680", "p 0 13 3690", "level")
+        # 15 %: icon; 10 %: toast; back up only past 12 % (hysteresis) and no second toast.
+        self.assertEqual(ev, ["@ui.lowbat 15 1", "level 1", "@ui.lowbat 10 2", "level 2",
+                              "@ui.lowbat 13 1", "level 1"])
+        ev = self.events("p 0 10 3660", "p 0 13 3690", "p 0 10 3660")
+        self.assertEqual(ev, ["@ui.lowbat 10 2", "@ui.lowbat 13 1"])   # the toast once a discharge
+        ev = self.events("p 0 10 3660", "p 1 10 3900", "p 0 10 3660")
+        self.assertEqual(ev, ["@ui.lowbat 10 2", "@ui.lowbat 10 0", "@ui.lowbat 10 2"])   # a charge re-arms it
+
+    def test_shutdown_needs_readings_in_a_row(self) -> None:
+        dips = ["p 0 5 3290"] * 4 + ["p 0 5 3350"] + ["p 0 5 3290"] * 4
+        ev = self.events("lowmv 3300", *dips, "level")
+        self.assertNotIn("@poweroff", ev)   # a dip under load isn't the end
+        ev = self.events("lowmv 3300", *["p 0 3 3290"] * 5, "level")
+        self.assertEqual(ev[-3:], ["@ui.lowbat 3 3", "@poweroff", "level 3"])
+
+    def test_never_on_usb_or_without_a_threshold(self) -> None:
+        ev = self.events("lowmv 3300", *["p 1 3 3290"] * 8, "level")
+        self.assertEqual(ev, ["level 0"])
+        ev = self.events(*["p 0 3 3290"] * 8, "level")   # no threshold set (board: 0)
+        self.assertNotIn("@poweroff", ev)
+        ev = self.events("lowmv 3300", *["p 0 -1 3290"] * 8, "level")   # no battery
+        self.assertEqual(ev, ["level 0"])
+
+    def test_next_boot_logs_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            flash = Path(tmp) / "nvs"
+            self.run_harness_raw(f"flash {flash}", "lowmv 3300", *["p 0 3 3280"] * 5)
+            proc = subprocess.run([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
+                                  capture_output=True, check=True)
+            self.assertIn("boot: after a low-battery shutdown at 3280 mV", proc.stderr)
+            proc = subprocess.run([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
+                                  capture_output=True, check=True)
+            self.assertNotIn("low-battery shutdown", proc.stderr)   # once
 
 
 class BatteryTest(HarnessCase):

@@ -20,8 +20,8 @@ Google's LC3 (Low Complexity Communication Codec, ETSI TS 103 634) encoder and
 decoder, the second codec of the musegadgets BLE protocol: 16 kHz mono, 10 ms
 frames, 40 bytes a frame (32 kb/s) by default. One copy serves both SDKs: the
 ESP32 component [`esp32/components/liblc3`](../../esp32/components/liblc3)
-compiles these sources with the options below, and the Zephyr gadgets use
-the same ones (the BLE gadgets on both come in a later change).
+compiles these sources with the options below for the ESP32 BLE gadgets,
+and the Zephyr gadgets (in a later change) use the same ones.
 
 | | |
 |---|---|

@@ -52,7 +52,7 @@ class MotionTests(unittest.TestCase):
         (tmp / "muse_motion.c").write_text((MUSE / "muse_motion.c").read_text())
         audio = (MUSE / "muse_audio.c").read_text()
         (tmp / "motion_audio_write.inc").write_text(
-            audio[audio.index("esp_err_t muse_audio_write("):audio.index("float muse_audio_dbfs(")])
+            audio[audio.index("esp_err_t muse_audio_write_chained("):audio.index("float muse_audio_dbfs(")])
         cls.binary = tmp / "motion"
         built = subprocess.run([
             *shlex.split(os.environ.get("CC", "cc")), "-std=c11", "-Wall", "-Wextra", "-Werror",

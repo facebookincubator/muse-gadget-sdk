@@ -18,6 +18,14 @@
 
 #include "host/ble_gatt.h"
 
+#include <stdbool.h>
+
+// The factory jig's service answers on a gadget that isn't set up, and on a
+// set-up one only in its owner's setup window (Settings > Bluetooth > Phone
+// setup, on boards with the full UI); otherwise both reads are refused with
+// no data and the button isn't armed. Pure, for the host tests.
+bool factory_test_allowed(bool set_up, bool window_open);
+
 const struct ble_gatt_svc_def *factory_test_svcs(void);
 void factory_test_on_button_press(void);
 void factory_test_on_disconnect(void);

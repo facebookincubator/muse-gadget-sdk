@@ -70,11 +70,12 @@ bool config_set_str(const char *key, const char *value) {
     return true;
 }
 
-// The stored node id and the pairing credentials (identity.c).
+// The stored node id (no re-provisioning journal here).
 bool config_get_node_id(char *out, size_t size) {
     return config_get_str("node_id", out, size) && out[0];
 }
 
+// Pairing credentials (identity.c: a set-up gadget that stored no node id).
 bool config_is_provisioned(void) {
     return find("access_token") >= 0 || find("auth_token") >= 0;
 }
@@ -84,10 +85,33 @@ static void erase(const char *key) {
     if (i >= 0) memset(&s_entries[i], 0, sizeof(s_entries[i]));
 }
 
+// The Wi-Fi STA MAC ends 11:22:33, the Bluetooth address 44:55:66 (zeros
+// elsewhere); with NO_BT_ADDRESS the Bluetooth address can't be read.
 esp_err_t esp_read_mac(uint8_t *mac, int type) {
-    (void)type;
     memset(mac, 0, 6);
+    if (type == ESP_MAC_WIFI_STA) {
+        mac[3] = 0x11, mac[4] = 0x22, mac[5] = 0x33;
+    } else if (type == ESP_MAC_BT) {
+#ifdef NO_BT_ADDRESS
+        return ESP_FAIL;
+#endif
+        mac[3] = 0x44, mac[4] = 0x55, mac[5] = 0x66;
+    } else {
+        return ESP_FAIL;
+    }
     return ESP_OK;
+}
+
+// The advertised name for the build's prefix (tests/test_link_identity.py
+// builds this once per case, with EXPECT_BLE_NAME); the name never changes the
+// node id (a plain Home Link build's here; gadget ids: link_node_id_harness.c).
+static void test_names(void) {
+    identity_init();
+    CHECK(strcmp(identity_node_id(), "homelink-112233") == 0, "node_id was %s", identity_node_id());
+#ifdef EXPECT_BLE_NAME
+    CHECK(strcmp(identity_ble_name(), EXPECT_BLE_NAME) == 0, "ble_name was %s, not %s",
+          identity_ble_name(), EXPECT_BLE_NAME);
+#endif
 }
 
 static void test_a_token_set_after_pairing_needs_pairing_again(void) {
@@ -126,6 +150,7 @@ static void test_unknown_or_tokenless_pairings(void) {
 }
 
 int main(void) {
+    test_names();
     test_a_token_set_after_pairing_needs_pairing_again();
     test_unknown_or_tokenless_pairings();
     puts("identity harness: PASS");

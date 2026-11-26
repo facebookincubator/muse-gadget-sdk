@@ -158,6 +158,14 @@ static esp_err_t power_off(void)
     return muse_pmu_power_off();
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off on the AXP2101. */
+static void safe_display_off(void)
+{
+    if (bsp_i2c_init() == ESP_OK) {
+        bsp_display_backlight_off();   /* the AXP2101's backlight LDO off (the BSP opens the PMU itself) */
+    }
+}
+
 static const muse_board_t s_board = {
 #if CONFIG_MUSE_BOARD_M5STACK_CORES3LITE
     /* The CoreS3 Lite (K128-Lite) is the CoreS3 without the camera, proximity
@@ -180,11 +188,13 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = bsp_display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the AXP2101's charge-done state */
     .power_off = power_off,
 };
 

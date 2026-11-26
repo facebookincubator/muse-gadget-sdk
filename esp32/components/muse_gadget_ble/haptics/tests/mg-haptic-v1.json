@@ -1,0 +1,5581 @@
+{
+ "description": "Haptics reference vectors (mgcommands.h, Haptics): a device_action packet or a local event at t (ms) -> the device's answers (status packets, \"error <mg_error_code>\", or the duty used in the 10 s and 60 s windows) and the motor after it; \"step\" entries are the step ends the device plays on its own.",
+ "version": 1,
+ "scenarios": [
+  {
+   "name": "tap, id 7",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010101"
+    },
+    {
+     "t": 100,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ],
+    [
+     100,
+     "used",
+     [
+      "used 50 50"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "timing list 40/100/120 at 60 %, id 8",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000008003c010203280064007800"
+    },
+    {
+     "t": 400,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f080000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     150,
+     "step",
+     [],
+     1
+    ],
+    [
+     270,
+     "step",
+     [
+      "1e0f080100"
+     ],
+     0
+    ],
+    [
+     400,
+     "used",
+     [
+      "used 170 170"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "ring x5 stopped by the client, id 9",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000090000050104"
+    },
+    {
+     "t": 3500,
+     "op": "rx",
+     "hex": "1e1100"
+    },
+    {
+     "t": 3600,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f090000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     600,
+     "step",
+     [],
+     1
+    ],
+    [
+     1000,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [],
+     1
+    ],
+    [
+     2400,
+     "step",
+     [],
+     0
+    ],
+    [
+     2600,
+     "step",
+     [],
+     1
+    ],
+    [
+     3000,
+     "step",
+     [],
+     0
+    ],
+    [
+     3500,
+     "rx",
+     [
+      "1e0f090200"
+     ],
+     0
+    ],
+    [
+     3600,
+     "used",
+     [
+      "used 1600 1600"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "haptics_enabled 0: refused, disabled",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000a0000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "rx",
+     [
+      "1e0f0a0401"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a 20 ms bench pulse with haptics_enabled 0 (lengthened to 50)",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000b01000102011400"
+    },
+    {
+     "t": 100,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "rx",
+     [
+      "1e0f0b0000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f0b0100"
+     ],
+     0
+    ],
+    [
+     100,
+     "used",
+     [
+      "used 50 50"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "an on step of 600 ms: invalid_value",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000c00000102015802"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 1",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000150000010101"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f150000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f150100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 50 50"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 1 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00001f0000030101"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f1f0000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     350,
+     "step",
+     [],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     700,
+     "step",
+     [],
+     1
+    ],
+    [
+     750,
+     "step",
+     [
+      "1e0f1f0100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 150 150"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 2",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000160000010102"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f160000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     170,
+     "step",
+     [],
+     1
+    ],
+    [
+     220,
+     "step",
+     [
+      "1e0f160100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 100 100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 2 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000200000030102"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f200000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     170,
+     "step",
+     [],
+     1
+    ],
+    [
+     220,
+     "step",
+     [],
+     0
+    ],
+    [
+     520,
+     "step",
+     [],
+     1
+    ],
+    [
+     570,
+     "step",
+     [],
+     0
+    ],
+    [
+     690,
+     "step",
+     [],
+     1
+    ],
+    [
+     740,
+     "step",
+     [],
+     0
+    ],
+    [
+     1040,
+     "step",
+     [],
+     1
+    ],
+    [
+     1090,
+     "step",
+     [],
+     0
+    ],
+    [
+     1210,
+     "step",
+     [],
+     1
+    ],
+    [
+     1260,
+     "step",
+     [
+      "1e0f200100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 300 300"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000170000010103"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f170000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [
+      "1e0f170100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 400 400"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 3 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000210000030103"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f210000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     700,
+     "step",
+     [],
+     1
+    ],
+    [
+     1100,
+     "step",
+     [],
+     0
+    ],
+    [
+     1400,
+     "step",
+     [],
+     1
+    ],
+    [
+     1800,
+     "step",
+     [
+      "1e0f210100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 1200 1200"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 4",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000180000010104"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f180000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     600,
+     "step",
+     [],
+     1
+    ],
+    [
+     1000,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [
+      "1e0f180100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 800 800"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 4 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000220000030104"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f220000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     600,
+     "step",
+     [],
+     1
+    ],
+    [
+     1000,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [],
+     1
+    ],
+    [
+     2400,
+     "step",
+     [],
+     0
+    ],
+    [
+     2600,
+     "step",
+     [],
+     1
+    ],
+    [
+     3000,
+     "step",
+     [],
+     0
+    ],
+    [
+     4000,
+     "step",
+     [],
+     1
+    ],
+    [
+     4400,
+     "step",
+     [],
+     0
+    ],
+    [
+     4600,
+     "step",
+     [],
+     1
+    ],
+    [
+     5000,
+     "step",
+     [],
+     0
+    ],
+    [
+     6000,
+     "step",
+     [
+      "1e0f220100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 2400 2400"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 5",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000190000010105"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f190000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     150,
+     "step",
+     [],
+     1
+    ],
+    [
+     270,
+     "step",
+     [
+      "1e0f190100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 170 170"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 5 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000230000030105"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f230000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     150,
+     "step",
+     [],
+     1
+    ],
+    [
+     270,
+     "step",
+     [],
+     0
+    ],
+    [
+     570,
+     "step",
+     [],
+     1
+    ],
+    [
+     620,
+     "step",
+     [],
+     0
+    ],
+    [
+     720,
+     "step",
+     [],
+     1
+    ],
+    [
+     840,
+     "step",
+     [],
+     0
+    ],
+    [
+     1140,
+     "step",
+     [],
+     1
+    ],
+    [
+     1190,
+     "step",
+     [],
+     0
+    ],
+    [
+     1290,
+     "step",
+     [],
+     1
+    ],
+    [
+     1410,
+     "step",
+     [
+      "1e0f230100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 510 510"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 6",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00001a0000010106"
+    },
+    {
+     "t": 3000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f1a0000"
+     ],
+     1
+    ],
+    [
+     120,
+     "step",
+     [],
+     0
+    ],
+    [
+     200,
+     "step",
+     [],
+     1
+    ],
+    [
+     320,
+     "step",
+     [],
+     0
+    ],
+    [
+     400,
+     "step",
+     [],
+     1
+    ],
+    [
+     520,
+     "step",
+     [
+      "1e0f1a0100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "used",
+     [
+      "used 360 360"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "preset 6 x3",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000240000030106"
+    },
+    {
+     "t": 9000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f240000"
+     ],
+     1
+    ],
+    [
+     120,
+     "step",
+     [],
+     0
+    ],
+    [
+     200,
+     "step",
+     [],
+     1
+    ],
+    [
+     320,
+     "step",
+     [],
+     0
+    ],
+    [
+     400,
+     "step",
+     [],
+     1
+    ],
+    [
+     520,
+     "step",
+     [],
+     0
+    ],
+    [
+     820,
+     "step",
+     [],
+     1
+    ],
+    [
+     940,
+     "step",
+     [],
+     0
+    ],
+    [
+     1020,
+     "step",
+     [],
+     1
+    ],
+    [
+     1140,
+     "step",
+     [],
+     0
+    ],
+    [
+     1220,
+     "step",
+     [],
+     1
+    ],
+    [
+     1340,
+     "step",
+     [],
+     0
+    ],
+    [
+     1640,
+     "step",
+     [],
+     1
+    ],
+    [
+     1760,
+     "step",
+     [],
+     0
+    ],
+    [
+     1840,
+     "step",
+     [],
+     1
+    ],
+    [
+     1960,
+     "step",
+     [],
+     0
+    ],
+    [
+     2040,
+     "step",
+     [],
+     1
+    ],
+    [
+     2160,
+     "step",
+     [
+      "1e0f240100"
+     ],
+     0
+    ],
+    [
+     9000,
+     "used",
+     [
+      "used 1080 1080"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "even list repeats without a gap",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000028000003020264003200"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f280000"
+     ],
+     1
+    ],
+    [
+     100,
+     "step",
+     [],
+     0
+    ],
+    [
+     150,
+     "step",
+     [],
+     1
+    ],
+    [
+     250,
+     "step",
+     [],
+     0
+    ],
+    [
+     300,
+     "step",
+     [],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     450,
+     "step",
+     [
+      "1e0f280100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "odd list repeats with the 300 ms gap",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00002900000302016400"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f290000"
+     ],
+     1
+    ],
+    [
+     100,
+     "step",
+     [],
+     0
+    ],
+    [
+     400,
+     "step",
+     [],
+     1
+    ],
+    [
+     500,
+     "step",
+     [],
+     0
+    ],
+    [
+     800,
+     "step",
+     [],
+     1
+    ],
+    [
+     900,
+     "step",
+     [
+      "1e0f290100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: truncated",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000007000001"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 2"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: preset with a byte more",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000007000001010100"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 2"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: mb effect ids",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0005070000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: motor 1",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0100070000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: motor all",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0fff00070000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: repeat 0",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000000101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: strength 101",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070065010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: strength 100",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070064010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: unknown kind",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010301"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: unknown preset 0",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010100"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: unknown preset 7",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010107"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: count 0",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010200"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: count short of its bytes",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000700000102023200"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 2"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: count 17",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000700000102113c003c003c003c003c003c003c003c003c003c003c003c003c003c003c003c003c00"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: a step of 0",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010203640000006400"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: on 500 ok",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010201f401"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     500,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: on 501",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010201f501"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: pass 5000 ok",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000007000001020af401f401f401f401f401f401f401f401f401f401"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     500,
+     "step",
+     [],
+     0
+    ],
+    [
+     1000,
+     "step",
+     [],
+     1
+    ],
+    [
+     1500,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [],
+     1
+    ],
+    [
+     2500,
+     "step",
+     [],
+     0
+    ],
+    [
+     3000,
+     "step",
+     [],
+     1
+    ],
+    [
+     3500,
+     "step",
+     [],
+     0
+    ],
+    [
+     4000,
+     "step",
+     [],
+     1
+    ],
+    [
+     4500,
+     "step",
+     [],
+     0
+    ],
+    [
+     5000,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: pass 5001",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000007000001020af401f401f401f401f401f401f401f401f401f501"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: request 10000 ok: ring x5",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000050104"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     600,
+     "step",
+     [],
+     1
+    ],
+    [
+     1000,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [],
+     1
+    ],
+    [
+     2400,
+     "step",
+     [],
+     0
+    ],
+    [
+     2600,
+     "step",
+     [],
+     1
+    ],
+    [
+     3000,
+     "step",
+     [],
+     0
+    ],
+    [
+     4000,
+     "step",
+     [],
+     1
+    ],
+    [
+     4400,
+     "step",
+     [],
+     0
+    ],
+    [
+     4600,
+     "step",
+     [],
+     1
+    ],
+    [
+     5000,
+     "step",
+     [],
+     0
+    ],
+    [
+     6000,
+     "step",
+     [],
+     1
+    ],
+    [
+     6400,
+     "step",
+     [],
+     0
+    ],
+    [
+     6600,
+     "step",
+     [],
+     1
+    ],
+    [
+     7000,
+     "step",
+     [],
+     0
+    ],
+    [
+     8000,
+     "step",
+     [],
+     1
+    ],
+    [
+     8400,
+     "step",
+     [],
+     0
+    ],
+    [
+     8600,
+     "step",
+     [],
+     1
+    ],
+    [
+     9000,
+     "step",
+     [],
+     0
+    ],
+    [
+     10000,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: request over: ring x6",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000060104"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: request with gaps over: 500 x13",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000700000d0201f401"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: stop with 2 bytes",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e110000"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 2"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: stop motor 1",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e1101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: stop, nothing playing",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e11ff"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "error: action 16 (reserved)",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e1000"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "timing list without the timing flag: unsupported",
+   "caps": {
+    "kind": 1,
+    "flags": 0,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000700000102016400"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 1"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a board cap of 200 ms",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 200
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000070000010201c900"
+    },
+    {
+     "t": 10,
+     "op": "rx",
+     "hex": "1e0f0000080000010201c800"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ],
+    [
+     10,
+     "rx",
+     [
+      "1e0f080000"
+     ],
+     1
+    ],
+    [
+     210,
+     "step",
+     [
+      "1e0f080100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a 20 ms step lengthened past a 40 ms board cap",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 40
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f00000700000102011400"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "error 3"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a play replaces the playing one",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010103"
+    },
+    {
+     "t": 100,
+     "op": "rx",
+     "hex": "1e0f0000020000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     100,
+     "rx",
+     [
+      "1e0f010207",
+      "1e0f020000"
+     ],
+     1
+    ],
+    [
+     150,
+     "step",
+     [
+      "1e0f020100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a refused replacement keeps the old one playing",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000020104"
+    },
+    {
+     "t": 100,
+     "op": "env",
+     "low_battery": 1
+    },
+    {
+     "t": 150,
+     "op": "rx",
+     "hex": "1e0f0000020000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     100,
+     "env",
+     [],
+     1
+    ],
+    [
+     150,
+     "rx",
+     [
+      "1e0f020403"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     600,
+     "step",
+     [],
+     1
+    ],
+    [
+     1000,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [],
+     1
+    ],
+    [
+     2400,
+     "step",
+     [],
+     0
+    ],
+    [
+     2600,
+     "step",
+     [],
+     1
+    ],
+    [
+     3000,
+     "step",
+     [],
+     0
+    ],
+    [
+     4000,
+     "step",
+     [
+      "1e0f010100"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "stop in an off step",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010102"
+    },
+    {
+     "t": 60,
+     "op": "rx",
+     "hex": "1e1100"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     60,
+     "rx",
+     [
+      "1e0f010200"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "stop after done: no answer",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010101"
+    },
+    {
+     "t": 200,
+     "op": "rx",
+     "hex": "1e1100"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [
+      "1e0f010100"
+     ],
+     0
+    ],
+    [
+     200,
+     "rx",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: updating",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1,
+     "updating": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030402"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: low battery",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1,
+     "low_battery": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030403"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: asleep",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1,
+     "asleep": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030404"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: in a turn",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1,
+     "in_turn": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030406"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: updating beats low battery and disabled",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 0,
+     "updating": 1,
+     "low_battery": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030402"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: low battery beats disabled",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 0,
+     "low_battery": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030403"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "refused: disabled beats in a turn",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 0,
+     "in_turn": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030401"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "bench flag in a turn: still in_use",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "in_turn": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030100010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030406"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "bench flag at low battery: still refused",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "low_battery": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000030100010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f030403"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: 5 s in 10 s",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000000000010201f401"
+    },
+    {
+     "t": 600,
+     "op": "rx",
+     "hex": "1e0f0000010000010201f401"
+    },
+    {
+     "t": 1200,
+     "op": "rx",
+     "hex": "1e0f0000020000010201f401"
+    },
+    {
+     "t": 1800,
+     "op": "rx",
+     "hex": "1e0f0000030000010201f401"
+    },
+    {
+     "t": 2400,
+     "op": "rx",
+     "hex": "1e0f0000040000010201f401"
+    },
+    {
+     "t": 3000,
+     "op": "rx",
+     "hex": "1e0f0000050000010201f401"
+    },
+    {
+     "t": 3600,
+     "op": "rx",
+     "hex": "1e0f0000060000010201f401"
+    },
+    {
+     "t": 4200,
+     "op": "rx",
+     "hex": "1e0f0000070000010201f401"
+    },
+    {
+     "t": 4800,
+     "op": "rx",
+     "hex": "1e0f0000080000010201f401"
+    },
+    {
+     "t": 5400,
+     "op": "rx",
+     "hex": "1e0f0000090000010201f401"
+    },
+    {
+     "t": 6000,
+     "op": "rx",
+     "hex": "1e0f00000a0000010201f401"
+    },
+    {
+     "t": 6600,
+     "op": "rx",
+     "hex": "1e0f00000b0000010201f401"
+    },
+    {
+     "t": 7300,
+     "op": "used"
+    },
+    {
+     "t": 12500,
+     "op": "rx",
+     "hex": "1e0f0000320000010201f401"
+    },
+    {
+     "t": 13000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f000000"
+     ],
+     1
+    ],
+    [
+     500,
+     "step",
+     [
+      "1e0f000100"
+     ],
+     0
+    ],
+    [
+     600,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     1100,
+     "step",
+     [
+      "1e0f010100"
+     ],
+     0
+    ],
+    [
+     1200,
+     "rx",
+     [
+      "1e0f020000"
+     ],
+     1
+    ],
+    [
+     1700,
+     "step",
+     [
+      "1e0f020100"
+     ],
+     0
+    ],
+    [
+     1800,
+     "rx",
+     [
+      "1e0f030000"
+     ],
+     1
+    ],
+    [
+     2300,
+     "step",
+     [
+      "1e0f030100"
+     ],
+     0
+    ],
+    [
+     2400,
+     "rx",
+     [
+      "1e0f040000"
+     ],
+     1
+    ],
+    [
+     2900,
+     "step",
+     [
+      "1e0f040100"
+     ],
+     0
+    ],
+    [
+     3000,
+     "rx",
+     [
+      "1e0f050000"
+     ],
+     1
+    ],
+    [
+     3500,
+     "step",
+     [
+      "1e0f050100"
+     ],
+     0
+    ],
+    [
+     3600,
+     "rx",
+     [
+      "1e0f060000"
+     ],
+     1
+    ],
+    [
+     4100,
+     "step",
+     [
+      "1e0f060100"
+     ],
+     0
+    ],
+    [
+     4200,
+     "rx",
+     [
+      "1e0f070000"
+     ],
+     1
+    ],
+    [
+     4700,
+     "step",
+     [
+      "1e0f070100"
+     ],
+     0
+    ],
+    [
+     4800,
+     "rx",
+     [
+      "1e0f080000"
+     ],
+     1
+    ],
+    [
+     5300,
+     "step",
+     [
+      "1e0f080100"
+     ],
+     0
+    ],
+    [
+     5400,
+     "rx",
+     [
+      "1e0f090000"
+     ],
+     1
+    ],
+    [
+     5900,
+     "step",
+     [
+      "1e0f090100"
+     ],
+     0
+    ],
+    [
+     6000,
+     "rx",
+     [
+      "1e0f0a0405"
+     ],
+     0
+    ],
+    [
+     6600,
+     "rx",
+     [
+      "1e0f0b0405"
+     ],
+     0
+    ],
+    [
+     7300,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ],
+    [
+     12500,
+     "rx",
+     [
+      "1e0f320405"
+     ],
+     0
+    ],
+    [
+     13000,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: the minute budget binds when the last 10 s are free",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "duty_add",
+     "ms": 5000
+    },
+    {
+     "t": 5000,
+     "op": "duty_add",
+     "ms": 5000
+    },
+    {
+     "t": 10000,
+     "op": "duty_add",
+     "ms": 5000
+    },
+    {
+     "t": 15000,
+     "op": "duty_add",
+     "ms": 3000
+    },
+    {
+     "t": 35000,
+     "op": "used"
+    },
+    {
+     "t": 35000,
+     "op": "rx",
+     "hex": "1e0f0000010000010209f4016400f4016400f4016400f4016400f401"
+    },
+    {
+     "t": 35010,
+     "op": "rx",
+     "hex": "1e0f0000020000010205f4016400f4016400f401"
+    },
+    {
+     "t": 40000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     5000,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     10000,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     15000,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     35000,
+     "used",
+     [
+      "used 0 18000"
+     ],
+     0
+    ],
+    [
+     35000,
+     "rx",
+     [
+      "1e0f010405"
+     ],
+     0
+    ],
+    [
+     35010,
+     "rx",
+     [
+      "1e0f020000"
+     ],
+     1
+    ],
+    [
+     35510,
+     "step",
+     [],
+     0
+    ],
+    [
+     35610,
+     "step",
+     [],
+     1
+    ],
+    [
+     36110,
+     "step",
+     [],
+     0
+    ],
+    [
+     36210,
+     "step",
+     [],
+     1
+    ],
+    [
+     36710,
+     "step",
+     [
+      "1e0f020100"
+     ],
+     0
+    ],
+    [
+     40000,
+     "used",
+     [
+      "used 1500 19500"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: steady requests stop at the 10 s budget",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f000000000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 2100,
+     "op": "rx",
+     "hex": "1e0f000001000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 4200,
+     "op": "rx",
+     "hex": "1e0f000002000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 6300,
+     "op": "rx",
+     "hex": "1e0f000003000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 8400,
+     "op": "rx",
+     "hex": "1e0f000004000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 10500,
+     "op": "rx",
+     "hex": "1e0f000005000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 12600,
+     "op": "rx",
+     "hex": "1e0f000006000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 14700,
+     "op": "rx",
+     "hex": "1e0f000007000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 16800,
+     "op": "rx",
+     "hex": "1e0f000008000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 18900,
+     "op": "rx",
+     "hex": "1e0f000009000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 21000,
+     "op": "rx",
+     "hex": "1e0f00000a000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 23100,
+     "op": "rx",
+     "hex": "1e0f00000b000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 25200,
+     "op": "rx",
+     "hex": "1e0f00000c000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 27300,
+     "op": "rx",
+     "hex": "1e0f00000d000001020890016400900164009001640090016400"
+    },
+    {
+     "t": 30000,
+     "op": "used"
+    },
+    {
+     "t": 61000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f000000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     500,
+     "step",
+     [],
+     1
+    ],
+    [
+     900,
+     "step",
+     [],
+     0
+    ],
+    [
+     1000,
+     "step",
+     [],
+     1
+    ],
+    [
+     1400,
+     "step",
+     [],
+     0
+    ],
+    [
+     1500,
+     "step",
+     [],
+     1
+    ],
+    [
+     1900,
+     "step",
+     [],
+     0
+    ],
+    [
+     2000,
+     "step",
+     [
+      "1e0f000100"
+     ],
+     0
+    ],
+    [
+     2100,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     2500,
+     "step",
+     [],
+     0
+    ],
+    [
+     2600,
+     "step",
+     [],
+     1
+    ],
+    [
+     3000,
+     "step",
+     [],
+     0
+    ],
+    [
+     3100,
+     "step",
+     [],
+     1
+    ],
+    [
+     3500,
+     "step",
+     [],
+     0
+    ],
+    [
+     3600,
+     "step",
+     [],
+     1
+    ],
+    [
+     4000,
+     "step",
+     [],
+     0
+    ],
+    [
+     4100,
+     "step",
+     [
+      "1e0f010100"
+     ],
+     0
+    ],
+    [
+     4200,
+     "rx",
+     [
+      "1e0f020000"
+     ],
+     1
+    ],
+    [
+     4600,
+     "step",
+     [],
+     0
+    ],
+    [
+     4700,
+     "step",
+     [],
+     1
+    ],
+    [
+     5100,
+     "step",
+     [],
+     0
+    ],
+    [
+     5200,
+     "step",
+     [],
+     1
+    ],
+    [
+     5600,
+     "step",
+     [],
+     0
+    ],
+    [
+     5700,
+     "step",
+     [],
+     1
+    ],
+    [
+     6100,
+     "step",
+     [],
+     0
+    ],
+    [
+     6200,
+     "step",
+     [
+      "1e0f020100"
+     ],
+     0
+    ],
+    [
+     6300,
+     "rx",
+     [
+      "1e0f030405"
+     ],
+     0
+    ],
+    [
+     8400,
+     "rx",
+     [
+      "1e0f040405"
+     ],
+     0
+    ],
+    [
+     10500,
+     "rx",
+     [
+      "1e0f050405"
+     ],
+     0
+    ],
+    [
+     12600,
+     "rx",
+     [
+      "1e0f060405"
+     ],
+     0
+    ],
+    [
+     14700,
+     "rx",
+     [
+      "1e0f070405"
+     ],
+     0
+    ],
+    [
+     16800,
+     "rx",
+     [
+      "1e0f080000"
+     ],
+     1
+    ],
+    [
+     17200,
+     "step",
+     [],
+     0
+    ],
+    [
+     17300,
+     "step",
+     [],
+     1
+    ],
+    [
+     17700,
+     "step",
+     [],
+     0
+    ],
+    [
+     17800,
+     "step",
+     [],
+     1
+    ],
+    [
+     18200,
+     "step",
+     [],
+     0
+    ],
+    [
+     18300,
+     "step",
+     [],
+     1
+    ],
+    [
+     18700,
+     "step",
+     [],
+     0
+    ],
+    [
+     18800,
+     "step",
+     [
+      "1e0f080100"
+     ],
+     0
+    ],
+    [
+     18900,
+     "rx",
+     [
+      "1e0f090000"
+     ],
+     1
+    ],
+    [
+     19300,
+     "step",
+     [],
+     0
+    ],
+    [
+     19400,
+     "step",
+     [],
+     1
+    ],
+    [
+     19800,
+     "step",
+     [],
+     0
+    ],
+    [
+     19900,
+     "step",
+     [],
+     1
+    ],
+    [
+     20300,
+     "step",
+     [],
+     0
+    ],
+    [
+     20400,
+     "step",
+     [],
+     1
+    ],
+    [
+     20800,
+     "step",
+     [],
+     0
+    ],
+    [
+     20900,
+     "step",
+     [
+      "1e0f090100"
+     ],
+     0
+    ],
+    [
+     21000,
+     "rx",
+     [
+      "1e0f0a0000"
+     ],
+     1
+    ],
+    [
+     21400,
+     "step",
+     [],
+     0
+    ],
+    [
+     21500,
+     "step",
+     [],
+     1
+    ],
+    [
+     21900,
+     "step",
+     [],
+     0
+    ],
+    [
+     22000,
+     "step",
+     [],
+     1
+    ],
+    [
+     22400,
+     "step",
+     [],
+     0
+    ],
+    [
+     22500,
+     "step",
+     [],
+     1
+    ],
+    [
+     22900,
+     "step",
+     [],
+     0
+    ],
+    [
+     23000,
+     "step",
+     [
+      "1e0f0a0100"
+     ],
+     0
+    ],
+    [
+     23100,
+     "rx",
+     [
+      "1e0f0b0405"
+     ],
+     0
+    ],
+    [
+     25200,
+     "rx",
+     [
+      "1e0f0c0405"
+     ],
+     0
+    ],
+    [
+     27300,
+     "rx",
+     [
+      "1e0f0d0405"
+     ],
+     0
+    ],
+    [
+     30000,
+     "used",
+     [
+      "used 2400 9600"
+     ],
+     0
+    ],
+    [
+     61000,
+     "used",
+     [
+      "used 0 9600"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: a request that does not fit is refused, a smaller one plays",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "duty_add",
+     "ms": 4800
+    },
+    {
+     "t": 10,
+     "op": "rx",
+     "hex": "1e0f0000010000010103"
+    },
+    {
+     "t": 20,
+     "op": "rx",
+     "hex": "1e0f0000020000010101"
+    },
+    {
+     "t": 100,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     10,
+     "rx",
+     [
+      "1e0f010405"
+     ],
+     0
+    ],
+    [
+     20,
+     "rx",
+     [
+      "1e0f020000"
+     ],
+     1
+    ],
+    [
+     70,
+     "step",
+     [
+      "1e0f020100"
+     ],
+     0
+    ],
+    [
+     100,
+     "used",
+     [
+      "used 4850 4850"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: buckets age out",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "duty_add",
+     "ms": 5000
+    },
+    {
+     "t": 1,
+     "op": "used"
+    },
+    {
+     "t": 9999,
+     "op": "used"
+    },
+    {
+     "t": 11999,
+     "op": "used"
+    },
+    {
+     "t": 12000,
+     "op": "used"
+    },
+    {
+     "t": 59999,
+     "op": "used"
+    },
+    {
+     "t": 62000,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     1,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ],
+    [
+     9999,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ],
+    [
+     11999,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ],
+    [
+     12000,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ],
+    [
+     59999,
+     "used",
+     [
+      "used 0 5000"
+     ],
+     0
+    ],
+    [
+     62000,
+     "used",
+     [
+      "used 0 5000"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "duty: the clock wraps",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 4294963200,
+     "op": "duty_add",
+     "ms": 3000
+    },
+    {
+     "t": 4294963456,
+     "op": "used"
+    },
+    {
+     "t": 4294967295,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     4294963200,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     4294963456,
+     "used",
+     [
+      "used 3000 3000"
+     ],
+     0
+    ],
+    [
+     4294967295,
+     "used",
+     [
+      "used 3000 3000"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "talk buzz cuts a client pattern",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010104"
+    },
+    {
+     "t": 100,
+     "op": "cue",
+     "src": "talk",
+     "steps": [
+      40
+     ]
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     100,
+     "cue",
+     [
+      "1e0f010306"
+     ],
+     1
+    ],
+    [
+     150,
+     "step",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a client request during a cue: in_use",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "setup",
+     "preset": 1
+    },
+    {
+     "t": 10,
+     "op": "rx",
+     "hex": "1e0f0000020000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     10,
+     "rx",
+     [
+      "1e0f020406"
+     ],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a test cuts a client pattern, a client request during a test is refused",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010104"
+    },
+    {
+     "t": 50,
+     "op": "cue",
+     "src": "test",
+     "preset": 3
+    },
+    {
+     "t": 100,
+     "op": "rx",
+     "hex": "1e0f0000020000010101"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     50,
+     "cue",
+     [
+      "1e0f010306"
+     ],
+     1
+    ],
+    [
+     100,
+     "rx",
+     [
+      "1e0f020406"
+     ],
+     1
+    ],
+    [
+     450,
+     "step",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a test works with haptics_enabled 0; cues do not",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "test",
+     "preset": 1
+    },
+    {
+     "t": 200,
+     "op": "cue",
+     "src": "talk",
+     "steps": [
+      40
+     ]
+    },
+    {
+     "t": 400,
+     "op": "cue",
+     "src": "setup",
+     "preset": 1
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     200,
+     "cue",
+     [],
+     0
+    ],
+    [
+     400,
+     "cue",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "the talk buzz plays in a turn; a test does not",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1,
+     "in_turn": 1
+    },
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "talk",
+     "steps": [
+      40
+     ]
+    },
+    {
+     "t": 100,
+     "op": "cue",
+     "src": "test",
+     "preset": 1
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     50,
+     "step",
+     [],
+     0
+    ],
+    [
+     100,
+     "cue",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a test replaces a test; Stop stops it",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "test",
+     "preset": 4,
+     "repeat": 5
+    },
+    {
+     "t": 500,
+     "op": "cue",
+     "src": "test",
+     "preset": 4,
+     "repeat": 5
+    },
+    {
+     "t": 900,
+     "op": "stop_test"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     500,
+     "cue",
+     [],
+     1
+    ],
+    [
+     900,
+     "step",
+     [],
+     0
+    ],
+    [
+     900,
+     "stop_test",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a client stop never stops a test",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "test",
+     "preset": 3
+    },
+    {
+     "t": 10,
+     "op": "rx",
+     "hex": "1e1100"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     10,
+     "rx",
+     [],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "an update cuts a client pattern",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010104"
+    },
+    {
+     "t": 450,
+     "op": "interrupt",
+     "reason": 2
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     450,
+     "interrupt",
+     [
+      "1e0f010302"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "an update cuts a cue too",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "cue",
+     "src": "talk",
+     "steps": [
+      400
+     ]
+    },
+    {
+     "t": 100,
+     "op": "interrupt",
+     "reason": 2
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "cue",
+     [],
+     1
+    ],
+    [
+     100,
+     "interrupt",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "low battery cuts a client pattern",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010103"
+    },
+    {
+     "t": 100,
+     "op": "interrupt",
+     "reason": 3
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     100,
+     "interrupt",
+     [
+      "1e0f010303"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "button_down cuts a client pattern, not the talk buzz",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010103"
+    },
+    {
+     "t": 100,
+     "op": "interrupt",
+     "reason": 6
+    },
+    {
+     "t": 200,
+     "op": "cue",
+     "src": "talk",
+     "steps": [
+      40
+     ]
+    },
+    {
+     "t": 210,
+     "op": "interrupt",
+     "reason": 6
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     100,
+     "interrupt",
+     [
+      "1e0f010306"
+     ],
+     0
+    ],
+    [
+     200,
+     "cue",
+     [],
+     1
+    ],
+    [
+     210,
+     "interrupt",
+     [],
+     1
+    ],
+    [
+     250,
+     "step",
+     [],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "a step that ended in the previous bucket, accounted after a newer roll, keeps the history",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 4900,
+     "op": "duty_add",
+     "ms": 3000
+    },
+    {
+     "t": 5100,
+     "op": "used"
+    },
+    {
+     "t": 5100,
+     "op": "duty_add",
+     "ms": 2000,
+     "ago": 200
+    },
+    {
+     "t": 5200,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     4900,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     5100,
+     "used",
+     [
+      "used 3000 3000"
+     ],
+     0
+    ],
+    [
+     5100,
+     "duty_add",
+     [],
+     0
+    ],
+    [
+     5200,
+     "used",
+     [
+      "used 5000 5000"
+     ],
+     0
+    ]
+   ]
+  },
+  {
+   "name": "the link drops: the client pattern stops, no status",
+   "caps": {
+    "kind": 1,
+    "flags": 2,
+    "min_on_ms": 50,
+    "strength_steps": 0,
+    "max_on_ms": 500
+   },
+   "events": [
+    {
+     "t": 0,
+     "op": "env",
+     "enabled": 1
+    },
+    {
+     "t": 0,
+     "op": "rx",
+     "hex": "1e0f0000010000010104"
+    },
+    {
+     "t": 450,
+     "op": "link_drop"
+    },
+    {
+     "t": 500,
+     "op": "used"
+    }
+   ],
+   "trace": [
+    [
+     0,
+     "env",
+     [],
+     0
+    ],
+    [
+     0,
+     "rx",
+     [
+      "1e0f010000"
+     ],
+     1
+    ],
+    [
+     400,
+     "step",
+     [],
+     0
+    ],
+    [
+     450,
+     "link_drop",
+     [],
+     0
+    ],
+    [
+     500,
+     "used",
+     [
+      "used 400 400"
+     ],
+     0
+    ]
+   ]
+  }
+ ]
+}

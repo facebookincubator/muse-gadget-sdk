@@ -24,6 +24,7 @@
 // the refresh, so photos keep their tones and the inks themselves stay exact.
 
 #include "led_status.h"
+#include "muse_bootguard.h"
 #include "epd_panel.h"
 #include "sdkconfig.h"
 
@@ -297,6 +298,8 @@ static char s_drawn_title[48];
 
 static SemaphoreHandle_t s_mutex;
 static led_state_t s_state = LED_STATE_BOOT;
+static bool s_bench;          // the bench switch on for the central: "Bench" before the status
+static bool s_drawn_bench;
 static char s_title[48];
 static TaskHandle_t s_task;
 
@@ -400,23 +403,27 @@ static void epd_task(void *arg) {
         char title[sizeof(s_title)];
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         const char *label = status_label(s_state);
+        bool bench = s_bench;
         memcpy(title, s_title, sizeof(title));
         xSemaphoreGive(s_mutex);
 
         xSemaphoreTake(s_panel_lock, portMAX_DELAY);
         xSemaphoreTake(s_lock, portMAX_DELAY);
         bool redraw = !s_image_mode && (!s_status_drawn || label != s_drawn_label
-                                        || strcmp(title, s_drawn_title) != 0);
+                                        || bench != s_drawn_bench || strcmp(title, s_drawn_title) != 0);
         bool full = !s_status_drawn || s_fast_refreshes >= FULL_REFRESH_EVERY;
         if (redraw) {
             memset(s_canvas, 255, s_canvas_bytes);
             // The title may sit in the character's blank top rows.
             draw_character();
             draw_text(title, s_panel->title_y, s_panel->title_max_scale);
-            draw_text(label, s_panel->status_y, s_panel->status_scale);
+            char line[64];
+            snprintf(line, sizeof(line), "%s%s", bench ? "Bench - " : "", label);   // the "Bench" mark
+            draw_text(line, s_panel->status_y, s_panel->status_scale);
             epd_dither();
             s_status_drawn = true;
             s_drawn_label = label;
+            s_drawn_bench = bench;
             memcpy(s_drawn_title, title, sizeof(s_drawn_title));
         }
         xSemaphoreGive(s_lock);
@@ -488,9 +495,21 @@ bool led_status_init(void) {
 
 void led_status_set_state(led_state_t state) {
     if (!s_ready) return;
+#if CONFIG_MUSE_BOOTGUARD_SAFE_LINK_QUIET
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) state = LED_STATE_ERROR;   // SAFE shows the error state throughout
+#endif
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     bool changed = s_state != state;
     s_state = state;
+    xSemaphoreGive(s_mutex);
+    if (changed) xTaskNotifyGive(s_task);
+}
+
+void led_status_set_bench(bool on) {
+    if (!s_ready) return;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    bool changed = s_bench != on;
+    s_bench = on;
     xSemaphoreGive(s_mutex);
     if (changed) xTaskNotifyGive(s_task);
 }
@@ -513,6 +532,10 @@ bool led_status_display_info(int *width, int *height) {
 int led_status_display_bits(void) {
     if (!s_ready) return 0;
     return s_panel->update_gray4 ? 2 : s_panel->bits_per_pixel;
+}
+
+bool led_status_display_round(void) {
+    return false;
 }
 
 bool led_status_draw_rect(int x, int y, int w, int h, const uint16_t *pixels) {

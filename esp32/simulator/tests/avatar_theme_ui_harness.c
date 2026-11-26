@@ -84,7 +84,8 @@ int main(void) {
     assert(s_avatar_visible && s_avatar_revision==moving.revision && !refs);
     assert(s_avatar_transform.zoom_y<1000); /* the dog bounces, with no character swap */
 
-    touch(x,y,true);touch(x,y-80,true);assert(muse_ui_volume_swiping());
+    /* The v1.0 home has no volume drag (volume_swipe_harness: the compact faces). */
+    touch(x,y,true);touch(x,y-80,true);assert(!muse_ui_volume_swiping());
     touch(x,y-80,false);assert(!muse_ui_volume_swiping());
     muse_state_set_mode(MUSE_MODE_LISTENING);frame_tick(NULL);assert(s_avatar_visible && s_avatar_revision==moving.revision);assert(muse_theme_background()==0xffffff);
     muse_state_set_mode(MUSE_MODE_SPEAKING);muse_state_set_level(1);frame_tick(NULL);assert(s_avatar_visible && s_avatar_revision==moving.revision);assert(muse_theme_background()==0xffffff);

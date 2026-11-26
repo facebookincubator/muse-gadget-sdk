@@ -28,9 +28,11 @@ menu "ESP32 Device SDK"
         default "muse-gadget"
         help
             The hardware model this device registers with Muse (model_id in
-            link.register): 1 to 64 lowercase letters, digits and hyphens.
-            Profiles of the same hardware share one id. Each board overlay in
-            devices/ sets its own. See protocols/DEVICE.md.
+            link.register), Home Link and Muse Gadget builds alike:
+            muse-gadget-<board>, the board's overlay id; 1 to 64 lowercase
+            letters, digits and hyphens. Profiles of the same hardware share
+            one id. Each board overlay in devices/ sets its own. See
+            protocols/DEVICE.md.
 
     config MUSE_DEVICE_MODEL_NAME
         string "Device model name"
@@ -39,7 +41,8 @@ menu "ESP32 Device SDK"
             The hardware's name as people know it, sent to Muse as
             metadata.model_name in link.register: 1 to 128 printable ASCII
             characters, without " or \. Each board overlay in devices/ sets
-            its own.
+            its own. A board's short product name (HOMEHUB_MODEL_NAME), where
+            its overlay sets one, is sent instead.
 
     config MUSE_DEVICE_GUIDE
         string "Device guide (Markdown file)"
@@ -231,6 +234,20 @@ menu "ESP32 Device SDK"
             (UDP or TCP, 1 to 49151) to itself for up to an hour per call, so
             devices on the home network can connect to it. With this off, the
             tunnel carries only connections the VM opens.
+    config MUSE_GATT_DBHASH
+        bool "GATT Database Hash and Client Supported Features"
+        depends on BT_NIMBLE_ENABLED && !BT_NIMBLE_GATT_CACHING && MUSE_GADGET_BLE_AUDIO && !MUSE_GADGET_BLE_HID
+        default y if !IDF_TARGET_ESP32 && !IDF_TARGET_ESP32S3 && !IDF_TARGET_ESP32C3
+        help
+            Serves the Generic Attribute service's Database Hash (0x2B2A) and
+            Client Supported Features (0x2B29) beside Service Changed
+            (main/gatt_dbhash.h), computed on the device from its own live
+            table. Android reads the hash only from a controller of LL 5.1
+            (0x0A) or later and then skips rediscovering the table on a
+            reconnect (about 1 s); the ESP32, S3 and C3 controllers report
+            0x09, so it's off there. Not with HID over GATT, whose service
+            appears and disappears (it keeps NimBLE's Generic Attribute
+            service and its Service Changed).
 
     config HOMEHUB_SETUP_TASKS_IN_PSRAM
         bool "Put the setup tasks' stacks in PSRAM"
@@ -464,8 +481,11 @@ menu "ESP32 Device SDK"
         help
             Marks this as a development build. Default y, so a plain
             `idf.py build` is a dev build signed with the committed
-            dev_signing_key.pem. Internal release builds set this to n and
-            point signing at the secret release key.
+            dev_signing_key.pem; no private key of your own is needed. Someone
+            shipping their own product under their own key can set this to n
+            and point CONFIG_SECURE_BOOT_SIGNING_KEY at that key: with n the
+            build fails if the key is missing or is the repository's dev key
+            (cmake/signing_key.cmake).
             Firmware can branch on it with `#if CONFIG_HOMEHUB_DEV_BUILD`.
             Dev builds may log sensitive support details such as network
             identifiers and VM metadata. They must never log credentials,
@@ -476,11 +496,14 @@ menu "ESP32 Device SDK"
         bool "New setups offer gadget- node ids"
         default n
         help
-            On, a new setup offers node_id "gadget-XXXXXX" instead of
-            "homelink-XXXXXX". Off by default; turn it on for development
-            (bench builds, devices/sdkconfig.muse-bench, do). Either way
-            setup stores the id with the device tokens, and a device keeps
-            its stored id until it is set up again.
+            On, a Muse Gadget build (musegadgets BLE) offers node_id
+            "gadget-XXXXXX" to a new setup instead of "homelink-XXXXXX".
+            Off by default; bench builds turn it on
+            (devices/sdkconfig.muse-bench). Either way setup stores the id
+            with the device tokens (with K at a gadget setup's commit) and a
+            stored id is kept: a device set up with either prefix keeps it
+            until it is set up again. A plain Home Link build always offers
+            "homelink-XXXXXX".
 
     config HOMEHUB_BLE_NAME_PREFIX
         string "Visible BLE name prefix"
@@ -489,9 +512,60 @@ menu "ESP32 Device SDK"
             The device advertises as "<prefix><suffix>-XXXXXX", where XXXXXX
             is the last three Wi-Fi STA MAC octets. Keep prefix and suffix
             together at most 22 characters so the name fits the BLE scan
-            response. The backend node_id ("gadget-XXXXXX" with
-            MUSE_GADGET_NODE_ID_PREFIX, else "homelink-XXXXXX"; a set-up
-            device keeps its stored one) does not change.
+            response. The backend node_id ("gadget-XXXXXX" for a gadget's new
+            setup with MUSE_GADGET_NODE_ID_PREFIX, else "homelink-XXXXXX";
+            a set-up unit keeps its stored one) does not change.
+            A product in the Muse Gadget catalog keeps the prefix and sets
+            HOMEHUB_BLE_PRODUCT_CODE.
+
+    config HOMEHUB_BLE_PRODUCT_CODE
+        string "Muse Gadget catalog product code"
+        default ""
+        help
+            The product's model code in the Muse Gadget catalog (uppercase
+            letters and digits, e.g. M5SW). Set, the advertised name is
+            <prefix>-<PRODUCT>-XXXXXX (MuseGadget-M5SW-1A2B3C), XXXXXX the last
+            three bytes of the Bluetooth address, as the catalog names its
+            products (HOMEHUB_BLE_NAME_TAIL_WIFI_MAC keeps the Wi-Fi MAC's
+            instead). Empty (SDK boards): MuseGadget-XXXXXX as before.
+            Prefix, suffix, a hyphen and the code together take at most 22
+            characters. The node_id does not change. Codes in use: M5SW
+            (M5Stack StopWatch), EMO1 (ESP-Mosaico), SCW1 (SenseCAP Watcher),
+            WC6 (Waveshare C6 1.8).
+
+    config HOMEHUB_MODEL_NAME
+        string "Product name the gadget registers with (link.register)"
+        default ""
+        help
+            The board's short product name, as people call it: StopWatch,
+            Watcher, Mosaico, C6, W175. link.register sends it as
+            metadata.model_name (every gadget with a device session), so
+            Muse can name the gadget
+            in hand. Empty: MUSE_DEVICE_MODEL_NAME is sent instead.
+
+    config HOMEHUB_BLE_NAME_TAIL_WIFI_MAC
+        bool "Keep the Wi-Fi MAC tail with a product code"
+        default n
+        depends on !HOMEHUB_BLE_NAME_BT_ADDRESS
+        help
+            With a product code, XXXXXX in MuseGadget-<PRODUCT>-XXXXXX stays
+            the last three Wi-Fi STA MAC octets (the node_id's digits)
+            instead of the Bluetooth address's. ESP32 boards may use the
+            Wi-Fi MAC this way, and it
+            keeps a board's digits the same as before it took a code. The
+            ESP32 catalog boards (M5SW, EMO1, SCW1, WC6) set it.
+
+    config HOMEHUB_BLE_NAME_BT_ADDRESS
+        bool "Visible BLE name ends in the Bluetooth address without a product code"
+        default n
+        help
+            XXXXXX in the advertised name is the last three bytes of the
+            Bluetooth address (what a BLE scan shows), as the Muse Gadget
+            catalog names its products, instead of the Wi-Fi STA MAC's. A
+            product code (HOMEHUB_BLE_PRODUCT_CODE) brings this by itself;
+            the option asks for it without one. The node_id keeps the Wi-Fi
+            MAC's octets either way. Off with no product code: SDK boards
+            keep the names they have always advertised.
 
     config HOMEHUB_BLE_NAME_SUFFIX
         string "Visible BLE name suffix"
@@ -781,6 +855,33 @@ menu "ESP32 Device SDK"
             image: the display backends, the LED matrix, and boards with the
             full UI, PSRAM for the image and a JPEG decoder in ROM or hardware.
 
+    config MUSE_AVATAR_FACE
+        bool "The avatar face: the user's Muse avatar as the home's background"
+        # Its decoder is the ROM's TJpgDec, which the ESP32-P4 doesn't have.
+        depends on HOMEHUB_LED_BACKEND_MUSE && HOMEHUB_DAEMON_REQUESTS && SPIRAM && !MUSE_UI_FREEINK && !IDF_TARGET_ESP32P4
+        default n
+        help
+            The gadget reads workspace/devices/<node_id>/face.jpg from the
+            user's VM over its own session to Muse (main/mg_face.h), at boot
+            and on face.set, stores it and draws the home over it with a
+            scrim; registers face.set. It never asks Muse to make the picture.
+            Boards with the full UI and PSRAM; the BLE gadget overlays turn
+            it on.
+
+    config MUSE_SESSION_IMAGE
+        bool "display.show_image and the Ask Muse for an image test"
+        depends on HOMEHUB_DISPLAY_COMMANDS && HOMEHUB_LED_BACKEND_MUSE && MUSE_GADGET_BLE_SESSION
+        default y
+        help
+            A use case taught to Muse through the device session alone
+            (main/session_image.h): the gadget registers display.show_image
+            (a picture from a file on the VM, shown for a few seconds, then
+            back) on its own link.register, and Settings > Developer > Tests
+            > Ask Muse for an image (the console's img.ask) asks Muse in
+            plain words, on the gadget's own session, to make a picture and
+            show it here. Neither the phone app nor the server knows about
+            it. BLE-only gadgets with the full UI.
+
     config HOMEHUB_PRE_DVT_GPIO
         bool "Use pre-DVT GPIO assignments"
         depends on HOMEHUB_LED_BACKEND_PWM_RGB
@@ -830,5 +931,15 @@ menu "ESP32 Device SDK"
             EFUSE_BLK_KEY0=4, KEY1=5, KEY2=6, ... KEY5=9.
             Manufacturing provisions the pairing key in KEY2 before Secure Boot
             locks read protection. No shared software attestation key is used.
+
+config MUSE_GADGET_TEST_BUILD
+    bool "A test build: Muse's phone setup service takes Wi-Fi and account writes"
+    default n
+    help
+        Off in release builds: Muse's phone setup service (components/muse/muse_ble.c) answers its
+        wifi.* and hatch.* writes with "not in this build", and the Muse app sets Wi-Fi and the
+        account up through Link setup. A test build (MUSE_BENCH=1, devices/sdkconfig.muse-bench)
+        takes them in the setup window (tools/muse/ble_setup.html). The USB console takes them
+        in every build.
 
 endmenu

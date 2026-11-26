@@ -30,7 +30,8 @@ esp_err_t nvs_open(const char *ns, nvs_open_mode_t mode, nvs_handle_t *h) {
     assert(!strcmp(ns,"muse") && mode==NVS_READWRITE); *h=1; return ESP_OK;
 }
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
-    assert(h==1); int i=key_index(key);
+    assert(h==1);
+    int i=key_index(key);
     if(i<0 || !present[i]) return ESP_FAIL;
     *value=stored[i]; return ESP_OK;
 }

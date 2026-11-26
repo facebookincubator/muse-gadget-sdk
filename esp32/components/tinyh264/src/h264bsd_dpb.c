@@ -1260,10 +1260,18 @@ u32 h264bsdCheckGapsInFrameNum(dpbStorage_t *dpb, u32 frameNum, u32 isRefPic,
     dpb->numOut = 0;
     dpb->outIndex = 0;
 
-    if(!gapsAllowed)
-        return(HANTRO_OK);
-
-    if ( (frameNum != dpb->prevRefFrameNum) &&
+    /* OPT: with gaps not allowed, a gap is a lost reference frame: an
+     * error, so the caller asks for a keyframe, instead of decoding the
+     * picture against whatever reference is left (a smeared picture, and
+     * no keyframe asked for). Upstream returned at once; prevRefFrameNum,
+     * which nothing else reads, is now kept below in this case too. */
+    if (!gapsAllowed)
+    {
+        if ( (frameNum != dpb->prevRefFrameNum) &&
+             (frameNum != ((dpb->prevRefFrameNum + 1) % dpb->maxFrameNum)) )
+            return(HANTRO_NOK);
+    }
+    else if ( (frameNum != dpb->prevRefFrameNum) &&
          (frameNum != ((dpb->prevRefFrameNum + 1) % dpb->maxFrameNum)))
     {
 
@@ -1350,6 +1358,7 @@ u32 h264bsdCheckGapsInFrameNum(dpbStorage_t *dpb, u32 frameNum, u32 isRefPic,
     {
         return(HANTRO_NOK);
     }
+    /* (with gaps not allowed, upstream never checked this; it still doesn't) */
 
     /* save current frame_num in prevRefFrameNum. For non-reference frame
      * prevFrameNum is set to frame number of last non-existing frame above */

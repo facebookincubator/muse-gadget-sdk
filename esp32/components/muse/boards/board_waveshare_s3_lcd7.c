@@ -308,6 +308,12 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off through the CH422G (the RGB panel shows nothing without its pixel clock). */
+static void safe_display_off(void)
+{
+    init();   /* the I2C bus and the CH422G only: EXP_IDLE leaves the backlight bit off */
+}
+
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-LCD-7",
     .width = LCD_W,
@@ -323,6 +329,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .poll_buttons = poll_buttons,
     .power_off = power_off,
 };

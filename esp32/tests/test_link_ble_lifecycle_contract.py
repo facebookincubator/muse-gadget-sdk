@@ -132,10 +132,30 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn('decrypted && strcmp(act, "provision_v2") == 0', dispatch)
         self.assertIn('complete_setup_and_stop_ble("provision", session_generation)', source)
         complete = _function_body(source, "static bool complete_setup_and_stop_ble(")
-        self.assertIn("config_mark_setup_complete()", complete)
-        self.assertIn("ble_server_full_shutdown()", complete)
-        advertise = _function_body(BLE_SERVER_C.read_text(), "static void start_advertising(void) {")
-        self.assertIn("if (config_setup_complete()) return;", advertise)
+        self.assertIn("link_pairing_commit_provisioning(session_generation, commit_setup)", complete)
+        self.assertIn("stop_setup_ble(reason)", complete)
+        commit = _function_body(source, "static bool commit_setup(void) {")
+        # The setup marker is the last write; on a gadget setting a set-up
+        # gadget up again, closing its re-provisioning journal after it is.
+        # Only once all of it succeeded, the passcode lock goes with the old
+        # pairing.
+        self.assertTrue(commit.rstrip().endswith(
+            "if (!config_mark_setup_complete()) return false;\n"
+            "    passcode_forget(\"Link setup\");\n    return true;\n#endif"))
+        gadget = commit[:commit.rindex("#else")]
+        # The owner cleanup is marked inside the journal before its commit point, so a cut after the commit
+        # finishes it at the next boot (OWNER_WIPE_KEY).
+        commit_point = "if (resetup && !config_reprovision_commit()) return false;"
+        self.assertLess(gadget.index("if (!config_mark_setup_complete()) return false;"), gadget.index(commit_point))
+        self.assertLess(gadget.index('if (resetup && !config_set_str(OWNER_WIPE_KEY, "1")) return false;'),
+                        gadget.index(commit_point))
+        self.assertLess(gadget.index(commit_point), gadget.index('passcode_forget("Link setup");'))
+        self.assertIn("ble_server_full_shutdown()", _function_body(source, "static void stop_setup_ble("))
+        ble = BLE_SERVER_C.read_text()
+        self.assertIn("if (!advertising_wanted(&link, &other)) return;",
+                      _function_body(ble, "static void start_advertising(void) {"))
+        self.assertIn("if (config_setup_complete()) return false;",
+                      _function_body(ble, "static bool advertising_wanted("))
 
     def test_token_401_unpairs_keeping_wifi_and_403_erases_nothing(self) -> None:
         source = APP_C.read_text()
@@ -159,7 +179,8 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         source = APP_C.read_text()
         body = _function_body(source, "static void on_button_long_press(")
         reset = _function_body(source, "static bool reset_setup_with_gate_held(")
-        restart = _function_body(source, "static bool reset_setup_from_control(")
+        control = _function_body(source, "static bool reset_setup_from_control(")
+        restart = _function_body(source, "static bool reset_setup_checked(")
 
         wipe = _function_body(source, "static bool setup_wipe_to_clean(")
         disconnect = _function_body(source, "static void setup_disconnect_to_clean(")
@@ -177,6 +198,7 @@ class LinkBleLifecycleContractTest(unittest.TestCase):
         self.assertIn("setup_disconnect_to_clean()", wipe)
         self.assertIn("disconnect_vm_transports()", disconnect)
         self.assertIn("wifi_mgr_disconnect()", disconnect)
+        self.assertIn("reset_setup_checked(source, scope, NULL, NULL, true)", control)
         self.assertIn("operation_gate_take(portMAX_DELAY", restart)
         self.assertIn("restart_after_setup_reset()", restart)
         self.assertNotIn("on_unpair()", body)
@@ -469,9 +491,9 @@ int main(void) {
         # (ble_basic) is told the phone's link is gone once the stack stops;
         # otherwise it keeps notifying a dead handle after ble.power off.
         self.assertIn("ev.type = BLE_GAP_EVENT_DISCONNECT", shutdown)
-        self.assertIn("s_companion.on_gap_event(&ev)", shutdown)
+        self.assertIn("s_companions[i].on_gap_event(&ev)", shutdown)
         self.assertLess(shutdown.index("nimble_port_deinit()"),
-                        shutdown.index("s_companion.on_gap_event(&ev)"))
+                        shutdown.index("s_companions[i].on_gap_event(&ev)"))
         basic = (BLE_SERVER_C.parent / "ble_basic.c").read_text()
         self.assertIn("if (!ble_hs_synced()) return;",
                       _function_body(basic, "void ble_basic_notify_status("))
@@ -482,7 +504,9 @@ int main(void) {
         self.assertIn("nimble_port_stop()", shutdown)
         self.assertIn("nimble_port_deinit()", shutdown)
         self.assertIn("if (s_shutting_down) return", start_adv)
-        self.assertIn("if (!s_advertising_enabled) return", start_adv)
+        self.assertIn("if (!advertising_wanted(&link, &other)) return", start_adv)
+        self.assertIn("if (!s_advertising_enabled) return false",
+                      _function_body(source, "static bool advertising_wanted("))
         self.assertIn("if (!s_shutting_down && s_advertising_enabled) start_advertising()", gap)
         self.assertIn("s_advertising_enabled = true", begin_adv)
         self.assertIn("s_advertising_enabled = false", stop_adv)

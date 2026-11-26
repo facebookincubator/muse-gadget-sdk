@@ -188,6 +188,7 @@ static bool operation_gate_take(TickType_t wait, const char *what) {
     (void)wait; (void)what; return !s_gate_busy;
 }
 static void operation_gate_give(void) {}
+static atomic_uint s_setup_gen;   /* reset_setup_checked's setup generation check */
 
 static int s_windows_opened, s_restarts, s_disconnects, s_finished_resets;
 static void open_setup_window(const char *reason) { (void)reason; s_windows_opened++; }
@@ -268,6 +269,7 @@ void vm_device_tokens_free(vm_device_tokens_t *tokens) {
 // ---- app.c state and code under test ---------------------------------------
 
 #define CONFIG_MUSE_ENABLED MUSE_BUILD
+#define GADGET_PROOF 0   /* app.c's: a Wi-Fi build here (no token proof key) */
 #define CONFIG_HOMEHUB_BLE_PERSISTENT 0
 #define CONFIG_HOMEHUB_TOKEN_REFRESH_INTERVAL_DAYS 30
 #define CONFIG_HOMEHUB_WIFI_SSID ""
@@ -286,6 +288,24 @@ static atomic_bool s_setup_reset_pending;
 static atomic_bool s_unpair_pending;
 static bool s_ble_started = false;
 static const char *s_setup_stage = "idle";
+
+// the pieces the extracted paths call (the passcode, the boot
+// guard's SAFE way out, a Wi-Fi gadget's token pair lock and expiry): not what this
+// harness checks.
+static void pair_lock_take(void) {}
+static void pair_lock_give(void) {}
+static void passcode_forget(const char *why) { (void)why; }
+// Every unpair and reset also clears the bonded phones and the Muse server, VM and device token set by
+// hand (forget_owner_links in app.c, its own test test_link_reset_forgets_pairings.py): counted here.
+static int s_owner_forgets;
+static bool forget_owner_links(void) { s_owner_forgets++; return true; }
+static bool muse_bootguard_leave_safe(const char *why) { (void)why; return false; }
+static uint64_t access_expires_from(int64_t expires_in_s, int64_t server_date_s) {
+    (void)expires_in_s; (void)server_date_s; return 0;
+}
+#if MUSE_BUILD
+static void muse_settings_factory_reset(void) {}
+#endif
 
 #include "app_token_paths.inc"
 
@@ -330,6 +350,7 @@ static void reset_counters(void) {
     s_fetches = s_refreshes = s_mints = s_connects = 0;
     s_windows_opened = s_restarts = s_disconnects = s_finished_resets = 0;
     s_ble_disconnects = s_tasks_started = 0;
+    s_owner_forgets = 0;
 }
 
 static void paired_device(void) {
@@ -404,6 +425,7 @@ static void revoked_refresh_unpairs_but_keeps_wifi(void) {
     app_tick();
     CHECK(s_disconnects == 1 && s_finished_resets == 1 && s_restarts == 1,
           "deferred unpair did not reset and restart");
+    CHECK(s_owner_forgets == 1, "deferred unpair kept the bonds and Muse settings");
     expect_pairing_gone("deferred unpair");
     expect_wifi_kept("deferred unpair");
 
@@ -644,12 +666,14 @@ static void explicit_unpairs_keep_wifi(void) {
     paired_device();
     on_unpair();
     CHECK(s_disconnects == 1 && s_finished_resets == 1, "BLE unpair did not reset");
+    CHECK(s_owner_forgets == 1, "BLE unpair kept the bonds and Muse settings");
     expect_pairing_gone("BLE unpair");
     expect_wifi_kept("BLE unpair");
 
     paired_device();
     ws_unpaired_task(NULL);
     CHECK(s_restarts == 1, "node.unpaired did not restart");
+    CHECK(s_owner_forgets == 1, "node.unpaired kept the bonds and Muse settings");
     expect_pairing_gone("node.unpaired");
     expect_wifi_kept("node.unpaired");
 
@@ -662,6 +686,7 @@ static void explicit_unpairs_keep_wifi(void) {
     // Setup failure cleanup uses the same scope: a failed re-pair keeps Wi-Fi.
     paired_device();
     CHECK(setup_wipe_to_clean(SETUP_RESET_KEEP_WIFI), "setup failure cleanup");
+    CHECK(s_owner_forgets == 0, "a failed setup's clean-up forgot the bonds");
     expect_pairing_gone("setup failure");
     expect_wifi_kept("setup failure");
 }
@@ -671,12 +696,14 @@ static void user_factory_reset_forgets_wifi(void) {
     paired_device();
     on_button_long_press();
     CHECK(s_restarts == 1 && s_finished_resets == 1, "5 s hold did not reset");
+    CHECK(s_owner_forgets == 1, "5 s hold kept the bonds and Muse settings");
     expect_pairing_gone("5 s hold");
     expect_wifi_gone("5 s hold");
 
     paired_device();
     app_reset_setup_async();
     CHECK(s_restarts == 1, "Muse menu reset did not restart");
+    CHECK(s_owner_forgets == 1, "Muse menu reset kept the bonds and Muse settings");
     expect_pairing_gone("Muse menu reset");
     expect_wifi_gone("Muse menu reset");
 
@@ -688,6 +715,7 @@ static void user_factory_reset_forgets_wifi(void) {
     s_task_create_fails = false;
     app_tick();
     CHECK(s_restarts == 1, "deferred reset did not restart");
+    CHECK(s_owner_forgets == 1, "deferred reset kept the bonds and Muse settings");
     expect_pairing_gone("deferred Muse menu reset");
     expect_wifi_gone("deferred Muse menu reset");
 

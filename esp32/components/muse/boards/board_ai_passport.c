@@ -48,6 +48,7 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_mem.h"
+#include "muse_lvgl_hold.h"
 
 static const char *TAG = "board";
 
@@ -350,9 +351,9 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* bounded, shared with video */
     } else {
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 
@@ -485,6 +486,19 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): any of the three ladder buttons, read
+ * raw (GPIO0 reads low for each; the ladder's own 10k pull-up). */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(BTN_GPIO, false);
+}
+
 static const muse_board_t s_board = {
     .name = "FoloToy AI Passport",
     .width = LCD_W,
@@ -505,13 +519,17 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
+    .i2s_dma_desc = I2S_DMA_DESC,
+    .i2s_dma_frames = I2S_DMA_FRAMES,
     .mic_slot = 0,
     .poll_buttons = poll_buttons,
     .read_power = read_power,
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

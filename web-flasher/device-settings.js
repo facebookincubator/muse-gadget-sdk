@@ -101,7 +101,7 @@ export function statusRows(status) {
   ]);
 }
 
-const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]/g;   // the log's colours
+const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]/g;   // the log's colors
 const MAX_LINE = 65536;
 
 // One open console. Requests run one at a time; every write waits for its

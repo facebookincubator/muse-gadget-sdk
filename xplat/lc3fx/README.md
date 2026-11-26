@@ -33,8 +33,8 @@ with very efficient CPU and memory use. This is the copy this SDK vendors
   in IRAM).
 - **Source:** the Muse Gadgets fixed-point port of Google liblc3 (see
   VENDORED.md). In this SDK: `xplat/lc3fx`, which `esp32/components/liblc3`
-  builds for chips without an FPU, for the ESP32 and Zephyr BLE gadgets
-  (which come in a later change).
+  builds for chips without an FPU, for the ESP32 BLE gadgets (and the
+  Zephyr gadgets, which come in a later change).
 - **Porting notes:** targets whose ROM keeps the stack 4-byte aligned need
   `-mpreferred-stack-boundary=2`; put the hot tables and
   tns/sns/spec/mdct in RAM when code runs from XIP flash; pointer tables are

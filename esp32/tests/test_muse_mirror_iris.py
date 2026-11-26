@@ -16,6 +16,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import struct
@@ -114,6 +115,16 @@ class BoardLink(unittest.TestCase):
         self.assertIn('depends on MUSE_MIRROR && MUSE_BOARD_ESP_MOSAICO && ESP_IRIS_ENABLE', option[:300])
         start = (ROOT / 'components_mosaico/muse_mosaico_iris/muse_mosaico_iris.c').read_text()
         self.assertLess(start.index('muse_mirror_iris_register();'), start.index('iris_ota_support_start();'))
+        # The bench's methods after the way back's, so a full RPC table never costs the way back; the table holds
+        # the mirror's, the way back's and the bench's with room.
+        body = start[start.index('void muse_mosaico_iris_start(void)'):]
+        self.assertLess(body.index('iris_ota_support_start();'), body.index('bench_rpc_register();'))
+        self.assertEqual(start.count('esp_iris_rpc_register('), 1)   # the bench table's loop, warning per method
+        self.assertIn('not registered (%s)', start)
+        overlay = (ROOT / 'devices/sdkconfig.muse-esp-mosaico-iris').read_text()
+        handlers = int(re.search(r'^CONFIG_ESP_IRIS_MAX_RPC_HANDLERS=(\d+)$', overlay, re.M).group(1))
+        bench = start[start.index('} s_bench_rpcs[] = {'):start.index('#define BENCH_RPCS')].count('{ BENCH_RPC_')
+        self.assertGreaterEqual(handlers, 3 + 3 + bench + 4)   # mirror + way back + bench + headroom
         cmake = (ROOT / 'components_mosaico/muse_mosaico_iris/CMakeLists.txt').read_text()
         self.assertIn('"muse_mirror_iris.c"', cmake)
         link = (ROOT / 'components_mosaico/muse_mosaico_iris/muse_mirror_iris.c').read_text()

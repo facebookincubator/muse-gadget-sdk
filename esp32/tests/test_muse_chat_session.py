@@ -135,6 +135,8 @@ static int64_t open_stream(kind_t kind, const char *verb, const char *path, cons
     return 7;
 }
 static bool send_body(int64_t, const uint8_t *, size_t, bool) { return true; }
+/* The app's: Link's node id, which every chat body names (muse_chat_priv.h). */
+const char *muse_chat_node_id(void) { return "gadget-0a1b2c"; }
 static void disconnect(const char *) {}
 static bool send_reset(int64_t) { return true; }
 ''' + done + reset + handlers + start_tts + check + chat + r'''
@@ -365,8 +367,10 @@ static void chat_request(bool spoken) {
         text_begin("Hi");
     }
     assert(s_turn.phase == P_WAIT_REPLY && s_turn.text == !spoken);
-    assert(!strcmp(chat_body, spoken ? "{\"message\":\"Hi\",\"output_modality\":\"text\",\"device\":\"mcu-wearable\"}"
-                                     : "{\"message\":\"Hi\",\"output_modality\":\"text\"}"));
+    /* The gadget's node first, at the top level (never chat_context). */
+    assert(!strcmp(chat_body, spoken ? "{\"node_id\":\"gadget-0a1b2c\",\"message\":\"Hi\",\"output_modality\":\"text\","
+                                       "\"device\":\"mcu-wearable\"}"
+                                     : "{\"node_id\":\"gadget-0a1b2c\",\"message\":\"Hi\",\"output_modality\":\"text\"}"));
 }
 #if CONFIG_MUSE_BOARD_SENSECAP_WATCHER || CONFIG_MUSE_LATEST_REPLY
 static char review[40000];
@@ -1137,6 +1141,7 @@ typedef struct esp_tls esp_tls_t;
 #define ESP_TLS_ERR_SSL_WANT_READ (-0x6900)
 #define ESP_TLS_ERR_SSL_WANT_WRITE (-0x6880)
 #define IO_TIMEOUT_US (15 * 1000000LL)
+static constexpr bool kNoNet = false;
 static const char *TAG = "test", *last_error;
 #define ESP_LOGW(tag, ...) ((void)(tag))
 #define ESP_LOGE(tag, fmt, ...) ((void)(tag), last_error = (fmt))

@@ -38,6 +38,8 @@ import sys
 import time
 
 import ports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import redact  # noqa: E402  (tools/redact.py: never print a secret the board's output carries)
 
 LINE_BYTES = 480            # message bytes per console line; escaped, a line stays under the board's 1024
 ACK_S = 3.0
@@ -393,7 +395,7 @@ def main():
                 st = board.status()
                 if st is None:
                     raise BoardError("The board doesn't answer: is its firmware older than the status command?")
-                print(json.dumps(st, indent=2))
+                print(json.dumps(redact.redact_record(st), indent=2))
                 return
             text = " ".join(args.message)
             if args.file:

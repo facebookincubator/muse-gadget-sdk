@@ -131,8 +131,8 @@ void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *out);
  * first reply is done and the server doesn't hear the caller talking. */
 bool muse_voice_call_working(void);
 
-/* Provided by the app: the Link node id ("gadget-xxxxxx"; a device set up by
- * earlier firmware keeps "homelink-xxxxxx") the call names as
+/* Provided by the app: the Link node id ("gadget-xxxxxx"; a device set up
+ * earlier keeps "homelink-xxxxxx") the call names as
  * its device, or "" if unknown. Called on the session task, whose stack is in
  * PSRAM: it must not read flash. */
 const char *muse_voice_call_device_id(void);

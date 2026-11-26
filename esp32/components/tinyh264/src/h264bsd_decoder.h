@@ -78,6 +78,40 @@ void h264bsdSetProgress(storage_t *pStorage,
 /* Zero keeps the default. Set before the first parameter set. */
 void h264bsdSetMaxReferences(storage_t *pStorage, u32 maxRefs);
 void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs);
+/* OPT: and refuse them when their picture after frame cropping (the
+ * sequence parameter set's frame_crop offsets) is wider or taller than this
+ * (pixels; 0: no limit). The coded size may be larger than the cropped one
+ * (an encoder's padding: iPhone streams code at least 192 x 96), within
+ * h264bsdSetMaxSize. Call after h264bsdInit. */
+void h264bsdSetMaxCropped(storage_t *pStorage, u32 maxWidth, u32 maxHeight);
+/* OPT: the active sequence parameter set's frame_crop_left, right, top and
+ * bottom offsets, as coded: in crop units (2 x 2 luma pixels for the 4:2:0
+ * frames this decoder takes); 0 without frame_cropping_flag. HANTRO_OK, or
+ * HANTRO_NOK with no active sequence parameter set (all 0). */
+u32 h264bsdCroppingOffsets(const storage_t *pStorage, u32 *left, u32 *right, u32 *top, u32 *bottom);
+
+/* OPT: error recovery (../README.md). h264bsdDecode leaves a picture it
+ * couldn't finish (an error, or slices missing) started; the next call would
+ * conceal it at its first NAL unit and return that picture in place of the
+ * one it was given, which then goes undecoded. A caller that hands over whole
+ * access units abandons it instead: after a call that didn't return a
+ * picture, h264bsdPictureStarted says one is left, and h264bsdAbandonPicture
+ * drops it (nothing of it is shown or kept as a reference), so the next
+ * access unit decodes on its own. */
+u32 h264bsdPictureStarted(const storage_t *pStorage);
+void h264bsdAbandonPicture(storage_t *pStorage);
+/* OPT: after an IDR picture decoded, keep the active parameter sets and lock
+ * the stream's size and profile (sequence parameter sets for another are
+ * refused from then on); after an error, put the kept ones back, in case
+ * damaged bytes replaced them. HANTRO_OK, or MEMORY_ALLOCATION_ERROR (nothing
+ * changed). */
+u32 h264bsdKeepParamSets(storage_t *pStorage);
+u32 h264bsdRestoreParamSets(storage_t *pStorage);
+/* OPT: once parameter sets are kept, one that differs from the kept one with
+ * its id is taken only while allowed (another size or profile never is): set
+ * it for a keyframe's access unit (where the stream's own come), clear it for
+ * the rest. */
+void h264bsdAllowParamSetChange(storage_t *pStorage, u32 allow);
 
 storage_t* h264bsdAlloc();
 void h264bsdFree(storage_t *pStorage);

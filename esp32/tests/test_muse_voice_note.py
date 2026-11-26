@@ -48,7 +48,8 @@ def riff_header(rate):
 
 # The POST /chat/stream envelope around the base64 WAV, written out rather than
 # read from muse_chat_priv.h: changing what the device sends must change this.
-HEAD = (b'{"message":"","output_modality":"text","device":"mcu-wearable","items":[{"type":"file",'
+HEAD = (b'{"node_id":"homelink-0a1b2c","message":"","output_modality":"text","device":"mcu-wearable",'
+        b'"items":[{"type":"file",'
         b'"mime_type":"audio/wav","filename":"voice_note.wav","data_base64":"')
 TAIL = b'"}]}'
 
@@ -198,7 +199,8 @@ class VoiceNoteHelpers(unittest.TestCase):
         self.assertEqual(body, HEAD + base64.b64encode(riff_header(16000) + pcm) + TAIL)
         request = json.loads(body)
         wav = base64.b64decode(request['items'][0].pop('data_base64'), validate=True)
-        self.assertEqual(request, {'message': '', 'output_modality': 'text', 'device': 'mcu-wearable', 'items': [
+        self.assertEqual(request, {'node_id': 'homelink-0a1b2c', 'message': '', 'output_modality': 'text',
+                                   'device': 'mcu-wearable', 'items': [
             {'type': 'file', 'mime_type': 'audio/wav', 'filename': 'voice_note.wav'}]})
         self.assertEqual(wav, riff_header(16000) + pcm)
         with wave.open(io.BytesIO(wav)) as w:
@@ -207,6 +209,8 @@ class VoiceNoteHelpers(unittest.TestCase):
 
 
 HATCH_DRIVER = r'''
+extern "C" const char *muse_chat_node_id(void) { return "homelink-0a1b2c"; }
+
 static StreamBufferHandle_t s_in;
 static turn_t s_turn;
 

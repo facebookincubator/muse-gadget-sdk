@@ -17,6 +17,7 @@
 #include "cJSON.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,13 @@ static char *xstrdup_len(const char *src, size_t len) {
 
 static char *xstrdup(const char *src) {
     return src ? xstrdup_len(src, strlen(src)) : NULL;
+}
+
+/* valueint as cJSON sets it: the number clamped to int's range. */
+static int clamp_int(double v) {
+    if (v >= INT_MAX) return INT_MAX;
+    if (v <= (double)INT_MIN) return INT_MIN;
+    return (int)v;
 }
 
 static cJSON *new_item(int type) {
@@ -292,6 +300,26 @@ static cJSON *parse_value(parser_t *p) {
     if (*p->cur == 't') return parse_literal(p, "true", cJSON_True);
     if (*p->cur == 'f') return parse_literal(p, "false", cJSON_False);
     if (*p->cur == 'n') return parse_literal(p, "null", cJSON_NULL);
+    if (*p->cur == '-' || (*p->cur >= '0' && *p->cur <= '9')) {
+        // A number (a token response's expires_in): its characters, then strtod.
+        char buf[64];
+        size_t n = 0;
+        while (p->cur + n < p->end && n < sizeof(buf) - 1
+               && strchr("+-.eE0123456789", p->cur[n]) && p->cur[n]) {
+            n++;
+        }
+        memcpy(buf, p->cur, n);
+        buf[n] = '\0';
+        char *end = NULL;
+        double v = strtod(buf, &end);
+        if (end != buf + n) return NULL;
+        cJSON *item = new_item(cJSON_Number);
+        if (!item) return NULL;
+        item->valuedouble = v;
+        item->valueint = clamp_int(v);
+        p->cur += n;
+        return item;
+    }
     return NULL;
 }
 
@@ -330,7 +358,7 @@ cJSON *cJSON_CreateNumber(double number) {
     cJSON *item = new_item(cJSON_Number);
     if (item) {
         item->valuedouble = number;
-        item->valueint = (int)number;
+        item->valueint = clamp_int(number);
     }
     return item;
 }
@@ -482,6 +510,10 @@ int cJSON_IsNull(const cJSON *item) {
 
 int cJSON_IsObject(const cJSON *item) {
     return item && item->type == cJSON_Object;
+}
+
+int cJSON_IsNumber(const cJSON *item) {
+    return item && item->type == cJSON_Number;
 }
 
 int cJSON_IsString(const cJSON *item) {

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -27,6 +28,9 @@
  * settings one swipe left, and optional Latest reply one swipe right. Also owns screen sleep and brightness.
  */
 esp_err_t muse_ui_start(void);
+/* What's on screen, for the bench: "face", "settings", "settings/sleep",
+ * "menu", "image". Under the display lock. */
+void muse_ui_page_name(char *buf, size_t n);
 
 /* From any task: the screen has gone dark for sleep (and not yet woken). */
 bool muse_ui_dark(void);
@@ -39,6 +43,25 @@ void muse_ui_app_brightness(int pct);
 bool muse_ui_face_active(void);
 /* From any task: a vertical volume drag owns the current touch (no hold PTT). */
 bool muse_ui_volume_swiping(void);
+
+/* The face has the v1.0 home's screen hold region:
+ * set once the UI is up, then constant. */
+bool muse_ui_has_hold_region(void);
+/* The touch now down (or the last one, until the next touch-down) is a
+ * swipe: it moved past the slop from where it went down, or a page or list
+ * started scrolling with it (muse_swipe.h). The control under its start
+ * gets no tap or hold: LVGL's clicks and long presses are stopped here, and
+ * the controls that time their own holds (the home's hold region) ask
+ * this. LVGL task. */
+bool muse_ui_touch_swiped(void);
+
+/* Bench and renderer: shows "face", "status", "settings" or
+ * "settings/<page>" ("sound", "display", "talk", "about"...). LVGL task. */
+void muse_ui_goto(const char *page);
+/* From any task: runs fn(arg) on the LVGL task at its next frame (bench
+ * presses that read LVGL's objects). False: one is already waiting, or arg
+ * is longer than 47 bytes. */
+bool muse_ui_run_in_lvgl(void (*fn)(const char *arg), const char *arg);
 
 /* The functions below run in the LVGL task (or with the display lock held). */
 
@@ -60,17 +83,34 @@ bool muse_ui_text_size_applies(void);
  * draws fail until the UI starts.
  */
 bool muse_ui_image_size(int *w, int *h);
+/* The panel is round: the image's corners are cut off. */
+bool muse_ui_image_round(void);
 /* What the panel shows of those pixels: 16 (colour), or 2 on a four-gray e-paper. */
 int muse_ui_image_bits(void);
 /* The image is complete: a four-gray e-paper dithers it to its grays. */
 void muse_ui_image_done(void);
 bool muse_ui_image_draw(int x, int y, int w, int h, const uint16_t *pixels);
 void muse_ui_image_hide(void);
+/* From any task: hide the image ms from now (display.show_image's showing),
+ * from the frame tick; 0 or less cancels a pending hide. A new image's first
+ * rectangle or any hide cancels it too. Logged on mg.image. */
+void muse_ui_image_hide_after(int ms);
+/*
+ * The avatar face (main/mg_face.h), from any task: px is a full-panel
+ * RGB565 picture (native order, heap_caps_malloc'd, the scrim already baked
+ * in) that the home draws under everything else on its face in place of
+ * Pixel Muse; muse_ui takes it and frees it when it's replaced. NULL brings
+ * Pixel Muse back. Applied on the next frame; turns and the turn dot
+ * and every control work as on the plain face.
+ */
+void muse_ui_face_bg_set(uint16_t *px);
 /* Watcher camera mode: shows an on-screen shutter hint over the live image. */
 void muse_ui_camera_hint(bool visible);
 
 /* Bench testing, from any task: streams the screen over USB serial. */
 void muse_ui_request_snapshot(void);
+/* The update card asks for its confirm press and is on show (muse_local_press_set_shown). Any task. */
+bool muse_ui_update_prompt_shown(void);
 #if CONFIG_LV_USE_SNAPSHOT
 /* Bench-only, from any task: select the touch tile without pretending a/s
  * are touch-menu navigation. No effect on non-touch boards. */
@@ -78,3 +118,7 @@ void muse_ui_bench_page(bool settings);
 /* Display-only demo name for privacy-safe screenshots; no provisioning changes. */
 void muse_ui_bench_demo(bool enabled);
 #endif
+
+/* Bench (console ui.redraw=N): N timed full redraws of the screen on show (min, average, max microseconds).
+ * On the LVGL task only (muse_ui_run_in_lvgl). */
+void muse_ui_redraw_cost(int n, uint32_t *min_us, uint32_t *avg_us, uint32_t *max_us);

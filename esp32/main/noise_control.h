@@ -70,8 +70,9 @@ void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb);
 // Override the Noise host. NULL or empty restores the compiled default.
 void noise_ctrl_set_host(const char *host);
 
-// The node id link.register sends from the next registration on: setup gives
-// a device set up by earlier firmware its new id without a restart.
+// The node id link.register sends from the next registration on (both the
+// Wi-Fi session and the one over BLE): a setup that gives the device a new id,
+// such as one set up by earlier firmware, changes it without a restart.
 void noise_ctrl_set_node_id(const char *node_id);
 
 // Off (the default), the session checks for traffic every tick. On, once it
@@ -111,6 +112,75 @@ void noise_ctrl_send_command_result(
 // report's explicit fields; device.health holds only the recent events.
 cJSON *noise_ctrl_device_health_json(bool for_bug_report);
 
+// ---- The device session over BLE (CONFIG_MUSE_GADGET_BLE_SESSION) ----
+//
+// A BLE-only gadget's VM session, carried by the phone over mg_command_session
+// (protocols/mgcommands.h, Device session): the same link.register, commands,
+// results and daemon requests as the session above, sent as
+// ServiceRequestEnvelopes through mg_ble. Starts its task; the command and
+// agent callbacks above apply. Instead of noise_ctrl_init() on such a build.
+bool noise_ctrl_ble_start(const char *node_id, const char *display_name);
+// The status callback on a build that starts with noise_ctrl_ble_start()
+// (noise_ctrl_init() takes it otherwise): a server unpair (ws_unpaired)
+// reaches the app over the phone's relay too. Set it before the start.
+void noise_ctrl_set_status_cb(noise_ctrl_status_cb on_status);
+// From mg_ble (mg_ble_platform_t's session_state and session_message): the
+// client reported the VM session (mg_session_state_t), or a message from the
+// VM waits. Don't block.
+void noise_ctrl_ble_state(uint8_t state, uint16_t epoch);
+void noise_ctrl_ble_message(void);
+// session.ping (the console's >session.ping, the Nordic UART's !IN
+// session.ping): one link.heartbeat on the open, registered device session,
+// answered on mg.session ("sent", "no session", "not registered yet").
+// Doesn't block: the session task sends it.
+void noise_ctrl_ble_ping(void);
+// Ask the client for a session now (open_request [1]) if none is open: a
+// press that needs Muse (the picture test). Doesn't block. The device also
+// asks by itself, with a backoff, after the client reports no_network or
+// closed while none was open, while a task is active (below).
+void noise_ctrl_ble_request_open(void);
+// The pairing changed hands (a setup's commit, a reset, a Forget): requests
+// and invoke results from before it are dropped, never carried into a session
+// under the new pairing. Doesn't block.
+void noise_ctrl_ble_pairing_changed(void);
+
+// ---- The active task ----
+//
+// A session carried through a phone relay (the device session above) opens
+// and stays up only for an active task: a user action (about 2 min after
+// it), traffic owed (requests queued or open, results to send, link.register
+// unanswered), or a wait for something not yet received (at most 15 min).
+// While one is active the gadget asks for a session (at once, then the
+// reopen series, the next ask set when one goes even if the client
+// stays silent) and keeps an open one awake with an empty /link-control frame
+// every NOISE_CTRL_KEEPALIVE_MS; with none it sends nothing, lets the session
+// close and doesn't ask again. An open session left with no task is closed
+// by the gadget NOISE_CTRL_IDLE_CLOSE_MS after the last task (open_request
+// [0], once). Owed traffic counts by itself; these hold the rest. A Wi-Fi gadget's own session (direct to the VM) is always open, as
+// before: there they do nothing. Any task; never block.
+typedef enum {
+    NOISE_TASK_USER = 0,    // a user action (noise_ctrl_user_action)
+    NOISE_TASK_WAIT_FACE,   // the avatar face: a look owed (mg_face.c)
+    NOISE_TASK_WAIT_IMAGE,  // the picture test: Muse asked for a picture (session_image.c)
+    NOISE_TASK_KINDS,
+} noise_task_t;
+#define NOISE_CTRL_USER_TASK_MS (2 * 60 * 1000)
+#define NOISE_CTRL_WAIT_MAX_MS (15 * 60 * 1000)
+#define NOISE_CTRL_KEEPALIVE_MS 15000   // <= 20 s: under iOS's ~30 s suspension
+// An open session with no task left: the gadget closes it itself (open_request
+// [0], the close both apps drain gracefully) this long after the last task
+// ended, so back-to-back actions reuse it; a task meanwhile keeps it (a
+// silent open session holds Android's VM socket
+// and its 30 s pings, and keeps the VM awake).
+#define NOISE_CTRL_IDLE_CLOSE_MS 20000
+// Held for ms from now (at most NOISE_CTRL_WAIT_MAX_MS; never shortens a
+// hold); 0 ends it.
+void noise_ctrl_task_hold(noise_task_t kind, uint32_t ms);
+// A user's talk press, key or tap on the gadget (not the screen lit alone):
+// NOISE_TASK_USER for NOISE_CTRL_USER_TASK_MS.
+void noise_ctrl_user_action(void);
+
+
 // ---- Extra daemon requests on this session (CONFIG_HOMEHUB_DAEMON_REQUESTS) ----
 //
 // Any task can open an HTTP request to the VM daemon on its own stream of this
@@ -131,15 +201,34 @@ cJSON *noise_ctrl_device_health_json(bool for_bug_report);
 // stream is done after end or -1. NOISE_CTRL_REQ_TOO_LARGE in place of -1:
 // the session ended because a frame was larger than this board's buffers.
 #define NOISE_CTRL_REQ_TOO_LARGE (-2)
+// The BLE-only gadgets' device session (mgcommands.h): a
+// request made while the session isn't open (or its link.register not yet
+// acknowledged) waits for it, in order, at most NOISE_CTRL_REQ_WAIT_OPEN_MS,
+// and asks the client for it at once; it ends with this status if none came
+// (an iOS app's sessions end at each Bluetooth wake, so a gap of a fraction of
+// a second is normal). At most three wait at once.
+#define NOISE_CTRL_REQ_NO_SESSION (-3)
+#define NOISE_CTRL_REQ_WAIT_OPEN_MS 10000
 typedef void (*noise_ctrl_req_cb)(void *ctx, int status, const uint8_t *data,
                                   size_t len, bool end);
 
 // headers: name, value pairs ending with NULL (may be NULL). Returns the stream
-// id, or 0 if the session is down or busy. Otherwise the callback always ends
+// id, or 0 if the session is down (over Wi-Fi; over BLE it waits, above) or
+// busy. Otherwise the callback always ends
 // the request with end or -1, even if it could not be sent.
 int64_t noise_ctrl_req_open(const char *verb, const char *path,
                             const char *const *headers, bool end_body,
                             noise_ctrl_req_cb cb, void *ctx);
+// The same, and hdr_cb gets each header of the response head (name and value,
+// not NUL-terminated, valid only during the call) on the session task, just
+// before cb gets the head's status. For a reply's ETag, Content-Range and the
+// like; no header is logged.
+typedef void (*noise_ctrl_req_hdr_cb)(void *ctx, const char *name, size_t name_len,
+                                      const char *value, size_t value_len);
+int64_t noise_ctrl_req_open_hdr(const char *verb, const char *path,
+                                const char *const *headers, bool end_body,
+                                noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb,
+                                void *ctx);
 // Queues body bytes (copied). Waits up to wait_ms for room; false if none.
 bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
                          bool end_body, int wait_ms);

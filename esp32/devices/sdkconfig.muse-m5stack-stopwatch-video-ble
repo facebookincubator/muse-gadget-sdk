@@ -1,0 +1,33 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The M5Stack StopWatch's BLE-only video build (tools/muse/board.sh build
+# stopwatch-video) only, loaded after devices/sdkconfig.muse-video-ble.
+#
+# Without this, at idle the StopWatch had 18.6 KB of internal RAM free with a
+# largest block of 7.9 KB, lowest 10.4 KB (>tasks), below the ~9 KB the video
+# decode and show tasks take when a stream's first picture arrives. The
+# internal stacks it can spare, as on the Watcher's video build:
+
+# The two LVGL draw threads (swdraw), 8 KB each by default: 1.7 KB used at
+# worst, measured on the StopWatch (1696 B; bitmap fonts only, the same
+# screens as the Watcher). That plus 1 KB, rounded up to 512: 10 KB back.
+CONFIG_LV_DRAW_THREAD_STACK_SIZE=3072
+# The stacks of the app tasks that never map flash (the BLE device session's
+# mg_vm 8 KB, the musegadgets player, Muse's keeper; muse_stack.h) go to
+# PSRAM, as on the Watcher: code and read-only data run from PSRAM here
+# (CONFIG_SPIRAM_XIP_FROM_PSRAM), so flash writes leave the cache on and
+# those tasks may write NVS; tasks that can map flash (the musegadgets
+# worker, OTA) stay internal.
+CONFIG_MUSE_STACKS_IN_PSRAM=y

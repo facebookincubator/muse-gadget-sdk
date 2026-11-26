@@ -16,7 +16,11 @@
 """Copy one board's flash images out of an ESP-IDF build directory and write
 an ESP Web Tools manifest for them.
 
-Usage: make_manifest.py BUILD_DIR OUT_DIR NAME VERSION
+Usage: make_manifest.py BUILD_DIR OUT_DIR NAME
+
+The manifest's version is the app image's own (its esp_app_desc_t, what the
+gadget reports as its version): the page reads the version back from the
+gadget after installing and says Done only if it matches.
 
 The images are flashed one by one at their own offsets, exactly like
 `idf.py flash`, rather than as a single merged image: a merged image would
@@ -56,12 +60,33 @@ def partitions_end(table):
     return end
 
 
+# esp_app_desc_t follows the image header (24 bytes) and the first segment's
+# header (8 bytes): its magic word, then version[32] 16 bytes in.
+APP_DESC_OFFSET = 24 + 8
+APP_DESC_MAGIC = 0xABCD5432
+
+
+def app_version(image):
+    """The version in an ESP-IDF app image's description."""
+    if len(image) < APP_DESC_OFFSET + 48 or image[0] != 0xE9:
+        raise ValueError("not an ESP-IDF app image")
+    (magic,) = struct.unpack_from("<I", image, APP_DESC_OFFSET)
+    if magic != APP_DESC_MAGIC:
+        raise ValueError("the app image has no app description")
+    raw = image[APP_DESC_OFFSET + 16:APP_DESC_OFFSET + 48]
+    version = raw.split(b"\0", 1)[0].decode("ascii")
+    if not version:
+        raise ValueError("the app image has no version")
+    return version
+
+
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 4:
         sys.exit(__doc__)
-    build, out, name, version = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+    build, out, name = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 
     args = json.loads((build / "flasher_args.json").read_text())
+    version = app_version((build / args["app"]["file"]).read_bytes())
     chip = args["extra_esptool_args"]["chip"]
 
     out.mkdir(parents=True, exist_ok=True)
@@ -77,6 +102,9 @@ def main():
         "version": version,
         # Offer to erase on first install; updates keep pairing and Wi-Fi.
         "new_install_prompt_erase": True,
+        # The firmware doesn't speak Improv: don't wait for it, so the port
+        # is the page's for its version reads.
+        "new_install_improv_wait_time": 0,
         # Not ESP Web Tools': the page refuses boards with less flash.
         "min_flash_bytes": partitions_end(table),
         "builds": [{"chipFamily": CHIP_FAMILIES[chip], "parts": parts}],

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# LC3 for voice over musegadgets BLE (the BLE gadget component, which comes
-# in a later change, sets the CONFIG_MUSE_GADGET_BLE_* options), 10 ms
+# LC3 for voice over musegadgets BLE (the BLE gadget component,
+# components/muse_gadget_ble, sets the CONFIG_MUSE_GADGET_BLE_* options), 10 ms
 # frames, no LTPF, at 16 and 24 kHz. Two implementations of the same API and bitstream, each
 # decoding the other's frames:
 # - xplat/liblc3: Google's Apache-2.0 liblc3 (floating point), shared with

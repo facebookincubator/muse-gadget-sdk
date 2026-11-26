@@ -44,6 +44,7 @@ static void log_line(const char *, const char *, ...) {}
 static const char *TAG = "test";
 static char s_register_req_id[40] = {0};
 static bool s_register_acked = false;
+static bool s_register_rejected = false;   /* noise_control.cpp: a rejected link.register is answered */
 static bool s_heartbeat_registered = false;
 
 struct handled {

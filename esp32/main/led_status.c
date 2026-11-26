@@ -15,6 +15,8 @@
  */
 
 #include "led_status.h"
+#include "muse_bootguard.h"
+#include "muse_local_press.h"
 #include "stack_monitor.h"
 
 #include <math.h>
@@ -341,6 +343,15 @@ static const rgb_t COLOR_YELLOW   = {80,  50,  0};
 static const rgb_t COLOR_GREEN    = {0,   80,  0};
 static const rgb_t COLOR_RED      = {80,  0,   0};
 static const rgb_t COLOR_PURPLE   = {60,  0,   60};
+// The bench switch on for the connected central (led_status_set_bench): a blue double flash
+// 30/100/30 ms every 4 s, the lowest priority.
+static const rgb_t COLOR_BENCH    = {0,   0,   80};
+#define BENCH_CUE_US (4 * 1000000LL)
+#define BENCH_FLASH_MS 30
+#define BENCH_GAP_MS 100
+static bool s_bench = false;
+static volatile bool s_prompt_shown;   // the update's confirm pattern is on the light
+static int64_t s_bench_cue_us = 0;
 
 #if CONFIG_HOMEHUB_LED_BACKEND_PWM_RGB
 static void led_hw_set_color(rgb_t c) {
@@ -1474,6 +1485,14 @@ static bool voice_render(void) {
 }
 #endif
 
+// The bench cue is the lowest priority: it shows only over a steady
+// connection colour; a state with its own pattern (breathing, blinking: setup, pairing, a reconnect,
+// an error) keeps the light.
+static bool bench_cue_yields(led_state_t state) {
+    return state == LED_STATE_BLE_ADVERTISING || state == LED_STATE_PAIRING_CONFIRM_REQUIRED ||
+           state == LED_STATE_VM_SWITCHING || state == LED_STATE_WS_DISCONNECTED || state == LED_STATE_ERROR;
+}
+
 static void led_task(void *arg) {
     stack_monitor_t stack = STACK_MONITOR_INIT;
     while (1) {
@@ -1481,12 +1500,20 @@ static void led_task(void *arg) {
         char title[sizeof(s_title)];
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         led_state_t state = s_state;
+        // An update over Bluetooth asks for its confirm press: the confirm pattern until the press comes or the
+        // prompt times out (muse_local_press_prompting), over whatever the state is.
+        bool prompting = muse_local_press_prompting();
+        if (prompting) state = LED_STATE_PAIRING_CONFIRM_REQUIRED;
         bool title_dirty = s_title_dirty;
         if (title_dirty) memcpy(title, s_title, sizeof(title));
         s_title_dirty = false;
         xSemaphoreGive(s_mutex);
         if (title_dirty) led_hw_set_title(title);
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        bool bench_due = s_bench && esp_timer_get_time() - s_bench_cue_us >= BENCH_CUE_US;
+        xSemaphoreGive(s_mutex);
 #if CONFIG_HOMEHUB_LED_BACKEND_C3_SSD1306
+        s_prompt_shown = prompting;   // the words show the confirm prompt at once
         // Words, not colours: no breathing or blinking to wait out, so a new
         // state shows within one frame.
         oled_show_state(state);
@@ -1494,8 +1521,23 @@ static void led_task(void *arg) {
         continue;
 #endif
 #if CONFIG_HOMEHUB_VOICE && (CONFIG_HOMEHUB_LED_BACKEND_VOICE_RING || CONFIG_HOMEHUB_LED_BACKEND_RESPEAKER_LITE)
-        if (voice_render()) continue;
+        if (voice_render()) {   // the voice states and the volume win over the bench cue
+            s_prompt_shown = false;   // ...and over the update's confirm pattern: a press then isn't the update's
+            continue;
+        }
 #endif
+        s_prompt_shown = prompting;   // the confirm pattern is on the light from here
+        if (bench_due && bench_cue_yields(state)) {
+            bench_due = false;   // any other pattern wins (lowest priority): the cue waits for a steady state
+        }
+        if (bench_due) {
+            // The "Bench" mark of a board with no screen: blue 30 ms, dark 100 ms, blue 30 ms, then the state.
+            xSemaphoreTake(s_mutex, portMAX_DELAY);
+            s_bench_cue_us = esp_timer_get_time();
+            xSemaphoreGive(s_mutex);
+            blink(COLOR_BENCH, BENCH_FLASH_MS, BENCH_GAP_MS);
+            blink(COLOR_BENCH, BENCH_FLASH_MS, 0);
+        }
 
         switch (state) {
             case LED_STATE_BOOT:
@@ -1552,6 +1594,10 @@ static void led_task(void *arg) {
     }
 }
 
+static __attribute__((unused)) bool led_update_prompt_shown(void) {
+    return s_prompt_shown;
+}
+
 bool led_status_init(void) {
     if (!led_hw_init()) {
         return false;
@@ -1560,6 +1606,7 @@ bool led_status_init(void) {
 #if CONFIG_HOMEHUB_LED_BACKEND_NONE || CONFIG_HOMEHUB_LED_BACKEND_MUSE
     return true;
 #endif
+    muse_local_press_set_shown(led_update_prompt_shown);   // a press confirms an update only once its cue shows
 
     s_mutex = xSemaphoreCreateMutex();
     if (!s_mutex) return false;
@@ -1581,9 +1628,20 @@ void led_status_set_state(led_state_t state) {
     muse_glue_led_state(state);
     return;
 #endif
+#if CONFIG_MUSE_BOOTGUARD_SAFE_LINK_QUIET
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) state = LED_STATE_ERROR;   // SAFE shows the error state throughout
+#endif
     if (!s_mutex) return;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_state = state;
+    xSemaphoreGive(s_mutex);
+}
+
+void led_status_set_bench(bool on) {
+    if (!s_mutex) return;   // the Muse UI (its home shows "Bench"), or no light
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (on && !s_bench) s_bench_cue_us = 0;   // the first cue at once
+    s_bench = on;
     xSemaphoreGive(s_mutex);
 }
 
@@ -1644,6 +1702,14 @@ int led_status_display_bits(void) {
     return muse_ui_image_size(&w, &h) ? muse_ui_image_bits() : 0;
 #else
     return 0;
+#endif
+}
+
+bool led_status_display_round(void) {
+#if CONFIG_HOMEHUB_LED_BACKEND_MUSE && CONFIG_HOMEHUB_DISPLAY_COMMANDS
+    return muse_ui_image_round();
+#else
+    return false;
 #endif
 }
 

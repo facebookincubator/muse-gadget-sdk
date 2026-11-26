@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -390,13 +391,33 @@ class SameConfiguration(unittest.TestCase):
                             ({"MUSE_MIRROR": "1"}, "-mirror"),
                             ({"MUSE_VIDEO": "1", "MUSE_BENCH": "1"}, "-video-bench"),
                             ({"MUSE_VIDEO": "1", "MUSE_MIRROR": "1", "MUSE_BENCH": "1"}, "-video-mirror-bench"),
-                            ({"MUSE_VIDEO": "", "MUSE_MIRROR": "", "MUSE_BENCH": ""}, "")):
+                            ({"MUSE_VIDEO": "", "MUSE_MIRROR": "", "MUSE_BENCH": ""}, ""),
+                            ({"MUSE_BENCH": "0"}, ""), ({"MUSE_VIDEO": "1", "MUSE_BENCH": "0"}, "-video")):
             with self.subTest(env=env), mock.patch.dict(os.environ, env):
                 for var in ("MUSE_VIDEO", "MUSE_MIRROR", "MUSE_BENCH"):
                     if var not in env:
                         os.environ.pop(var, None)
                 self.assertEqual(avatar.build_dir("s3"), "build-muse-waveshare-s3-175c" + suffix)
                 self.assertEqual(avatar.build_dir("echoear"), "build-muse-ostb-echoear-2st" + suffix)
+
+    def test_only_muse_bench_1_is_the_bench_build(self):
+        # board.sh itself: MUSE_BENCH=0 (or empty) adds no bench overlay or -bench directory; 1 does. Its bench block
+        # and the power-test check, run in bash.
+        board = (ROOT / "tools" / "muse" / "board.sh").read_text()
+        block = re.search(r"^if [^\n]*MUSE_BENCH[^\n]*then[^\n]*\n[^\n]*-bench[^\n]*\nfi\n", board, re.M).group(0)
+        power = next(line for line in board.splitlines() if "power-test cannot be combined" in line)
+        script = 'B=build-muse-x; defaults=base\n' + block + 'echo "$B;$defaults"\n' + \
+                 '( ' + power.strip().replace("exit 2", "exit 7") + ' ) >/dev/null 2>&1; echo "power $?"\n'
+        for value, bench in ((None, False), ("", False), ("0", False), ("1", True)):
+            env = {k: v for k, v in os.environ.items() if k not in ("MUSE_BENCH", "MUSE_VIDEO")}
+            if value is not None:
+                env["MUSE_BENCH"] = value
+            with self.subTest(MUSE_BENCH=value):
+                out = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, check=True)
+                lines = out.stdout.splitlines()
+                self.assertEqual(lines[0], "build-muse-x-bench;base;devices/sdkconfig.muse-bench" if bench
+                                 else "build-muse-x;base")
+                self.assertEqual(lines[1], "power 7" if bench else "power 0")
 
     def test_the_mirror_build_has_its_own(self):
         self.expect_dir = "build-muse-waveshare-s3-175c-mirror"

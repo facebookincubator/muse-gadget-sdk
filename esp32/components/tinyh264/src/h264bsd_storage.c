@@ -139,13 +139,41 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
 
     id = pSeqParamSet->seqParameterSetId;
 
-    /* OPT: a picture larger than the caller allows (h264bsdSetMaxSize) */
+    /* OPT: a picture larger than the caller allows (h264bsdSetMaxSize), or
+     * with more reference frames (h264bsdSetMaxReferences), or
+     * once the stream has shown a picture, of another size or profile than
+     * its own (h264bsdKeepParamSets), or another one with the kept one's id
+     * outside a keyframe's access unit: damaged or stray bytes, never let
+     * them replace the stream's parameter sets. The picture after frame
+     * cropping (crop units of 2 x 2: 4:2:0 frames only, as the parse takes;
+     * the parse checked the offsets leave one) is held to
+     * h264bsdSetMaxCropped's size, the coded one to h264bsdSetMaxSize's */
     if ( (pStorage->maxWidthMbs &&
           pSeqParamSet->picWidthInMbs > pStorage->maxWidthMbs) ||
          (pStorage->maxHeightMbs &&
           pSeqParamSet->picHeightInMbs > pStorage->maxHeightMbs) ||
          (pStorage->maxRefFrames &&
-          pSeqParamSet->numRefFrames > pStorage->maxRefFrames) )
+          pSeqParamSet->numRefFrames > pStorage->maxRefFrames) ||
+         (pStorage->maxCroppedWidth &&
+          16 * (uint64_t)pSeqParamSet->picWidthInMbs -
+          (pSeqParamSet->frameCroppingFlag ?
+           2 * ((uint64_t)pSeqParamSet->frameCropLeftOffset +
+                pSeqParamSet->frameCropRightOffset) : 0) >
+          pStorage->maxCroppedWidth) ||
+         (pStorage->maxCroppedHeight &&
+          16 * (uint64_t)pSeqParamSet->picHeightInMbs -
+          (pSeqParamSet->frameCroppingFlag ?
+           2 * ((uint64_t)pSeqParamSet->frameCropTopOffset +
+                pSeqParamSet->frameCropBottomOffset) : 0) >
+          pStorage->maxCroppedHeight) ||
+         (pStorage->lockWidthMbs &&
+          (pSeqParamSet->picWidthInMbs != pStorage->lockWidthMbs ||
+           pSeqParamSet->picHeightInMbs != pStorage->lockHeightMbs ||
+           pSeqParamSet->profileIdc != pStorage->lockProfileIdc)) ||
+         (pStorage->lockWidthMbs && pStorage->goodSps &&
+          !pStorage->ppsChangeAllowed &&
+          id == pStorage->goodSps->seqParameterSetId &&
+          h264bsdCompareSeqParamSets(pSeqParamSet, pStorage->goodSps) != 0) )
     {
         FREE(pSeqParamSet->offsetForRefFrame);
         FREE(pSeqParamSet->vuiParameters);
@@ -220,6 +248,22 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
 
 ------------------------------------------------------------------------------*/
 
+/* OPT: the same picture parameter set (one slice group: no arrays to compare) */
+static u32 SamePicParamSet(const picParamSet_t *a, const picParamSet_t *b)
+{
+    return a->numSliceGroups == 1 && b->numSliceGroups == 1 &&
+        a->picParameterSetId == b->picParameterSetId &&
+        a->seqParameterSetId == b->seqParameterSetId &&
+        a->picOrderPresentFlag == b->picOrderPresentFlag &&
+        a->numRefIdxL0Active == b->numRefIdxL0Active &&
+        a->picInitQp == b->picInitQp &&
+        a->chromaQpIndexOffset == b->chromaQpIndexOffset &&
+        a->deblockingFilterControlPresentFlag ==
+            b->deblockingFilterControlPresentFlag &&
+        a->constrainedIntraPredFlag == b->constrainedIntraPredFlag &&
+        a->redundantPicCntPresentFlag == b->redundantPicCntPresentFlag;
+}
+
 u32 h264bsdStorePicParamSet(storage_t *pStorage, picParamSet_t *pPicParamSet)
 {
 
@@ -235,6 +279,21 @@ u32 h264bsdStorePicParamSet(storage_t *pStorage, picParamSet_t *pPicParamSet)
     ASSERT(pPicParamSet->seqParameterSetId < MAX_NUM_SEQ_PARAM_SETS);
 
     id = pPicParamSet->picParameterSetId;
+
+    /* OPT: once the stream has shown a picture, its kept picture parameter
+     * set is replaced only from a keyframe's access unit: damaged or stray
+     * bytes that parse as one never change how its frames decode */
+    if (pStorage->lockWidthMbs && pStorage->goodPps &&
+        id == pStorage->goodPps->picParameterSetId &&
+        !pStorage->ppsChangeAllowed &&
+        !SamePicParamSet(pPicParamSet, pStorage->goodPps))
+    {
+        FREE(pPicParamSet->runLength);
+        FREE(pPicParamSet->topLeft);
+        FREE(pPicParamSet->bottomRight);
+        FREE(pPicParamSet->sliceGroupId);
+        return(HANTRO_NOK);
+    }
 
     /* pic parameter set with id not used before -> allocate memory */
     if (pStorage->pps[id] == NULL)
@@ -332,6 +391,19 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
                    pStorage->sps[pStorage->pps[ppsId]->seqParameterSetId]);
     if (tmp != HANTRO_OK)
         return(tmp);
+
+    /* OPT: the stream's format, once locked (h264bsdKeepParamSets), holds at
+     * activation too: a sequence parameter set stored before the lock, of
+     * another size or profile, is never activated afterwards. */
+    {
+        const seqParamSet_t *sps =
+            pStorage->sps[pStorage->pps[ppsId]->seqParameterSetId];
+        if (pStorage->lockWidthMbs &&
+            (sps->picWidthInMbs != pStorage->lockWidthMbs ||
+             sps->picHeightInMbs != pStorage->lockHeightMbs ||
+             sps->profileIdc != pStorage->lockProfileIdc))
+            return(HANTRO_NOK);
+    }
 
     /* first activation part1 */
     if (pStorage->activePpsId == MAX_NUM_PIC_PARAM_SETS)

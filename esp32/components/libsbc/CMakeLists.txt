@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # libsbc: Google's Apache-2.0 SBC codec, trimmed for 16 kHz mono voice over
-# musegadgets BLE (the BLE gadget component, which comes in a later change,
+# musegadgets BLE (the BLE gadget component, components/muse_gadget_ble,
 # sets CONFIG_MUSE_GADGET_BLE_AUDIO). The sources are the one copy
 # in xplat/libsbc, shared with the Zephyr SDK; see its README.md.
 set(src_dir "${CMAKE_CURRENT_LIST_DIR}/../../../xplat/libsbc")

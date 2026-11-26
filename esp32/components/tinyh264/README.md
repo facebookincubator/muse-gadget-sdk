@@ -38,6 +38,37 @@ deblocking off and 2 Mb/s VGA):
   pass over the whole picture: the pixels are still in the data cache, which
   saves 15-37% of the PSRAM traffic at 240-412 px. Out-of-order slices (or a
   damaged stream) fall back to filtering the rest of the picture at its end.
+- Error recovery, which clean streams never reach (their pictures are
+  unchanged): `h264bsdPictureStarted` / `h264bsdAbandonPicture` let a
+  caller that hands over whole access units drop a picture an error left
+  unfinished, instead of upstream's concealing it at the next access unit's
+  first NAL unit and returning it for that one (whose slices then went
+  undecoded: after one damaged frame, every keyframe "decoded" into the old
+  picture and the next frame failed). `h264bsdKeepParamSets` /
+  `h264bsdRestoreParamSets` keep the parameter sets of the last IDR picture
+  and lock the stream's size and profile (other sequence parameter sets are
+  refused in `h264bsdStoreSeqParamSet`; one that changes the kept one, SPS
+  or PPS, only while `h264bsdAllowParamSetChange`, a keyframe's access
+  unit), and put them back after an error. `h264bsdDecode` returns an
+  error, not a NULL dereference, for a picture that reached no output, and
+  stops at the buffer's end with `H264BSD_RDY` (parameter sets alone)
+  instead of failing on an empty buffer. With `gaps_in_frame_num_allowed`
+  0, a gap in frame_num (a lost reference frame) is an error
+  (`h264bsdCheckGapsInFrameNum`) where upstream decoded on regardless.
+  `muse_vdec.c` uses all of it; `tests/test_video_route.py` checks it.
+- Undefined behavior out (found by fuzzing tinyh264; the
+  same results): the Exp-Golomb decoder's `1 << 31` is unsigned, the
+  crop check sums in 64 bits, deblocking multiplies `q0 - p0` by 4 instead
+  of shifting a negative value, and `h264bsdDecode` never steps past its
+  buffer. `tests/test_video_route.py` (TinyH264Regress) replays the corpus
+  in `tests/vectors/h264/regress` under ASan and UBSan.
+- Frame cropping: `h264bsdCroppingOffsets`
+  hands the active sequence parameter set's four frame_crop offsets to the
+  caller, which shows that window of the coded picture (`muse_vdec.c`);
+  `h264bsdSetMaxCropped` refuses a sequence parameter set whose picture
+  after cropping is larger than the stream's, beside `h264bsdSetMaxSize`'s
+  bound on the coded size, which may be larger by an encoder's padding
+  (iPhone streams code at least 192 x 96). Decoding itself is unchanged.
 - Experimental, off by default: on the ESP32-S31
   (`CONFIG_MUSE_VIDEO_SIMD_MC`), the luma 6-tap
   positions (a, b, c, d, h, n) and their averages (e, g, p, r) for

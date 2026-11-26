@@ -114,6 +114,13 @@ limitations under the License.
     .status-table td { border-top: 1px solid var(--line); padding: 0.3rem 0.5rem 0.3rem 0; vertical-align: top; overflow-wrap: anywhere; }
     .status-table td:first-child { color: var(--muted); width: 45%; }
 
+    .remember { margin-top: 0.75rem; }
+    .remember-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    .remember-row .checkbox { margin-top: 0; }
+    .remember .note { margin: 0.35rem 0 0; }
+    .button.small { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
+    .log-row { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; }
+
     details.card summary { cursor: pointer; font-weight: 600; }
     details.card[open] summary { margin-bottom: 0.75rem; }
     footer { text-align: center; margin-top: 2rem; }
@@ -154,14 +161,21 @@ limitations under the License.
         <span class="summary" id="token-saved" hidden>
           <code id="token-hint"></code>
           <a href="#" id="change-token" data-i18n="token.change">Change</a>
-          <a href="#" id="forget-token" data-i18n="token.forget">Forget</a>
+          <a href="#" id="clear-token" data-i18n="token.clear">Clear</a>
         </span>
       </div>
       <div class="step-body" id="token-entry">
-        <p><span data-i18n="token.intro.before">A gadget needs your SDK token to pair. Get it from </span><a href="https://gadgets.muse.ai/settings/sdk-tokens">gadgets.muse.ai</a><span data-i18n="token.intro.after"> (Account &gt; SDK tokens). It's sent to the gadget over USB after installing, the gadget keeps it through updates, and this browser remembers it for next time.</span></p>
+        <p><span data-i18n="token.intro.before">A gadget needs your SDK token to pair. Get it from </span><a href="https://gadgets.muse.ai/settings/sdk-tokens">gadgets.muse.ai</a><span data-i18n="token.intro.after"> (Account &gt; SDK tokens). It's sent to the gadget over USB after installing, and the gadget keeps it through updates.</span></p>
         <label class="field" for="token" data-i18n="token.label">SDK token</label>
         <input id="token" type="password" placeholder="mgst_…" autocomplete="off" spellcheck="false">
         <p id="token-check" class="status"></p>
+      </div>
+      <div class="remember">
+        <div class="remember-row">
+          <label class="checkbox"><input type="checkbox" id="token-remember"> <span data-i18n="token.remember">Remember this token on this computer</span></label>
+          <button id="token-forget" class="button secondary small" hidden data-i18n="token.forgetSaved">Forget saved token</button>
+        </div>
+        <p class="note" id="token-remember-note" data-i18n="token.rememberNote">Off unless you tick it. When it's on, the page saves the token in this browser's local storage once it reaches a gadget, unencrypted, so anyone who uses this browser profile on this computer can read it. Untick it or press Forget saved token to delete it.</p>
       </div>
     </section>
 
@@ -174,6 +188,7 @@ limitations under the License.
         <label class="field" for="board" data-i18n="install.board">Board</label>
         <select id="board"></select>
         <p id="board-note" class="warning"></p>
+        <p id="worn-note" class="warning" hidden data-i18n="transfer.wrist">Take the gadget off your wrist and set it down first: moving it can wake it and stall the update.</p>
         <label class="checkbox" id="all-ports-row">
           <input type="checkbox" id="all-ports"> <span data-i18n="install.allPorts">Show all serial ports, not just this board's USB device</span>
         </label>
@@ -185,17 +200,24 @@ limitations under the License.
             <span slot="not-allowed" data-i18n="install.notAllowed">Web Serial needs a secure (https) connection.</span>
           </esp-web-install-button>
         </div>
-        <p class="note" data-i18n="install.note">Keep this tab in front while installing. Updating keeps your pairing, Wi-Fi settings and token. When it's done, close the installer: the page sends your token, and you set the gadget up in the Muse app.</p>
+        <p class="note" data-i18n="install.note">Keep this tab in front while installing. Updating keeps your pairing, Wi-Fi settings and token. Once the firmware is written, the page checks the version the gadget runs, sends your token and says Done; then you set the gadget up in the Muse app.</p>
         <p class="note" data-i18n="install.dialogLanguage"></p>
         <p id="install-status" class="status"></p>
         <p id="settings-holds-port" class="note" hidden data-i18n="install.holdsPort">Device settings below is connected to a gadget. Disconnect it there to install.</p>
+        <div class="log-row">
+          <button id="save-log" class="button secondary" data-i18n="log.save">Save log</button>
+          <span class="note" data-i18n="log.note">Something went wrong? Save this page's log and attach it to your report. Your token shows only as its length and a fingerprint.</span>
+        </div>
       </div>
     </section>
 
     <details class="card" id="already">
-      <summary data-i18n="already.summary">Already installed? Send your token to a gadget</summary>
+      <summary data-i18n="already.summary">Already installed? Send your token or check the version</summary>
       <p class="note" data-i18n="already.note">For a gadget running firmware from this page. Pick its port when asked.</p>
-      <button id="send-token" class="button secondary" data-i18n="already.send">Send token to gadget</button>
+      <div class="button-row">
+        <button id="send-token" class="button secondary" data-i18n="already.send">Send token to gadget</button>
+        <button id="check-version" class="button secondary" data-i18n="already.checkVersion">Check version</button>
+      </div>
       <p class="note" id="settings-holds-token" hidden data-i18n="already.holds">Disconnect Device settings below first.</p>
       <p id="token-status" class="status"></p>
     </details>
@@ -255,20 +277,44 @@ limitations under the License.
   </main>
 
   <script type="module">
+    import {
+      createSessionLog, fingerprint, logFileName, stopMessage, transferLines, versionsMatch,
+    } from "./flasher-core.js";
     import { installFlasherHooks } from "./flasher-hooks.js";
     import { installPacedSerial } from "./paced-serial.js";
     import { isSdkToken, sendSdkToken } from "./sdk-token.js";
+    import { createTokenMemory } from "./token-memory.js";
+    import { readGadgetVersion } from "./version-read.js";
     import { DeviceSettingsSession, SETTINGS, statusRows } from "./device-settings.js";
-    import { LocalizedError, hasString, initLanguage, message, render, renderRich, setLanguage, t, translatePage } from "./i18n.js";
+    import {
+      LocalizedError, hasString, initLanguage, language, message, render, renderRich, setLanguage, t, translatePage,
+    } from "./i18n.js";
+
+    // The whole session's log, for the Save log button: ESP Web Tools'
+    // and esptool-js's console output, the install's states, the version
+    // reads and the token step, every line masked as esp32/tools/redact.py
+    // masks secrets. Status lines go in as shown, in the page's language.
+    const log = createSessionLog();
+    log.teeConsole();
+    log.add("page", `Muse Gadget Web Flasher, ${navigator.userAgent}`);
 
     const $ = (id) => document.getElementById(id);
+
+    // This browser's local storage, or null where it's blocked: then the
+    // page keeps nothing (no language choice, no token).
+    let storage = null;
+    try {
+      storage = window.localStorage;
+    } catch {
+      // Storage blocked.
+    }
 
     // The page's language: the visitor's choice, kept in this browser, else
     // the browser's own until they choose. Switching redraws every text,
     // the status lines included, so they keep what they show as messages.
     const statuses = new Map();   // status element -> [message, kind]
     const redraws = [];
-    initLanguage({ storage: localStorage, languages: navigator.languages ?? [navigator.language] });
+    initLanguage({ storage, languages: navigator.languages ?? [navigator.language] });
     const redraw = () => {
       translatePage(document);
       for (const [el, [text]] of statuses) el.textContent = render(text);
@@ -276,36 +322,47 @@ limitations under the License.
     };
     for (const button of document.querySelectorAll("[data-lang]")) {
       button.addEventListener("click", () => {
-        setLanguage(button.dataset.lang, { storage: localStorage });
+        setLanguage(button.dataset.lang, { storage });
+        log.add("page", `language ${language()}`);
         redraw();
       });
     }
     redraw();
+    log.add("page", `language ${language()}`);
 
     const select = $("board");
     const button = $("install");
     const tokenInput = $("token");
     const allPorts = $("all-ports");
     const pacing = "SerialPort" in window ? installPacedSerial(SerialPort) : null;
-    // text: a message(), an Error, or text from elsewhere (shown as it is).
+    // text: a message(), an Error, text from elsewhere (shown as it is), or a
+    // list of them. A new status also goes to the session log.
     const showStatus = (el, text, kind = "") => {
+      const before = el.textContent;
       statuses.set(el, [text, kind]);
       el.textContent = render(text);
       el.className = `status ${kind}`;
+      if (el.textContent && el.textContent !== before) log.add("status", el.textContent);
     };
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const [boards, build] = await Promise.all([
       fetch("boards.json").then((r) => r.json()),
       fetch("build.json").then((r) => r.json()).catch(() => null),
     ]);
+    log.add("page", `built from ${build?.commit ?? "an unknown commit"}`);
     for (const { board, name } of boards) {
       select.add(new Option(name, board));
     }
 
-    // The selected board, and how much flash its build needs (its manifest).
+    // The selected board and its build's manifest: the version it installs
+    // and how much flash it needs.
     let board;
+    let manifest = null;
     let minFlashBytes = 0;
     let manifestRequest = 0;
+    // Resolves to whether this was still the newest selection when its
+    // manifest came in.
     const update = async () => {
       const request = ++manifestRequest;
       board = boards.find((b) => b.board === select.value);
@@ -314,11 +371,17 @@ limitations under the License.
       // Boards whose USB bridge drops bytes get their writes paced.
       pacing?.set(board.pacing ?? null);
       showBoardNote();
+      // Wrist-worn products (boards.json "worn"): a wake can stall the update.
+      $("worn-note").hidden = !board.worn;
       $("all-ports-row").hidden = !board.usb;
+      manifest = null;
       minFlashBytes = 0;
-      const manifest = await fetch(manifestPath).then((r) => r.json()).catch(() => null);
+      const loaded = await fetch(manifestPath).then((r) => r.json()).catch(() => null);
       // The selection may have changed while this request was pending.
-      if (request === manifestRequest) minFlashBytes = manifest?.min_flash_bytes ?? 0;
+      if (request !== manifestRequest) return false;
+      manifest = loaded;
+      minFlashBytes = manifest?.min_flash_bytes ?? 0;
+      return true;
     };
     // A board's note is "note.<board>" in i18n.js, if it has one.
     const showBoardNote = () => {
@@ -326,17 +389,26 @@ limitations under the License.
       renderRich($("board-note"), hasString(key) ? t(key) : "");
     };
     redraws.push(() => board && showBoardNote());
-    select.addEventListener("change", update);
-    await update();
+    const selectBoard = async () => {
+      if (await update()) log.add("page", `board ${board.board}: this page installs ${manifest?.version ?? "(no manifest)"}`);
+    };
+    select.addEventListener("change", selectBoard);
+    await selectBoard();
 
-    // The token, remembered in this browser. Once saved, step 1 folds to its
-    // first 12 characters (the hint the gadget logs and gadgets.muse.ai
-    // shows) and step 2 takes the focus.
-    const TOKEN_KEY = "muse-sdk-token";
-    let saved = localStorage.getItem(TOKEN_KEY);
-    if (!isSdkToken(saved ?? "")) saved = null;
-    const token = () => saved;
+    // The token: kept in this page only, unless the user ticks "Remember
+    // this token on this computer" (token-memory.js). Once
+    // entered, step 1 folds to its first 12 characters (the hint
+    // gadgets.muse.ai shows; this page only, never a log) and step 2 takes
+    // the focus.
+    const memory = createTokenMemory(storage, isSdkToken);
+    const token = () => memory.token();
+    const remember = $("token-remember");
+    const showRemember = () => {
+      remember.checked = memory.remember();
+      $("token-forget").hidden = !memory.saved();
+    };
     const showToken = (entering = false) => {
+      const saved = token();
       const done = Boolean(saved) && !entering;
       $("step-token").className = `card step ${done ? "done" : "active"}`;
       $("step-install").className = `card step ${done ? "active" : "waiting"}`;
@@ -345,14 +417,15 @@ limitations under the License.
       $("token-entry").hidden = done;
       $("token-hint").textContent = saved ? `${saved.slice(0, 12)}…` : "";
       $("token-warning").hidden = Boolean(saved);
+      showRemember();
     };
+    if (token()) log.add("token", `remembered on this computer (${fingerprint(token())})`);
     tokenInput.addEventListener("input", () => {
       const value = tokenInput.value.trim();
-      if (isSdkToken(value)) {
-        saved = value;
-        localStorage.setItem(TOKEN_KEY, value);
+      if (memory.enter(value)) {
         tokenInput.value = "";
         showStatus($("token-check"), "");
+        log.add("token", `entered (${fingerprint(value)})`);
         showToken();
         select.focus();
       } else {
@@ -367,59 +440,230 @@ limitations under the License.
       showToken(true);
       tokenInput.focus();
     });
-    $("forget-token").addEventListener("click", (e) => {
+    $("clear-token").addEventListener("click", (e) => {
       e.preventDefault();
-      saved = null;
-      localStorage.removeItem(TOKEN_KEY);
+      memory.clear();
+      log.add("token", "cleared (and any saved copy deleted)");
       showToken();
       tokenInput.focus();
     });
+    remember.addEventListener("change", () => {
+      memory.setRemember(remember.checked);
+      log.add("token", remember.checked ? `remember on (${memory.saved() ? "saved" : "saved once it reaches a gadget"})` : "remember off (saved copy deleted)");
+      showRemember();
+    });
+    $("token-forget").addEventListener("click", () => {
+      memory.forget();
+      log.add("token", "saved copy forgotten");
+      showRemember();
+    });
     showToken();
-    if (saved) select.focus();
+    if (token()) select.focus();
 
     // While the token goes out, Device settings can't take a port.
     let tokenSending = false;
-    const send = async (port, statusEl) => {
+    // Sends the token over `port`, saying how it goes in statusEl. `says`
+    // gives what to say while sending, once the gadget stored it and on a
+    // failure (the install step names the version it checked).
+    const send = async (port, statusEl, says = {}) => {
       if (tokenSending) return;
-      showStatus(statusEl, message("token.sending"));
+      const value = token();
+      showStatus(statusEl, says.sending ?? message("token.sending"));
+      log.add("token", `sending the SDK token (${fingerprint(value)})`);
       tokenSending = true;
       renderSettings();
       try {
-        await sendSdkToken(port, token(), {
+        await sendSdkToken(port, value, {
           onWriteTimeout: (error) => showStatus(statusEl, error, "error"),
         });
-        showStatus(statusEl, message("token.sent"), "ok");
+        memory.sent(value);
+        log.add("token", `the gadget stored it and restarts with it${memory.saved() ? "; saved on this computer" : ""}`);
+        showRemember();
+        showStatus(statusEl, says.sent ?? message("token.sent"), "ok");
       } catch (e) {
-        showStatus(statusEl, e, "error");
+        log.add("token", `failed: ${e.message}`);
+        showStatus(statusEl, says.failed?.(e) ?? e, "error");
       } finally {
         tokenSending = false;
         renderSettings();
       }
     };
 
-    // After an install, closing the installer sends the token over its port.
-    let installedPort = null;
+    // Reads the gadget's version; resolves to { version, source } or null.
+    // A read that opens the port holds it: the installer, the token step and
+    // Device settings wait for it.
+    let versionReading = false;
+    const readVersion = async (port, what, options = {}) => {
+      const holds = options.open !== false;
+      if (holds) {
+        versionReading = true;
+        renderSettings();
+      }
+      try {
+        const found = await readGadgetVersion(port, { ...options, onLine: (line) => log.add("gadget", line) });
+        log.add("version", found ? `${what}: ${found.version} (${found.source === "answer" ? "asked" : "boot log"})` : `${what}: the gadget didn't say`);
+        return found;
+      } catch (e) {
+        log.add("version", `${what}: ${e.message}`);
+        return null;
+      } finally {
+        if (holds) {
+          versionReading = false;
+          renderSettings();
+        }
+      }
+    };
+    const portName = (port) => {
+      const { usbVendorId: v, usbProductId: p } = port?.getInfo?.() ?? {};
+      return v === undefined ? "a serial port" : `USB ${v.toString(16).padStart(4, "0")}:${p.toString(16).padStart(4, "0")}`;
+    };
+
+    // One run of the installer, from the dialog opening its port to it closing.
+    let installRun = null;
+    // While the gadget mustn't be touched, leaving the page asks first.
+    let busy = false;
+    window.addEventListener("beforeunload", (e) => {
+      if (busy) e.preventDefault();
+    });
+
     if (pacing) {
+      let lastLogged = "";
       installFlasherHooks({
         getSelection: () => ({ usb: allPorts.checked ? null : board.usb, minFlashBytes }),
-        onInstalled: (port) => (installedPort = port),
+        onErase: () => {
+          if (installRun) installRun.erased = true;
+          log.add("install", "erasing the flash");
+        },
+        onWrite: () => {
+          if (installRun) installRun.writeStarted = true;
+          log.add("install", "writing the firmware");
+        },
+        onInstalled: (port) => {
+          if (installRun) installRun.installed = true;
+          log.add("install", `written over ${portName(port)}`);
+        },
+        log: (text) => log.add("page", text),
+        dialog: {
+          // The dialog has the port open: read the version the gadget runs
+          // now, so a stop can say what it still runs.
+          // The dialog also starts over after a failed install (its Back):
+          // the same run, keeping what the gadget went through.
+          onConnected: (dialog) => {
+            if (installRun?.dialog === dialog) {
+              if (installRun.erased || installRun.writeStarted) return;
+            } else {
+              installRun = {
+                dialog, board, manifest, port: dialog.port, started: false, erased: false, writeStarted: false,
+                installed: false, oldVersion: null,
+              };
+              log.add("install", `connected to ${portName(dialog.port)} for ${board.name}; this page installs ${manifest?.version ?? "?"}`);
+              showStatus($("install-status"), "");
+            }
+            const s = installRun;
+            if (s.oldRead) return;
+            const abort = new AbortController();
+            s.oldRead = {
+              abort,
+              done: readVersion(s.port, "before", { open: false, timeoutMs: 4500, askEveryMs: 1500, signal: abort.signal })
+                .then((found) => (s.oldVersion = found?.version ?? null)),
+            };
+          },
+          // The install takes the port: stop the read first.
+          beforeInstall: async () => {
+            const s = installRun;
+            if (!s) return;
+            s.started = true;
+            busy = true;
+            s.oldRead?.abort.abort();
+            await s.oldRead?.done;
+            log.add("install", "install confirmed");
+          },
+          onState: (state) => {
+            const pct = state.state === "writing" ? Math.floor((state.details?.percentage ?? 0) / 10) * 10 : null;
+            const line = pct === null ? `${state.state}: ${state.message}` : `writing: ${pct}%`;
+            if (line !== lastLogged) {
+              lastLogged = line;
+              log.add("install", line);
+              if (state.state === "error") log.add("install", `error ${state.details?.error ?? ""}`, state.details?.details ?? "");
+            }
+            if (state.state === "erasing" || state.state === "writing") {
+              showStatus($("install-status"), transferLines(board));
+            }
+          },
+          // Drawn into the dialog, in the page's language.
+          transferLines: () => transferLines(board),
+          onFinished: () => log.add("install", "written; closing the installer to check the version"),
+        },
       });
     }
+
+    // Waits for ESP Web Tools to close the port; closes it if it couldn't.
+    const portClosed = async (port) => {
+      for (let i = 0; i < 20 && (port.readable || port.writable); i++) await sleep(100);
+      if (port.readable || port.writable) await port.close().catch(() => {});
+    };
+
+    // After an install the installer closes, and the page reads the version
+    // back before it sends the token and says Done. A stop before the
+    // end says what state the gadget is in.
     document.addEventListener("closed", async (e) => {
-      if (e.target.localName !== "ewt-install-dialog" || !installedPort) return;
-      const port = installedPort;
-      installedPort = null;
+      if (e.target.localName !== "ewt-install-dialog" || !installRun) return;
+      const s = installRun;
+      installRun = null;
+      const status = $("install-status");
+      s.oldRead?.abort.abort();
+      await s.oldRead?.done;
+      await portClosed(s.port);
+
+      if (!s.installed) {
+        busy = false;
+        const stopped = stopMessage({
+          erased: s.erased, writeStarted: s.writeStarted, cancelled: !s.started, oldVersion: s.oldVersion,
+        });
+        showStatus(status, stopped, s.started || s.erased ? "error" : "");
+        return;
+      }
+
+      showStatus(status, [message("install.checking"), ...transferLines(s.board)]);
+      const expected = s.manifest?.version ?? null;
+      let stalled = false;
+      const found = await readVersion(s.port, "after", {
+        onWriteTimeout: (error) => { stalled = true; showStatus(status, error, "error"); },
+      });
+      busy = false;
+      if (!found) {
+        if (!stalled) showStatus(status, message("install.noVersion"), "error");
+        return;
+      }
+      const { version } = found;
+      if (!versionsMatch(expected, found.version)) {
+        showStatus(
+          status,
+          expected ? message("install.wrongVersion", { version, expected }) : message("install.wrongVersionUnknown", { version }),
+          "error",
+        );
+        return;
+      }
+      log.add("version", `matches the manifest's ${expected}`);
       if (!token()) {
-        showStatus($("install-status"), message("install.needToken"), "error");
+        showStatus(status, message("install.needToken", { version }), "error");
         tokenInput.focus();
         return;
       }
-      // The installer closes the port as it goes; wait for that.
-      for (let i = 0; i < 20 && (port.readable || port.writable); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      await send(port, $("install-status"));
+      await send(s.port, status, {
+        sending: message("install.sendingToken", { version }),
+        sent: message("install.done", { version }),
+        failed: (error) => message("install.tokenFailed", { version, error }),
+      });
     });
+
+    const askForPort = async () => {
+      try {
+        return await navigator.serial.requestPort();
+      } catch {
+        return null;   // no port picked
+      }
+    };
 
     $("send-token").disabled = !pacing;
     $("send-token").addEventListener("click", async () => {
@@ -428,13 +672,42 @@ limitations under the License.
         tokenInput.focus();
         return;
       }
-      let port;
-      try {
-        port = await navigator.serial.requestPort();
-      } catch {
-        return;   // no port picked
+      const port = await askForPort();
+      if (port) await send(port, $("token-status"));
+    });
+
+    $("check-version").disabled = !pacing;
+    $("check-version").addEventListener("click", async () => {
+      const port = await askForPort();
+      if (!port) return;
+      const status = $("token-status");
+      showStatus(status, message("version.asking"));
+      let stalled = false;
+      const found = await readVersion(port, "check", {
+        onWriteTimeout: (error) => { stalled = true; showStatus(status, error, "error"); },
+      });
+      const expected = manifest?.version;
+      if (!found) {
+        if (!stalled) showStatus(status, message("version.none"), "error");
+        return;
       }
-      await send(port, $("token-status"));
+      const params = { version: found.version, board: board.name };
+      if (versionsMatch(expected, found.version)) {
+        showStatus(status, message("version.current", params), "ok");
+      } else if (expected) {
+        showStatus(status, message("version.other", { ...params, expected }));
+      } else {
+        showStatus(status, message("version.noBuild", params));
+      }
+    });
+
+    $("save-log").addEventListener("click", () => {
+      log.add("page", "log saved");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([log.text()], { type: "text/plain" }));
+      link.download = logFileName(board?.board, new Date());
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     });
 
     // Device settings: reads ">status" and changes the five settings
@@ -459,7 +732,7 @@ limitations under the License.
       const online = Boolean(settings?.online);
       const changed = edits();
       $("settings-connect").textContent = t(online ? "settings.disconnect" : "settings.connect");
-      $("settings-connect").disabled = settingsBusy || !pacing || Boolean(settingsClosing) || tokenSending;
+      $("settings-connect").disabled = settingsBusy || !pacing || Boolean(settingsClosing) || versionReading || tokenSending;
       // While the card holds a port, or is still giving one back, the
       // installer and the token step can't open it: they stay off until then.
       // (Closing first on their click wouldn't do: the port picker needs the
@@ -467,6 +740,10 @@ limitations under the License.
       const holding = Boolean(settings || settingsClosing);
       $("install-activate").disabled = holding || tokenSending;
       $("send-token").disabled = !pacing || holding || tokenSending;
+      // Check version opens a port too, and while a version read holds one
+      // the installer and the token step wait as well.
+      $("check-version").disabled = !pacing || holding || tokenSending || versionReading;
+      if (versionReading) $("install-activate").disabled = $("send-token").disabled = true;
       $("settings-holds-port").hidden = $("settings-holds-token").hidden = !holding;
       $("settings-reload").hidden = !online;
       $("settings-reload").disabled = settingsBusy;

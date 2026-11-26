@@ -25,19 +25,25 @@
 // device identifier (device-token mint/refresh, link.register, chat turns);
 // ble_name "MuseGadget-XXXXXX" (upper) is the advertised BLE name.
 //
-// Node ids: a new setup offers "gadget-XXXXXX" with
-// CONFIG_MUSE_GADGET_NODE_ID_PREFIX (off by default), else "homelink-XXXXXX"
-// (identity_setup_node_id()), and stores it with the device tokens (NVS
-// "node_id"). The stored id is the one
-// in use (identity_node_id()) until the device is set up again. A device set
-// up by earlier firmware, which stored no id, keeps "homelink-XXXXXX", the id
-// its tokens were issued for; one not set up uses the setup id.
+// Node ids: a new Link setup offers
+// "gadget-XXXXXX" on a Muse Gadget build (musegadgets BLE) with
+// CONFIG_MUSE_GADGET_NODE_ID_PREFIX (off by default; on in bench builds), else
+// "homelink-XXXXXX", as a plain Home Link build always does
+// (identity_setup_node_id()).
+// Setup stores the id it offered with the device tokens (and K, on a Muse
+// Gadget build; NVS "node_id"), and that stored id is the one in use
+// (identity_node_id()) until the next setup commits, so a device set up with
+// "homelink-XXXXXX" keeps it through reboots, updates and token refreshes. A
+// device set up before the id was stored (earlier firmware, or a gadget
+// setup without a proof key), still holding its credentials, uses
+// "homelink-XXXXXX", the id its tokens were issued for; one not set up uses
+// the setup id.
 void identity_init(void);
 const char *identity_node_id(void);
 const char *identity_setup_node_id(void);
-// Reads the stored id again (identity_init() does it at boot): call once
-// setup has stored new credentials or they were erased. Returns true when
-// the id in use changed.
+// Reads the stored setup again (identity_init() does it at boot): call once a
+// setup has committed (stored new credentials) or been erased. Returns true
+// when the id in use changed.
 bool identity_refresh_node_id(void);
 const char *identity_ble_name(void);
 const char *identity_mac(void);

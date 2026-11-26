@@ -467,6 +467,19 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): button A (GPIO37, the talk key), read
+ * raw (the board's own pull-up: GPIO37 has none). */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(TALK_GPIO, false);
+}
+
 static const muse_board_t s_board = {
     .name = "M5Stack StickC Plus2",
     .width = LCD_W,
@@ -484,6 +497,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .audio_init = audio_init,
     .mic_slot = 0,              /* M5Unified's right slot: the ESP32 stores each pair swapped */
@@ -491,6 +505,7 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .read_power = read_power,
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

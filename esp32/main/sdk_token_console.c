@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
+#include "muse_bootguard.h"
+#include "muse_local_press.h"
+#include "muse_restart.h"
 #include "sdk_token_console.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include "driver/uart.h"
+#include "esp_app_desc.h"
 #include "driver/uart_vfs.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -37,6 +41,9 @@
 #include "muse_link.h"
 #endif
 #include "token_fp.h"
+#if CONFIG_HOMEHUB_VOICE && !CONFIG_MUSE_ENABLED
+#include "voice.h"   // vol= (the bench volume)
+#endif
 
 // The chip's own USB port, where it has one and the log goes to it.
 #define USJ_CONSOLE (SOC_USB_SERIAL_JTAG_SUPPORTED && \
@@ -113,6 +120,35 @@ done:
 
 bool sdk_token_console_command(const char *line) {
     if (proxy_command(line)) return true;
+    if (!strcmp(line, "version")) {
+        // The web flasher reads the version back before it says Done.
+        printf("@version %s\n", esp_app_get_description()->version);
+        fflush(stdout);
+        return true;
+    }
+#if CONFIG_HOMEHUB_VOICE && !CONFIG_MUSE_ENABLED
+    // The bench volume (RAM only); the Muse boards' console has its own.
+    if (voice_volume_word(line)) return true;
+#endif
+    // hang=task|int (the watchdogs' hardware check: a task or interrupt watchdog reset
+    // on purpose, muse_restart_test_hang). USB only: the Nordic UART doesn't
+    // reach this console.
+    if (!strncmp(line, "hang", 4) && (!line[4] || line[4] == '=')) {
+        char out[80];
+        muse_restart_hang_word(line, out, sizeof(out));
+        printf("@%s\n", out);
+        fflush(stdout);
+        return true;
+    }
+    // safe=0 / safe.off (in SAFE: Muse on and a planned restart) and guard?.
+    char safe[64];
+    if (muse_bootguard_console_word(line, safe, sizeof(safe))) {
+        if (safe[0]) {
+            printf("@%s\n", safe);
+            fflush(stdout);
+        }
+        return true;
+    }
     if (strncmp(line, COMMAND, strlen(COMMAND)) != 0) return false;
     const char *token = line + strlen(COMMAND);
     if (!identity_sdk_token_valid(token)) {
@@ -132,7 +168,7 @@ bool sdk_token_console_command(const char *line) {
     printf("@sdk_token ok\n");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(500));   // let the answer reach the host
-    esp_restart();
+    muse_restart(MUSE_RESTART_SETUP);
     return true;
 }
 
@@ -155,7 +191,9 @@ static void feed(line_reader_t *r, char c) {
         return;
     }
     r->buf[r->len] = '\0';
-    if (!r->overflow && r->buf[0] == '>') sdk_token_console_command(r->buf + 1);
+    // update.arm (the wired console's arm: this link updates with no press) only here, the wired console's line
+    // reader: never a word another path relays.
+    if (!r->overflow && r->buf[0] == '>' && !muse_local_press_console(r->buf + 1)) sdk_token_console_command(r->buf + 1);
     network_proxy_wipe(r->buf, sizeof(r->buf));
     r->len = 0;
     r->overflow = false;

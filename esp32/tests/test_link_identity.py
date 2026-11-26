@@ -50,11 +50,22 @@ def _function_body(source: str, signature: str) -> str:
 
 
 class LinkIdentityHarnessTest(unittest.TestCase):
-    def test_sdk_token_pairing(self) -> None:
+    def run_harness(self, prefix: str = "MuseGadget", suffix: str = "", expect_name: str | None = None,
+                    extra: tuple[str, ...] = (), product: str = "") -> None:
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             raise unittest.SkipTest("C compiler not available")
 
+        defines = [
+            f'-DBUILD_TOKEN="{BUILD_TOKEN}"',
+            f'-DCONFIG_GADGET_SDK_TOKEN="{BUILD_TOKEN}"',
+            f'-DCONFIG_HOMEHUB_BLE_NAME_PREFIX="{prefix}"',
+            f'-DCONFIG_HOMEHUB_BLE_NAME_SUFFIX="{suffix}"',
+            f'-DCONFIG_HOMEHUB_BLE_PRODUCT_CODE="{product}"',
+            *extra,
+        ]
+        if expect_name is not None:
+            defines.append(f'-DEXPECT_BLE_NAME="{expect_name}"')
         with tempfile.TemporaryDirectory() as tmpdir:
             binary = Path(tmpdir) / "link_identity_harness"
             compile_proc = subprocess.run(
@@ -63,10 +74,7 @@ class LinkIdentityHarnessTest(unittest.TestCase):
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
-                    f'-DBUILD_TOKEN="{BUILD_TOKEN}"',
-                    f'-DCONFIG_GADGET_SDK_TOKEN="{BUILD_TOKEN}"',
-                    '-DCONFIG_HOMEHUB_BLE_NAME_PREFIX="MuseGadget"',
-                    '-DCONFIG_HOMEHUB_BLE_NAME_SUFFIX=""',
+                    *defines,
                     "-I",
                     str(ROOT / "tests" / "identity_fakes"),
                     "-I",
@@ -101,6 +109,35 @@ class LinkIdentityHarnessTest(unittest.TestCase):
                 0,
                 msg=run_proc.stdout + run_proc.stderr,
             )
+
+    def test_sdk_token_pairing(self) -> None:
+        self.run_harness()
+
+    def test_names(self) -> None:
+        # The harness's Wi-Fi STA MAC ends 11:22:33, its Bluetooth address
+        # 44:55:66. SDK boards keep the Wi-Fi tail (the node_id's digits); a
+        # catalog product (Gadget setup v2: MuseGadget-<PRODUCT>-XXXXXX) takes
+        # the Bluetooth address's, and HOMEHUB_BLE_NAME_BT_ADDRESS asks for it
+        # without a product code.
+        cases = [
+            ("MuseGadget", "", "", (), "MuseGadget-112233"),
+            ("MuseGadget", "-Disp", "", (), "MuseGadget-Disp-112233"),
+            ("MuseGadget", "", "SCW1", (), "MuseGadget-SCW1-445566"),
+            ("MuseGadget", "", "EMO1", ("-DNO_BT_ADDRESS",), "MuseGadget-EMO1-112233"),   # the Wi-Fi tail then
+            ("MuseGadget", "", "", ("-DCONFIG_HOMEHUB_BLE_NAME_BT_ADDRESS=1",), "MuseGadget-445566"),
+            ("MG-W175", "", "", (), "MG-W175-112233"),   # no MG- rule: the prefix is just a prefix
+            # ESP32 catalog boards keep the Wi-Fi tail with their code.
+            ("MuseGadget", "", "M5SW", ("-DCONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC=1",), "MuseGadget-M5SW-112233"),
+        ]
+        for prefix, suffix, product, extra, name in cases:
+            with self.subTest(name=name):
+                self.run_harness(prefix, suffix, name, extra, product)
+
+
+    def test_name_length_is_checked_at_build_time(self) -> None:
+        with self.assertRaises(AssertionError) as caught:
+            self.run_harness("MuseGadget", "-respeaker", None, (), "TOOLONG")
+        self.assertIn("exceed 22 characters", str(caught.exception))
 
 
 class LinkSdkTokenPairingContractTest(unittest.TestCase):

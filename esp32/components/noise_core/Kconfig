@@ -24,7 +24,9 @@ menu "Noise core"
             ESP-IDF's own copy in its 32-bit build and called directly instead
             of through PSA's generic Montgomery-curve code. Same results byte
             for byte (RFC 7748 and cacophony's Noise_XX vector,
-            tests/test_noise_core.py); no protocol change.
+            tests/test_noise_core.py); no protocol change. `>noise.x25519`
+            on a Muse console checks the RFC 7748 vectors on the device and
+            times both.
 
             The Everest paths are private to ESP-IDF: on an ESP-IDF other
             than v6.0.x, or one missing any of its files, the build warns

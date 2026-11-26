@@ -16,6 +16,7 @@
 
 #include "tunnel_netif.h"
 #include "stack_monitor.h"
+#include "muse_stack.h"
 
 #include <stdatomic.h>
 #include <string.h>
@@ -314,8 +315,8 @@ bool tunnel_netif_start(const ip4_addr_t *ip,
         xQueueSend(s_tx_free_queue, &p, 0);
     }
     if (!s_tx_task
-        && xTaskCreate(tx_task, "tun_tx", TX_TASK_STACK, NULL, TX_TASK_PRIO,
-                       &s_tx_task) != pdPASS) {
+        && muse_task_create(tx_task, "tun_tx", TX_TASK_STACK, NULL, TX_TASK_PRIO,
+                            &s_tx_task, tskNO_AFFINITY) != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreate failed");
         return false;
     }

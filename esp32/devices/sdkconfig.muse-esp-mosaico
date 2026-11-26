@@ -29,6 +29,22 @@ CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-esp-mosaico"
 CONFIG_MUSE_DEVICE_MODEL_NAME="Espressif ESP-Mosaico"
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_MUSE_BOARD_ESP_MOSAICO=y
+# The UI's type drawn at this panel's size (fonts/type, 480 px).
+CONFIG_MUSE_UI_PANEL_TYPE=y
+
+# Muse Gadgets catalog model code: advertises
+# MuseGadget-EMO1-XXXXXX. ESP32 catalog boards keep the Wi-Fi MAC tail, the
+# same digits as before the code.
+CONFIG_HOMEHUB_BLE_PRODUCT_CODE="EMO1"
+# link.register metadata.model_name: the product name.
+CONFIG_HOMEHUB_MODEL_NAME="Mosaico"
+CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC=y
+
+# LC3 beside SBC with the fixed-point lc3fx: integer
+# code measured on RISC-V and bit-exact across targets; the float liblc3 was
+# never run on the S31. Applies to the musegadgets BLE builds (mosaico-video).
+CONFIG_MUSE_GADGET_BLE_LC3=y
+CONFIG_MUSE_GADGET_BLE_LC3_FIXED=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_320=y
 
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
@@ -37,9 +53,13 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_mosaico.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 
-# Its PSRAM, as Espressif's application template sets it.
+# Its PSRAM. 200 MHz, ESP-IDF's default for the S31, not the 250 MHz of
+# Espressif's application template: at 250 the board took 4 unexplained
+# panics in 3 days (load and store access faults at valid PSRAM addresses,
+# devices/README.md, ESP-Mosaico). An overnight A/B soak saw none at either
+# speed, so 200 is the cautious choice, not a proven fix.
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_SPEED_250M=y
+CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_SPIRAM_MEMTEST=n
 CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
@@ -50,7 +70,16 @@ CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
 
 # USB-C is high-speed OTG; USB Serial/JTAG only reaches the expansion header.
 # The console is the UART on the header.
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# The console UART at 921600 instead of 115200 (UART0, its default pins: -1
+# keeps them): every boot log line is clocked out synchronously, and at
+# 115200 the BLE path's few lines waited ~190 ms behind the board init's
+# before the first advertisement (restart to connected, from boot marks).
+# ESP-Iris keeps its own log path; set a header reader to 921600.
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=-1
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=-1
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Not signed: the board's Vibe Mode firmware does the updates, and an app

@@ -34,6 +34,7 @@ typedef struct {
     int status;
     const char *body;
     size_t split_at;
+    const char *date;   // a Date header, or NULL
 } fake_response_t;
 
 typedef struct {
@@ -209,6 +210,13 @@ esp_err_t esp_http_client_perform(esp_http_client_handle_t client) {
         return response.err;
     }
 
+    if (response.date && client->config.event_handler) {
+        esp_http_client_event_t event = {
+            .event_id = HTTP_EVENT_ON_HEADER, .user_data = client->config.user_data,
+            .header_key = "Date", .header_value = response.date, .client = client,
+        };
+        CHECK(client->config.event_handler(&event) == ESP_OK, "header handler failed");
+    }
     if (response.body) {
         size_t len = strlen(response.body);
         if (response.split_at > 0 && response.split_at < len) {
@@ -362,6 +370,70 @@ static void test_refresh_success_via_access_token(void) {
           "unexpected refresh body: %s", g_requests[0].body);
 
     vm_device_tokens_free(&tokens);
+}
+
+// The server's clock: a strict IMF-fixdate Date header, at 2024 or later.
+static void test_http_date(void) {
+    CHECK(vm_api_parse_http_date("Thu, 05 Nov 2026 09:40:00 GMT") == 1793871600, "a date");
+    CHECK(vm_api_parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT") == 784111777, "RFC 7231's example");
+    CHECK(vm_api_parse_http_date("Thu, 29 Feb 2024 00:00:00 GMT") == 1709164800, "a leap day");
+    static const char *bad[] = {
+        "Fri, 05 Nov 2026 09:40:00 GMT",    // the wrong weekday
+        "Thu, 5 Nov 2026 09:40:00 GMT",     // one digit
+        "Thursday, 05-Nov-26 09:40:00 GMT", // RFC 850
+        "Thu Nov  5 09:40:00 2026",         // asctime
+        "Thu, 05 Nov 2026 09:40:00 UTC",
+        "Thu, 05 nov 2026 09:40:00 GMT",
+        "Thu, 31 Nov 2026 09:40:00 GMT",
+        "Wed, 29 Feb 2023 00:00:00 GMT",
+        "Thu, 05 Nov 2026 24:00:00 GMT",
+        "Thu, 05 Nov 2026 09:40:00 GMT ",
+        "",
+        NULL,
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        CHECK(vm_api_parse_http_date(bad[i]) == 0, "bad %zu taken", i);
+    }
+    // A refresh carries it in server_date_s; before 2024 or malformed: none.
+    static const struct { const char *date; int64_t want; } cases[] = {
+        {"Thu, 05 Nov 2026 09:40:00 GMT", 1793871600},
+        {"Sun, 06 Nov 1994 08:49:37 GMT", 0},
+        {"Thu, 05 Nov 2026 09:40:00 UTC", 0},
+        {NULL, 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        vm_device_tokens_t tokens = {0};
+        fake_reset();
+        fake_queue_response(200, "{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":14400}");
+        g_responses[g_response_count - 1].date = cases[i].date;
+        int rc = vm_api_refresh_device_token("old-a", "old-r", "link-123", &tokens, NULL);
+        CHECK(rc == 0 && tokens.server_date_s == cases[i].want && tokens.expires_in_s == 14400,
+              "date case %zu: rc=%d server_date_s=%lld", i, rc, (long long)tokens.server_date_s);
+        vm_device_tokens_free(&tokens);
+        CHECK(tokens.server_date_s == 0, "freed");
+    }
+}
+
+// The access token's lifetime: a refresh's expires_in, else none.
+static void test_refresh_reads_expires_in(void) {
+    static const struct { const char *body; int64_t want; } cases[] = {
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":14400}", 14400},
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\"}", 0},
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":\"14400\"}", 0},
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":-5}", 0},
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":1.5}", 0},
+        {"{\"access_token\":\"a\",\"refresh_token\":\"r\",\"expires_in\":1e12}", 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        vm_device_tokens_t tokens = {0};
+        fake_reset();
+        fake_queue_response(200, cases[i].body);
+        int rc = vm_api_refresh_device_token("old-a", "old-r", "link-123", &tokens, NULL);
+        CHECK(rc == 0 && tokens.expires_in_s == cases[i].want, "case %zu: rc=%d expires_in_s=%lld", i, rc,
+              (long long)tokens.expires_in_s);
+        vm_device_tokens_free(&tokens);
+        CHECK(tokens.expires_in_s == 0, "freed");
+    }
 }
 
 static void test_refresh_and_mint_carry_sdk_token(void) {
@@ -892,6 +964,8 @@ int main(void) {
     RUN_TEST(test_mint_rejects_malformed_or_partial_token_responses);
     RUN_TEST(test_mint_auth_failure_is_not_retried);
     RUN_TEST(test_refresh_success_via_access_token);
+    RUN_TEST(test_refresh_reads_expires_in);
+    RUN_TEST(test_http_date);
     RUN_TEST(test_refresh_and_mint_carry_sdk_token);
     RUN_TEST(test_refresh_falls_back_to_refresh_token_on_401);
     RUN_TEST(test_refresh_does_not_fallback_on_403);

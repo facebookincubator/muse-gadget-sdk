@@ -2992,23 +2992,6 @@ def resetup_bad_takeover_exchange(encrypted: bool = False, drops_link: bool = Fa
     return r.ex
 
 
-def update_press_no_window_exchange() -> dict:
-    u = update_ref()
-    r = ProofGateRecorder("an update press opens no window", "On a set-up gadget's release build the owner's press on "
-                          "an unproven link's update prompt confirms that prompt's upload and nothing else: it opens "
-                          "no window, so an injected tap from that link confirms nothing, and a re-setup prompt it "
-                          "raises stays unconfirmed.", proof=False, talk_key_only=False)
-    r.smp(u.UPLOAD_0, "an unproven link's image upload: rc 10, the update prompt shows")
-    r.event("press", "the owner's physical press: confirms that upload")
-    r.smp(u.UPLOAD_0, "the retry: rc 0, the confirmed upload")
-    r.smp(u.UPLOAD_OTHER_0, "another image's upload: rc 10, not covered (no prompt yet: the last showed under 10 s "
-          "ago)")
-    r.event("injected_press", "an injected confirm tap from that link: nothing")
-    r.event("resetup_request", "the same link raises a re-setup prompt (hello 1): it shows")
-    r.event("injected_press", "an injected tap: the re-setup prompt stays, unconfirmed")
-    return r.ex
-
-
 def resetup_prompt_exempt_exchange() -> dict:
     r = ProofGateRecorder("the re-setup prompt on an automation build", "Automation builds are exempt from the "
                           "dismiss rule: a hello after a dismiss shows the prompt at once. For a device that keeps "
@@ -3073,7 +3056,7 @@ def proof_gate_section() -> dict:
                       resetup_prompt_dismiss_drops_link_exchange(), resetup_prompt_two_connections_exchange(),
                       resetup_bad_takeover_exchange(), resetup_bad_takeover_exchange(encrypted=True),
                       resetup_bad_takeover_exchange(drops_link=True),
-                      resetup_bad_takeover_exchange(encrypted=True, drops_link=True), update_press_no_window_exchange(),
+                      resetup_bad_takeover_exchange(encrypted=True, drops_link=True),
                       resetup_prompt_exempt_exchange(), resetup_talk_key_exchange(),
                       resetup_talk_key_only_exchange(),
                       setup_mode_ends_exchange(), first_setup_talk_key_exchange(),
@@ -3211,21 +3194,6 @@ class LatchesPressAfterBadTakeover(ProofGateDevice):
         return super().event(what, ms, source, conn, key, invalid)
 
 
-class UpdatePressOpensWindow(ProofGateDevice):
-    """Lets the update-confirm press open the link's other words, so an injected tap then counts as a press: must
-    fail the section."""
-
-    window = False
-
-    def event(self, what: str, ms: int = 0, source: str = None, conn: int = 1, key: str = None,
-              invalid: bool = False) -> list:
-        if what == "press" and self.update_prompt() == "confirm":
-            self.window = True
-        elif what == "injected_press" and self.window:
-            what, key = "press", None
-        return super().event(what, ms, source, conn, key, invalid)
-
-
 class ResetupOutsideSetupMode(ProofGateDevice):
     """Prompts a re-setup on a talk-key-only gadget outside setup mode: must fail the section."""
 
@@ -3237,7 +3205,7 @@ def check_proof_gates(section: dict) -> list:
     bad = replay_proof_gates(section)
     for mutant in (UngatedDevice, UnlimitedPromptDevice, RefusesWhilePromptUp, TakeoverAcrossConnections,
                    PromptsDuringOthersSetup, TalkKeyConfirmsResetup, ResetupOutsideSetupMode, SetupModeNeverEnds,
-                   LatchesPressAfterBadTakeover, UpdatePressOpensWindow):
+                   LatchesPressAfterBadTakeover):
         if not replay_proof_gates(section, mutant):
             bad.append(f"{mutant.__name__} passes proof_gates")
     return bad

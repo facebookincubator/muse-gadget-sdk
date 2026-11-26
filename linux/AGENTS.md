@@ -167,12 +167,13 @@ never has a command's parameters, output or error message.
 - Node ids: with `MUSEGADGET_GADGET_NODE_ID=1` in the pairing's environment
   (`sudo env MUSEGADGET_GADGET_NODE_ID=1 musegadget pair`), a new pairing
   offers `gadget-` and those six digits (lowercase) in `get_device_info` and
-  the transcript; without it (the default) it offers `homelink-` and the same
-  digits. Either way it
+  the transcript; without it (the default) it offers `homelink-` and the same digits. Either way it
   stores the id in `pairing.json` with the tokens it was issued for. That stored id is the one in use
   (`link.register`, token refresh, chat turns) until the device is paired
   again, so a pairing made before ids were stored keeps `homelink-xxxxxx`.
-  Never rename a stored id.
+  `Identity.node_id` is that id (`load_or_create()` reads it from the
+  pairing, and `Service` follows the pairing it connects with), or, while
+  not paired, the one a new pairing offers. Never rename a stored id.
 - The apps always scan Wi-Fi and send `provision_v2` with an SSID. When the
   device is online it offers one open network, "the current connection", and
   ignores the Wi-Fi fields it gets back. It never stores them.

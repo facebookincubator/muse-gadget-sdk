@@ -336,9 +336,126 @@ static void test_reset_clears_endpoints_before_credentials(void) {
     }
 }
 
+static const char *value_of(const char *key) {
+    fake_entry_t *entry = find_entry(key);
+    return entry ? entry->value : NULL;
+}
+
+// The device session's credentials_update: the
+// pair in one commit through the re-provisioning journal, K and node_id
+// untouched (link_reprovision_journal_harness.c cuts the power at each write).
+static void test_token_pair_is_one_update(void) {
+    fake_reset();
+    fake_put("access_token", "old-access");
+    fake_put("refresh_token", "old-refresh");
+    fake_put("mg_proof_k", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+    fake_put("node_id", "homelink-1a2b3c");
+    CHECK(config_set_token_pair("new-access", "new-refresh", 0), "a token pair update must store");
+    CHECK(value_of("access_token") && strcmp(value_of("access_token"), "new-access") == 0, "access not stored");
+    CHECK(value_of("refresh_token") && strcmp(value_of("refresh_token"), "new-refresh") == 0, "refresh not stored");
+    CHECK(strncmp(value_of("mg_proof_k"), "0011", 4) == 0 && strcmp(value_of("node_id"), "homelink-1a2b3c") == 0,
+          "K and node_id must stay");
+    CHECK(!find_entry("rp_open") && !find_entry("rp_at") && !find_entry("rp_k") && !find_entry("tok_update"),
+          "the journal must be closed and its copies gone");
+    CHECK(!config_set_token_pair("", "r", 0) && !config_set_token_pair("a", NULL, 0), "an empty token must be refused");
+
+    // A write failing: refused, the old pair back, the journal closed.
+    const char *failing[] = {"refresh_token", "access_token", "rp_at", "rp_open"};
+    for (size_t f = 0; f < sizeof(failing) / sizeof(failing[0]); f++) {
+        s_commit_error_key = failing[f];
+        CHECK(!config_set_token_pair("third-access", "third-refresh", 0), "a failed write must fail the update");
+        char at[64], rt[64];
+        CHECK(config_get_token_pair(at, sizeof(at), rt, sizeof(rt)) && strcmp(at, "new-access") == 0
+              && strcmp(rt, "new-refresh") == 0, "a failed update must be read as the old pair");
+        s_commit_error_key = NULL;
+        (void)config_reprovision_recover();   // boot: a rollback NVS refused finishes
+        CHECK(strcmp(value_of("access_token"), "new-access") == 0
+              && strcmp(value_of("refresh_token"), "new-refresh") == 0, "a failed update must leave the old pair");
+        CHECK(!find_entry("rp_open"), "a failed update must close the journal");
+    }
+    // A re-setup's journal is open: refused, nothing touched.
+    fake_put("rp_open", "1");
+    CHECK(!config_set_token_pair("fourth-access", "fourth-refresh", 0), "refused while a journal is open");
+    CHECK(strcmp(value_of("access_token"), "new-access") == 0 && strcmp(value_of("rp_open"), "1") == 0,
+          "a refused update must change nothing");
+    CHECK(config_erase_key("rp_open"), "erase");
+
+    // A pair journalled by a build before 3.1 ("tok_update"): boot finishes it.
+    fake_put("tok_update", "8:access-4refresh-4");
+    config_store_init();
+    CHECK(strcmp(value_of("access_token"), "access-4") == 0 && strcmp(value_of("refresh_token"), "refresh-4") == 0,
+          "boot must apply a journalled pair");
+    // A journal that can't be read is dropped, and changes nothing.
+    fake_put("tok_update", "99:short");
+    config_store_init();
+    CHECK(!find_entry("tok_update") && strcmp(value_of("access_token"), "access-4") == 0,
+          "an unreadable journal must be dropped without effect");
+    // Reset erases a pending pair with the rest of the credentials.
+    fake_put("tok_update", "1:ab");
+    CHECK(config_clear_setup() && !find_entry("tok_update"), "setup clear must erase the journal");
+    fake_put("tok_update", "1:ab");
+    CHECK(config_clear_pairing() && !find_entry("tok_update"), "pairing clear must erase the journal");
+}
+
+static void test_token_pair_reader_never_mixes_pairs(void) {
+    char access[64], refresh[64];
+    fake_reset();
+    CHECK(!config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh)), "no pair, nothing read");
+    fake_put("access_token", "old-access");
+    fake_put("refresh_token", "old-refresh");
+    CHECK(config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh))
+          && strcmp(access, "old-access") == 0 && strcmp(refresh, "old-refresh") == 0, "the stored pair");
+
+    // NVS refuses access_token after refresh_token took the new token: the
+    // update rolls back, and the reader gets the whole old pair.
+    s_commit_error_key = "access_token";
+    CHECK(!config_set_token_pair("new-access", "new-refresh", 0), "the update must fail");
+    CHECK(config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh))
+          && strcmp(access, "old-access") == 0 && strcmp(refresh, "old-refresh") == 0,
+          "while NVS refuses the rollback, the kept-aside pair is read");
+    s_commit_error_key = NULL;
+    (void)config_reprovision_recover();   // boot
+    CHECK(config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh))
+          && strcmp(access, "old-access") == 0 && strcmp(refresh, "old-refresh") == 0,
+          "a failed update must be read as the old pair, whole");
+
+    // A pre-3.1 journal half applied (refresh_token new, access_token old)
+    // while NVS still refuses access_token: read whole from the journal.
+    fake_put("refresh_token", "new-refresh");
+    fake_put("tok_update", "10:new-accessnew-refresh");
+    s_commit_error_key = "access_token";
+    CHECK(config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh))
+          && strcmp(access, "new-access") == 0 && strcmp(refresh, "new-refresh") == 0,
+          "a half-applied update must be read whole from its journal");
+    CHECK(!config_get_token_pair(access, 5, refresh, sizeof(refresh)), "a token that doesn't fit isn't cut");
+    // Once NVS takes it, reading finishes the update.
+    s_commit_error_key = NULL;
+    CHECK(config_get_token_pair(access, sizeof(access), refresh, sizeof(refresh))
+          && strcmp(access, "new-access") == 0 && !find_entry("tok_update")
+          && strcmp(value_of("access_token"), "new-access") == 0, "reading must finish the update");
+}
+
+/* An unreadable setup marker never reads as "unset" to who fails closed. */
+static void test_setup_marker_fails_closed(void) {
+    fake_reset();
+    CHECK(!config_setup_complete_or_unreadable(), "no marker is unset");
+    fake_put("setup_complete", "1");
+    CHECK(config_setup_complete_or_unreadable(), "the marker is set up");
+    s_get_error_key = "setup_complete";
+    CHECK(config_setup_complete_or_unreadable(), "a marker that can't be read must read as set up");
+    CHECK(!config_setup_complete(), "config_setup_complete itself is unchanged (false on an error)");
+    s_get_error_key = NULL;
+    s_open_error = ESP_FAIL;
+    CHECK(config_setup_complete_or_unreadable(), "a namespace that can't be opened must read as set up");
+    s_open_error = ESP_OK;
+}
+
 int main(void) {
+    test_setup_marker_fails_closed();
     test_lookup_is_tri_state();
     test_erase_propagates_commit_failure();
+    test_token_pair_is_one_update();
+    test_token_pair_reader_never_mixes_pairs();
     test_setup_clear_verifies_credentials_and_preserves_identity();
     test_pairing_clear_preserves_wifi_channel();
     test_setup_clear_fails_closed_on_uncommitted_credential();

@@ -418,8 +418,22 @@ static void emit(muse_hatch_ev_t type, const char *text)
 
 /* ---- TLS / WebSocket (from Link's main/noise_control.cpp) ---- */
 
+/* BLE-only builds (CONFIG_MUSE_GADGET_BLE_STANDALONE): Wi-Fi never starts, so
+ * this session never connects (ensure_connected stops at muse_wifi_connected())
+ * and no TLS connection exists. kNoNet says so to the compiler, which keeps
+ * TLS, HTTP and the IP stack out of the image (about 300 KB on the
+ * ESP-Mosaico); the session's task and its state behave as before. */
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+static constexpr bool kNoNet = true;
+#else
+static constexpr bool kNoNet = false;
+#endif
+
 static bool write_all(esp_tls_t *tls, const void *buf, size_t len)
 {
+    if (kNoNet) {
+        return false;
+    }
     const uint8_t *p = static_cast<const uint8_t *>(buf);
     int64_t deadline = now_us() + IO_TIMEOUT_US;
     while (len) {
@@ -443,6 +457,9 @@ static bool write_all(esp_tls_t *tls, const void *buf, size_t len)
 /* Reads exactly len bytes, waiting up to the I/O timeout. */
 static bool read_all(esp_tls_t *tls, uint8_t *buf, size_t len)
 {
+    if (kNoNet) {
+        return false;
+    }
     int64_t deadline = now_us() + IO_TIMEOUT_US;
     while (len) {
         if (now_us() >= deadline) {
@@ -517,6 +534,9 @@ static bool ws_send_ping(esp_tls_t *tls)
  */
 static ssize_t ws_recv(esp_tls_t *tls, uint8_t *buf, size_t cap, bool wait)
 {
+    if (kNoNet) {
+        return -1;
+    }
     uint8_t hdr[2];
     int64_t deadline = now_us() + IO_TIMEOUT_US;
     for (;;) {
@@ -618,6 +638,9 @@ static void query_escape(const char *in, char *out, size_t cap)
 /* Returns the HTTP status of the upgrade (101 on success), or 0. */
 static int ws_upgrade(esp_tls_t *tls, const char *vm_id, const char *token)
 {
+    if (kNoNet) {
+        return 0;
+    }
     char id[3 * 128 + 1];
     query_escape(vm_id, id, sizeof(id));
     /* The VM takes the app identity of every request on this connection from
@@ -839,7 +862,7 @@ static void disconnect(const char *why)
 {
     muse_options_disconnected();
     s_option_sending = false;
-    if (s_conn.tls) {
+    if (!kNoNet && s_conn.tls) {
         ESP_LOGI(TAG, "disconnect: %s", why);
         esp_tls_conn_destroy(s_conn.tls);
     }
@@ -972,6 +995,9 @@ static void tls_resume_keep(esp_tls_t *tls)
 static bool connect_once(char *err, size_t err_cap, int *http_status)
 {
     *http_status = 0;
+    if (kNoNet) {
+        return false;
+    }
     conn_t &c = s_conn;
     c.tls = esp_tls_init();
     if (!c.tls) {
@@ -1048,7 +1074,7 @@ static bool ensure_connected(void)
     if (s_connected) {
         return true;
     }
-    if (!muse_hatch_configured() || !muse_wifi_connected()) {
+    if (kNoNet || !muse_hatch_configured() || !muse_wifi_connected()) {
         return false;
     }
     muse_hatch_report(MUSE_HATCH_TESTING, "Connecting...");
@@ -1305,12 +1331,17 @@ static bool send_note_part(bool last)
  */
 static bool open_note(void)
 {
+    char head[MUSE_NOTE_HEAD_MAX];   /* names the node (muse_chat_priv.h) */
+    size_t head_len = muse_note_head(head, sizeof(head), muse_chat_node_id());
+    if (!head_len) {
+        return false;
+    }
     s_turn.chat_id = open_stream(K_CHAT, "POST", "/chat/stream", "application/json", nullptr, nullptr, false);
     if (!s_turn.chat_id) {
         return false;
     }
-    s_turn.body_sent = sizeof(MUSE_HATCH_NOTE_HEAD) - 1;
-    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(MUSE_HATCH_NOTE_HEAD), sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false)) {
+    s_turn.body_sent = head_len;
+    if (!send_body(s_turn.chat_id, reinterpret_cast<const uint8_t *>(head), head_len, false)) {
         return false;
     }
     muse_hatch_wav_header(s_turn.note, MIC_RATE);
@@ -1425,6 +1456,9 @@ static void send_chat(const char *text, const char *modality, bool spoken, cJSON
 {
     s_turn.chat_posted = true;
     cJSON *body = provided ? provided : cJSON_CreateObject();
+    /* The gadget's node at the top level, never chat_context (muse_chat_priv.h). */
+    const char *node = muse_chat_node_id();
+    cJSON_AddStringToObject(body, "node_id", node ? node : "");
     if (!provided) {
         cJSON_AddStringToObject(body, "message", text);
         cJSON_AddStringToObject(body, "output_modality", modality);

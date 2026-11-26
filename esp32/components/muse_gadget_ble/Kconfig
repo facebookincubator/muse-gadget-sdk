@@ -1,0 +1,438 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Muse Gadget BLE audio (musegadgets protocol)"
+
+    config MUSE_GADGET_AUTOMATION
+        bool "Gadget automation tools (bench words, injected input)"
+        default n
+        help
+            Off in release builds. MUSE_BENCH=1 (devices/sdkconfig.muse-bench)
+            turns it on for lab and CI builds. On: every Nordic UART console
+            word is open to any connection (!PAIR AUTO, !RESTART, !SAFEID,
+            !SILENCE, !SETUP ADV, !IN ..., bench.out=, ble.pause, link.*=,
+            vib=, the bench tunings). Off: a Nordic UART word that changes
+            state runs only on a connection whose token proof matched, and
+            answers "locked" otherwise; in SAFE, safe.off and safe=0 stay
+            open. Reads (status, version, guard?, ota?, the "?" words) stay
+            open either way, and so does the USB console with every word.
+
+    config MUSE_GADGET_SEALED_CLEAR
+        bool "Offer the sealed clear (mg_session_cap_sealed_clear)"
+        default n
+        help
+            On: request_status's caps carry mg_session_cap_sealed_clear, in
+            the BLE-only session and the credentials-only one, and an
+            unsealed token_proof clear erases nothing (refused insecure).
+            Off by default: release images offer no cap and the unsealed
+            clear erases as before. The
+            sealed clear itself is taken in every build. MUSE_BENCH=1
+            (devices/sdkconfig.muse-bench) turns it on.
+
+    config MUSE_GADGET_BLE_AUDIO
+        bool "musegadgets BLE audio server"
+        depends on BT_NIMBLE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Adds the musegadgets BLE protocol (protocols/mgcommands.h) to the
+            BLE server Home Link already runs: the musegadgets service
+            (Control and Data), Battery, Device Information and Nordic UART
+            (log mirror). A phone, browser or gateway that connects and turns
+            on push-to-talk gets each utterance as SBC or LC3 over BLE
+            instead of it going to Muse over Wi-Fi (see the routing policy
+            below). The BLE stack then stays up after setup, advertising the
+            musegadgets service, and Home Link's BLE setup can skip Wi-Fi
+            (token-only setup) and leaves a key for the token proof. Off by
+            default; nothing changes without it.
+
+    if MUSE_GADGET_BLE_AUDIO
+
+    config MUSE_GADGET_BLE_PEER_NAME
+        bool "Name the connected phone by its GAP Device Name (Status page)"
+        default y
+        select BT_NIMBLE_ROLE_CENTRAL
+        select BT_NIMBLE_GATT_CLIENT
+        help
+            The Status page names the phone it's connected to: the central's GAP Device Name
+            (0x2A00), as the gadget reads it, else "phone" (the read pending
+            or failed; failures counted). The name is read once per
+            connection, 1.5 s after connect, with NimBLE's GATT client
+            (asynchronous: the host task never waits on it). That needs
+            NimBLE's central role and GATT client, which this selects (the
+            Muse boards otherwise build without them, devices/sdkconfig.muse);
+            with the client, NimBLE confirms a phone's indications itself, so
+            mg_att_confirm.c isn't linked. Off, the page says "phone"
+            (client_name, setting 18, is reserved: the apps don't send it).
+
+    config MUSE_GADGET_BLE_STANDALONE
+        bool "BLE-only gadget: no Wi-Fi, no Muse session"
+        depends on MUSE_ENABLED || HOMEHUB_VOICE
+        default n
+        help
+            Runs the board as a musegadgets BLE gadget and nothing else:
+            Wi-Fi, the Muse session over Wi-Fi, the home-network tunnel and
+            over-the-air updates are never started, so their RAM stays free
+            (what lets boards without PSRAM, like the Waveshare C6, run it).
+            Home Link's BLE setup still runs, without Wi-Fi: until the Muse
+            app has set the gadget up (its device tokens, confirmed with the
+            talk button) it advertises setup beside the musegadgets service.
+            Push-to-talk goes to the connected client, else to the offline
+            queue, else it's refused.
+
+    config MUSE_GADGET_BLE_SESSION
+        bool "The gadget's own VM session over BLE (device session)"
+        depends on MUSE_GADGET_BLE_STANDALONE
+        default y
+        help
+            Offers mg_command_session (protocols/mgcommands.h, Device
+            session): after a matching token proof, the gadget hands the
+            client its credentials, sealed, the client runs the
+            gadget's Noise session to its VM, and the gadget sends and
+            receives that session's messages over BLE. The gadget then does
+            what a Wi-Fi gadget does on its session: registers its device
+            commands (link.register), answers link.invoke, and opens its own
+            requests, with the same code (main/noise_control.cpp). Turns on
+            NimBLE's security manager with bonding (Just Works). Only a
+            sealed hello (mgcommands.h, Sealed credentials; what the Muse apps
+            send) gets the credentials, on any link; an unsealed one is
+            answered insecure, bonded or not.
+
+
+    config MUSE_GADGET_BLE_SESSION_MAX_MESSAGE
+        int "Largest VM session message the gadget takes (bytes)"
+        depends on MUSE_GADGET_BLE_SESSION
+        range 4096 65536
+        default 16384
+        help
+            The device session's max_message and window: a client never sends
+            a larger message, and closes the session with too_large if the VM
+            does. The gadget holds this much for messages from the VM, and as
+            much again while it handles one (in PSRAM when there is some),
+            both only while a session is open: nothing between sessions.
+
+    choice MUSE_GADGET_BLE_ROUTE
+        prompt "Where push-to-talk goes"
+        depends on !MUSE_GADGET_BLE_STANDALONE
+        default MUSE_GADGET_BLE_ROUTE_AUTO
+        help
+            Decided once per press.
+
+        config MUSE_GADGET_BLE_ROUTE_AUTO
+            bool "BLE when a client takes it, else Wi-Fi"
+            help
+                A connected musegadgets client that turned on push-to-talk
+                gets the utterance. Otherwise it goes to Muse over Wi-Fi as
+                before. With neither, it's recorded to the offline queue if
+                the client turned the queue on.
+
+        config MUSE_GADGET_BLE_ROUTE_BLE_ONLY
+            bool "BLE only"
+            help
+                Never Wi-Fi: the client, else the offline queue, else the
+                press is refused.
+
+        config MUSE_GADGET_BLE_ROUTE_WIFI_ONLY
+            bool "Wi-Fi only"
+            help
+                Push-to-talk always goes to Muse over Wi-Fi. The client still
+                gets gestures and can capture with start_mic.
+    endchoice
+
+    config MUSE_GADGET_BLE_LC3
+        bool "LC3 codec"
+        default y
+        help
+            Offer LC3 (16 kHz, 10 ms, 40-byte frames) beside SBC: every
+            gadget offers SBC and LC3. About 35 KB of
+            flash. On chips without an FPU (C3, C5, C6) the fixed-point
+            implementation makes it cheap: on the ESP32-C6, 0.54 ms to
+            encode and 0.29 ms to decode a 10 ms frame with the codec in
+            RAM (7.5 and 3.5 ms for the floating-point liblc3 on
+            soft-float).
+
+    choice MUSE_GADGET_BLE_LC3_IMPL
+        prompt "LC3 implementation"
+        depends on MUSE_GADGET_BLE_LC3
+        default MUSE_GADGET_BLE_LC3_FIXED if !SOC_CPU_HAS_FPU
+        default MUSE_GADGET_BLE_LC3_FLOAT
+        help
+            Both implement the same API and the standard LC3 bitstream: each
+            decodes the other's frames.
+
+        config MUSE_GADGET_BLE_LC3_FLOAT
+            bool "liblc3 (floating point)"
+            help
+                Google's liblc3, xplat/liblc3. About 7.5 MIPS to encode on
+                the ESP32 and S3, which have a fast FPU.
+
+        config MUSE_GADGET_BLE_LC3_FIXED
+            bool "lc3fx (fixed point)"
+            help
+                The integer-only port of liblc3, xplat/lc3fx, for
+                chips without an FPU,
+                and the ESP-Mosaico's ESP32-S31 (its overlay picks it:
+                integer code measured on RISC-V, bit-exact across targets).
+    endchoice
+
+    choice MUSE_GADGET_BLE_LC3_PLACE
+        prompt "LC3 code and tables"
+        depends on MUSE_GADGET_BLE_LC3
+        default MUSE_GADGET_BLE_LC3_PLACE_FLASH
+        help
+            Where the LC3 codec's code and constant tables live. In flash
+            they're read through the cache, which the rest of the firmware
+            shares: each frame starts with misses, and on the ESP32-C6 the
+            encoder runs about 2 times slower than from internal RAM.
+
+        config MUSE_GADGET_BLE_LC3_PLACE_FLASH
+            bool "Flash"
+
+        config MUSE_GADGET_BLE_LC3_PLACE_ENC
+            bool "Encoder code in IRAM (about 24 KB)"
+            help
+                The encoder's code and the code it shares with the decoder
+                in IRAM; the decoder's own code and all tables in flash.
+
+        config MUSE_GADGET_BLE_LC3_PLACE_TEXT
+            bool "All code in IRAM (about 31 KB)"
+            help
+                The codec's code in IRAM, its tables in flash.
+
+        config MUSE_GADGET_BLE_LC3_PLACE_RAM
+            bool "Code in IRAM and tables in DRAM (about 57 KB)"
+            help
+                The whole codec in internal RAM (lc3fx: code 31 KB, the
+                16 kHz tables 26 KB; linker.lf leaves the other rates'
+                windows in flash): faster than code alone. The Waveshare
+                C6's BLE-only profile takes it.
+    endchoice
+
+    config MUSE_GADGET_BLE_PLAY_BUFFER
+        int "Playback buffer (bytes)"
+        range 4096 65536
+        default 16384
+        help
+            Audio the client streams to the speaker (mg_command_stream_audio)
+            is held here, allocated only while a stream plays: 16 KB is 2 s
+            of 60 kb/s SBC, and 500 ms at the 256 kb/s maximum bitrate.
+
+    config MUSE_GADGET_BLE_CAPTURE_HOLD_S
+        int "Capture audio held for a slow link (seconds, with PSRAM)"
+        range 1 30
+        default 10
+        help
+            A push-to-talk capture (or a client's start_mic) is encoded into
+            a hold buffer and drained as fast as the link takes it, so a turn
+            on a slow link (sleep, 200 ms interval) loses nothing while the
+            link moves to active. The buffer is allocated in PSRAM at the
+            capture's start (this many seconds of its format: 75 KB for
+            10 s of 60 kb/s SBC) and freed once everything, the end of the
+            utterance included, has gone. Only when it overflows is the
+            oldest audio dropped; the end of the utterance (stop_mic) is never
+            dropped.
+
+    config MUSE_GADGET_BLE_CAPTURE_HOLD_INTERNAL_KB
+        int "Capture audio held for a slow link (KB, without PSRAM)"
+        range 1 64
+        default 8
+        help
+            The hold buffer's cap where PSRAM isn't there (the C6): taken
+            from internal RAM at the capture's start only while 32 KB stays
+            free past it, and freed once everything has gone. 8 KB is about
+            1 s of 60 kb/s SBC or 2 s of 32 kb/s LC3.
+
+    config MUSE_GADGET_BLE_CAPTURE_GUARD_INTERNAL_KB
+        int "A bench-guard held turn's audio (KB, without PSRAM)"
+        range 1 128
+        default 32
+        help
+            The bench guard (console word ptt.minrise=N, off at every boot)
+            holds a push-to-talk turn on the gadget until its capture rises
+            N dB over its own floor, so it keeps all of the turn's audio
+            until then. With PSRAM it takes the whole turn (16 s of its
+            format); without (the C6) up to this much internal RAM, still
+            only while 32 KB stays free past it. 32 KB is about 4.3 s of
+            60 kb/s SBC or 8.1 s of 32 kb/s LC3; a held turn longer than
+            that loses its oldest frames (counted). Off, it's never used.
+            A capture held for the token proof (talk before the
+            central's proof) takes the same size, in one allocation at the
+            capture's start; one that fills stops the capture and keeps
+            what it holds.
+
+    config MUSE_GADGET_BLE_VIDEO
+        bool "Video streaming over BLE"
+        depends on MUSE_VIDEO
+        default n
+        help
+            Offers mg_command_stream_video: the client (the phone's camera,
+            say) streams H.264 constrained baseline over BLE into its own
+            ring, and muse_video (CONFIG_MUSE_VIDEO, protocols/VIDEO.md)
+            decodes it and shows it full screen, as it does a Wi-Fi stream.
+            The Phone camera item asks a BLE client for a stream too.
+
+    config MUSE_GADGET_BLE_VIDEO_BUFFER
+        int "Video receive buffer (bytes, a power of two)"
+        depends on MUSE_GADGET_BLE_VIDEO
+        range 8192 262144
+        default 65536
+        help
+            The client may have this much in flight; in PSRAM. 64 KB holds
+            about 1 s of 500 kb/s video, enough for a keyframe and the frames
+            behind it. A power of two (8192, 16384, ... 262144): the build
+            fails on any other value.
+            Half of it is the largest frame: a UI stream's keyframe at the
+            panel's size (protocols/UI.md) takes up to ~128 KB, so UI
+            streams want 262144.
+
+    config MUSE_GADGET_BLE_HID
+        bool "HID over GATT beside musegadgets (touchscreen and pointer)"
+        depends on MUSE_GADGET_BLE_AUDIO && MUSE_ENABLED
+        default n
+        help
+            On a board with a touchscreen, the gadget is also a Bluetooth
+            HID device on the same connection (HOGP, service 0x1812): a
+            one-finger touchscreen (Android), an absolute pointer, or a
+            relative pointer (iOS AssistiveTouch), as the client's hid_map
+            picks (mg_command_ui_input, protocols/UI.md). The reports need a
+            bonded, encrypted link, so this turns on NimBLE's security
+            manager with bonding (Just Works) and keeps bonds in NVS; the
+            phone pairs from its Bluetooth settings or when an app reads the
+            Report Map. Advertising adds the HID UUID and appearance.
+
+    config MUSE_GADGET_BLE_LC3_24K
+        bool "List LC3 at 24 kHz"
+        depends on MUSE_GADGET_BLE_LC3
+        default n
+        help
+            LC3 playback at 24 kHz in stream_audio's
+            rates, and 24 kHz captures where the board's audio bus takes
+            them. Off until the board's check (encode and decode time, the
+            mic filter on real audio) has passed: the Muse apps use 24 kHz
+            whenever it's listed. The code is built and host-tested either way.
+
+    config MUSE_GADGET_BLE_SBC_BITPOOL
+        int "SBC bitpool"
+        range 2 60
+        default 26
+        help
+            16 kHz mono, 16 blocks, 8 subbands. 26 gives 60-byte frames
+            every 8 ms (60 kb/s), the quality of mSBC.
+
+    config MUSE_GADGET_BLE_QUEUE
+        bool "Offline clip queue"
+        default y
+        help
+            Record push-to-talk to flash while no client is connected, when
+            the client turned audio_queue_enabled on, and hand the clips over
+            later. Needs the mg_queue partition (partitions_muse.csv has
+            one); without it the queue isn't offered.
+
+    config MUSE_GADGET_BLE_LINK_WAKE
+        bool "Listen at every connection event during a link-mode switch, by default (experimental)"
+        default n
+        help
+            Experimental. While a link-mode switch is
+            pending, the gadget can ignore its slave latency locally so the
+            central's answer is heard at the next event (the S3 and C3
+            controllers' vendor command 0xFC13; elsewhere a pending
+            notification). It's on by default only where an A/B shows
+            a gain. Measured (talk press from a sleep link to the active
+            grant, link.wake 1 vs 0): ESP32-S31 + iPhone 17 2976 vs 2974 ms
+            (n=3+3); ESP32-S3 + Galaxy S22 10.7 vs 11.1 s (n=3+3, the phone's
+            spread 7-14 s). No gain on either, so it's off by default. The
+            bench word link.wake=1 turns it on for the boot (RAM only).
+
+    config MUSE_GADGET_BLE_SMP
+        bool "Firmware updates over BLE (MCUmgr SMP)"
+        default y if MUSE_GADGET_BLE_AUDIO && !MUSE_BOARD_ESP_MOSAICO
+        default n
+        help
+            The MCUmgr SMP service the Muse apps'
+            firmware update speaks (OS echo/reset/params, image state and
+            upload), the SMP core (smp/, vendored) under the
+            ESP-IDF backend (mg_smp_esp.c). The file is an MCUboot envelope
+            around the signed ESP-IDF app (tools/muse/mcuboot_wrap.py makes
+            one); it goes into the other OTA slot, ESP-IDF checks it and its
+            signature, the client marks it to test and resets, and the image
+            is kept at the boot's healthy mark (with or without the client's
+            confirm); a test image that never gets there boots the old one
+            again. Answers in every mode, SAFE included: it is the BLE
+            recovery tier. Needs two OTA slots (partitions_muse*.csv): off
+            on the ESP-Mosaico, which updates through ESP-Iris over USB.
+            Reads (echo, image state, params) are open. An upload, image
+            state write, reset or erase needs no phone or token: a
+            connection whose token proof matched, the wired console's
+            update.arm, a SAFE the user entered with the key, and bench,
+            automation and test builds take it at once; any other link,
+            set up or not, gets one confirm press on the gadget ("Press to
+            confirm update", rc 10 while it asks, rc 11 if it times out or
+            is cancelled). A SAFE the gadget entered itself can't prompt
+            and refuses (rc 11). The image's signature
+            check protects it too (the dev key is in the repo). Before the
+            first byte is written, the upload's app header must name this
+            chip, product code and board profile (components/muse_image_id),
+            or the upload is refused.
+
+    config MUSE_GADGET_WIFI_OTA_SAME_BOARD
+        bool "Accept a Wi-Fi OTA (Link setup's) of this board's own image"
+        depends on HOMEHUB_OTA_ENABLED && !MUSE_GADGET_BLE_STANDALONE
+        default n
+        help
+            A Muse Gadget updates over Bluetooth (MCUmgr SMP), from the
+            Muse apps or a web updater. Off (the default), it refuses every
+            Wi-Fi OTA: Link setup's ota_url and its device.ota action are
+            ignored; each refusal is logged with the URL's host and path
+            (never its query). An image built for an ESP32-S3 with the dev
+            key would pass both the chip id and the signature checks. On, an
+            image is installed only when its board description (components/
+            muse_image_id) names this exact board, the same product code and
+            board profile, read from the download's first bytes before
+            anything is written; ESP-IDF's chip id and signature checks
+            stay. Either way a re-setup of a set-up gadget never takes an
+            ota_url (ble_server.c ignores it).
+
+    config MUSE_GADGET_BLE_MANUFACTURER
+        string "Manufacturer name (Device Information)"
+        default "Waveshare" if MUSE_BOARD_WAVESHARE_S3_175C || MUSE_BOARD_WAVESHARE_S3_175 || MUSE_BOARD_WAVESHARE_S3_216 || MUSE_BOARD_WAVESHARE_S3_185C || MUSE_BOARD_WAVESHARE_C6_18 || MUSE_BOARD_WAVESHARE_C6_206 || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128
+        default "Seeed Studio" if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_RETERMINAL_STICKY
+        default "M5Stack" if MUSE_BOARD_M5STACK_STOPWATCH || MUSE_BOARD_M5STACK_STICKS3 || MUSE_BOARD_M5STACK_STICKC_PLUS2 || MUSE_BOARD_M5STACK_CORES3 || MUSE_BOARD_M5STACK_CORE2 || MUSE_BOARD_M5STACK_CARDPUTER_ADV
+        default "Freenove" if MUSE_BOARD_FNK0104B
+        default "Guition" if MUSE_BOARD_GUITION_JC3248W535
+        default "FoloToy" if MUSE_BOARD_AI_PASSPORT
+        default "OSTB" if MUSE_BOARD_OSTB_ECHOEAR_2ST
+        default "Nabu Casa" if HOMEHUB_VOICE
+        default "Espressif"
+        help
+            Who makes the hardware, never the chip vendor:
+            M5Stack for the StopWatch, Seeed Studio for the SenseCAP
+            Watcher, Waveshare for its boards. Espressif only for boards
+            Espressif makes (ESP-Mosaico, ESP32-S3-BOX-3, the DevKits). The
+            other Device Information strings: Model = the board's name
+            (muse_board_t.name), Firmware Revision = the image's version,
+            Software Revision = mg<MG_SPEC_VERSION> (mg1).
+
+    config MUSE_GADGET_BLE_NUS_LOG_TAGS
+        string "Log tags mirrored on the Nordic UART service"
+        default "mg,link.main,link.heartbeat,muse_audio"
+        help
+            Comma-separated tag prefixes, or * for the whole log. muse_audio
+            says when the codecs can't open (no DMA memory, a held lock), which
+            a board without its USB cable shows nowhere else. The
+            Nordic UART service has no security, so anyone nearby can read
+            it: keep tags that can log what people say or type (voice
+            transcripts, chat) out of it.
+
+    endif
+
+endmenu

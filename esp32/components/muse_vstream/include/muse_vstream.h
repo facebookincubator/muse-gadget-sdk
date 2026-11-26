@@ -44,6 +44,7 @@ extern "C" {
 #define MUSE_VIDEO_FRAME_MAGIC 0x56   /* 'V' */
 #define MUSE_VIDEO_FRAME_HEADER_LEN 8
 #define MUSE_VIDEO_FRAME_KEY 0x01     /* flags: a keyframe (every band an IDR picture, SPS and PPS first; VP8: a key frame) */
+#define MUSE_VIDEO_FRAME_STILL 0x02   /* flags: a UI stream's lossless still patch, not the codec's (protocols/UI.md) */
 
 #define MUSE_VIDEO_CODEC_H264 1       /* constrained baseline, CAVLC, Annex B */
 #define MUSE_VIDEO_CODEC_VP8 2        /* RFC 6386 frames, as an IVF file carries them (no IVF headers) */
@@ -56,7 +57,11 @@ typedef struct {
     uint16_t kbps;
     uint16_t playout_ms;      /* 0: show each frame once decoded; else at fps, this long after the first */
     uint8_t tiles;            /* horizontal bands, each its own stream of the codec; 0/1: one */
+    uint8_t content;          /* MUSE_VIDEO_CONTENT_*: camera video, or a UI picture at the panel's size */
 } muse_video_params_t;
+
+#define MUSE_VIDEO_CONTENT_VIDEO 0    /* live or recorded video, frames at a steady rate */
+#define MUSE_VIDEO_CONTENT_UI 1       /* a mostly static picture, frames only on change (protocols/UI.md) */
 
 /* What a display board offers. */
 typedef struct {
@@ -71,6 +76,15 @@ typedef struct {
     uint8_t max_tiles;           /* most bands it decodes in parallel, 0/1: one */
     uint8_t tile_split_pct;      /* two bands: the top band's share of the height, %; 0: equal */
     bool vp8;                    /* decodes VP8 as well as H.264 */
+    bool no_h264;                /* no H.264 (a board without PSRAM): only the codecs flagged here */
+    /* UI streams (MUSE_VIDEO_CONTENT_UI): the largest picture, shown one to
+     * one (normally the panel's size; 0: none), their frame rate, the
+     * largest frame, and the most bands at that size. */
+    uint16_t ui_w, ui_h;
+    uint8_t ui_fps;
+    uint32_t ui_max_frame;
+    uint8_t ui_tiles;
+    uint8_t ui_still;            /* still patch formats, 1 << mg_video_still_format_t each; 0: none */
 } muse_video_caps_t;
 
 typedef struct {
@@ -96,6 +110,13 @@ typedef struct {
     uint32_t max_frame;
     uint32_t resyncs;         /* times a bad header made the consumer search */
     uint32_t overruns;        /* bytes the producer had no room for (a client ignoring credits) */
+    /* A loss boundary: where the producer last lost bytes (a refused write, or the part of a
+     * write past the room), counted. The consumer drops a frame that doesn't end before it, so later bytes never
+     * splice onto a lost frame's prefix. */
+    volatile uint32_t loss_at;
+    volatile uint32_t losses;
+    volatile uint32_t start_losses;   /* losses when the stream started: the old stream's, skipped with it */
+    uint32_t lost_seen;       /* the consumer's copy of losses */
     volatile bool active;
     /* The stream's codec, for telling a frame from noise when resyncing (set
      * before muse_vstream_start; 0 is H.264): H.264 access units start with
@@ -113,6 +134,9 @@ void muse_vstream_init(muse_vstream_t *s, uint8_t *buf, uint32_t size, uint32_t 
 void muse_vstream_start(muse_vstream_t *s);
 void muse_vstream_stop(muse_vstream_t *s);
 
+/* A write the producer refused whole (past the credit granted): counted in received and overruns, nothing
+ * buffered; the frame it belonged to is lost (the consumer resyncs on the next header, as after an overrun). */
+void muse_vstream_drop(muse_vstream_t *s, size_t n);
 /* Producer. Bytes that don't fit are counted in overruns and dropped. */
 void muse_vstream_write(muse_vstream_t *s, const uint8_t *d, size_t n);
 /* Producer, without a copy: the contiguous free space at the head (*dst, its
