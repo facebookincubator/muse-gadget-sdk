@@ -21,8 +21,11 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from power_test_fixture import prepare_board_matrix
 from unittest.mock import patch
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from power_test_fixture import prepare_board_matrix  # noqa: E402
+
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools/power/power_sweep.py"
 spec = importlib.util.spec_from_file_location("power_sweep", SOURCE)
@@ -1606,8 +1609,8 @@ class FirmwareProtocolIntegrationTests(unittest.TestCase):
                             str(root / "tests/power_test_harness.c"), "-o", str(binary)],
                            check=True, capture_output=True, text=True, timeout=30)
             script = list(setup) + [">" + command for command in commands]
-            process = subprocess.run([str(binary)], input="\n".join(script) + "\n",
-                                     capture_output=True, text=True, check=True, timeout=10)
+            process = run_child([str(binary)], input="\n".join(script) + "\n",
+                                capture_output=True, text=True, check=True, timeout=10)
             lines = process.stdout.splitlines()
             emitted = [power.strict_json_object(line[6:]) for line in lines]
             state_frames = [frame for frame in emitted if frame["type"] == "dryrun_state"]
@@ -1669,8 +1672,8 @@ class FirmwareProtocolIntegrationTests(unittest.TestCase):
                         "usb 1", "ptest.status", "ptest.results"]
             # The firmware fake uses the real console's '>' prefix.
             commands = [">" + line if line.startswith("ptest.") else line for line in commands]
-            process = subprocess.run([str(binary)], input="\n".join(commands) + "\n",
-                                     capture_output=True, text=True, check=True, timeout=10)
+            process = run_child([str(binary)], input="\n".join(commands) + "\n",
+                                capture_output=True, text=True, check=True, timeout=10)
         emitted = [power.json.loads(line[6:]) for line in process.stdout.splitlines()]
         initial, ack, live, firmware = emitted
         self.assertEqual(firmware["state"], "complete")

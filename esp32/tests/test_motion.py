@@ -18,8 +18,12 @@ import json
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
@@ -89,7 +93,8 @@ class MotionTests(unittest.TestCase):
     def replay(self, name):
         rows = (ROOT / "tests" / ("motion_" + name + "_capture.csv")).read_text().splitlines()
         data = "\n".join(row.replace(",", " ") for row in rows if not row.startswith("#"))
-        result = subprocess.check_output([str(self.binary), "replay"], input=data, text=True)
+        result = run_child([str(self.binary), "replay"], input=data, text=True, check=True,
+                           stdout=subprocess.PIPE).stdout
         return [int(ms) for ms in result.splitlines()]
 
     def test_captured_failed_pickup_wakes_before_the_acceleration_burst(self):

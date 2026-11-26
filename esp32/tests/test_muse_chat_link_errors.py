@@ -16,10 +16,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -369,7 +371,7 @@ int main(int argc,char **argv) {
         c = Path(cls.tmp.name) / 'chat.c'
         c.write_text(code)
         cls.binary = c.with_suffix('')
-        cjson = ROOT / 'managed_components/espressif__cjson/cJSON'
+        cjson = cjson_dir()
         compiled = subprocess.run([
             os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
             '-I', str(cjson), '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),

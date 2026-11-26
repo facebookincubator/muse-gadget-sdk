@@ -18,8 +18,12 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_freeink import freeink_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 EINK = ROOT / "components/muse/eink"
@@ -33,10 +37,8 @@ def section(source, start, end):
 class _CompiledFixture(unittest.TestCase):
     @classmethod
     def compile(cls, harness, parts):
-        source = Path(os.environ.get("FREEINK_SOURCE_DIR", ROOT / "managed_components/freeink-sdk"))
+        source = freeink_dir()
         ui = source / "libs/ui/FreeInkUI"
-        if not (ui / "include/FreeInkApp.h").is_file():
-            raise AssertionError("Set FREEINK_SOURCE_DIR to the unchanged pinned FreeInk checkout")
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         out = Path(cls.temp.name)

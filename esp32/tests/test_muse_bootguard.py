@@ -28,10 +28,13 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import re
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 COMP = ROOT / "components" / "muse_restart"
@@ -131,18 +134,18 @@ class BootGuardTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_boots(self, *cmds: str) -> list[tuple[int, ...]]:
-        r = subprocess.run([str(self.exe)], input="".join(c + "\n" for c in cmds), text=True,
-                           capture_output=True, check=True)
+        r = run_child([str(self.exe)], input="".join(c + "\n" for c in cmds), text=True,
+                      capture_output=True, check=True)
         return [tuple(int(x) for x in l.split()) for l in r.stdout.splitlines() if not l.startswith("fired")]
 
     def entries(self, *steps) -> list[int]:
         cmds = "".join("entry reset\n" if s == "reset" else f"entry {s[0]} {s[1]}\n" for s in steps)
-        r = subprocess.run([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
+        r = run_child([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
         return [int(l.split()[1]) for l in r.stdout.splitlines() if l.startswith("fired")]
 
     def early(self, *steps) -> int:
         cmds = "".join("entry reset\n" if s == "reset" else f"entry {s[0]} {s[1]}\n" for s in steps) + "entry early\n"
-        r = subprocess.run([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
+        r = run_child([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
         return [int(l.split()[1]) for l in r.stdout.splitlines() if l.startswith("early")][0]
 
     def test_setup_mode_is_the_key_held_at_power_on_and_let_go_early(self) -> None:
@@ -158,12 +161,12 @@ class BootGuardTest(unittest.TestCase):
 
     def keys(self, *steps: tuple[int, int]) -> list[int]:
         cmds = "".join(f"keys {d} {ms}\n" for d, ms in steps)
-        r = subprocess.run([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
+        r = run_child([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
         return [int(l.split()[1]) for l in r.stdout.splitlines() if l.startswith("fired")]
 
     def holds(self, *steps: tuple[int, int]) -> list[int]:
         cmds = "".join(f"hold {d} {ms}\n" for d, ms in steps)
-        r = subprocess.run([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
+        r = run_child([str(self.exe)], input=cmds, text=True, capture_output=True, check=True)
         return [int(l.split()[1]) for l in r.stdout.splitlines() if l.startswith("fired")]
 
     @staticmethod

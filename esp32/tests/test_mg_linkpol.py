@@ -28,9 +28,12 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MG = ROOT / "components" / "muse_gadget_ble"
@@ -156,8 +159,8 @@ class LinkModesTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def steps(self, lines: list[str], args=()) -> list[str]:
-        out = subprocess.run([str(self.exe), *args], input="\n".join(lines) + "\n", text=True, capture_output=True,
-                             check=True).stdout
+        out = run_child([str(self.exe), *args], input="\n".join(lines) + "\n", text=True, capture_output=True,
+                        check=True).stdout
         return [l.strip() for l in out.splitlines()]
 
 

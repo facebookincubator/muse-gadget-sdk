@@ -16,10 +16,13 @@ from pathlib import Path
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source  # noqa: E402
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -184,15 +187,14 @@ class ReterminalBatteryTest(unittest.TestCase):
         init_block = app[app.rfind("#if", 0, init):app.index("#endif", init)+6]
         source = include_block + "\nvoid app_run(void) {\n" + init_block + "\n}\n"
         for panel in ("UC8179", "SPECTRA6", "IT8951"):
-            result = subprocess.run([*self.cc, *self.flags,
+            result = run_child([*self.cc, *self.flags,
                 "-DCONFIG_HOMEHUB_RETERMINAL_SHT4X=0",
                 "-DCONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_" + panel + "=1",
                 "-x", "c", "-fsyntax-only", "-"], input=source, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_health_fields_for_reterminal_ui_and_other_boards(self):
-        json_dir = Path(os.environ.get(
-            "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
+        json_dir = cjson_dir()
         result = subprocess.run([*self.cc, "-I", str(json_dir), "-c",
             *cjson_source(json_dir), "-o", str(self.out / "cjson.o")],
             capture_output=True, text=True)

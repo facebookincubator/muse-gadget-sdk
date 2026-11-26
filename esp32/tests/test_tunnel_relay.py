@@ -16,16 +16,17 @@ from pathlib import Path
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from test_link_ota import function_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from test_link_ota import function_source  # noqa: E402
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
-JSON = Path(os.environ.get(
-    "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"
-))
+JSON = cjson_dir()
 
 
 class TunnelRelayTest(unittest.TestCase):
@@ -47,13 +48,14 @@ class TunnelRelayTest(unittest.TestCase):
             (out / "net_forward.inc").write_text(
                 function_source(app, "static bool int_param(") + "\n"
                 + function_source(app, "static cJSON *net_forward_command("))
+            require_cjson(JSON)
             cc = shlex.split(os.environ.get("CC", "cc"))
             flags = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-D_DEFAULT_SOURCE",
                      "-DCJSON_NESTING_LIMIT=16", "-I", str(JSON), "-I", str(out)]
             binary = out / "relay"
             compiled = subprocess.run(
                 [*cc, *flags, str(ROOT / "tests/tunnel_relay_harness.c"),
-                 str(JSON / "cJSON.c"), "-lm", "-o", str(binary)],
+                 *cjson_source(JSON), "-lm", "-o", str(binary)],
                 capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
             ran = subprocess.run([str(binary)], capture_output=True, text=True)

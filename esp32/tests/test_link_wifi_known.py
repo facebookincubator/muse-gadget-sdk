@@ -20,18 +20,18 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
-JSON = Path(os.environ.get(
-    "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"
-))
+JSON = cjson_dir()
 
 
 class LinkWifiKnownHarnessTest(unittest.TestCase):
@@ -39,15 +39,16 @@ class LinkWifiKnownHarnessTest(unittest.TestCase):
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             raise unittest.SkipTest("C compiler not available")
-        if not (JSON / "cJSON.c").exists():
-            raise unittest.SkipTest("cJSON sources not available")
+        require_cjson(JSON)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             binary = Path(tmpdir) / "link_wifi_known_harness"
             compile_proc = subprocess.run(
                 [
                     *cc,
-                    "-std=c11",
+                    # A GNU dialect, like the firmware's and test_network_proxy's: network_proxy.c uses strnlen,
+                    # which glibc declares only outside strict ISO C; clang and GCC 14 refuse the undeclared call.
+                    "-std=gnu11",
                     "-Wall",
                     "-Wextra",
                     "-DCJSON_NESTING_LIMIT=16",

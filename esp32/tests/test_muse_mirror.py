@@ -24,6 +24,9 @@ import tempfile
 import unittest
 import zlib
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
 try:
     import numpy as np
 except ImportError:
@@ -61,8 +64,8 @@ class MirrorCore(unittest.TestCase):
         h, w = source.shape
         commands = self.update(0, 0, source) if updates is None else updates
         data = struct.pack('<HHI', w, h, cap) + commands + b'SD\x02B\x00'
-        result = subprocess.run([self.exe], input=data, capture_output=True, timeout=20,
-                                env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:abort_on_error=1',
+        result = run_child([self.exe], input=data, capture_output=True, timeout=20,
+                           env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:abort_on_error=1',
                                      'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'})
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         fb = np.zeros_like(source)

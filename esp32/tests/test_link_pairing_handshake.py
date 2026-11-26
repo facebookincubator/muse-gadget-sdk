@@ -35,7 +35,7 @@ import unittest
 
 # Also run as tests.test_link_pairing_handshake (see above).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from host_cjson import cjson_source  # noqa: E402
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,13 +55,7 @@ class LinkPairingHandshakeTest(unittest.TestCase):
             (crypto / "CMakeLists.txt").is_file(),
             "The selected ESP-IDF/Mbed TLS source has no tf-psa-crypto project",
         )
-        cjson = Path(os.environ.get("CJSON_SOURCE_DIR", str(
-            ROOT / "managed_components/espressif__cjson/cJSON"
-        ))).resolve()
-        self.assertTrue(
-            all((cjson / name).is_file() for name in ("cJSON.c", "cJSON.h")),
-            f"Install managed cJSON or set CJSON_SOURCE_DIR (checked {cjson})",
-        )
+        cjson = require_cjson(cjson_dir()).resolve()
         cc = shlex.split(os.environ.get("CC", "cc"))
         cmake = shutil.which("cmake")
         self.assertTrue(cmake and cc and shutil.which(cc[0]), "Host C compiler and CMake are required")

@@ -17,8 +17,11 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +32,7 @@ class MuseOptions(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binary = Path(cls.tmp.name) / 'options'
-        json = Path(os.environ.get('CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'))
+        json = require_cjson(cjson_dir())
         muse = ROOT / 'components/muse'
         flags = [*shlex.split(os.environ.get('CC', 'cc')), '-std=c11', '-g', '-O1',
                    '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',

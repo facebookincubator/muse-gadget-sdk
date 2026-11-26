@@ -3391,18 +3391,27 @@ To run each module in its own process under the freeze watchdog, as CI does, put
 time (1800 s until it has 5 passing runs on this computer) is stopped and
 reported as STUCK, with what it was waiting on, instead of hanging the run.
 
-Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
-`managed_components/`, and that directory only exists after a build. Set `CC`
-or `CXX` to change compilers. Set `IDF_PATH` (activating ESP-IDF does) so the
-real-crypto tests, `test_link_pairing_handshake` and `test_mg_token_proof`, run
-instead of skipping.
+The tests that compile cJSON find it by themselves (`tests/host_cjson.py`):
+`CJSON_SOURCE_DIR` if set, else `managed_components/espressif__cjson/cJSON`
+(any `idf.py build` or `idf.py reconfigure` here fetches it), else the newest
+1.7.x in ESP-IDF's component manager cache. Without one they fail, saying how
+to get it. Set `CC` or `CXX` to change compilers. Set `IDF_PATH` (activating
+ESP-IDF does) so the real-crypto tests, `test_link_pairing_handshake` and
+`test_mg_token_proof`, run instead of skipping.
 
-The e-ink navigation tests use the pinned FreeInk source: set
-`FREEINK_SOURCE_DIR` to its checkout, or use `managed_components/freeink-sdk`
-from a Sticky configure. CI checks out that exact pin for the host tests.
+The e-ink navigation and presentation tests use the pinned FreeInk source
+(`tests/host_freeink.py`): `FREEINK_SOURCE_DIR` if set, else
+`managed_components/freeink-sdk` from a Sticky configure. CI checks out that
+exact pin for the host tests.
 
-Two tests skip quietly when their inputs are missing; check the summary for
-`skipped=`:
+A test that feeds its driver input passes it through a temporary file
+(`tests/host_child.py`): on macOS, feeding it through a pipe can deadlock
+`communicate()`.
+
+Some tests skip when an optional tool or library is missing (a C or C++
+compiler, CMake, a wasm32 compiler, libx264 or libvpx, the PPK2 client, the
+mirror viewer's PySide6 and numpy, pyserial); check the summary for
+`skipped=`. Two need inputs you set up:
 
 - `test_noise_core` links against the host's PSA Crypto library, found with
   `pkg-config mbedcrypto`. Install `libmbedtls-dev` and `pkg-config` on Debian

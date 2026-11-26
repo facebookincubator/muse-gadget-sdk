@@ -26,18 +26,18 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 from test_link_unpair_storage_contract import _function_body
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get(
-    "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"
-))
+JSON = cjson_dir()
 
 API_ALLOWED = ["https://api.muse.ai", "https://hatch-api.meta.ai"]
 NOISE_ALLOWED = ["hatch.metaaivm.com"]
@@ -190,8 +190,7 @@ int main(void) {{
                       "helper_task_create(provision_task"):
             self.assertLess(refuse, block.index(later), later)
 
-        if not (JSON / "cJSON.c").exists():
-            self.skipTest("cJSON sources not available")
+        require_cjson(JSON)
         helpers = ""
         for signature in ("static const char *optional_str(cJSON *root, const char *key)",
                           "static bool setup_hosts_allowed(cJSON *root)"):

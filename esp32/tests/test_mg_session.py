@@ -40,12 +40,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_mg_ble import MG, PROTOCOLS, ROOT, SEAL_INCS, SEAL_SRCS, codec_build, compile_and_run  # noqa: E402
+from host_cjson import cjson_dir, require_cjson  # noqa: E402
 
 VECTORS = PROTOCOLS / "test-vectors/mg-session-v1.json"
 SEAL_VECTORS = PROTOCOLS / "test-vectors/mg-session-seal-v1.json"
 PROOF_VECTORS = PROTOCOLS / "test-vectors/mg-token-proof-v1.json"
 CONTROL = ROOT / "main/noise_control.cpp"
-CJSON = ROOT / "managed_components/espressif__cjson/cJSON"
+CJSON = cjson_dir()
 
 
 def reference():
@@ -742,8 +743,7 @@ class WholeGadgetTest(unittest.TestCase):
     """mg_session.c under noise_control.cpp's link code, and that code over Wi-Fi too."""
 
     def run_gadget_harness(self, mode: str) -> str:
-        if not (CJSON / "cJSON.c").exists():
-            self.skipTest("cJSON comes from managed_components: run one idf.py build first (AGENTS.md, Tests)")
+        require_cjson(CJSON)
         cc = shlex.split(os.environ.get("CC", "cc"))
         cxx = shlex.split(os.environ.get("CXX", "c++"))
         san = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g"]
