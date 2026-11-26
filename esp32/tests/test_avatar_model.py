@@ -12,16 +12,17 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 class AvatarModel(unittest.TestCase):
     def test_metadata_and_cache_failures(self):
-        found = list((ROOT / "managed_components/espressif__cjson").rglob("cJSON.c"))
-        if not found:
-            self.skipTest("Run an IDF build first to populate pinned cJSON")
-        cjson = found[0]
+        cjson = require_cjson(cjson_dir()) / "cJSON.c"
         with tempfile.TemporaryDirectory() as tmp:
             exe = str(Path(tmp) / "model")
             subprocess.run([*shlex.split(os.environ.get("CC", "cc")), "-std=c11",

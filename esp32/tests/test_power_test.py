@@ -17,9 +17,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
-from power_test_fixture import function_body, prepare_board_matrix
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from power_test_fixture import function_body, prepare_board_matrix  # noqa: E402
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "components/muse/muse_power_test.c"
@@ -50,7 +53,7 @@ class PowerTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_commands(self, *commands):
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary)], input="\n".join(commands) + "\n",
             capture_output=True, text=True, check=True, timeout=10,
         )

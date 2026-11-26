@@ -45,9 +45,13 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,7 +68,7 @@ def _cc_command() -> list[str]:
 def _sanitizer_flags(cc: list[str], tmp: Path) -> list[str]:
     probe = tmp / "asan_probe"
     flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
-    proc = subprocess.run(
+    proc = run_child(
         [*cc, "-x", "c", "-std=c11", *flags, "-o", str(probe), "-"],
         input=b"int main(void) { return 0; }\n",
         stdout=subprocess.PIPE,

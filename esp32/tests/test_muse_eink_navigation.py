@@ -18,8 +18,12 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_freeink import freeink_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,10 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class MuseEinkNavigationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        source = Path(os.environ.get("FREEINK_SOURCE_DIR", ROOT / "managed_components/freeink-sdk"))
+        source = freeink_dir()
         ui_root = source / "libs/ui/FreeInkUI"
-        if not (ui_root / "include/FreeInkApp.h").is_file():
-            raise AssertionError("Pinned FreeInk source missing: set FREEINK_SOURCE_DIR to its checkout")
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         out = Path(cls.temp.name)

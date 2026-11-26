@@ -25,9 +25,12 @@ and the drawing's wiring below."""
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components" / "muse"
@@ -148,8 +151,8 @@ class SubtitleVectorsTest(unittest.TestCase):
         import mg_subtitle_ref as ref
         import test_mg_ble as t
         cc = shlex.split(os.environ.get("CC", "cc"))
-        probe = subprocess.run([*cc, "-fsanitize=address", "-x", "c", "-", "-o", os.devnull],
-                               input="int main(void){return 0;}", text=True, capture_output=True)
+        probe = run_child([*cc, "-fsanitize=address", "-x", "c", "-", "-o", os.devnull],
+                          input="int main(void){return 0;}", text=True, capture_output=True)
         asan = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g"] if probe.returncode == 0 else []
         big = ref.words(9, 0, 0, [(1, b"a" * 200), (2, b"b" * 200)])
         script = ["O", "M " + ref.state(True, 0).hex(), "M " + big.hex()]

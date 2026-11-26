@@ -17,15 +17,15 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get(
-    'CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'
-))
+JSON = cjson_dir()
 
 
 class ChatSession(unittest.TestCase):

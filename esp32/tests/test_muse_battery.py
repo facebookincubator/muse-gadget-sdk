@@ -28,6 +28,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "muse"))
@@ -135,7 +138,7 @@ class HarnessCase(unittest.TestCase):
     def run_harness_raw(self, *commands: str, binary: Path | None = None) -> list[str]:
         """The lines the commands print, as text; boot's own "@power.saved" in self.booted_with."""
         script = "".join(f"dump\n{c}end\n" if c.startswith("Time since") else c + "\n" for c in commands)
-        proc = subprocess.run([str(binary or self.binary)], input=script, text=True, capture_output=True)
+        proc = run_child([str(binary or self.binary)], input=script, text=True, capture_output=True)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         lines = proc.stdout.splitlines()
         # What boot prints unasked, for a console that takes no commands.
@@ -184,11 +187,11 @@ class LowBatteryTest(HarnessCase):
         with tempfile.TemporaryDirectory() as tmp:
             flash = Path(tmp) / "nvs"
             self.run_harness_raw(f"flash {flash}", "lowmv 3300", *["p 0 3 3280"] * 5)
-            proc = subprocess.run([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
-                                  capture_output=True, check=True)
+            proc = run_child([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
+                             capture_output=True, check=True)
             self.assertIn("boot: after a low-battery shutdown at 3280 mV", proc.stderr)
-            proc = subprocess.run([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
-                                  capture_output=True, check=True)
+            proc = run_child([str(self.binary)], input=f"flash {flash}\nlevel\n", text=True,
+                             capture_output=True, check=True)
             self.assertNotIn("low-battery shutdown", proc.stderr)   # once
 
 

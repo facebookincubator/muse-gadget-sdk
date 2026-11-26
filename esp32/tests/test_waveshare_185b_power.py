@@ -17,8 +17,12 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,8 +49,8 @@ class Waveshare185bPower(unittest.TestCase):
             values = defaults | sample
             values["current"] &= 0xffff
             lines.append(" ".join(str(values[key]) for key in defaults))
-        proc = subprocess.run([str(self.binary)], input="\n".join(lines) + "\n",
-                              check=True, capture_output=True, text=True)
+        proc = run_child([str(self.binary)], input="\n".join(lines) + "\n",
+                         check=True, capture_output=True, text=True)
         return [tuple(map(int, line.split())) for line in proc.stdout.splitlines()]
 
     def test_percent_and_little_endian_millivolts(self):

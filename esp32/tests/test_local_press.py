@@ -35,6 +35,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 COMP = ROOT / "components" / "muse_restart"
@@ -148,8 +150,8 @@ class LocalPressWindow(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_(self, *cmds: str) -> list[str]:
-        r = subprocess.run([str(self.exe)], input="".join(c + "\n" for c in cmds), text=True, capture_output=True,
-                           check=True)
+        r = run_child([str(self.exe)], input="".join(c + "\n" for c in cmds), text=True, capture_output=True,
+                      check=True)
         return r.stdout.split()
 
     # The core's answers: 0 open (rc 0), 1 asking (rc 10), 2 refused (rc 11).

@@ -24,6 +24,9 @@ import subprocess
 import tempfile
 import unittest
 import zlib
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, require_cjson  # noqa: E402
 ROOT=Path(__file__).resolve().parents[1]
 MUSE=ROOT/'components/muse'
 spec=importlib.util.spec_from_file_location('avatar_clips',ROOT/'tools/muse/avatar_clips.py')
@@ -181,8 +184,7 @@ class AvatarClips(unittest.TestCase):
                 clips.convert(directory,directory/'output.mav',['idle'],240,16,'ffmpeg')
 
     def test_bounded_identity_variant_fields(self):
-        cjson=ROOT/'managed_components/espressif__cjson/cJSON'
-        if not (cjson/'cJSON.c').exists():self.skipTest('Configure IDF to fetch pinned cJSON')
+        cjson=require_cjson(cjson_dir())
         harness=r"""
 #include "avatar_clip_refs.h"
 #include <assert.h>

@@ -22,6 +22,9 @@ import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
 # Builds with the wake word compiled in (boards with PSRAM, as the option needs).

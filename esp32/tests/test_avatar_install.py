@@ -39,6 +39,79 @@ import avatar  # noqa: E402
 import chat  # noqa: E402
 
 
+class CheckedOnce:
+    """avatar's subprocess module in these tests, except that a renderer's host check isn't repeated: its two builds
+    (plain and under the sanitizers) and its run through every animation, about 2,100 frames, which takes seconds
+    under ASan. The tests check a handful of renderers over and over, and the same code gives the same answer, so
+    each distinct renderer is built and run once, for real; a later check of it gets those results, with their
+    messages naming that check's files.
+
+    What a key assumes: a build's result depends only on its command (less the source and output names), its
+    working directory, the bytes of its .c sources and its other arguments to run, so a header a check changes
+    without changing a .c file isn't seen (avatar.host_check builds in esp32/ against the tree's own headers, which
+    no test changes); a run's result depends only on the build it runs and its arguments. A test that needs a
+    fresh build or run must use another renderer, or bypass the cache (avatar.subprocess = subprocess)."""
+
+    def __init__(self):
+        self.seen = {}   # key -> (the result, the files it named)
+        self.exes = {}   # a build's output -> (its key, its sources)
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
+
+    def run(self, cmd, *args, **kwargs):
+        if "-o" in cmd:   # a build of a renderer
+            cwd = Path(kwargs.get("cwd") or ".")
+            exe = cmd[cmd.index("-o") + 1]
+            srcs = [c for c in cmd if c.endswith(".c")]
+            digest = hashlib.sha256(b"".join((cwd / c).read_bytes() + b"\0" for c in srcs)).hexdigest()
+            how = tuple(sorted((k, repr(v)) for k, v in kwargs.items() if k != "cwd"))
+            key = ("build", str(cwd.resolve()), tuple(c for c in cmd if c not in srcs and c != exe), digest, how)
+            self.exes[exe] = (key, srcs)
+            names = srcs + [exe]
+        else:             # a build's run through the animations
+            built = self.exes.get(cmd[0]) if cmd else None
+            if built is None:
+                return subprocess.run(cmd, *args, **kwargs)
+            how = tuple(sorted((k, repr(v)) for k, v in kwargs.items()))
+            key, srcs = ("run",) + built[0][1:] + (how,), built[1]
+            names = srcs + [cmd[0]]
+        if key not in self.seen:
+            self.seen[key] = (subprocess.run(cmd, *args, **kwargs), names)
+        p, was = self.seen[key]
+        out, err = p.stdout, p.stderr
+        for old, new in zip(was, names):   # its messages name this check's files
+            for a, b in {(old, new), (os.path.realpath(old), os.path.realpath(new))}:
+                out = out.replace(a, b) if isinstance(out, str) else out
+                err = err.replace(a, b) if isinstance(err, str) else err
+        return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+REAL_RENDER = avatar.make_gifs.render
+PREVIEWS = {}   # renderer -> its previews: (name, bytes, frames)
+
+
+def render_once(src, out):
+    """make_gifs.render, made once per renderer (with Pillow it builds and runs the animations again)."""
+    key = Path(src).read_bytes()
+    if key not in PREVIEWS:
+        with tempfile.TemporaryDirectory() as d:
+            PREVIEWS[key] = [(os.path.basename(p), Path(p).read_bytes(), n) for p, n in REAL_RENDER(src, d)]
+    os.makedirs(out, exist_ok=True)
+    made = []
+    for name, data, n in PREVIEWS[key]:
+        Path(out, name).write_bytes(data)
+        made.append((os.path.join(out, name), n))
+    return made
+
+
+def setUpModule():
+    for target, name, value in ((avatar, "subprocess", CheckedOnce()), (avatar.make_gifs, "render", render_once)):
+        patcher = mock.patch.object(target, name, value)
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
 def renderer(colour, body=""):
     """A complete renderer drawing a flat square in `colour`; `body` goes into render()."""
     return f"""// Copyright (c) Meta Platforms, Inc. and affiliates.

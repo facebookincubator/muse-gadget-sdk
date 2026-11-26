@@ -23,18 +23,20 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import HOST_CJSON
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import HOST_CJSON, cjson_dir, require_cjson  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
 NOISE = (ROOT / "main" / "noise_control.cpp").read_text()
 KCONFIG = (ROOT / "main" / "Kconfig.projbuild").read_text()
 OVERLAYS = sorted((ROOT / "devices").glob("sdkconfig.*"))
-CJSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
+CJSON = cjson_dir()
 REGISTER_LIMIT = 8192
 GUIDE_LIMIT = 4096
 GUIDE_DESCRIPTION = "This device's usage guide (Markdown): what it is, its controls and limits."
@@ -105,8 +107,7 @@ def assemble_guide(out: Path, guide: str | None = None) -> subprocess.CompletedP
 class DeviceDescriptionTest(unittest.TestCase):
     def compile_and_run(self, tmp: Path, harness: str, defines: list[str] = (), ble: bool = False,
                         apps: bool = False, apps_on: bool = True) -> str:
-        if not (CJSON / "cJSON.c").exists():
-            self.skipTest("cJSON sources not available (run idf.py build once)")
+        require_cjson(CJSON)
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             self.skipTest("C compiler unavailable")

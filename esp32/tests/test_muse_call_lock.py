@@ -25,9 +25,12 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
@@ -176,8 +179,8 @@ class CallLock(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_lines(self, lines: list[str]) -> list[str]:
-        return subprocess.run([str(self.exe)], input="\n".join(lines) + "\n", text=True, capture_output=True,
-                              check=True).stdout.splitlines()
+        return run_child([str(self.exe)], input="\n".join(lines) + "\n", text=True, capture_output=True,
+                         check=True).stdout.splitlines()
 
     def test_an_injected_start_while_locked_asks_for_the_keypad_not_the_phone(self) -> None:
         # `!IN call` on a locked gadget, then the phone's connecting and live.

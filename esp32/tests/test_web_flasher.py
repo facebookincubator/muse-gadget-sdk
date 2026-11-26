@@ -33,6 +33,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
@@ -292,8 +294,8 @@ class WebFlasherCoreTest(unittest.TestCase):
                 shutil.copy(js, tmp)
             Path(tmp, "package.json").write_text('{"type": "module"}\n')
             Path(tmp, "driver.js").write_text(DRIVER)
-            run = subprocess.run(["node", "driver.js"], cwd=tmp, input=json.dumps(payload), capture_output=True,
-                                 text=True, timeout=120)
+            run = run_child(["node", "driver.js"], cwd=tmp, input=json.dumps(payload), capture_output=True,
+                            text=True, timeout=120)
         if run.returncode != 0:
             raise AssertionError(f"node failed:\n{run.stderr}")
         cls.out = json.loads(run.stdout)

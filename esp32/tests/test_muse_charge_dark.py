@@ -25,9 +25,12 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components" / "muse"
@@ -93,8 +96,8 @@ class ChargeDarkDecisionTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_readings(self, *lines: str) -> list[tuple[int, int, int]]:
-        res = subprocess.run([str(self.exe)], input="".join(l + "\n" for l in lines), text=True,
-                             capture_output=True, check=True)
+        res = run_child([str(self.exe)], input="".join(l + "\n" for l in lines), text=True,
+                        capture_output=True, check=True)
         return [tuple(int(x) for x in l.split()) for l in res.stdout.splitlines()]
 
     def test_a_healthy_cell_boots_at_once(self) -> None:

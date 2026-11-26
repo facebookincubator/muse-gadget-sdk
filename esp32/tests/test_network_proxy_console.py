@@ -18,20 +18,22 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
+JSON = cjson_dir()
 
 
 class ProxyConsole(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not (JSON / "cJSON.c").is_file():
-            raise unittest.SkipTest("cJSON sources missing; run idf.py build")
+        require_cjson(JSON)
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         folder = Path(cls.tmp.name)
@@ -95,8 +97,8 @@ int main(void) {
             cls.binaries.append(binary)
 
     def run_commands(self, binary, commands):
-        result = subprocess.run([str(binary)], input="".join("wifi_proxy=" + json.dumps(c) + "\n" for c in commands),
-                                capture_output=True, text=True, timeout=3)
+        result = run_child([str(binary)], input="".join("wifi_proxy=" + json.dumps(c) + "\n" for c in commands),
+                           capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.splitlines()
 

@@ -23,6 +23,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
 MIRROR = ROOT / 'components/muse_mirror'
@@ -109,7 +112,7 @@ int main(int argc, char **argv) {
             self.assertEqual(result.returncode, 0, result.stderr)
             for name, signal, limit in (('voice', voice, 0.06), ('steps', loud, 0.5)):
                 pcm = np.clip(np.rint(signal), -32768, 32767).astype('<i2')
-                packed = subprocess.run([exe], input=pcm.tobytes(), capture_output=True, timeout=10).stdout
+                packed = run_child([exe], input=pcm.tobytes(), capture_output=True, timeout=10).stdout
                 self.assertEqual(len(packed), 164 * 25, name)
                 chunks = [packed[i:i + 164] for i in range(0, len(packed), 164)]
                 heard = np.frombuffer(b''.join(mirror.adpcm_decode(c) for c in chunks), '<i2').astype(float)
@@ -123,7 +126,7 @@ int main(int argc, char **argv) {
                 state = [0, 0]
                 mine = b''.join(mirror.adpcm_encode(pcm[i:i + 320].tobytes(), state) for i in range(0, len(pcm), 320))
                 self.assertEqual(mine, packed, name)
-                recorded = subprocess.run([exe, 'mic'], input=mine, capture_output=True, timeout=10).stdout
+                recorded = run_child([exe, 'mic'], input=mine, capture_output=True, timeout=10).stdout
                 # 60 ms gathered first: the board records two chunks of silence, then the chunks in order.
                 self.assertEqual(recorded, bytes(1280) + heard[:-640].astype('<i2').tobytes(), name)
         for bad in (bytes([0, 0, 89, 0, 0]), bytes(4)):       # a step index past the table; no samples

@@ -24,9 +24,13 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,7 +84,7 @@ class EmojiTextTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_harness(self, mode: str, text: str, *args: str) -> str:
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary), mode, *args], input=text.encode(), capture_output=True, check=True
         )
         return proc.stdout.decode()
