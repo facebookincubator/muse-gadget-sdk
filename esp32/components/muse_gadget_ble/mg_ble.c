@@ -2811,6 +2811,9 @@ static uint16_t s_smp_handle;
  */
 #define SMP_BUF 512                          /* buf_size: the largest request (GATT's attribute maximum) */
 #define SMP_SLOT 1024                        /* the core's slot: a request, or the image state response */
+/* A request the front can't hold is one the core answers EMSGSIZE from its header alone (larger than the slot), so the
+ * front hands it just the header and drops the rest (mg_smp_front.h). */
+_Static_assert(SMP_SLOT == MG_SMP_FRONT_MAX, "the request front holds what the core's slot does");
 #define SMP_WINDOW 3                         /* buf_count */
 #define SMP_WRITE_MAX 520                    /* the largest ATT write (MTU 517 less 3, and some) */
 /* The ring: the window in 20-byte writes (2 bytes of length apiece), and two whole writes more. */
@@ -3351,7 +3354,7 @@ static void smp_front_whole(void *ctx, const uint8_t *req, size_t n);
 static void smp_front_raw(void *ctx, const uint8_t *p, size_t n)
 {
     (void)ctx;
-    mg_smp_rx(s_smp_env, p, (uint16_t)n);   /* too large to hold: the core answers it (EMSGSIZE) */
+    mg_smp_rx(s_smp_env, p, (uint16_t)n);   /* a header too large to hold, alone: the core answers it (EMSGSIZE) */
 }
 
 static const mg_smp_front_out_t s_smp_front_out = { smp_front_whole, smp_front_raw, NULL };

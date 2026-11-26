@@ -1019,8 +1019,11 @@ static void up_names(const mg_smp_t *s, const req_t *q, uint32_t *len, const uin
     }
 }
 
+static NOINLINE int h_upload_take(mg_smp_t *s, const req_t *q, const uint8_t *body);
+
 static NOINLINE int h_upload(mg_smp_t *s, const req_t *q, const uint8_t *body)
 {
+    bool asked = false;
     if (s->pf->may_change && !up_same_transfer(s, q)) {
         bool ok;
         if (s->pf->may_upload) {
@@ -1034,8 +1037,17 @@ static NOINLINE int h_upload(mg_smp_t *s, const req_t *q, const uint8_t *body)
         if (!ok) {
             return refused(s);   /* before anything changes */
         }
-        s->flags |= F_XAUTH;
+        asked = true;
     }
+    int h = h_upload_take(s, q, body);
+    if (asked && h >= 0) {
+        s->flags |= F_XAUTH;   /* local change (VENDORED.md): only a request the core took marks the transfer */
+    }
+    return h;
+}
+
+static NOINLINE int h_upload_take(mg_smp_t *s, const req_t *q, const uint8_t *body)
+{
     if ((q->has & (Q_OFF | Q_DATA)) != (Q_OFF | Q_DATA)) {
         return -(MG_SMP_EINVAL);
     }

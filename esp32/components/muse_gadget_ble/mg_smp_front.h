@@ -47,7 +47,8 @@ typedef struct {
     uint8_t buf[MG_SMP_FRONT_MAX];
 } mg_smp_front_rx_t;
 
-/* What one write makes: whole requests, and bytes passed through unread. */
+/* What one write makes: whole requests, and the header alone of one too large to hold (MG_SMP_FRONT_MAX: the core's
+ * slot, so the core answers it EMSGSIZE from that header); the rest of such a request is dropped, never passed on. */
 typedef struct {
     void (*whole)(void *ctx, const uint8_t *req, size_t n);
     void (*raw)(void *ctx, const uint8_t *p, size_t n);
@@ -90,8 +91,11 @@ typedef struct {
  * (core_holds: mg_smp_upload_active; up NULL: nothing known). True: answer rc 11 and end the upload (mg_smp_abort);
  * the core never sees it (smp-v11 drops the extra bytes and answers rc 0). */
 bool mg_smp_front_past_len(const uint8_t *req, size_t n, const mg_smp_front_up_t *up, bool core_holds);
+/* The shortest upload the core takes: an MCUboot header and a TLV area (smp/mg_smp.c h_upload: 32 + 40). */
+#define MG_SMP_FRONT_MIN_UPLOAD (32u + 40u)
 /* A request the core takes: an upload's first chunk sets the length the later ones are checked against (up NULL:
- * nowhere to keep it). True: it is an upload's first chunk. */
+ * nowhere to keep it). True: it is an upload's first chunk the core takes as one (len at least MG_SMP_FRONT_MIN_UPLOAD,
+ * a SHA-256 of 32 bytes or none); one it refuses leaves the length as it was. */
 bool mg_smp_front_up_note(const uint8_t *req, size_t n, mg_smp_front_up_t *up);
 
 /*

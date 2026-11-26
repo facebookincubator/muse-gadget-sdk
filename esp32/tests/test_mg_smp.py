@@ -1175,6 +1175,117 @@ int main(int argc, char **argv) {
                 self.servers.remove(srv)
 
 
+class NoSmuggling(EspServerBase):
+    """A request whose header declares more than the request front holds (MG_SMP_FRONT_MAX, the core's slot) is
+    answered EMSGSIZE from that header alone, and the rest of its bytes are dropped by the front, never forwarded: a
+    request embedded in them (an upload start with no SHA-256, a state write, the reset) reaches no decoder and gets
+    no answer, so it can't start a transfer past the front's checks (#525 council: the front used to pass those bytes
+    on, where the core parsed them as new requests). With no hooks, and with --gate on a proven and an unproven link.
+    """
+
+    @staticmethod
+    def frame(group: int, cmd: int, body: dict, seq: int) -> bytes:
+        b = sl.cbor_encode(body)
+        return bytes([2, 0]) + struct.pack(">HH", len(b), group) + bytes([seq, cmd]) + b
+
+    def responses(self, lk: sl.Link, wait: float = 0.8) -> list:
+        time.sleep(wait)
+        out = []
+        while not lk.responses.empty():
+            out.append(lk.responses.get_nowait())
+        return out
+
+    def test_an_oversized_header_carries_nothing_in(self) -> None:
+        env = envelope("3.0.0", 3000, seed=31)
+        embedded = {
+            "upload start, no SHA-256": self.frame(1, 1, {"image": 0, "len": len(env), "off": 0, "data": env[:100]}, 7),
+            "state write": self.frame(1, 0, {"hash": bytes(32), "confirm": True}, 7),
+            "reset": self.frame(0, 5, {}, 7),
+        }
+        oversized = bytes([2, 0]) + struct.pack(">HH", 1092, 1) + bytes([3, 1])   # an upload declaring 1100 bytes
+        for mode, args, proven in (("no hooks", (), False), ("--gate, proven", ("--gate",), True),
+                                   ("--gate, unproven", ("--gate",), False)):
+            for name, inner in embedded.items():
+                with self.subTest(mode=mode, embedded=name):
+                    srv = self.server(*args)
+                    lk = srv.link(247)
+                    if proven:
+                        lk.sock.sendto(b"\x0d\x03", lk.addr)
+                    time.sleep(0.05)
+                    before = lk.status()
+                    while not lk.responses.empty():
+                        lk.responses.get_nowait()
+                    lk.disconnected.clear()
+                    lk.write(oversized)
+                    lk.write(inner)   # a whole request of its own, in the oversized one's bytes
+                    lk.write(bytes(40))   # more of them
+                    got = self.responses(lk)
+                    self.assertEqual([r[6] for r in got], [3], (name, [r.hex() for r in got], srv.log()[-800:]))
+                    self.assertNotEqual(sl.cbor_decode(got[0][8:]).get("rc", 0), 0)   # EMSGSIZE, from the header
+                    self.assertFalse(lk.disconnected.is_set(), "the embedded reset ran")
+                    st = lk.status()
+                    self.assertFalse(st["ota_open"], st)
+                    self.assertEqual((st["boots"], st["auth_asks"]), (before["boots"], before["auth_asks"]), st)
+                    # Once the oversized request's bytes are all in, the next request is read as one.
+                    left = 1092 - len(inner) - 40
+                    while left:
+                        k = min(left, 200)
+                        lk.write(bytes(k))
+                        left -= k
+                    self.assertEqual(self.responses(lk, 0.3), [])
+                    c = sl.Client(lk)
+                    self.assertTrue(c.image_state())
+                    srv.stop()
+                    self.servers.remove(srv)
+
+
+class TheCoreMarksOnlyWhatItTook(EspServerBase):
+    """The vendored core's local change (smp/VENDORED.md): a request the hooks allowed marks the transfer as this
+    connection's (F_XAUTH: its later chunks ask no hook) only once the core took it. A held upload, resumed on a new
+    link: a request the hook allowed but the core refused (an upload start whose len is too short) leaves no mark, so
+    the held upload's next chunk, after the link's proof is gone, is asked about and refused (rc 11); smp-v11 let it
+    through unasked. And the front keeps the held upload's length past an upload start the core refuses (a len under
+    32 + 40): its next chunk isn't taken as one past the length."""
+
+    def ask(self, srv: Server, lk: sl.Link, body: dict) -> dict:
+        b = sl.cbor_encode(body)
+        return NestingDepth.ask(self, srv, lk, bytes([2, 0]) + struct.pack(">HH", len(b), 1) + bytes([0, 1]) + b)
+
+    def test_a_refused_request_leaves_no_mark(self) -> None:
+        env = envelope("4.0.0", 3000, seed=41)
+        sha = hashlib.sha256(env).digest()
+        srv = self.server("--auth", "unproven")
+        lk = srv.link(247)
+        lk.sock.sendto(b"\x09\x01", lk.addr)   # proven
+        time.sleep(0.05)
+        self.assertNotIn("rc", self.ask(srv, lk, {"image": 0, "len": len(env), "off": 0, "sha": sha, "data": env[:400]}))
+        self.assertEqual(self.ask(srv, lk, {"off": 400, "data": env[400:800]}).get("off"), 800)
+        lk.drop_link()   # the upload is held for its resume
+        time.sleep(0.1)
+        self.assertTrue(lk.connect(10))
+        lk.sock.sendto(b"\x09\x01", lk.addr)   # proven on the new link
+        time.sleep(0.05)
+        # the held upload's start again, but a 16-byte SHA-256: the hook allows it, the core refuses it (EINVAL)
+        self.assertEqual(self.ask(srv, lk, {"image": 0, "len": len(env), "off": 0, "sha": sha[:16], "data": env[:5]}),
+                         {"rc": 3})
+        lk.sock.sendto(b"\x09\x00", lk.addr)   # the proof gone
+        time.sleep(0.05)
+        rsp = self.ask(srv, lk, {"off": 800, "data": env[800:1200]})
+        self.assertEqual(rsp, {"rc": 11}, srv.log()[-800:])
+        self.assertNotIn("past its upload's length", srv.log())
+
+    def test_a_refused_start_keeps_the_held_length(self) -> None:
+        env = envelope("4.1.0", 3000, seed=42)
+        sha = hashlib.sha256(env).digest()
+        srv = self.server("--auth", "proven")
+        lk = srv.link(247)
+        self.assertNotIn("rc", self.ask(srv, lk, {"image": 0, "len": len(env), "off": 0, "sha": sha, "data": env[:400]}))
+        self.assertEqual(self.ask(srv, lk, {"image": 0, "len": 10, "off": 0, "data": env[:5]}), {"rc": 3})
+        rsp = self.ask(srv, lk, {"off": 400, "data": env[400:800]})
+        self.assertEqual(rsp.get("off"), 800, (rsp, srv.log()[-800:]))
+        self.assertNotIn("past its upload's length", srv.log())
+
+
 class PastTheLength(EspServerBase):
     """An image upload write past its upload's length gets rc 11 and ends the upload, however the link was opened
     (smp-v12 on a gated platform; mg_smp_front.c mg_smp_front_past_len, ahead of the vendored smp-v11 core, which

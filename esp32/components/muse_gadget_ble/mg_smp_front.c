@@ -39,8 +39,9 @@ void mg_smp_front_rx(mg_smp_front_rx_t *rx, const uint8_t *p, size_t n, uint32_t
     rx->at_ms = now_ms;
     while (n) {
         if (rx->skip) {
+            /* The rest of a request too large to hold: dropped here, never forwarded (the core answered EMSGSIZE from
+             * its header; bytes passed on would start requests of their own there, past every check). */
             size_t k = n < rx->skip ? n : rx->skip;
-            out->raw(out->ctx, p, k);
             rx->skip -= (uint32_t)k;
             p += k;
             n -= k;
@@ -55,7 +56,7 @@ void mg_smp_front_rx(mg_smp_front_rx_t *rx, const uint8_t *p, size_t n, uint32_t
         if (rx->have == HDR && !rx->want) {
             uint32_t total = HDR + ((uint32_t)rx->buf[2] << 8 | rx->buf[3]);
             if (total > MG_SMP_FRONT_MAX) {
-                out->raw(out->ctx, rx->buf, HDR);   /* too large to hold: the core's (EMSGSIZE) */
+                out->raw(out->ctx, rx->buf, HDR);   /* too large to hold: its header alone, the core's (EMSGSIZE) */
                 rx->skip = total - HDR;
                 rx->have = 0;
                 continue;
@@ -158,7 +159,7 @@ static bool key_is(const uint8_t *k, size_t kn, const char *name)
 
 /* An upload's body: off, len, sha and data (the rest skipped). */
 static bool read_upload(const uint8_t *body, size_t n, muse_update_req_t *r, const uint8_t **data, bool *has_off,
-                        bool *has_len, bool *has_data)
+                        bool *has_len, bool *has_data, bool *sha_bad)
 {
     cbor_t c = { body, n, 0 };
     uint8_t major;
@@ -209,6 +210,8 @@ static bool read_upload(const uint8_t *body, size_t n, muse_update_req_t *r, con
             } else if (v == 32) {
                 memcpy(r->id.sha, c.b + c.i, 32);
                 r->id.has_sha = true;
+            } else {
+                *sha_bad = true;   /* the core refuses it (EINVAL) */
             }
             c.i += (size_t)v;
         } else {
@@ -221,7 +224,8 @@ static bool read_upload(const uint8_t *body, size_t n, muse_update_req_t *r, con
     return true;
 }
 
-mg_smp_front_kind_t mg_smp_front_read(const uint8_t *req, size_t n, muse_update_req_t *out, const uint8_t **data)
+static mg_smp_front_kind_t front_read(const uint8_t *req, size_t n, muse_update_req_t *out, const uint8_t **data,
+                                      bool *sha_bad)
 {
     memset(out, 0, sizeof(*out));
     *data = NULL;
@@ -240,7 +244,8 @@ mg_smp_front_kind_t mg_smp_front_read(const uint8_t *req, size_t n, muse_update_
     }
     if (upload) {
         bool has_off = false, has_len = false, has_data = false;
-        if (!read_upload(req + HDR, n - HDR, out, data, &has_off, &has_len, &has_data) || !has_off || !has_data) {
+        if (!read_upload(req + HDR, n - HDR, out, data, &has_off, &has_len, &has_data, sha_bad) || !has_off
+            || !has_data) {
             return MG_SMP_FRONT_UNREADABLE;
         }
         out->kind = out->off == 0 && has_len ? MUSE_UPDATE_UPLOAD0 : MUSE_UPDATE_CHUNK;
@@ -255,6 +260,12 @@ mg_smp_front_kind_t mg_smp_front_read(const uint8_t *req, size_t n, muse_update_
     mg_smp_sha256_final(h, out->key);
     out->kind = state ? MUSE_UPDATE_STATE : MUSE_UPDATE_CHANGE;
     return MG_SMP_FRONT_CHANGE;
+}
+
+mg_smp_front_kind_t mg_smp_front_read(const uint8_t *req, size_t n, muse_update_req_t *out, const uint8_t **data)
+{
+    bool sha_bad = false;
+    return front_read(req, n, out, data, &sha_bad);
 }
 
 /* ---- the slot ---------------------------------------------------------------------------- */
@@ -418,8 +429,12 @@ bool mg_smp_front_up_note(const uint8_t *req, size_t n, mg_smp_front_up_t *up)
 {
     muse_update_req_t r;
     const uint8_t *data;
-    if (mg_smp_front_read(req, n, &r, &data) != MG_SMP_FRONT_CHANGE || r.kind != MUSE_UPDATE_UPLOAD0) {
+    bool sha_bad = false;
+    if (front_read(req, n, &r, &data, &sha_bad) != MG_SMP_FRONT_CHANGE || r.kind != MUSE_UPDATE_UPLOAD0) {
         return false;
+    }
+    if (sha_bad || r.id.len < MG_SMP_FRONT_MIN_UPLOAD) {
+        return false;   /* one the core refuses (EINVAL): the upload it holds keeps its length */
     }
     if (up) {
         up->known = true;

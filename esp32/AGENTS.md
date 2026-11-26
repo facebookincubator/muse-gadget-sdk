@@ -1935,7 +1935,9 @@ its constants.
   sees it (`mg_smp_front_depth_ok`, iterative), and so is one it can't walk
   to the end: a malformed or cut-short item, a length or count past the
   request or past 32 bits (a 32-bit decoder could truncate it), bytes after
-  the body. With no memory for the FIFO block (and so no front) SMP writes
+  the body. A request larger than the front holds reaches the core as its
+  header alone (EMSGSIZE) and the rest of its bytes are dropped, never read
+  as requests. With no memory for the FIFO block (and so no front) SMP writes
   are refused. Any image upload write past its upload's length (an offset-0
   request longer than its own len, or a later chunk past the len its first
   chunk named) gets rc 11 and ends the upload, however the link was opened

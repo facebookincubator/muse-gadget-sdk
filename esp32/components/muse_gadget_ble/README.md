@@ -1211,8 +1211,11 @@ rc 3 before any decoder sees it (`mg_smp_front_depth_ok`, an iterative walk
 that fails closed: a malformed or cut-short item, a length or count past the
 request or past 32 bits, or bytes after the body are refused too; the core's
 own skip stops at depth 8 and compares lengths in 64 bits, `smp/mg_smp.c`
-`cr_head` and `cr_skip_body`). With no memory for the FIFO block, and so no
-front, SMP writes are refused. Any image upload write past its upload's
+`cr_head` and `cr_skip_body`). A request larger than the front holds (the
+core's 1 KB slot) reaches the core as its header alone, which the core answers
+EMSGSIZE; the front drops the rest of its bytes and never passes them on, so
+nothing in them is read as a request of its own. With no memory for the FIFO
+block, and so no front, SMP writes are refused. Any image upload write past its upload's
 length (an offset-0 request longer than its own len, or a later chunk past the
 len its first chunk named) gets rc 11 and ends the upload (`mg_smp_abort`),
 however the link was opened, as smp-v12 does on a gated platform; this

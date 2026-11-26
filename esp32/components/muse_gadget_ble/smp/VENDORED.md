@@ -64,8 +64,22 @@ byte-identical to imgtool) and `conformance/smplink.py`, but for comments:
 this copy words some comments and docstrings differently (in `mg_smp_backend.h`,
 `mg_smp.h`, `mg_smp.c` and `pack.py` it doesn't name the vendor SDKs the release's
 backends were written for, which this SDK doesn't support); their code is the
-release's. Never patch them here: take a new release whole, word those
-comments again, and update this note and the hashes below. `tests/test_mg_smp.py` runs the ESP32 configuration against it.
+release's but for the one local change listed below. Never patch them here
+otherwise: take a new release whole, word those comments again, and update
+this note and the hashes below. `tests/test_mg_smp.py` runs the ESP32 configuration against it.
+
+## Local changes
+
+One local change, until a release of the core carries it:
+
+- `mg_smp.c` `h_upload`: a request the `may_change`/`may_upload` hooks allowed marks the transfer as this
+  connection's (`F_XAUTH`, after which its chunks, the state write and the reset ask no hook) only once the core
+  has taken it (`h_upload_take` returned no error); smp-v11 marked it before checking the request, so a request the
+  core then refused (a missing field, a short len, a committed upload) still left the mark. Found with a
+  request-smuggling report (the front now never forwards the bytes of a request it can't hold, see
+  `../mg_smp_front.c`).
+
+The `mg_smp.c` line below is smp-v11's: this copy's code differs from it by that change.
 
 ## Code hashes
 

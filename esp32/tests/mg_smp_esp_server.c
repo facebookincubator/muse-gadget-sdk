@@ -807,6 +807,10 @@ int main(int argc, char **argv)
     }
     socklen_t al = sizeof(a);
     getsockname(s_sock, (struct sockaddr *)&a, &al);
+    if (s_cfg.slot_size != MG_SMP_FRONT_MAX) {
+        logf_("BUG: the request front holds %d bytes, the core's slot %u", MG_SMP_FRONT_MAX, (unsigned)s_cfg.slot_size);
+        return 3;
+    }
     if (s_auth_on) {
         s_pf.may_change = pf_may_change;
         s_pf.refusal_rc = pf_refusal_rc;
