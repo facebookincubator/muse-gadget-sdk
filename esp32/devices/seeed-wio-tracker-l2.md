@@ -39,8 +39,10 @@ tools/muse/board.sh build l2
 
 To install the built firmware over native USB Serial/JTAG (`303a:1001`),
 use `tools/muse/board.sh flash l2`. Installing Muse replaces the firmware
-currently on the board. Seeed's [getting started guide][restore] links the
-Meshtastic flasher for returning to the mesh firmware.
+currently on the board. Before pairing, provision your Muse SDK token over
+the USB console as described in the [SDK build guide](../README.md#2-build).
+Seeed's [getting started guide][restore] links the Meshtastic flasher for
+returning to the mesh firmware.
 
 - Muse uses its standard BLE setup and Wi-Fi connection. Press U/B to
   confirm a pending pairing request. During normal use, hold U/B to
