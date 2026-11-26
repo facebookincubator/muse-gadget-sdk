@@ -1069,9 +1069,11 @@
  *     declaration never stands in for the proof: the gadget is trusted again
  *     only when a later connection, with no declaration, proves its token. A
  *     mode the client doesn't know is a recovery mode.
- *   - Until both Muse apps handle the declaration, a recovery mode keeps a
- *     distinct identity (another name or address, never the Muse one); only
- *     then does it advertise its normal identity and declare.
+ *   - A recovery mode keeps a distinct identity (another name or address,
+ *     never the Muse one), so a client that doesn't handle the declaration
+ *     never meets recovery under the gadget's normal identity. A client that
+ *     handles it treats a device that does advertise its normal identity and
+ *     declares as above.
  *
  * Throughput test (a bench command):
  *   mg_command_device_action with mg_device_action_throughput_test measures
@@ -3128,9 +3130,11 @@ MG_ENUM(uint8_t, mg_audio_queue_command_t) {
   // start_unix_ms is the wall-clock time the clip started, in ms since the
   // Unix epoch, from the device's clock (see Clock); 0 when the clock wasn't
   // set. Absent: unknown. It comes only after the format fields.
-  // Clips are SBC at 16000 until both Muse apps decode clips by this format;
-  // then the device picks the clip's codec, rate and
-  // bitrate (e.g. LC3 at 16 kb/s, 20 B per 10 ms, where storage is tight).
+  // A client that doesn't decode clips by this format gets clips it can play
+  // as an older client would: the device keeps them SBC at 16000. It picks
+  // another codec, rate or bitrate (e.g. LC3 at 16 kb/s, 20 B per 10 ms,
+  // where storage is tight) only for a client that declares it decodes each
+  // clip by its own format; this revision defines no such declaration.
   // start_timestamp_ms is device uptime at the start of the clip. It resets
   // on reboot, so use it for ordering within one boot only; clips are
   // queued oldest first.
