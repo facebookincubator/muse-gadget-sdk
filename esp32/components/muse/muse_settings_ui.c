@@ -1451,12 +1451,28 @@ static const char *const TEXT_SIZE_NAMES[MUSE_TEXT_SIZES] = {
     "Extra small", "Small", "Medium", "Large", "Extra large",
 };
 
+static const lv_font_t *const TEXT_SIZE_FONTS[MUSE_TEXT_SIZES] = {
+    [MUSE_TEXT_XSMALL] = &lv_font_unscii_8,
+    [MUSE_TEXT_SMALL] = &lv_font_montserrat_14,
+    [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_16,
+    [MUSE_TEXT_LARGE] = &lv_font_montserrat_20,
+    [MUSE_TEXT_XLARGE] = &lv_font_montserrat_28,
+};
+static lv_obj_t *s_text_preview;
+
 static void on_text_size(lv_event_t *e)
 {
+    (void)e;
     int v = lv_slider_get_value(s_text_sl);
-    set_text(s_text_val, TEXT_SIZE_NAMES[v]);
-    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-        muse_settings_set_text_size(v);   /* the face picks it up on its next frame */
+    if (v >= MUSE_TEXT_XSMALL && v <= MUSE_TEXT_XLARGE) {
+        set_text(s_text_val, TEXT_SIZE_NAMES[v]);
+        if (TEXT_SIZE_FONTS[v]) {
+            lv_obj_set_style_text_font(s_text_val, TEXT_SIZE_FONTS[v], 0);
+            if (s_text_preview) {
+                lv_obj_set_style_text_font(s_text_preview, TEXT_SIZE_FONTS[v], 0);
+            }
+        }
+        muse_settings_set_text_size(v);   /* the face and state pick it up immediately */
     }
 }
 
@@ -1466,9 +1482,19 @@ static void text_size_row(lv_obj_t *list)
     if (!muse_ui_text_size_applies()) {
         return;
     }
-    s_text_sl = slider(list, "Text size", MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE, muse_settings_text_size(),
+    int cur = muse_settings_text_size();
+    if (cur < MUSE_TEXT_XSMALL || cur > MUSE_TEXT_XLARGE) {
+        cur = MUSE_TEXT_MEDIUM;
+    }
+    s_text_sl = slider(list, "Text size", MUSE_TEXT_XSMALL, MUSE_TEXT_XLARGE, cur,
                        &s_text_val, on_text_size);
-    set_text(s_text_val, TEXT_SIZE_NAMES[muse_settings_text_size()]);
+    set_text(s_text_val, TEXT_SIZE_NAMES[cur]);
+    s_text_preview = label(list, TEXT_SIZE_FONTS[cur] ? TEXT_SIZE_FONTS[cur] : &lv_font_montserrat_16,
+                           COLOR_ACCENT, "Preview: Stack-Chan 1.0");
+    lv_obj_set_style_text_align(s_text_preview, LV_TEXT_ALIGN_CENTER, 0);
+    if (TEXT_SIZE_FONTS[cur]) {
+        lv_obj_set_style_text_font(s_text_val, TEXT_SIZE_FONTS[cur], 0);
+    }
 }
 
 static void build_sound_page(lv_obj_t *tile)

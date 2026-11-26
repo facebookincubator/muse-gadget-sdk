@@ -727,11 +727,29 @@ static const lv_font_t *caption_font(void)
 #endif
 }
 
-/* The small screen's caption band: two lines of unscii-8, as replies are paged
- * there, 2 px apart with 2 px above and below. */
+static const lv_font_t *caption_font_for_size(int size)
+{
+    static const lv_font_t *const SIZES[MUSE_TEXT_SIZES] = {
+        [MUSE_TEXT_XSMALL] = &lv_font_unscii_8,
+        [MUSE_TEXT_SMALL] = &lv_font_montserrat_14,
+        [MUSE_TEXT_MEDIUM] = &lv_font_montserrat_16,
+        [MUSE_TEXT_LARGE] = &lv_font_montserrat_20,
+        [MUSE_TEXT_XLARGE] = &lv_font_montserrat_28,
+    };
+    if (size >= 0 && size < MUSE_TEXT_SIZES && SIZES[size]) {
+        return SIZES[size];
+    }
+    return &lv_font_montserrat_16;
+}
+
+/* The small screen's caption band: scaled to fit the chosen Text size. */
 static int caption_band_h(void)
 {
-    return 2 * lv_font_get_line_height(&lv_font_unscii_8) + 2 + 2 * 2;
+    int size = muse_settings_text_size();
+    const lv_font_t *font = caption_font_for_size(size);
+    int lh = lv_font_get_line_height(font);
+    int lines = (lh <= 16) ? 2 : 1;
+    return lines * lh + (lines - 1) * 2 + 6;
 }
 
 /* Where the small screen's band sits: full width along the bottom, above the
@@ -766,16 +784,13 @@ static const lv_font_t *caption_font_for(const char *text)
 }
 #endif
 
-#if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
 #if CONFIG_MUSE_CJK_FONT
 #define CJK_BAND_PAD 6          /* px each side of a CJK caption on a small screen */
 #define CJK_LINE_SPACE 4
 static int s_cjk_lines;         /* lines of CJK the small screen's caption band holds */
 #endif
 
-/* The small screen's band: two lines of unscii-8, or s_cjk_lines of the 16 px
- * caption font with room between them for CJK, or for accented letters one
- * line of Unifont's 8x16 in the same band as unscii-8's two. */
+/* The small screen's band: scaled to fit the chosen Text size. */
 static void set_caption_font(const char *caption)
 {
 #if CONFIG_MUSE_SMALL_FULL_REPLY
@@ -796,22 +811,17 @@ static void set_caption_font(const char *caption)
         return;
     }
 #endif
-    const lv_font_t *font = &lv_font_unscii_8;
-#if CONFIG_MUSE_LATIN_FONT
-    if (muse_text_has_latin(caption)) {
-        font = &muse_font_latin_16;
-    }
-#endif
+    int text_size = muse_settings_text_size();
+    const lv_font_t *font = caption_font_for_size(text_size);
+    int band_h = caption_band_h();
     lv_obj_set_style_text_font(s_caption_lbl, font, 0);
     lv_obj_set_style_text_line_space(s_caption_lbl, 2, 0);
-    lv_obj_set_style_pad_hor(s_caption_lbl, 0, 0);
-    lv_obj_set_height(s_caption_lbl, caption_band_h());
-    /* Replies are paged to fit; the firmware's own captions are whole, so an
-     * accented one longer than the line rolls by rather than ending in dots. */
+    lv_obj_set_style_pad_hor(s_caption_lbl, 4, 0);
+    lv_obj_set_height(s_caption_lbl, band_h);
+    /* Replies are paged to fit; circular scroll for longer phrases */
     lv_label_set_long_mode(s_caption_lbl, font == &lv_font_unscii_8 ? LV_LABEL_LONG_MODE_DOTS
                                                                     : LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
 }
-#endif
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
@@ -2448,6 +2458,26 @@ static void update_status(muse_mode_t mode, float now)
     static muse_review_view_t view;
     bool reviewing = muse_review_active();
 #endif
+    if (s_small && !s_reply_lbl) {
+        static int s_prev_text_size = -1;
+        int cur_size = muse_settings_text_size();
+        if (cur_size != s_prev_text_size) {
+            s_prev_text_size = cur_size;
+            const lv_font_t *f = caption_font_for_size(cur_size);
+            int cw = lv_font_get_glyph_width(f, 'M', ' ');
+            if (cw < 1) cw = 8;
+            int lines = (lv_font_get_line_height(f) <= 16) ? 2 : 1;
+            int cols = (s_w - 12) / cw;
+            if (cols < 4) cols = 4;
+            muse_state_set_page(cols, lines);
+            muse_state_set_latin_page(cols, lines);
+            if (s_caption_lbl) {
+                set_caption_font(caption);
+                lv_obj_align(s_caption_lbl, LV_ALIGN_BOTTOM_MID, 0, SMALL_BAND_Y);
+                fresh = true;
+            }
+        }
+    }
     if (s_reply_lbl) {
         /* The speaker picks the layout, even mid-reply: the voice task pages to fit. */
         int layout = muse_board->audio_init && muse_settings_speaker_on() ? ANSWER_HEARD : ANSWER_READ;
@@ -2498,11 +2528,12 @@ static void update_status(muse_mode_t mode, float now)
     if (fresh) {
         lv_obj_t *lbl = answer >= 0 ? s_reply_lbl : s_caption_lbl;
         if (answer >= 0) lv_obj_set_style_text_font(lbl, s_answers[answer].font, 0);
+        if (s_small) {
+            set_caption_font(shown);
+        }
 #if CONFIG_MUSE_CJK_FONT || CONFIG_MUSE_LATIN_FONT
         if (s_long) {
             lv_obj_set_style_text_font(s_caption_lbl, long_caption_font(shown), 0);
-        } else if (s_small) {
-            set_caption_font(shown);
         }
         if (lbl == s_caption_lbl ? !s_small : !s_answers[answer].own_font) {
             lv_obj_set_style_text_font(lbl, caption_font_for(shown), 0);

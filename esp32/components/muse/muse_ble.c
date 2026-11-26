@@ -175,6 +175,8 @@ static void run_command(char *cmd)
         muse_settings_set_brightness(n);
     } else if (!strcmp(cmd, "text_size") && parse_int(v, 0, MUSE_TEXT_SIZES - 1, &n)) {
         muse_settings_set_text_size(n);
+    } else if (!strcmp(cmd, "caption")) {
+        muse_state_set_hint(v);
     } else if (!strcmp(cmd, "about")) {
         res = "M5Stack CoreS3 Stack-Chan Port v1.0.0 by Fernando Leitao";
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
