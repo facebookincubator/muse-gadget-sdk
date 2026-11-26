@@ -1,0 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# SPDX-License-Identifier: Apache-2.0
+# Opt-in avatar-rendering profile for PSRAM-equipped S3/P4 UI boards.
+# Load after sdkconfig.muse and the board overlay. No personal assets or tokens.
+# These features do not change the saved avatar source or select pixel style.
+CONFIG_MUSE_AVATAR_SYNC=y
+CONFIG_MUSE_AVATAR_ANIMATIONS=y
+CONFIG_MUSE_PIXEL_AVATAR=y
+CONFIG_MUSE_AVATAR_WHITE_MATTE=y

@@ -3,7 +3,7 @@
 
 The experimental `CONFIG_MUSE_PIXEL_AVATAR` path uses one shared local renderer for many avatar types. The converter in [`../../avatar_pixel/`](../../avatar_pixel/README.md) produces a small indexed sprite, palette and independent alpha mask. Its output is data, not custom C, WASM or an inferred face rig. A new asset therefore needs no firmware rebuild after the renderer is installed.
 
-The first release is deterministic image processing: contain-fit framing, palette reduction, optional dithering, and nearest-neighbor enlargement. It preserves the original image/background rather than inventing anatomy or removing a background. Generic whole-sprite breathing, bobbing, tap feedback and subtle state tint run on the ESP32. A plant, animal, robot or abstract logo can use the same runtime. Individual eye/mouth/limb rigging and full phone-character parity are not part of v1.
+The default conversion is deterministic image processing: contain-fit framing, palette reduction, optional dithering, and nearest-neighbor enlargement. Source alpha and background are preserved unless `--remove-white-background` (or API `remove_white_background: true`) enables [conservative uniform-white matting](avatar-background.md). Generic whole-sprite breathing, bobbing, tap feedback and subtle state tint run on the ESP32. A plant, animal, robot or abstract logo can use the same runtime. Individual eye/mouth/limb rigging and full phone-character parity are not part of v1.
 
 ## Build
 
@@ -15,6 +15,8 @@ CONFIG_MUSE_PIXEL_AVATAR=y
 ```
 
 For the Waveshare ESP32-P4 3.5, build in a separate directory using `sdkconfig.defaults`, `devices/sdkconfig.muse`, `devices/sdkconfig.muse-waveshare-p4-lcd35` and that fragment. Keep silicon-revision settings as described in [the P4 setup guide](../devices/waveshare-p4-lcd35.md). The new feature defaults off and works independently of `CONFIG_MUSE_AVATAR_ANIMATIONS`; original still images and H.264 clips remain separate fallback sources. Do not enable Apps, camera or live voice merely to use a pixel sprite.
+
+The optional `devices/sdkconfig.muse-avatar-rendering` fragment enables avatar sync, pixel packs, white matting and software H.264 on a PSRAM-equipped S3/P4 UI board. CI builds that profile on the P4 3.5 and S3 1.75C, in addition to the unchanged default profiles. It contains no token or personal asset and does not select pixel style. To use only pixels, keep the smaller two-option fragment above.
 
 The native renderer/parser is `components/muse/muse_pixel_art.c`; the owner-bound cache/USB installer is `main/pixel_avatar.c`. The UI pins a model and its pose per render strip, so a concurrent asset/source change cannot free its palette or mix transforms halfway through a strip.
 
@@ -57,7 +59,7 @@ These are serial maintenance commands, not unauthenticated network endpoints:
 >pixel.abort
 ```
 
-`pixel` reports numeric pack/cache/upload counters and matching state, never pairing credentials. `pixel.on/off` persists the local appearance selection with readback. Select My Muse as the avatar source for the pixel pack; Built-in still selects the existing local procedural character. The speaker/mute button and existing captions, touch controls and volume gestures are unchanged.
+`pixel` reports numeric pack/cache/upload counters and matching state, never pairing credentials. `pixel.on/off` persists the local appearance selection with readback; normal rendering remains the default until explicitly enabled. Select My Muse as the avatar source for the pixel pack; Built-in still selects the existing local procedural character. Use `install --no-enable` to stage a pack without changing the current style. The helper preserves an exported A8 plane through compilation; `pixel.image_alpha` describes alpha availability and byte counts from the actual pinned image, while legacy `pixel.image` remains RGB-only. The speaker/mute button and existing captions, touch controls and volume gestures are unchanged.
 
 The installer bounds the entire pack to 64 KiB and every chunk to 600 bytes. It validates the paired owner, exact current avatar generation, palette/indices/alpha, dimensions, capability mask and CRCs before atomic file replacement. Incomplete/invalid candidates leave the previous good pack intact. Staging expires after 30 seconds without progress and abort releases its memory.
 
