@@ -174,7 +174,9 @@ static void restart_after(uint32_t ms, int why)
     esp_timer_start_once(s_restart_timer, (uint64_t)(ms ? ms : 1) * 1000);
 }
 static volatile bool s_set_up;   /* the gadget has been set up: Link setup left a proof key, or its marker */
+#if CONFIG_MUSE_GADGET_BLE_SMP
 static volatile bool s_smp_forgot;   /* Forget erased the token: no proof opens a firmware update until the restart */
+#endif
 static mg_capture_req_t s_capture;
 static volatile uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_handle[MG_CH_COUNT];
@@ -2138,8 +2140,10 @@ void mg_ble_proof_clear_done(bool erased)
         s_set_up = false;   /* the key and the marker are gone (a restart follows) */
         /* Forget ends the link's proof and the update's binding (mg-update-v2.json "Forget ends the binding", "...
          * the link's proof"): until the restart an update asks for the press; the wired console's arm stays. */
+#if CONFIG_MUSE_GADGET_BLE_SMP   /* without SMP there's no update to bind or open */
         s_smp_forgot = true;
         muse_local_press_forget();
+#endif
     } else {
         uint8_t k[MG_TOKEN_PROOF_KEY_LEN];   /* failed: what storage still says */
         s_set_up = (s_platform.proof_key && s_platform.proof_key(k)) || (s_platform.set_up && s_platform.set_up());

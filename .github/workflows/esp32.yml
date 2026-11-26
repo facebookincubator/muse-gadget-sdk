@@ -206,6 +206,10 @@ jobs:
           - board: muse-waveshare-s3-175c-gadget
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget"
+          # The same gadget without firmware updates over BLE (SMP off, as the ESP-Mosaico's default).
+          - board: muse-waveshare-s3-175c-gadget-nosmp
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-gadget-nosmp"
           # Lab and CI images: a BLE gadget profile with the bench overlay (MUSE_BENCH=1).
           - board: muse-waveshare-s3-175c-bench
             target: esp32s3
