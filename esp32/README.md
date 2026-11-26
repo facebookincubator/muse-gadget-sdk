@@ -583,6 +583,11 @@ The tests run on your computer, with no board attached:
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+To run each module in its own process under the freeze watchdog, as CI does, put
+`python3 tools/stuck_watch.py --` in front. A module that runs well past its usual
+time (1800 s until it has 5 passing runs on this computer) is stopped and
+reported as STUCK, with what it was waiting on, instead of hanging the run.
+
 Run `idf.py build` once first so the downloaded components are in place.
 The loopback proxy/TLS tests also use the OpenSSL CLI and development library
 (`openssl` with `pkg-config` on macOS; `openssl libssl-dev pkg-config` on Debian

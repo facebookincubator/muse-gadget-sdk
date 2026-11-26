@@ -66,7 +66,7 @@ jobs:
             set -e
             # test_noise_core links against the host PSA Crypto library.
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl ffmpeg
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl ffmpeg procps lsof
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
@@ -79,7 +79,10 @@ jobs:
             IDF_TARGET=esp32s3 idf.py -B build-host-wakeword -DSDKCONFIG=build-host-wakeword/sdkconfig \
               -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
               reconfigure
-            python -m unittest discover -s tests -p "test_*.py" -v
+            # One process per test module under the freeze watchdog: a module that hangs is stopped and
+            # reported as STUCK instead of holding the job until its timeout.
+            # A 900 s cap until a module has a typical time (CI keeps none), so a hang ends well inside the job timeout.
+            python tools/stuck_watch.py --cap 900 -- python -m unittest discover -s tests -p "test_*.py" -v
             cmake -S tests/avatar_webp -B build-host-avatar-webp -G Ninja
             cmake --build build-host-avatar-webp --parallel 2
             ctest --test-dir build-host-avatar-webp --output-on-failure
