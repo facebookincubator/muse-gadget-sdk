@@ -114,6 +114,17 @@ void muse_input_inject(unsigned events)
 }
 #endif
 static bool s_talk_down;
+/* Self-use tap-to-toggle (see talk_button()): a short talk press latches
+ * recording on instead of ending it; the next tap stops it. */
+#define TAP_TICKS pdMS_TO_TICKS(300)           /* a shorter press is a tap; matches muse_voice's 0.3 s MIN_HELD */
+#define TAP_LATCH_TICKS pdMS_TO_TICKS(20000)   /* a latch older than the 20 s record cap (MAX_SECS in muse_voice.c) died at the cap */
+static bool s_press_call_pending;   /* the current press posted a call-pending DOWN (stopwatch PTT call) */
+static bool s_tap_latched;
+static bool s_tap_swallow_release;
+static bool s_tap_session;
+static bool s_press_wake;
+static TickType_t s_press_tick;
+static TickType_t s_latch_tick;
 static int64_t s_talk_released_us;   /* when the talk control was last let go */
 #if CONFIG_MUSE_VOICE_NOTE_TOGGLE
 static atomic_bool s_note_toggled;   /* a toggled voice note is recording, talk released */
@@ -152,6 +163,10 @@ static volatile bool s_nap_now;   /* ">nap": asleep, as if on battery, nap witho
 
 static void post(muse_ptt_t type, bool wake)
 {
+    if (type == MUSE_PTT_DOWN) {
+        s_tap_session = false;   /* until a tap latches it, a press is a hold */
+        s_press_call_pending = muse_voice_ptt_enabled() && !muse_voice_in_call();
+    }
     muse_input_event_t ev = { .type = type, .wake = wake, .epoch = muse_input_call_epoch(),
                              .at_us = esp_timer_get_time() };
     bool pending = type == MUSE_PTT_DOWN && muse_voice_ptt_enabled() && !muse_voice_in_call();
@@ -341,6 +356,33 @@ static void aux_key(bool pressed, bool edge)
     }
 }
 
+bool muse_input_tap_session(void)
+{
+    return s_tap_session;
+}
+
+/* Release of a press that posted PTT_DOWN: a short press that did not wake
+ * us latches the recording on (tap-to-toggle) instead of ending it; the
+ * next tap ends it. A longer press keeps the original push-to-talk. */
+static void talk_release(void)
+{
+    /* The latch is for starting a note while idle: never in a call (a forced
+     * release there, e.g. power-off, must post the UP that ends the hold),
+     * never when a toggled note is recording (that press stops it), and never
+     * for a call-pending press (stopwatch PTT: each press owns its mark and
+     * its release posts the UP that pairs with it). */
+    if (!s_press_wake && !muse_voice_in_call() && !NOTE_TOGGLED()
+        && !s_press_call_pending
+        && xTaskGetTickCount() - s_press_tick < TAP_TICKS) {
+        s_tap_latched = true;
+        s_tap_session = true;
+        s_latch_tick = xTaskGetTickCount();
+        ESP_LOGI(TAG, "tap: recording latched on");
+    } else {
+        post(MUSE_PTT_UP, false);
+    }
+}
+
 /* Talk button: push-to-talk, or Select while the menu is open. Asleep, the
  * press wakes and is posted as a waking one: muse_voice records only if it's
  * still held once awake. A display-only board (no audio_init or mic_init)
@@ -357,20 +399,37 @@ static void talk_input(unsigned ev, bool can_confirm)
     /* A quick tap can latch press and release in the same poll, and a release
      * can land just before the next press; keep them ordered. */
     bool released = ev & MUSE_BTN_TALK_RELEASE;
-    if ((talk_down || swallow) && released) {
-        if (talk_down) {
-            post(MUSE_PTT_UP, false);
+    if ((talk_down || swallow || s_tap_swallow_release) && released) {
+        if (s_tap_swallow_release) {
+            s_tap_swallow_release = false;
+        } else if (talk_down) {
+            talk_release();
         }
         talk_down = swallow = false;
         released = false;
     }
-    if (!talk_down && !swallow && (ev & MUSE_BTN_TALK_PRESS)) {
+    bool press = (ev & MUSE_BTN_TALK_PRESS) != 0;
+    if (press && s_tap_latched
+        && xTaskGetTickCount() - s_latch_tick > TAP_LATCH_TICKS) {
+        s_tap_latched = false;   /* the latched session hit the record cap */
+    }
+    if (press && s_tap_latched) {
+        /* Second tap: end the latched recording (and send it). This
+         * press's release is swallowed when it arrives. */
+        s_tap_latched = false;
+        s_tap_swallow_release = true;
+        post(MUSE_PTT_UP, false);
+        press = false;
+    }
+    if (!talk_down && !swallow && press) {
         if (can_confirm && muse_link_confirm_press(s_talk_released_us)) {
             /* Confirmed a Muse app pairing (Link's setup button). */
             muse_state_poke();
             swallow = true;
         } else if (muse_state_asleep()) {
             set_asleep(false, muse_board->talk_button);
+            s_press_wake = true;
+            s_press_tick = xTaskGetTickCount();
             if (voice) {
                 post(MUSE_PTT_DOWN, true);
                 talk_down = true;
@@ -382,6 +441,8 @@ static void talk_input(unsigned ev, bool can_confirm)
             if (!muse_board->keyboard) muse_menu_key(MUSE_MENU_SELECT);
             swallow = true;
         } else if (voice) {
+            s_press_wake = false;
+            s_press_tick = xTaskGetTickCount();
             post(MUSE_PTT_DOWN, false);
             talk_down = true;
         } else {
@@ -389,9 +450,11 @@ static void talk_input(unsigned ev, bool can_confirm)
             swallow = true;
         }
     }
-    if ((talk_down || swallow) && released) {
-        if (talk_down) {
-            post(MUSE_PTT_UP, false);
+    if ((talk_down || swallow || s_tap_swallow_release) && released) {
+        if (s_tap_swallow_release) {
+            s_tap_swallow_release = false;
+        } else if (talk_down) {
+            talk_release();
         }
         talk_down = swallow = false;
     }

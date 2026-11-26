@@ -315,6 +315,15 @@ static bool muse_menu_is_open(void) { return false; }
 static void muse_menu_key(int key) { (void)key; }
 static bool s_talk_down;
 static int64_t s_talk_released_us;
+/* Tap-to-toggle state (muse_input.c, tap-to-toggle PR): this prelude is
+ * maintained with the input state it stands in for; talk_release is
+ * stubbed to the pre-latch behaviour (the latch itself is covered by
+ * the ptt_ui harness). */
+#define TAP_TICKS 300
+#define TAP_LATCH_TICKS 20000
+static bool s_tap_latched, s_tap_swallow_release, s_press_wake;
+static uint32_t s_press_tick, s_latch_tick;
+static void talk_release(void) { post(MUSE_PTT_UP, false); }
 ''' + talk + r'''
 #if CONFIG_MUSE_WATCHER_CAMERA
 static void watcher_camera_preview_toggle(void) { cameras++; }

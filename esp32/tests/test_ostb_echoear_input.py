@@ -66,6 +66,16 @@ static void post(int type, bool wake) { (void)wake; if (type==MUSE_PTT_DOWN) dow
 static bool s_touch_talk_down;
 static int swipe_updates;
 static void update_tileview_swipe(void) { swipe_updates++; }
+/* Tap-to-toggle state (muse_input.c, tap-to-toggle PR): this prelude is
+ * maintained with the input state it stands in for; talk_release is
+ * stubbed to the pre-latch behaviour (the latch itself is covered by
+ * the ptt_ui harness). */
+#define TAP_TICKS 300
+#define TAP_LATCH_TICKS 20000
+static bool s_tap_latched, s_tap_swallow_release, s_press_wake;
+static uint32_t s_press_tick, s_latch_tick;
+static uint32_t xTaskGetTickCount(void) { return 0; }
+static void talk_release(void) { post(MUSE_PTT_UP, false); }
 '''
         code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_input') + '\n' + function(source, 'talk_button')
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
