@@ -23,8 +23,22 @@ enum GadgetTab {
     static func connection(_ app: MainViewController, _ l: SettingsList) {
         l.header("Connection")
         l.row({ "Gadget" }, detail: { [weak app] in app?.connectionLine() ?? "" },
-              value: { [weak app] in app?.gadgetName() ?? "Choose" }, action: { [weak app] in app?.pick("device") })
-        l.toggle("Start automatically", detail: { "Stream as soon as the gadget connects, without waiting for its Phone camera view" },
+              value: { [weak app] in app?.gadgetOff == true ? "Not connected" : app?.gadgetName() ?? "Choose" },
+              action: { [weak app] in app?.pick("device") })
+        l.row({ [weak app] in "Disconnect " + (app?.gadgetName() ?? "the gadget") },
+              detail: { "Ends any stream, then stays disconnected until you connect or choose a gadget" },
+              action: { [weak app] in app?.disconnectGadget() })
+            .showIf { [weak app] in app?.gadgetOff == false }
+        l.row({ [weak app] in "Connect " + (app?.lastGadget() ?? "") }, detail: { "Connect to it again" },
+              action: { [weak app] in app?.connectLast() })
+            .showIf { [weak app] in app?.gadgetOff == true && app?.lastGadget() != nil }
+        l.row({ "Choose a gadget" }, detail: { "The gadgets nearby, to connect to one" },
+              action: { [weak app] in app?.pick("device") })
+            .showIf { [weak app] in app?.gadgetOff == true }
+        l.row({ [weak app] in "Forget " + ((app?.gadgetOff == true ? app?.lastGadget() : app?.gadgetName()) ?? "") + "…" },
+              detail: { "Disconnect and forget it" }, action: { [weak app] in app?.forgetGadget() })
+            .showIf { [weak app] in (app?.gadgetOff == true ? app?.lastGadget() : app?.gadgetName()) != nil }
+        l.toggle("Start automatically", detail: { "Stream as soon as the gadget connects (over BLE, once it proves its key; over Wi-Fi, only the connection it is turned on for), without waiting for its Phone camera view" },
                  isOn: { [weak app] in app?.autoStart() ?? false }, set: { [weak app] on in app?.setAutoStart(on) })
     }
 

@@ -52,7 +52,16 @@ enum Tabs {
             .add(VideoTab.camera)
             .add(VideoTab.encoding)
             .add(VideoTab.advanced))
+        tabs.append(Tab("UI", symbol: "rectangle.on.rectangle.circle").live { [weak app] in app?.ui.streamer != nil }
+            .add(UiTab.stream)           /* web pages and the screen at the gadget's size */
+            .add(UiTab.webPage)
+            .add(UiTab.mirror)
+            .add(UiTab.hid))
+        tabs.append(Tab("Audio", symbol: "speaker.wave.2").live { [weak app] in app?.toneOn() ?? false }   /* musegadgets BLE */
+            .add(BleTab.playback)
+            .add(BleTab.mic))
         tabs.append(Tab("Gadget", symbol: "applewatch")
+            .add(BleTab.link)            /* Wi-Fi or Bluetooth LE */
             .add(GadgetTab.connection)
             .add(GadgetTab.reports)
             .add(GadgetTab.about))

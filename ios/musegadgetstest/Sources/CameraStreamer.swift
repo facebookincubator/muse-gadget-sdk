@@ -52,6 +52,14 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     /* "x264" (X264), "vp8" (Vpx) or nil: the phone's encoder (VTH264). */
     var swEncoder: String?
     var swPreset = "fast", swParams: String?
+    /* The largest access unit the gadget's ring takes (half its buffer, less
+     * the frame header); 0: no cap. x264 holds frames under it with its VBV
+     * (sized for vbvCeilKbps, the adaptive bitrate's ceiling) and re-encodes
+     * a keyframe coarser if it still overshoots; a delta frame that does is
+     * dropped and the next is a keyframe. VideoToolbox can't re-encode: a
+     * frame over the cap is dropped, a keyframe there lowers the bitrate. */
+    var maxFrameBytes = 0, vbvCeilKbps = 0
+    var statOversize = 0
     /* Two bands, each its own encoder; the top band's share of the height, %. */
     var bands = 1
     var bandSplitPct = 50
@@ -86,6 +94,14 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var geomKey = 0
     private var cropX = 0, cropY = 0, cropSide = 0
     private var patternFrame = 0
+    /* Development builds, -dumph264 YES: the first 300 encoded frames to Documents/stream.h264. */
+    private lazy var dump: FileHandle? = {
+        guard Extras.devBuild, Extras.bool("dumph264", false) else { return nil }
+        let u = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("stream.h264")
+        FileManager.default.createFile(atPath: u.path, contents: nil)
+        return try? FileHandle(forWritingTo: u)
+    }()
+    private var dumped = 0
 
     init(sink: CameraSink) {
         self.sink = sink
@@ -177,6 +193,30 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         return p
     }
 
+    /* Tiny-RAM gadgets decode in place with a few spare rows (e.g. 64 at 112 px), so a
+     * motion vector reaching far up is refused: up to 44 px vertically for a ring under 16 KB. */
+    static func withSmallMvRange(_ params: String?, maxFrame: Int) -> String? {
+        if maxFrame <= 0 || maxFrame >= 16384 || (params?.contains("mvrange") ?? false) {
+            return params
+        }
+        return (params.map { $0.isEmpty ? "" : $0 + ":" } ?? "") + "mvrange=44"
+    }
+
+    /* x264's VBV for a gadget whose ring takes at most maxFrame bytes a frame: a buffer of
+     * maxFrame at the highest bitrate it runs at (it keeps its length in ms when the bitrate
+     * changes), up to the usual 200 ms. */
+    static func withVbvCap(_ p0: String?, maxFrame: Int, ceilKbps: Int) -> String? {
+        let params = withSmallMvRange(p0, maxFrame: maxFrame)
+        if maxFrame <= 0 || ceilKbps <= 0 || (params?.contains("vbv-") ?? false) {
+            return params
+        }
+        let ms = max(20, min(200, maxFrame * 8 / ceilKbps))
+        if ms >= 200 {
+            return params
+        }
+        return (params.map { $0.isEmpty ? "" : $0 + ":" } ?? "") + "vbv-ms=\(ms)"
+    }
+
     /*
      * VP8 settings for a picture this wide, unless params names its own:
      * libvpx's good mode with no lag, version 1, no loop filter, one thread;
@@ -202,7 +242,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             let h0 = two ? max(16, min(outH - 16, (outH * bandSplitPct / 100 + 8) / 16 * 16)) : outH
             band0Rows = h0
             let k0 = two ? kbps * h0 / outH : kbps
-            let params = vp8 ? Self.vp8Params(swParams, width: outW) : Self.withMvCheap(swParams, width: outW)
+            let params = vp8 ? Self.vp8Params(swParams, width: outW)
+                : Self.withVbvCap(Self.withMvCheap(swParams, width: outW), maxFrame: maxFrameBytes, ceilKbps: max(kbps, vbvCeilKbps))
             func open(_ h: Int, _ k: Int) -> SwEncoder? {
                 vp8 ? Vpx(w: outW, h: h, fps: fps, kbps: k, params: params)
                     : X264(w: outW, h: h, fps: fps, kbps: k, preset: swPreset, params: params)
@@ -225,6 +266,21 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             self.inflightLock.lock()
             let ts = self.inflight.removeValue(forKey: idx)
             self.inflightLock.unlock()
+            let cap = self.maxFrameBytes
+            if cap > 0 && au.count > cap {
+                /* Over the gadget's ring: VideoToolbox can't redo it. Drop it, ask for a
+                 * keyframe, and after a keyframe that didn't fit, a lower bitrate. */
+                self.statOversize += 1
+                if key {
+                    let k = max(16, self.kbps * 3 / 4)
+                    mlog("keyframe \(au.count) B over the gadget's \(cap) B: dropped, \(self.kbps) -> \(k) kb/s")
+                    self.setBitrate(k)
+                } else {
+                    mlog("frame \(au.count) B over the gadget's \(cap) B: dropped")
+                }
+                self.requestKeyframe()
+                return
+            }
             self.emit(au, key: key, capNs: ts?.0 ?? 0, convNs: ts?.1 ?? nowNs())
         }) else {
             throw NSError(domain: "MuseCam", code: 3, userInfo: [NSLocalizedDescriptionKey: "no H.264 encoder"])
@@ -244,6 +300,10 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         statEncUs += (now - convNs) / 1000
         meter?.captured(frameNo, captureNs: capNs > 0 ? capNs : convNs, encodedNs: now)
+        if let d = dump, dumped < 300 {
+            d.write(au)   /* -dumph264 YES: the stream as encoded (Annex B), for bitstream checks */
+            dumped += 1
+        }
         let fr = VideoFrame.make(au, number: frameNo, key: key)
         frameNo += 1
         statEncoded += 1
@@ -318,9 +378,44 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             out = (au, a0.key && a1.key, (a0.qp + a1.qp) / 2)
         } else {
             out = pic.withUnsafeBufferPointer { s0.encode($0.baseAddress!, pts: Int64(statFed), key: idr) }
+            let cap = maxFrameBytes
+            if cap > 0, let o = out, o.data.count > cap, let x = s0 as? X264 {
+                statOversize += 1
+                var r: (data: Data, key: Bool, qp: Int)? = o
+                if o.key {
+                    /* A keyframe over the gadget's ring: again, coarser, until it fits. */
+                    var qp = max(o.qp, 20)
+                    while let c = r, c.data.count > cap, qp < 51 {
+                        qp = min(51, qp + 6)
+                        r = pic.withUnsafeBufferPointer { x.encodeQp($0.baseAddress!, pts: Int64(statFed), key: true, qp: qp) }
+                    }
+                    mlog("keyframe over \(cap) B: QP \(qp), \(r?.data.count ?? 0) B")
+                }
+                if let c = r, c.data.count > cap {
+                    mlog("frame \(c.data.count) B over the gadget's \(cap) B: dropped, a keyframe next")
+                    r = nil
+                    swKey = true
+                }
+                out = r
+            }
         }
         statFed += 1
         guard let o = out, !o.data.isEmpty else { return }
+        let cap = maxFrameBytes
+        if cap > 0 && o.data.count > cap {
+            /* VP8 or two bands, past the gadget's ring: dropped, a keyframe next, and after a
+             * keyframe that didn't fit a lower bitrate, as on VideoToolbox. */
+            statOversize += 1
+            if o.key {
+                let k = max(16, kbps * 3 / 4)
+                mlog("keyframe \(o.data.count) B over the gadget's \(cap) B: dropped, \(kbps) -> \(k) kb/s")
+                setBitrate(k)
+            } else {
+                mlog("frame \(o.data.count) B over the gadget's \(cap) B: dropped, a keyframe next")
+            }
+            swKey = true
+            return
+        }
         statQpSum += o.qp
         statQpN += 1
         emit(o.data, key: o.key, capNs: capNs, convNs: convNs)
@@ -455,7 +550,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             cropSide = min(w, h) & ~1
             cropX = ((w - cropSide) / 2) & ~1
             cropY = ((h - cropSide) / 2) & ~1
-            if panelFilter {
+            /* the chroma scaler works at half of each: both at least a macroblock (a 2x2 report would trap it) */
+            if panelFilter && panelPx >= Caps.minPanel && outW >= Caps.minPanel {
                 let t0 = nowMs()
                 scY = PanelScaler(nIn: cropSide, nOut: outW, panel: panelPx, lambda: 0.2, halfTaps: 3)
                 scC = PanelScaler(nIn: cropSide / 2, nOut: outW / 2, panel: panelPx / 2, lambda: 0.2, halfTaps: 3)

@@ -28,6 +28,7 @@ final class LatencyMeter {
     private var sentNs = [Int64](repeating: 0, count: n)
     private var gen = [Int](repeating: -1, count: n)
     private var lastShown = -1
+    private var lastShownNs: Int64 = 0
     private var lat: [Int64] = [], enc: [Int64] = [], queue: [Int64] = [], air: [Int64] = []
     private let lock = NSLock()
     var perFrame = false
@@ -58,6 +59,7 @@ final class LatencyMeter {
             return
         }
         lastShown = num
+        lastShownNs = rxNs
         let i = num & (Self.n - 1)
         if gen[i] != num || capNs[i] == 0 || lat.count >= 512 {
             return
@@ -70,6 +72,13 @@ final class LatencyMeter {
         if perFrame {
             mlog("lf \(num) \(lat.last! / 1000) \(enc.last! / 1000) \(queue.last! / 1000) \(air.last! / 1000)")
         }
+    }
+
+    /* The last frame the gadget reported drawn, and when that report came (-1: none yet). */
+    func lastShownFrame() -> (Int, Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (lastShown, lastShownNs)
     }
 
     private static func pct(_ a: [Int64], _ p: Int) -> Int64 {

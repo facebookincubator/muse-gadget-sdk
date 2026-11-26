@@ -46,6 +46,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
+    /* The gadget's link only in the foreground (MainViewController.appBackground). */
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        main.appBackground()
+    }
+
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        main.appForeground()
+    }
+
     /* musegadgetstest://pick/<what> (or the old musegadgetscamera://) does what tapping
      * it does, as Android's --es pick
      * (xcrun devicectl device process launch --payload-url ...). */

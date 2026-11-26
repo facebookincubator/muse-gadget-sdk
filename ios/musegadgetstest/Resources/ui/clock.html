@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!-- Muse Gadgets Test UI demo: a clock. One change a second (the second hand
+     and the digits), so the gadget gets about one small frame a second.
+     Tap anywhere to switch between analog and digital. -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
+    font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; }
+  #wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  svg { width: 100vmin; height: 100vmin; }
+  #digital { display: none; text-align: center; }
+  #time { font-size: 22vmin; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  #date { font-size: 7vmin; color: #9ab; margin-top: 2vmin; }
+</style></head>
+<body>
+<div id="wrap">
+  <svg id="analog" viewBox="-100 -100 200 200">
+    <circle r="96" fill="#111" stroke="#334" stroke-width="2"/>
+    <g id="ticks"></g>
+    <text id="day" x="0" y="42" fill="#9ab" font-size="13" text-anchor="middle"></text>
+    <line id="h" y2="-48" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+    <line id="m" y2="-72" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+    <line id="s" y1="14" y2="-80" stroke="#f60" stroke-width="2" stroke-linecap="round"/>
+    <circle r="5" fill="#f60"/>
+  </svg>
+  <div id="digital"><div id="time"></div><div id="date"></div></div>
+</div>
+<script>
+  const ticks = document.getElementById('ticks');
+  for (let i = 0; i < 60; i++) {
+    const big = i % 5 === 0, a = i * Math.PI / 30, r1 = big ? 78 : 86, r2 = 92;
+    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('x1', r1 * Math.sin(a)); l.setAttribute('y1', -r1 * Math.cos(a));
+    l.setAttribute('x2', r2 * Math.sin(a)); l.setAttribute('y2', -r2 * Math.cos(a));
+    l.setAttribute('stroke', big ? '#fff' : '#556'); l.setAttribute('stroke-width', big ? 3 : 1);
+    ticks.appendChild(l);
+  }
+  const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  function rot(id, deg) { document.getElementById(id).setAttribute('transform', 'rotate(' + deg + ')'); }
+  function draw() {
+    const d = new Date(), h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
+    rot('h', (h % 12) * 30 + m / 2); rot('m', m * 6); rot('s', s * 6);
+    document.getElementById('day').textContent = days[d.getDay()] + ' ' + d.getDate();
+    const hh = ((h + 11) % 12) + 1;
+    document.getElementById('time').textContent = hh + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    document.getElementById('date').textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    setTimeout(draw, 1000 - d.getMilliseconds() + 5);
+  }
+  draw();
+  let analog = true;
+  document.body.addEventListener('click', () => {
+    analog = !analog;
+    document.getElementById('analog').style.display = analog ? '' : 'none';
+    document.getElementById('digital').style.display = analog ? 'none' : 'block';
+  });
+</script>
+</body></html>

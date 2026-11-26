@@ -69,3 +69,4 @@ test_mg_codecs
 test_ghash32
 test_secure_random
 test_token_logs
+test_redact

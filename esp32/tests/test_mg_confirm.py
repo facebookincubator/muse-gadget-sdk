@@ -135,6 +135,49 @@ class MgConfirmTest(unittest.TestCase):
             self.assertNotIn(fake[i:i + 6].encode(), text)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_an_existing_log_is_made_private(self) -> None:
+        # O_CREAT's 0600 applies only to a new file; a log left world-readable is tightened too.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "console.log"
+        path.write_bytes(b"old\n")
+        path.chmod(0o644)
+        mg_confirm.Console(self.port, str(path)).close()
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.read_bytes(), b"old\n")
+
+    def test_a_port_at_end_of_file_is_reopened(self) -> None:
+        # A read of 0 bytes is the port's end of file (it hung up): the descriptor is dropped and the next read
+        # opens the port again, not reading a dead descriptor forever.
+        console = mg_confirm.Console(self.port)
+        self.addCleanup(console.close)
+        reads = iter([b""])
+        real_read = os.read
+
+        def fake_read(fd, n):
+            try:
+                return next(reads)
+            except StopIteration:
+                return real_read(fd, n)
+
+        self.assertTrue(console._open())
+        first = console.fd
+        orig = mg_confirm.os.read
+        mg_confirm.os.read = fake_read
+        try:
+            self.assertEqual(console.read_lines(0.0), [])
+            self.assertIsNone(console.fd)
+            os.write(self.master, b"after\n")
+            got = []
+            end = time.monotonic() + 2.0
+            while not got and time.monotonic() < end:
+                got = console.read_lines(0.01)
+        finally:
+            mg_confirm.os.read = orig
+        self.assertEqual(got, [b"after"])
+        self.assertIsNotNone(console.fd)
+        self.assertNotEqual(first, None)
+
 
 class FirmwareContractTest(unittest.TestCase):
     """Both SDKs print the same marker and take the same line, and the command is the
@@ -145,7 +188,8 @@ class FirmwareContractTest(unittest.TestCase):
         body = re.search(r'if \(!strcmp\(line, "pair\.confirm"\)\) \{(.*?)\n    \}', src, re.S)
         self.assertIsNotNone(body, "muse_input.c takes >pair.confirm")
         self.assertIn("muse_link_bench_confirm()", body.group(1))
-        # The bench's confirmation is the talk button's setup press (or a re-setup's hold).
+        # The bench's confirmation is the talk button's setup press (test and bench builds are always in setup mode,
+        # so it confirms a re-setup too).
         link = (ROOT / "components" / "muse" / "muse_link.c").read_text()
         bench = re.search(r"bool muse_link_bench_confirm\(void\)\n\{(.*?)\n\}", link, re.S)
         self.assertIsNotNone(bench)

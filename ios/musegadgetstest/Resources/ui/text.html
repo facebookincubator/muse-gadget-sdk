@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!-- Muse Gadgets Test UI demo: a page of text that never changes on its own,
+     for legibility and for what a still picture costs (nothing, once it has
+     sharpened). Drag to scroll. -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; background: #fff; color: #111;
+    font-family: Georgia, "Times New Roman", serif; }
+  article { padding: 16vmin 15vmin 30vmin; font-size: 4.4vmin; line-height: 1.38; }
+  h1 { font-family: -apple-system, Roboto, Arial, sans-serif; font-size: 6.4vmin; margin: 0 0 2vmin; text-align: center; }
+  .by { font-family: -apple-system, Roboto, Arial, sans-serif; font-size: 3.4vmin; color: #666; text-align: center; margin-bottom: 3vmin; }
+</style></head>
+<body><article>
+<h1>How a phone talks to a watch</h1>
+<div class="by">A short read · 3 min</div>
+<p>Bluetooth Low Energy sends data in short bursts called connection events. The phone and the gadget agree on an interval, often 15 milliseconds, and wake together at each event to swap a few packets before going back to sleep.</p>
+<p>Each packet carries at most 251 bytes, and a fast link fits several packets into one event. That is how a stream of a few hundred kilobits per second fits through a radio that spends most of its time asleep.</p>
+<p>When nothing changes on the screen, nothing needs to be sent at all. The gadget keeps its last picture on the panel, and the radio can skip events until there is news.</p>
+<p>When something does change, only the difference travels: a ticking second hand costs about a kilobyte, a whole new page a few dozen.</p>
+</article></body></html>

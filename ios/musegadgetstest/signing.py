@@ -109,6 +109,13 @@ Or pass a profile with PROFILE=path/to/profile.mobileprovision.
         "com.apple.developer.team-identifier": team,
         "get-task-allow": True,
     }
+    # The app and its broadcast extension share settings in a keychain group
+    # (no app groups needed), where the profile's keychain groups allow it.
+    groups = p.get("Entitlements", {}).get("keychain-access-groups", [])
+    shared = f"{prefix}.musegadgets.shared"
+    if any(g == shared or (g.endswith("*") and shared.startswith(g[:-1])) for g in groups):
+        app_group = f"{prefix}.{bundle[:-len('.broadcast')] if bundle.endswith('.broadcast') else bundle}"
+        ent["keychain-access-groups"] = [f"{prefix}.{bundle}", shared] if app_group == f"{prefix}.{bundle}" else [app_group, shared]
     with open(os.path.join(out, "app.entitlements"), "wb") as f:
         plistlib.dump(ent, f)
     sys.stderr.write(f"signing as {ids[sha]} with profile \"{p.get('Name')}\" (team {p.get('TeamName', team)})\n")

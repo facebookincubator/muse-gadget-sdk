@@ -23,7 +23,9 @@
     python3 tools/mg_confirm.py PORT --now            confirm the setup waiting right now
 
 Setup over Muse Link (protocols/README.md, Gadget setup over Muse Link) waits
-for a press of the gadget's button after confirm_required. On a test rig
+for one press of the gadget's button or one tap on its Confirm after
+confirm_required (a set-up gadget's re-setup never by the talk key outside its
+setup mode). On a test rig
 nobody is there to press it, so the firmware takes the press over the USB
 serial console:
 
@@ -34,7 +36,7 @@ serial console:
 
 Both print "@pair.pending" when a confirmation starts waiting, and answer
 ">pair.confirm" with "@pair.confirm confirmed", or "@pair.confirm none" if
-nothing was waiting (never push-to-talk). A shipping ESP32 build answers
+nothing was waiting (never push-to-talk). A release build of either answers
 "@pair.confirm disabled": only the button confirms there. The console is the USB cable, so
 this asks for the same physical access as the button.
 
@@ -69,7 +71,8 @@ class ConfirmDisabled(RuntimeError):
 
     def __init__(self):
         super().__init__("this build doesn't confirm setup over the console (\"@pair.confirm disabled\"): "
-                         "build it with MUSE_BENCH=1 (CONFIG_MUSE_PAIR_CONFIRM_CONSOLE), or press the button")
+                         "build it for the bench (ESP32: MUSE_BENCH=1, CONFIG_MUSE_PAIR_CONFIRM_CONSOLE; Zephyr: "
+                         "overlay-bench.conf, CONFIG_MG_AUTOMATION), or confirm on the gadget")
 
 
 class Console:

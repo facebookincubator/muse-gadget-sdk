@@ -130,6 +130,14 @@ jobs:
       - name: Test
         run: ctest --test-dir build/simulator --output-on-failure
 
+      # The Muse Gadgets test apps' protocol code (capabilities, the token proof), on the
+      # desktop JVM and as a macOS executable: the runner has the Android SDK, a JDK and Swift.
+      - name: Test app host tests
+        if: matrix.name == 'macOS (Apple silicon)'
+        run: |
+          android/musegadgetstest/tests/run.sh
+          ios/musegadgetstest/tests/run.sh
+
   build:
     name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
