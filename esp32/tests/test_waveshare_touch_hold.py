@@ -71,6 +71,7 @@ static int talk_downs, talk_ups;
 __attribute__((unused)) static bool muse_touch_real(void) { return real; }
 __attribute__((unused)) static bool muse_input_talk_ok(bool r) { return no_person || r; }
 __attribute__((unused)) static void muse_input_touch_talk(bool down) { down ? talk_downs++ : talk_ups++; }
+__attribute__((unused)) static void muse_input_touch_down(void) {}   /* the prompt rule: test_pairing_fresh_press */
 %(poll)s
 static unsigned step(TickType_t ms) { now += ms; return poll_buttons(); }
 static void hold_talks(void) {

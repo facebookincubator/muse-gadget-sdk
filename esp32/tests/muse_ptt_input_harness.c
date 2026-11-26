@@ -83,7 +83,8 @@ bool muse_settings_sleep_when_charged(void) { return sleep_when_charged; }
 void muse_ble_status(muse_ble_status_t *p) { memset(p,0,sizeof(*p)); }
 muse_link_state_t muse_link_state(void) { return MUSE_LINK_ONLINE; }
 bool muse_link_talk_press(void) { return pairing; }
-bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return pairing; }
+bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq) { (void)released_us; (void)down_seq; return pairing; }
+uint32_t muse_link_prompt_seq(void) { return 0; }   /* the press-before-the-prompt rule: test_pairing_fresh_press */
 bool muse_menu_is_open(void) { return menu; }
 /* The passcode lock: unlocked unless a scenario locks it. lapse_due: "After 5 min" lapsed in the dark, applied at
  * the next press (muse_passcode_locked_at_press) or the UI's tick. */

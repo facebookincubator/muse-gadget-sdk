@@ -298,8 +298,11 @@ __attribute__((unused)) static bool muse_passcode_locked_at_press(void) { return
 enum { MUSE_PASS_WHY_TALK };
 static void muse_passcode_request_keypad(int why) { (void)why; }
 /* `confirm`: the next press confirms; `armed`: a pairing prompt waits for a press. */
-static bool muse_link_confirm_press(int64_t released_us) {
+static uint32_t s_down_seq;   /* the press-before-the-prompt rule: test_pairing_fresh_press */
+static uint32_t muse_link_prompt_seq(void) { return 0; }
+static bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq) {
     (void)released_us;
+    (void)down_seq;
     bool c = confirm || armed;
     confirm = armed = false;
     confirmations += c;

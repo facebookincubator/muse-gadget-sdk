@@ -409,8 +409,10 @@ static bool touch_confirms(void)
 }
 
 static atomic_bool s_ask_shown;   /* the update card asks and is on show (no video over it, the screen lit) */
-/* This touch went down on Confirm (its PRESSED), as a real touch where one is needed; a PRESS_LOST clears it. */
+/* This touch went down on Confirm (its PRESSED), as a real touch where one is needed; a PRESS_LOST clears it. And
+ * the setup prompt's showing then (muse_link_prompt_seq): a touch down before it armed never confirms it. */
 static bool s_ok_down;
+static uint32_t s_ok_seq;
 
 /* Confirm takes a tap, on either card: a press on the control and its release on it too (its hit area). A press
  * that slides off before it lifts, a swipe that starts on it, confirms nothing. */
@@ -427,6 +429,7 @@ static void on_pair_ok(lv_event_t *e)
             s_ok_down = false;   /* down while the update card wasn't on show: its tap isn't the update's */
         }
 #endif
+        s_ok_seq = muse_link_prompt_seq();
         return;
     }
     bool down = s_ok_down;
@@ -455,7 +458,7 @@ static void on_pair_ok(lv_event_t *e)
         return;   /* the update holds the card (drawn at the next chrome tick): no re-setup confirms under it */
     }
 #endif
-    if (s_pair_ok == PAIR_OK_SETUP) {
+    if (s_pair_ok == PAIR_OK_SETUP && s_ok_seq == muse_link_prompt_seq()) {
         (void)muse_link_confirm_key_press();   /* one tap on Confirm pairs, a first setup or a re-setup */
     }
 }
@@ -3086,6 +3089,9 @@ static void update_chrome(float now)
     covered |= muse_video_is_open();
 #endif
     atomic_store(&s_ask_shown, ask && !covered && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
+    if (confirm && !upd && !let_go && !covered && !lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN)) {
+        muse_link_prompt_shown();   /* the setup prompt is on show: it arms (a press from now on may confirm it) */
+    }
 
     bool speaker = muse_settings_speaker_on();   /* also set from settings, the phone and serial */
     if (s_speaker && (int)speaker != s_shown_speaker) {
@@ -3820,6 +3826,7 @@ static void frame_tick(lv_timer_t *timer)
 
 esp_err_t muse_ui_start(void)
 {
+    muse_link_set_prompt_ui();   /* the pairing card draws Link's prompt: each one arms at its first showing */
     s_w = muse_board->width;
     s_h = muse_board->height;
     /* The full layout assumes room for the 466 px board's header and bottom

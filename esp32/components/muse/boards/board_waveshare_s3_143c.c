@@ -465,6 +465,7 @@ static unsigned poll_buttons(void)
         tp_down = true;
         tp_on_face = muse_ui_face_active();
         tp_press_tick = xTaskGetTickCount();
+        muse_input_touch_down();   /* a hold it reports later went down here */
         tp_talking = false;
         tp_real = muse_touch_real();
     } else if (!pressed && tp_down) {

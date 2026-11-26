@@ -15,6 +15,7 @@
  */
 
 #include "muse_link.h"
+#include <stdatomic.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -36,14 +37,51 @@ void muse_link_register(const muse_link_ops_t *ops)
     s_ops = ops;
 }
 
+/* The prompt's showings (muse_link_prompt_seq), whether the one now up is armed (on show), and whether a screen
+ * draws it (muse_link_set_prompt_ui: it arms at its first showing, muse_link_prompt_shown). */
+static atomic_uint s_prompt_seq;
+static atomic_bool s_prompt_armed, s_prompt_ui;
+
+static void arm(void)
+{
+    atomic_fetch_add(&s_prompt_seq, 1);   /* a press down before this is older */
+    atomic_store(&s_prompt_armed, true);
+}
+
 void muse_link_set_state(muse_link_state_t state)
 {
     if (state != s_state) {
         s_state = state;
         if (state == MUSE_LINK_CONFIRM) {
+            atomic_store(&s_prompt_armed, false);
+            if (!atomic_load(&s_prompt_ui)) {
+                arm();   /* no screen draws it: armed as it comes */
+            }
             muse_state_poke();      /* keep the screen awake for the prompt */
         }
     }
+}
+
+void muse_link_set_prompt_ui(void)
+{
+    atomic_store(&s_prompt_ui, true);
+}
+
+void muse_link_prompt_shown(void)
+{
+    if (s_state == MUSE_LINK_CONFIRM && !atomic_load(&s_prompt_armed)) {
+        arm();
+    }
+}
+
+uint32_t muse_link_prompt_seq(void)
+{
+    return atomic_load(&s_prompt_seq);
+}
+
+bool muse_link_prompt_armed(void)
+{
+    return atomic_load(&s_prompt_armed);
 }
 
 muse_link_state_t muse_link_state(void)
@@ -120,28 +158,35 @@ bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *v
  * task's poll), so a press reported now began less than this long ago. */
 #define CONFIRM_SETTLE_US (250 * 1000)
 
-static bool press(int64_t released_us, bool talk_key)
+static bool press(int64_t released_us, bool talk_key, uint32_t down_seq)
 {
     if (!s_ops || !s_ops->talk_press) {
         return false;
+    }
+    if (muse_link_state() == MUSE_LINK_CONFIRM && (!muse_link_prompt_armed() || down_seq != muse_link_prompt_seq())) {
+        ESP_LOGI(TAG, "a press that went down before the pairing prompt showed: it confirms nothing");
+        if (muse_state_asleep()) {
+            muse_state_set_asleep(false);   /* a dark screen wakes to show it: the next press confirms */
+        }
+        return true;   /* the prompt's, never a talk turn */
     }
     int64_t after = esp_timer_get_time() - CONFIRM_SETTLE_US;
     return s_ops->talk_press(released_us > after ? released_us : after, talk_key);
 }
 
-bool muse_link_confirm_press(int64_t released_us)
+bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq)
 {
-    return press(released_us, true);
+    return press(released_us, true, down_seq);
 }
 
 bool muse_link_talk_press(void)
 {
-    return press(0, true);
+    return press(0, true, muse_link_prompt_seq());
 }
 
 bool muse_link_confirm_key_press(void)
 {
-    return press(0, false);
+    return press(0, false, muse_link_prompt_seq());   /* at the key's or the Confirm disc's own down */
 }
 
 bool muse_link_confirm_dismiss(void)

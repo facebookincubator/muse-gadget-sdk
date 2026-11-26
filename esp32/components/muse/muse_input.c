@@ -122,6 +122,10 @@
 #endif
 
 static atomic_uint s_touch_talk_events;
+/* The pairing prompt's showing (muse_link_prompt_seq) at the last touch-down, and at the down of the talk press being
+ * handled (input task): a press that went down before the prompt up now showed never confirms it. */
+static atomic_uint s_touch_down_seq;
+static uint32_t s_down_seq;
 /* The console's key=: a press of a board button, as poll_buttons reports it
  * (its release comes a poll later). Never a hold: a power key's long press
  * (power off) can't come from here. */
@@ -192,8 +196,16 @@ void muse_input_press(muse_press_t src)
     }
 }
 
+void muse_input_touch_down(void)
+{
+    atomic_store(&s_touch_down_seq, muse_link_prompt_seq());
+}
+
 void muse_input_touch_talk(bool pressed)
 {
+    if (pressed) {
+        muse_input_touch_down();   /* called at the touch-down */
+    }
     atomic_fetch_or(&s_touch_talk_events, pressed ? MUSE_BTN_TALK_PRESS : MUSE_BTN_TALK_RELEASE);
 }
 
@@ -288,6 +300,9 @@ static bool (*s_console_hook)(const char *line);
 #if CONFIG_MUSE_MIRROR
 void muse_input_inject(unsigned events)
 {
+    if (events & MUSE_BTN_TALK_PRESS) {
+        muse_input_touch_down();
+    }
     atomic_fetch_or(&s_touch_talk_events, events);
     if (s_input) xTaskNotifyGive(s_input);
 }
@@ -574,7 +589,7 @@ static void aux_key(bool pressed, bool edge)
  * runs no voice task to take presses off the queue, so there the press only
  * wakes, selects or confirms pairing. One press confirms a pairing prompt, a
  * first setup's or a re-setup's, whatever the press (the key's own, a held
- * one, the bench's) and whenever it began. */
+ * one, the bench's), if it went down after the prompt showed (s_down_seq). */
 static void talk_input(unsigned ev)
 {
     bool talk_down = s_talk_down;
@@ -591,7 +606,7 @@ static void talk_input(unsigned ev)
         released = false;
     }
     if (!talk_down && !swallow && (ev & MUSE_BTN_TALK_PRESS)) {
-        if (muse_link_confirm_press(s_talk_released_us)) {
+        if (muse_link_confirm_press(s_talk_released_us, s_down_seq)) {
             /* Confirmed a Muse app pairing (Link's setup button). */
             muse_state_poke();
             swallow = true;
@@ -745,7 +760,7 @@ static void watcher_buttons(unsigned ev)
     if (down && !wheel.down) {
         press_us = esp_timer_get_time();
     }
-    bool confirmed = down && !wheel.down && muse_link_confirm_press(s_talk_released_us);   /* one press, any press */
+    bool confirmed = down && !wheel.down && muse_link_confirm_press(s_talk_released_us, muse_link_prompt_seq());   /* one press, any press */
     bool asleep = muse_state_asleep();
     uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 #if CONFIG_MUSE_WATCHER_CAMERA
@@ -1187,7 +1202,7 @@ static unsigned talk_key_filter(unsigned ev)
     }
     if (ev & MUSE_BTN_TALK_PRESS) {
         muse_state_poke();
-        if (muse_link_confirm_press(s_talk_released_us)) {
+        if (muse_link_confirm_press(s_talk_released_us, s_down_seq)) {
             /* confirmed a Muse app pairing: one press */
         } else if (muse_state_asleep()) {
             set_asleep(false, muse_board->talk_button);
@@ -1396,7 +1411,10 @@ static unsigned update_prompt_press(unsigned phys)
                                  { MUSE_BTN_AUX_PRESS, MUSE_BTN_AUX_RELEASE },
                                  { MUSE_BTN_ENTER, 0 } };
     for (unsigned k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
-        if ((phys & keys[k][0]) && muse_local_press_prompting()
+        /* A key's own press, at its edge; never a finger held on the face (MUSE_BTN_TALK_HELD, reported long after it
+         * went down). */
+        bool face = k == 0 && (phys & MUSE_BTN_TALK_HELD);
+        if ((phys & keys[k][0]) && !face && muse_local_press_prompting()
             && muse_local_press_note("a press of the gadget's own key on the update prompt")) {
             phys &= ~keys[k][0];
             held |= keys[k][1];
@@ -1430,7 +1448,15 @@ static void input_task(void *arg)
             muse_input_press(MUSE_PRESS_KEY);   /* the talk key's own press (never the bench's below) */
         }
         unsigned keys = own | bench_talk();
-        unsigned ev = talk_key_filter(keys) | atomic_exchange(&s_touch_talk_events, 0);
+        /* Where each talk press went down (s_down_seq): a key's here, at its edge; a hold on the face, and a
+         * touch's, at its touch-down. */
+        s_down_seq = (keys & MUSE_BTN_TALK_HELD) ? atomic_load(&s_touch_down_seq) : muse_link_prompt_seq();
+        unsigned ev = talk_key_filter(keys);
+        unsigned touch = atomic_exchange(&s_touch_talk_events, 0);
+        if (touch & MUSE_BTN_TALK_PRESS) {
+            s_down_seq = atomic_load(&s_touch_down_seq);
+        }
+        ev |= touch;
         {
             /* The console's key=: the press now, its release on the next poll. */
             static unsigned bench_release;

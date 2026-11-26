@@ -179,6 +179,9 @@ bool muse_link_confirm_key_press(void)
     if (muse_link_state() != MUSE_LINK_CONFIRM) {
         return false;
     }
+    if (!muse_link_prompt_armed()) {
+        return true;   /* not on show yet: the press confirms nothing (muse_link.c) */
+    }
     printf("@confirm\n");
     return true;
 }

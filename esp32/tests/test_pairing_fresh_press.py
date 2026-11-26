@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""One press confirms a Muse Gadget's pairing prompt, a first setup or a re-setup, whenever it began.
+"""One press confirms a Muse Gadget's pairing prompt, a first setup or a re-setup, if it went down after the prompt showed.
 
 Compiles the real debounced GPIO button, talk-button input, Muse's confirm
 press and the Link button task, with a gadget build's Link (one press while
-the prompt is armed confirms: no hold, no press time, no edge check, any
-press) modelled as link_pairing_confirm_active_session() makes it. The Link
+the prompt is armed confirms: no hold, no press time, any press) modelled as
+link_pairing_confirm_active_session() makes it. A press that went down before
+the prompt showed (muse_link_prompt_seq: ordering, not time) confirms
+nothing and does nothing else. The Link
 button's short press still reports when the button was last seen up (Home
 Link's own check, link_pairing.c).
 """
@@ -53,6 +55,7 @@ static int level;                       /* the button's pin */
 static int gpio_get_level(gpio_num_t gpio) { (void)gpio; return level; }
 static int64_t esp_timer_get_time(void) { return clock_us; }
 static bool muse_state_asleep(void) { return false; }
+static void muse_state_set_asleep(bool on) { (void)on; }
 static void muse_state_poke(void) {}
 static bool muse_menu_is_open(void) { return false; }
 static void muse_menu_key(int key) { (void)key; }
@@ -90,8 +93,26 @@ typedef struct {
 static const muse_link_ops_t ops = { .talk_press = link_press, .confirm_dismiss = link_dismiss }, *s_ops = &ops;
 enum { MUSE_LINK_CONFIRM = 3 };
 static int muse_link_state(void) { return pending ? MUSE_LINK_CONFIRM : 0; }
-static void prompt(int64_t ms) { (void)ms; pending = armed = true; }
-bool muse_link_confirm_press(int64_t released_us);
+/* The prompt's showings (muse_link.c's, bumped as each prompt arms: at its first showing on a screen), whether the
+ * one up is armed, and where the talk press being handled went down (muse_input.c's input task: a key's at its
+ * edge, a touch's at its touch-down). */
+static unsigned prompt_seq;
+static bool prompt_armed;
+uint32_t muse_link_prompt_seq(void);
+uint32_t muse_link_prompt_seq(void) { return prompt_seq; }
+bool muse_link_prompt_armed(void);
+bool muse_link_prompt_armed(void) { return prompt_armed; }
+static uint32_t s_down_seq;
+static const char *TAG = "muse_link";
+#define ESP_LOGI(tag, ...) ((void)(tag))
+/* Link's prompt comes (the state becomes MUSE_LINK_CONFIRM), then its first frame on the screen arms it. */
+static void prompt_up(void) { pending = armed = true; prompt_armed = false; }
+static void prompt_shows(void) { prompt_seq++; prompt_armed = true; }
+static void prompt(int64_t ms) { (void)ms; prompt_up(); prompt_shows(); }
+/* A touch whose down was seen at `seq`, reported now as `ev`. */
+static void talk_button(unsigned ev);
+static void touch(unsigned ev, unsigned seq) { s_down_seq = seq; talk_button(ev); }
+bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq);
 bool muse_link_talk_press(void);
 bool muse_link_confirm_key_press(void);
 bool muse_link_bench_confirm(void);
@@ -105,6 +126,7 @@ static void run(int64_t from, int64_t to) {
     for (int64_t ms = from; ms < to; ms += 10) {
         clock_us = ms * 1000;
         unsigned ev = muse_gpio_button_poll(&btn);
+        s_down_seq = muse_link_prompt_seq();   /* a key's press went down at its (debounced) edge */
         if (ev) talk_button(ev);
     }
 }
@@ -169,15 +191,72 @@ static void replaced_prompt(void) {
 }
 
 /* A finger held on the face, reported once the hold passes 500 ms
- * (MUSE_BTN_TALK_HELD): with the prompt up it's one press, and it confirms
- * (no press time); it never talks. */
+ * (MUSE_BTN_TALK_HELD): down before the prompt showed, it confirms nothing
+ * and never talks; down after, it's one press and confirms. */
 static void held_face(void) {
     reset();
-    prompt(1100);              /* the finger went down at 1000 ms */
-    clock_us = 1500 * 1000; talk_button(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD);
+    unsigned down = prompt_seq;   /* the finger went down at 1000 ms */
+    prompt(1100);
+    clock_us = 1500 * 1000; touch(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD, down);
+    assert(!confirms && pending && !downs);
+    clock_us = 2000 * 1000; touch(MUSE_BTN_TALK_RELEASE, down);
+    assert(!ups && pending);
+    down = prompt_seq;            /* down again at 2100 ms, the prompt up */
+    clock_us = 2600 * 1000; touch(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD, down);
     assert(confirms == 1 && !pending && !downs);
-    clock_us = 2000 * 1000; talk_button(MUSE_BTN_TALK_RELEASE);
+    clock_us = 3000 * 1000; touch(MUSE_BTN_TALK_RELEASE, down);
     assert(!ups);
+}
+
+/* A touch's talk press that went down before the prompt showed but reaches
+ * the input task after it (its events are drained a poll later): it confirms
+ * nothing and never talks; a key pressed once the prompt is up still does. */
+static void drained_touch(void) {
+    reset();
+    unsigned down = prompt_seq;
+    prompt(1000);
+    clock_us = 1010 * 1000; touch(MUSE_BTN_TALK_PRESS, down);
+    assert(!confirms && pending && !downs);
+    clock_us = 1200 * 1000; touch(MUSE_BTN_TALK_RELEASE, down);
+    assert(!ups && pending);
+    run(1200, 1400);
+    level = 0; run(1400, 1500);
+    assert(confirms == 1 && !pending && !downs);
+}
+
+/* Before the prompt's first frame (it isn't armed yet): a key's edge, a touch's down and a confirm key's press
+ * confirm nothing and never talk, held on into the prompt and let go there; the next press, once it shows,
+ * confirms. */
+static void before_the_first_frame(void) {
+    reset();
+    prompt_up();
+    level = 0; run(50, 150);         /* the edge lands before the first frame */
+    assert(!confirms && pending && !downs);
+    prompt_shows();
+    run(150, 300);
+    level = 1; run(300, 400);
+    assert(!confirms && pending && !ups && !s_talk_down);
+    level = 0; run(400, 500);
+    assert(confirms == 1 && !pending && !downs);
+    level = 1; run(500, 600);
+    assert(!ups);
+
+    reset();
+    prompt_up();
+    unsigned down = prompt_seq;      /* a touch down before the first frame */
+    prompt_shows();
+    clock_us = 1010 * 1000; touch(MUSE_BTN_TALK_PRESS, down);
+    clock_us = 1200 * 1000; touch(MUSE_BTN_TALK_RELEASE, down);
+    assert(!confirms && pending && !downs && !ups);
+    clock_us = 1300 * 1000; touch(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE, prompt_seq);
+    assert(confirms == 1 && !pending && !downs && !ups);
+
+    reset();
+    set_up = true;                   /* a re-setup's confirm key (the second key, the Confirm disc) */
+    prompt_up();
+    clock_us = 1010 * 1000; assert(muse_link_confirm_key_press() && !confirms && pending);
+    prompt_shows();
+    clock_us = 1300 * 1000; assert(muse_link_confirm_key_press() && confirms == 1 && !dismisses);
 }
 
 /* Screen confirmation: touch taps report press and release together
@@ -187,7 +266,7 @@ static void held_face(void) {
 static void screen_taps(void) {
     reset();
     prompt(1000);
-    clock_us = 1010 * 1000; talk_button(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE);
+    clock_us = 1010 * 1000; touch(MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_RELEASE, prompt_seq);
     assert(confirms == 1 && !downs && !ups);
 
     reset();
@@ -270,6 +349,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "replaced")) replaced_prompt();
     else if (!strcmp(argv[1], "screen")) screen_taps();
     else if (!strcmp(argv[1], "held")) held_face();
+    else if (!strcmp(argv[1], "drained")) drained_touch();
+    else if (!strcmp(argv[1], "first_frame")) before_the_first_frame();
     else if (!strcmp(argv[1], "resetup")) resetup_one_press();
     else if (!strcmp(argv[1], "resetup_talk")) resetup_talk_dismisses();
     else if (!strcmp(argv[1], "dismiss")) dismiss_on_a_touch_board();
@@ -435,8 +516,14 @@ class PairingFreshPress(unittest.TestCase):
     def test_a_press_landing_after_a_replaced_prompt_confirms_it(self):
         self.run_case("replaced")
 
-    def test_a_face_held_on_the_prompt_confirms_and_never_talks(self):
+    def test_a_face_held_from_before_the_prompt_confirms_nothing_and_never_talks(self):
         self.run_case("held")
+
+    def test_a_touch_down_before_the_prompt_drained_after_it_confirms_nothing(self):
+        self.run_case("drained")
+
+    def test_a_press_before_the_prompts_first_frame_confirms_nothing(self):
+        self.run_case("first_frame")
 
     def test_one_screen_tap_confirms(self):
         self.run_case("screen")

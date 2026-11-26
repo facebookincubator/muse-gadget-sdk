@@ -77,8 +77,10 @@ static void *lp_calloc(size_t n) {
 #define PAIRING_CONFIRM_TIMEOUT_US (PAIRING_CONFIRM_TIMEOUT_SECONDS * 1000000LL)
 // A Muse Gadget's setup confirm (protocols/README.md, The press) is one press
 // or tap while the prompt is up, a first setup and a re-setup alike: no timer
-// on the prompt (it stays until the press, a dismiss, or the phone giving up)
-// and no check of when the press began. Home Link keeps its press window.
+// on the prompt (it stays until the press, a dismiss, or the phone giving up).
+// A press that went down before the prompt showed never reaches it (Muse's
+// input drops it: muse_link_prompt_seq, an order check). Home Link keeps its
+// press window.
 #if CONFIG_MUSE_GADGET_BLE_AUDIO
 #define CONFIRM_ONE_PRESS 1
 #else

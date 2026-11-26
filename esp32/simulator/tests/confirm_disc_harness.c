@@ -56,7 +56,9 @@ static bool test_confirm_key_press(void)
     if (muse_link_state() != MUSE_LINK_CONFIRM) {
         return false;
     }
-    confirms++;
+    if (muse_link_prompt_armed()) {   /* armed at its first showing (muse_link.c) */
+        confirms++;
+    }
     return true;
 }
 
@@ -219,6 +221,31 @@ int main(int argc, char **argv)
         assert(lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && s_pair_ok == PAIR_OK_NONE);
     }
 
+    /* A finger already down when the prompt shows (on the face, where the disc comes up): its release confirms
+     * nothing, a first setup or a re-setup; the next tap does. */
+    for (int set_up = 0; set_up < 2; set_up++) {
+        sim_services_set_paired(set_up);
+        sim_services_set_link_state(MUSE_LINK_CONFIRM);
+        chrome();
+        disc_center(&x, &y);
+        sim_services_set_link_state(MUSE_LINK_ONLINE);
+        chrome();
+        assert(lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
+        confirms = 0;
+        touch(x, y, true);
+        touch(x, y, true);
+        sim_services_set_link_state(MUSE_LINK_CONFIRM);
+        chrome();
+        assert(!lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && s_pair_ok == PAIR_OK_SETUP);
+        touch(x, y, true);
+        touch(x, y, false);
+        assert(confirms == 0);
+        tap(x, y);
+        assert(confirms == 1);
+        sim_services_set_link_state(MUSE_LINK_ONLINE);
+        chrome();
+    }
+
     /* An injected touch on the disc (a bench press, over any link) confirms neither a first setup nor a re-setup;
      * the finger's next tap does. */
     for (int set_up = 0; set_up < 2; set_up++) {
@@ -282,6 +309,23 @@ int main(int argc, char **argv)
     disc_center(&x, &y);
     tap(x, y);
     assert(notes == 2 && cancels == 1 && confirms == 0);
+    /* A finger already down when the card shows: its release confirms nothing; the next tap does. */
+    disc_center(&x, &y);
+    s_upd_state = 0;
+    s_prompting = false;
+    chrome();
+    assert(lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN));
+    touch(x, y, true);
+    touch(x, y, true);
+    s_upd_state = MG_BLE_UPDATE_UI_ASK;
+    s_prompting = true;
+    chrome();
+    assert(!lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && atomic_load(&s_ask_shown));
+    touch(x, y, true);
+    touch(x, y, false);
+    assert(notes == 2 && cancels == 1 && s_prompting);
+    tap(x, y);
+    assert(notes == 3 && cancels == 1 && !s_prompting);
     /* An injected touch neither confirms nor cancels it. */
     s_prompting = true;   /* asked again */
     chrome();
@@ -290,7 +334,7 @@ int main(int argc, char **argv)
     tap(x, y);
     elsewhere(&x, &y);
     tap(x, y);
-    assert(notes == 2 && cancels == 1 && confirms == 0 && s_prompting);
+    assert(notes == 3 && cancels == 1 && confirms == 0 && s_prompting);
     touch_real = true;
     puts("PASS confirm disc");
     return 0;

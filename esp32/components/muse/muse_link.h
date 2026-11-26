@@ -143,13 +143,26 @@ bool muse_link_sdk_token_fp(unsigned *len, char hex[MUSE_LINK_FP_HEX]);
 bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                         char **vm_token);
 /* A talk-key press, now; true: Link used it. On a Muse Gadget one press
- * confirms a first setup, whenever it began; on a set-up gadget the talk key
+ * confirms a first setup if it went down after the prompt showed (down_seq,
+ * muse_link_prompt_seq); on a set-up gadget the talk key
  * never confirms a re-setup outside setup mode: its press dismisses the
  * prompt (no talk turn). Home Link counts only one that began after its
  * prompt. released_us is when the key was last let go (esp_timer's clock), or
  * 0 if the caller doesn't track it; muse_link_talk_press() passes 0. */
-bool muse_link_confirm_press(int64_t released_us);
+bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq);
 bool muse_link_talk_press(void);
+/* The pairing prompt's showings, counted: bumped as each prompt arms, when it
+ * first shows on the screen (a UI that draws it: muse_link_prompt_shown), else
+ * as the state becomes MUSE_LINK_CONFIRM. A press records it as it goes down
+ * (down_seq): one that went down before the prompt now up armed, an edge in
+ * the moment before its first frame included, confirms nothing and does
+ * nothing else but wake a dark screen (ordering, not time). */
+uint32_t muse_link_prompt_seq(void);
+bool muse_link_prompt_armed(void);
+/* Once, before any prompt: a screen draws the prompt (muse_ui.c); each prompt
+ * then arms at its first showing, which the UI reports. */
+void muse_link_set_prompt_ui(void);
+void muse_link_prompt_shown(void);
 /* A confirm key's press (Enter, a second key) or a tap on the prompt's
  * Confirm disc, now: confirms a first setup or a re-setup. */
 bool muse_link_confirm_key_press(void);

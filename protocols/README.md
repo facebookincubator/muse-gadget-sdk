@@ -180,10 +180,12 @@ firmware, the public ESP32 Wi-Fi builds and the Linux reference
   touch gadgets one tap on the on-screen Confirm disc ("Pair with Muse",
   "Tap to pair"), whose hit area is generous (the disc, its ring and a
   margin of 10 % of the screen's size around them); a tap elsewhere does
-  nothing. No hold, no minimum or maximum press time, no check of when the
-  press began, and no timer on the gadget's prompt: it stays up until the
-  press, a dismiss, or the phone gives up (`pairing_ready`'s
-  `confirm_timeout_seconds` is the phone's give-up time).
+  nothing. No hold, no minimum or maximum press time, and no timer on the
+  prompt: it stays up until the press, a dismiss, or the phone gives up
+  (`pairing_ready`'s `confirm_timeout_seconds` is the phone's give-up time).
+  A key or touch that went down before the setup, re-setup or update prompt
+  showed never confirms it, not even at its release; the next press does.
+  It's an order check with no timing.
   `pairing_confirmed` goes out only after that press, which counts only once
   the encrypted `confirm_required` went out; a press with nothing armed
   confirms nothing (it's the gadget's normal input then), set up or not.
@@ -279,7 +281,9 @@ Known limits:
   it, so the owner can only dismiss it.
 - Firmware updates: on a release build, a Bluetooth update from a link
   without a matched proof takes one physical confirm press on the gadget,
-  set up or not (after Forget too). The press binds to the upload that
+  set up or not (after Forget too). A key or touch that went down before
+  the update prompt showed never confirms it, not even at its release; the
+  next press does. It's an order check with no timing. The press binds to the upload that
   asked for it (its length and whole-image SHA-256) for 600 s, across link
   drops; a cancel answers rc 11 once and binds nothing; the prompt shows at
   most once per 10 s per connection. On a

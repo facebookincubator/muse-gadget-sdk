@@ -130,9 +130,36 @@ void sim_services_set_chat_status(muse_hatch_state_t state, const char *detail)
     copy_text(s_chat.detail, sizeof(s_chat.detail), detail);
 }
 
+/* muse_link.c's prompt arming: each prompt arms at its first showing (the UI's muse_link_prompt_shown). */
+static unsigned s_prompt_seq;
+static bool s_prompt_armed;
+
 void sim_services_set_link_state(muse_link_state_t state)
 {
+    if (state != s_link && state == MUSE_LINK_CONFIRM) {
+        s_prompt_armed = false;
+    }
     s_link = state;
+}
+
+void muse_link_set_prompt_ui(void) {}
+
+void muse_link_prompt_shown(void)
+{
+    if (s_link == MUSE_LINK_CONFIRM && !s_prompt_armed) {
+        s_prompt_seq++;
+        s_prompt_armed = true;
+    }
+}
+
+uint32_t muse_link_prompt_seq(void)
+{
+    return s_prompt_seq;
+}
+
+bool muse_link_prompt_armed(void)
+{
+    return s_prompt_armed;
 }
 
 void sim_services_set_brightness(int pct)

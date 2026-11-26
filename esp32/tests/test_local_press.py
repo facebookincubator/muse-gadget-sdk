@@ -392,7 +392,8 @@ int main(void) {
         self.assertIn('(void)muse_local_press_note("a tap on the update card\'s Confirm");', upd_ok)
         self.assertNotIn("muse_link_confirm_key_press(", upd_ok)   # the update's tap confirms no re-setup
         self.assertLess(ok.index("if (muse_local_press_prompting()) {\n        return;"), ok.index("muse_link_confirm_key_press("))
-        self.assertIn("if (s_pair_ok == PAIR_OK_SETUP) {\n        (void)muse_link_confirm_key_press();", ok)
+        self.assertIn("if (s_pair_ok == PAIR_OK_SETUP && s_ok_seq == muse_link_prompt_seq()) {\n"
+                      "        (void)muse_link_confirm_key_press();", ok)
         press = ui[ui.index("static void on_any_press(lv_event_t *e)"):]
         press = press[:press.index("\n}\n")]
         upd = press[press.index("if (s_pair_ok == PAIR_OK_UPDATE"):]
@@ -437,6 +438,59 @@ class OnlyTheGadgetsOwnPressOnThePrompt(unittest.TestCase):
         self.assertEqual(inp.count("muse_local_press_note("), 1)
         touch = (ROOT / "components" / "muse" / "muse_touch.c").read_text()
         self.assertNotIn("muse_local_press", touch)   # a plain touch never confirms
+
+    def test_a_press_down_before_the_prompt_showed_never_confirms(self) -> None:
+        # Ordering, not time: the update's prompt takes a key's own press at its edge while the prompt is on show.
+        # A key already down when it shows makes no edge on it, and a finger held on the face (MUSE_BTN_TALK_HELD,
+        # reported long after it went down) never answers it.
+        inp = (ROOT / "components" / "muse" / "muse_input.c").read_text()
+        fn = inp[inp.index("static unsigned update_prompt_press(unsigned phys)"):]
+        fn = fn[:fn.index("\n}\n") + 3]
+        code = r"""
+#include <assert.h>
+#include <stdbool.h>
+#define MUSE_BTN_TALK_PRESS 1u
+#define MUSE_BTN_TALK_RELEASE 2u
+#define MUSE_BTN_AUX_PRESS 4u
+#define MUSE_BTN_AUX_RELEASE 8u
+#define MUSE_BTN_ENTER 16u
+#define MUSE_BTN_TALK_HELD (1u << 17)
+static bool prompting, shown;
+static int notes;
+static bool muse_local_press_prompting(void) { return prompting; }
+static bool muse_local_press_note(const char *what) {   /* muse_local_press.c: only while the card is on show */
+    (void)what;
+    if (!shown) return false;
+    notes++;
+    prompting = false;
+    return true;
+}
+""" + fn + r"""
+int main(void) {
+    prompting = true;
+    /* Down before the card showed: the press is the view's; held on into the card it's no edge, and confirms nothing. */
+    assert(update_prompt_press(MUSE_BTN_TALK_PRESS) == MUSE_BTN_TALK_PRESS && !notes);
+    shown = true;
+    assert(update_prompt_press(0) == 0 && !notes);
+    assert(update_prompt_press(MUSE_BTN_TALK_RELEASE) == MUSE_BTN_TALK_RELEASE && !notes);
+    /* A finger held on the face, reported once its hold passes: never the update's. */
+    unsigned face = MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;
+    assert(update_prompt_press(face) == face && !notes);
+    /* A key pressed once the card is on show: it confirms, and its release is the prompt's too. */
+    assert(update_prompt_press(MUSE_BTN_AUX_PRESS) == 0 && notes == 1);
+    assert(update_prompt_press(MUSE_BTN_AUX_RELEASE) == 0);
+    return 0;
+}
+"""
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        with tempfile.TemporaryDirectory(prefix="update-press-") as d:
+            src = Path(d) / "h.c"
+            src.write_text(code)
+            r = subprocess.run([*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(src), "-o", str(Path(d) / "h")],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            r = subprocess.run([str(Path(d) / "h")], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_a_touch_boards_confirm(self) -> None:
         ui = (ROOT / "components" / "muse" / "muse_ui.c").read_text()

@@ -54,7 +54,10 @@ static int lv_event_get_code(lv_event_t *e) { return *e; }
 __attribute__((unused)) static int muse_link_state(void) { return link_state; }
 #define muse_board (&board)
 static bool muse_link_talk_press(void) { if (pending_pair) { confirmed++; return true; } return false; }
-static bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return muse_link_talk_press(); }
+static bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq) { (void)released_us; (void)down_seq; return muse_link_talk_press(); }
+static uint32_t muse_link_prompt_seq(void) { return 0; }   /* the press-before-the-prompt rule: test_pairing_fresh_press */
+static atomic_uint s_touch_down_seq;
+static uint32_t s_down_seq;
 static bool muse_link_confirm_key_press(void) { if (pending_pair) { confirmed++; return true; } return false; }
 static int64_t s_talk_released_us;
 static bool muse_state_asleep(void) { return false; }
@@ -88,13 +91,14 @@ typedef struct lv_indev lv_indev_t;
 static int s_pair_code_obj, indev_obj;
 static void *s_pair_code = &s_pair_code_obj;
 static bool s_ok_down;
+static uint32_t s_ok_seq;   /* the setup prompt's showing at the tap's down (muse_link_prompt_seq) */
 static lv_indev_t *lv_indev_active(void) { return (lv_indev_t *)&indev_obj; }
 static void lv_indev_get_point(lv_indev_t *indev, lv_point_t *pt) { (void)indev; pt->x = pt->y = 0; }
 static bool lv_obj_hit_test(void *obj, const lv_point_t *pt) { (void)obj; (void)pt; return true; }
 static void muse_input_press(int src) { (void)src; }
 static bool muse_input_talk_ok(bool real) { return real; }   /* a release image: the finger here is real */
 '''
-        code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_input') + '\n' + function(source, 'talk_button')
+        code += function(source, 'muse_input_touch_down') + '\n' + function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_input') + '\n' + function(source, 'talk_button')
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
         code += '\n' + function(ui, 'on_touch_mic') + '\n' + function(ui, 'on_pair_ok') + '\n' + function(ui, 'on_any_press')
         code += r'''

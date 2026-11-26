@@ -126,6 +126,9 @@ void muse_input_user_touch(void);
 
 /* LVGL microphone press/release edges; handled by the existing input task. */
 void muse_input_touch_talk(bool pressed);
+/* A board's own touch went down (a hold on the face that may talk): the pairing prompt's showing then, for the press
+ * it may report later (MUSE_BTN_TALK_HELD). muse_input_touch_talk(true) notes its own. */
+void muse_input_touch_down(void);
 /* No person in the loop: a test or automation image (a bench image is both) takes injected input for every human
  * gate (a setup's touch confirm, the press a client's start_mic waits for, the talk press): an automated run never
  * waits. A release image takes only the gadget's own. The one predicate: mg_ble.c defines the same expression

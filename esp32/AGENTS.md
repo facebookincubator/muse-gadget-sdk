@@ -1132,12 +1132,15 @@ its constants.
   no control, the whole screen), a press of a second key (the aux key,
   Enter on a keyboard) or, for a first setup, the talk key (the Link button
   on boards without the full UI, taken at its down edge,
-  `button_set_confirm()`): no hold, no minimum or maximum press time, no
-  check of when the press began, and a scripted or bench key press confirms
-  as a real one does (on release builds the console words that change state
-  stay refused over Bluetooth); on a release build a scripted or bench touch
-  on the Confirm control never does, over any link (`touch_confirms()`). **The talk key never confirms a re-setup**
-  on a set-up gadget's release build: its press while the prompt is up only
+  `button_set_confirm()`): no hold and no minimum or maximum press time, but
+  a key or touch that went down before the prompt showed (armed at its first
+  frame on a screen) never confirms it, not even at its release; the next
+  press does (an order check with no timing, `muse_link_prompt_seq()`). A
+  scripted or bench key press confirms as a real one does (on release builds
+  the console words that change state stay refused over Bluetooth); on a
+  release build a scripted or bench touch on the Confirm control never does,
+  over any link (`touch_confirms()`). **The talk key never confirms a
+  re-setup** on a set-up gadget's release build: its press while the prompt is up only
   dismisses it ("Not now", no talk turn; `app_confirm_pairing_press()`'s
   `talk_key`, `muse_link_confirm_press()` vs `muse_link_confirm_key_press()`).
   A board whose only key is its talk key (no touch screen, no menu keys, no

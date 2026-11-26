@@ -746,7 +746,9 @@
  *   gets rc 10 (EBUSY: confirm on the gadget) while the gadget shows "Press
  *   to confirm update" (on its screen, or by LED on a screenless board), the
  *   client retries about once a second, and the first write after the press
- *   gets rc 0. Such an upload's first chunk must name its length and
+ *   gets rc 0. A key or touch that went down before the update prompt showed
+ *   never confirms it, not even at its release; the next press does. It's an
+ *   order check with no timing. Such an upload's first chunk must name its length and
  *   whole-image SHA-256: one that names none gets rc 11 with no prompt, and a
  *   chunk with no upload started on its link gets rc 11. The press confirms
  *   the upload whose write started the prompt and binds to that upload's
