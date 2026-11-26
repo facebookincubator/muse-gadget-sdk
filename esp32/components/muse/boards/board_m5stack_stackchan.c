@@ -371,7 +371,6 @@ static void stackchan_motion_task(void *arg)
     muse_mode_t prev_mode = MUSE_MODE_BOOT;
     bool torque_active = true;
     uint32_t idle_settle_ticks = 0;
-    bool base_boost_on = true;
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(40)); /* 25 Hz loop */
@@ -387,24 +386,15 @@ static void stackchan_motion_task(void *arg)
         bool on_battery = !power.usb;
         bool low_battery = on_battery && ((power.battery_pct >= 0 && power.battery_pct <= 20) ||
                                           (power.battery_mv > 0 && power.battery_mv <= 3500));
-        bool critical_battery = on_battery && ((power.battery_pct >= 0 && power.battery_pct <= 8) ||
-                                              (power.battery_mv > 0 && power.battery_mv <= 3350));
 
-        /* Critical battery safety guard: shut down 5V boost converter to protect battery cell */
-        if (critical_battery && base_boost_on) {
-            ESP_LOGW(TAG, "Battery CRITICAL (%d%%, %d mV): disabling 5V base boost converter",
+        /* Low battery safety guard: release servo torque and turn off LEDs to protect battery cell */
+        if (low_battery && torque_active) {
+            ESP_LOGW(TAG, "Battery LOW (%d%%, %d mV): releasing servo torque",
                      power.battery_pct, power.battery_mv);
             scs_set_torque(SERVO_ID_YAW, false);
             scs_set_torque(SERVO_ID_PITCH, false);
             stackchan_set_leds_rgb(0, 0, 0);
-            bsp_feature_enable(BSP_FEATURE_USB, false);
-            base_boost_on = false;
             torque_active = false;
-        } else if (!critical_battery && !base_boost_on && power.usb) {
-            /* Recovered on USB power */
-            ESP_LOGI(TAG, "USB power restored: re-enabling 5V base boost converter");
-            bsp_feature_enable(BSP_FEATURE_USB, true);
-            base_boost_on = true;
         }
 
         if (mode != prev_mode) {
@@ -422,7 +412,7 @@ static void stackchan_motion_task(void *arg)
             }
 
             /* Re-enable torque when leaving idle into an active state */
-            if (mode != MUSE_MODE_IDLE && mode != MUSE_MODE_OFF && !low_battery && base_boost_on) {
+            if (mode != MUSE_MODE_IDLE && mode != MUSE_MODE_OFF && !low_battery) {
                 if (!torque_active) {
                     scs_set_torque(SERVO_ID_YAW, true);
                     scs_set_torque(SERVO_ID_PITCH, true);
@@ -543,7 +533,7 @@ static void stackchan_motion_task(void *arg)
         target_pitch = clamp_int(target_pitch, PITCH_MIN, PITCH_MAX);
 
         /* Update servo positions smoothly only when torque is active and not low battery */
-        if (torque_active && base_boost_on && !low_battery && (tick % 2 == 0)) {
+        if (torque_active && !low_battery && (tick % 2 == 0)) {
             scs_write_pos(SERVO_ID_YAW, (uint16_t)target_yaw, 35, 0);
             scs_write_pos(SERVO_ID_PITCH, (uint16_t)target_pitch, 35, 0);
         }
@@ -566,29 +556,6 @@ static esp_err_t init(void)
         s_pmu = true;
         (void)muse_pmu_set_key_shutdown(true);
     }
-
-    /* Check battery state before enabling high-current 5V boost converter */
-    muse_power_t pwr = { 0 };
-    bool critical = false;
-    if (s_pmu && muse_pmu_read_power(&pwr) == ESP_OK) {
-        if (!pwr.usb && ((pwr.battery_pct >= 0 && pwr.battery_pct <= 10) ||
-                         (pwr.battery_mv > 0 && pwr.battery_mv <= 3400))) {
-            critical = true;
-            ESP_LOGW(TAG, "Battery CRITICAL on boot (%d%%, %d mV): deferring 5V base rail to prevent brownout",
-                     pwr.battery_pct, pwr.battery_mv);
-        }
-    }
-
-    /* Enable CoreS3 5V base rail (AW9523 USB_EN / 5V boost) if safe */
-    if (!critical) {
-        err = bsp_feature_enable(BSP_FEATURE_USB, true);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "BSP_FEATURE_USB enable failed: %s", esp_err_to_name(err));
-        }
-    }
-
-    /* Give the base hardware 150 ms to stabilize power rail */
-    vTaskDelay(pdMS_TO_TICKS(150));
 
     /* Initialize PY32L020 Base IO Expander & WS2812C LEDs */
     py32_init(bsp_i2c_get_handle());
@@ -698,8 +665,6 @@ static esp_err_t power_off(void)
     scs_set_torque(SERVO_ID_YAW, false);
     scs_set_torque(SERVO_ID_PITCH, false);
     stackchan_set_leds_rgb(0, 0, 0);
-    /* Disable 5V boost converter rail to prevent battery drain while powered off */
-    bsp_feature_enable(BSP_FEATURE_USB, false);
     return muse_pmu_power_off();
 }
 
