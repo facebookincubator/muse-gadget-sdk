@@ -29,11 +29,11 @@
 static muse_pass_rec_t s_rec;
 static bool s_have;
 
-bool muse_passcode_platform_load(muse_pass_rec_t *rec)
+muse_pass_load_t muse_passcode_platform_load(muse_pass_rec_t *rec)
 {
-    if (!s_have) return false;
+    if (!s_have) return MUSE_PASS_LOAD_NONE;
     *rec = s_rec;
-    return true;
+    return MUSE_PASS_LOAD_OK;
 }
 
 bool muse_passcode_platform_save(const muse_pass_rec_t *rec)

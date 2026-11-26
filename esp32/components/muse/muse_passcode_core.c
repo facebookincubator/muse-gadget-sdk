@@ -73,6 +73,15 @@ void muse_pass_init(muse_pass_t *p, const muse_pass_rec_t *rec, int64_t now_ms)
     }
 }
 
+void muse_pass_init_unreadable(muse_pass_t *p)
+{
+    memset(p, 0, sizeof(*p));
+    rec_default(&p->rec);
+    p->rec.on = 1;   /* no salt or hash: muse_pass_check never takes a code (unreadable) */
+    p->locked = true;
+    p->unreadable = true;
+}
+
 bool muse_pass_screen_off(muse_pass_t *p, int64_t now_ms, bool busy)
 {
     p->dark = true;
@@ -169,7 +178,7 @@ muse_pass_result_t muse_pass_check(muse_pass_t *p, const char digits[MUSE_PASS_D
     }
     p->wait_until_ms = 0;
     bool right = false;
-    if (p->rec.on && digits_ok(digits)) {
+    if (p->rec.on && !p->unreadable && digits_ok(digits)) {
         uint8_t h[MUSE_PASS_HASH_LEN];
         if (!hash_code(p->rec.salt, digits, sha, h)) {
             wipe(h, sizeof(h));
@@ -189,7 +198,7 @@ muse_pass_result_t muse_pass_check(muse_pass_t *p, const char digits[MUSE_PASS_D
         return MUSE_PASS_RIGHT;
     }
     if (p->rec.tries < 255) p->rec.tries++;
-    p->dirty = true;
+    p->dirty = !p->unreadable;   /* an unreadable record is never written over: the count is RAM's */
     if (p->rec.tries < MUSE_PASS_FREE_TRIES) {
         return MUSE_PASS_WRONG;
     }
@@ -217,6 +226,7 @@ bool muse_pass_set(muse_pass_t *p, const char digits[MUSE_PASS_DIGITS], const ui
     p->wait_until_ms = 0;
     p->locked = false;
     p->after_due = false;
+    p->unreadable = false;   /* a new code replaces whatever was stored */
     p->dirty = true;
     return true;
 }
@@ -228,6 +238,7 @@ void muse_pass_turn_off(muse_pass_t *p)
     p->rec.lock = lock;   /* the Lock choice stays for the next time it's turned on */
     p->locked = p->after_due = false;
     p->wait_until_ms = 0;
+    p->unreadable = false;   /* `pass clear`: the stored record is erased */
     p->dirty = true;
 }
 
@@ -235,7 +246,7 @@ void muse_pass_set_lock(muse_pass_t *p, muse_pass_lock_t lock)
 {
     if (lock > MUSE_PASS_LOCK_AFTER_5_MIN || p->rec.lock == (uint8_t)lock) return;
     p->rec.lock = (uint8_t)lock;
-    p->dirty = true;
+    p->dirty = !p->unreadable;
 }
 
 void muse_pass_forget(muse_pass_t *p)
@@ -243,6 +254,7 @@ void muse_pass_forget(muse_pass_t *p)
     rec_default(&p->rec);
     p->locked = p->after_due = false;
     p->wait_until_ms = 0;
+    p->unreadable = false;   /* the pairing's erase: the stored record, readable or not, goes */
     p->dirty = true;
 }
 

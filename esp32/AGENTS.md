@@ -2326,7 +2326,12 @@ its constants.
   menus, Status, Settings, reply text and drawn files
   stay off the screen; the Link setup prompt, low battery and power screens
   show as usual. Wrong codes: 5 free, then 30 s, 1, 2, 4, 5 min, kept across
-  reboots; never a wipe. The pairing's erase takes it (`passcode_forget()`
+  reboots; never a wipe. Only NVS saying there's no `passcode` blob means
+  no passcode: a blob that can't be read (any other NVS error, or one of no
+  known size or format) boots locked with no code right
+  (`muse_pass_init_unreadable()`; wrong codes still reach the wait, counted
+  in RAM, nothing written over it), and Forgot passcode's Reset pairing (or
+  the console's `pass clear`) erases it. The pairing's erase takes it (`passcode_forget()`
   in `main/app.c`: Reset pairing, the token proof's clear, a setup reset, a
   completed Link setup). A UI stream or phone camera view that starts or
   arrives while locked is held like a drawn file (`muse_video_set_hold()`:
