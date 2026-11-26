@@ -1181,11 +1181,21 @@ void muse_input_set_console_hook(bool (*hook)(const char *line))
 esp_err_t muse_input_start(QueueHandle_t queue)
 {
     s_queue = queue;
-    if (xTaskCreate(input_task, "muse_input", 4096, NULL, 6, &s_input) != pdPASS) {
+#ifdef ESP_PLATFORM
+    if (xTaskCreateWithCaps(input_task, "muse_input", 4096, NULL, 6, &s_input,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         return ESP_FAIL;
     }
     /* Bench-test and setup console; the input still works if it can't start. */
+    xTaskCreateWithCaps(serial_task, "muse_serial", 3584, NULL, 5, NULL,
+                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    /* Host harnesses stub xTaskCreate only (the muse_theme.c pattern). */
+    if (xTaskCreate(input_task, "muse_input", 4096, NULL, 6, &s_input) != pdPASS) {
+        return ESP_FAIL;
+    }
     xTaskCreate(serial_task, "muse_serial", 3584, NULL, 5, NULL);
+#endif
     return ESP_OK;
 }
 

@@ -99,7 +99,7 @@ class LinkTransportContractTest(unittest.TestCase):
         header = (ROOT / "main" / "noise_control.h").read_text()
         connect = _function_body(NOISE_CONTROL_CPP.read_text(), 'extern "C" bool noise_ctrl_connect(')
         self.assertIn("bool noise_ctrl_connect", header)
-        failure = _function_body(connect, "if (xTaskCreate(noise_ctrl_task")
+        failure = _function_body(connect, "if (xTaskCreateWithCaps(noise_ctrl_task")
         self.assertIn("!= pdPASS", connect)
         self.assertIn("s_running = false", failure)
         self.assertIn("s_task = nullptr", failure)
