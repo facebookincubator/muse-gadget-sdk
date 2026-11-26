@@ -16,116 +16,151 @@ limitations under the License.
 
 # M5Stack Stack-Chan (CoreS3 Edition)
 
-Board support for the **M5Stack Stack-Chan**: combining the **M5Stack CoreS3** unit (ESP32-S3, 16 MB flash, 8 MB quad PSRAM, 320x240 ILI9342C touch display, dual ES7210 microphones, AW88298 amplifier, AXP2101 PMIC, AW9523B IO expander) with the **Stack-Chan motorized base** (2x Feetech SCS0009 serial bus servos on UART and 12x WS2812C RGB LEDs via the PY32L020 base controller at I2C address `0x6F`).
+![M5Stack Stack-Chan running Muse Gadget](images/m5stack-stackchan.jpg)
+
+Full board support for the **M5Stack Stack-Chan** desktop robot, pairing the **M5Stack CoreS3** controller with the **Stack-Chan motorized pan/tilt base**.
+
+This port brings Muse's conversational AI presence into a physical robot with expressive physical pan/tilt head kinematics, dynamic RGB LED animations, interactive acoustic feedback, dynamic text sizing, and comprehensive battery/power-saving management.
 
 ---
 
-## Recursos Incluídos / Supported Features
+## Hardware Overview
 
-- **Pareamento Bluetooth LE e Wi-Fi:** Provisionamento direto pelo aplicativo móvel Muse (com *Allow community devices* ativo).
-- **Display e Touch:** Interface gráfica com avatar animado e legendas em tempo real no LCD ILI9342C de 2,0 polegadas (320x240) com touch capacitivo FT6336U.
-- **Áudio Bidirecional:** Captação pelos microfones duplos ES7210 e reprodução de voz no alto-falante amplificado pelo chip I2S AW88298.
-- **Gerenciamento de Energia:** Ativação automática do barramento de 5V da base via expansor AW9523B e gerenciamento de bateria pelo PMIC AXP2101.
-- **Movimento e Expressões Físicas dos Servos (Feetech SCS0009):**
-  - `idle`: Centralização suave (Yaw 500, Pitch 580) e respiração sutil periódica.
-  - `listening`: Postura atenta com inclinação para frente e LEDs em azul suave.
-  - `thinking`: Inclinação curiosa de cabeça (tilt/nod) e animação em magenta/roxo.
-  - `speaking`: Micro-movimentos expressivos de cabeça (assentimento e leve oscilação) sincronizados com o nível de voz em tempo real (`muse_state_level()`).
-  - Totalmente seguro e não-bloqueante (nunca trava o loop principal de áudio/rede se a base for desconectada).
-- **LEDs RGB na Base (12x WS2812C):** Iluminação dinâmica de status controlada pelo coprocessador PY32L020 da base.
+| Component | Specification |
+|---|---|
+| **SoC** | ESP32-S3 (Dual-core Xtensa LX7 @ 240 MHz, 2.4 GHz Wi-Fi 4, BLE 5.0) |
+| **Memory** | 16 MB Octal SPI Flash, 8 MB Quad PSRAM |
+| **Display** | 2.0-inch 320x240 ILI9342C IPS LCD (Capacitive Touch via FT6336U) |
+| **Audio Input** | Dual ES7210 PDM Microphones |
+| **Audio Output** | AW88298 1W I2S Class-D Power Amplifier + Internal Cavity Speaker |
+| **Power Management**| AXP2101 PMIC + AW9523B IO Expander |
+| **Battery** | 550 mAh 3.7V Lithium Battery (integrated inside the robot base) |
+| **Servos** | 2x Feetech SCS0009 Serial Bus Servos (UART1 @ 1 Mbps, Half-Duplex) |
+| **RGB Lighting** | 12x WS2812C RGB LEDs (controlled via PY32L020 base coprocessor at I2C `0x6F`) |
 
 ---
 
-## Como Configurar o SDK Token Sem Recompilar Nada
+## Features
 
-Você **não precisa instalar o ESP-IDF nem recompilar o código** para usar o Stack-Chan. O firmware aceita a configuração do token via porta serial (USB) e armazena na memória não-volátil (NVS) do ESP32.
+### 1. Expressive Head Movements (Kinematics)
+The pan/tilt servos dynamically reflect Muse's conversational state:
+- **Idle (`MUSE_MODE_IDLE`):** Centers smoothly (`Yaw 500`, `Pitch 580`), settling into a natural neutral stance.
+- **Listening (`MUSE_MODE_LISTENING`):** Tilts forward attentively toward the user (`Pitch -35`) with gentle nodding.
+- **Thinking (`MUSE_MODE_THINKING`):** Curious tilted head posture (`Yaw ±25`, `Pitch -15`) simulating active contemplation.
+- **Speaking (`MUSE_MODE_SPEAKING`):** Conversational nodding and tilting modulated in real time by voice energy levels (`muse_state_level()`).
 
-### Passo 1: Obtenha seu Token do Muse
-Acesse [gadgets.muse.ai/settings/sdk-tokens](https://gadgets.muse.ai/settings/sdk-tokens) e gere seu SDK Token (começa com `mgst_` e tem 48 caracteres).
+### 2. Auto-Torque Battery Conservation
+Feetech bus servos consume ~300–500 mA when holding PID position. To ensure long battery runtime and prevent servo heating:
+- When the robot enters `MUSE_MODE_IDLE`, servos settle in center for ~1.4 seconds before **automatically releasing holding torque** (`scs_set_torque(false)`).
+- Idle servo power consumption drops to **0 mA**.
+- Active torque instantly re-engages the moment the user initiates listening, thinking, or speaking.
 
-### Passo 2: Grave o Firmware Pré-compilado (se ainda não gravou)
-Instale apenas o `esptool`:
+### 3. Base RGB LED Ring (12x WS2812C)
+- **Idle:** Off to conserve battery (saves ~80 mA).
+- **Listening:** Glowing soft cyan/blue pulsing ring.
+- **Thinking:** Gentle purple/magenta shimmering glow.
+- **Speaking:** Responsive turquoise glow modulated by voice amplitude.
+
+### 4. Interactive R2-D2 Sound Effects
+- Melodic chimes on wakeup, thinking, speaking, and sleep.
+- Respects the software **Speaker Mute** switch in Settings.
+
+### 5. Dynamic Text Sizing & Live Preview
+- Full font scaling support for the 2.0-inch display (`8px`, `14px`, `16px`, `20px`, `28px`).
+- Real-time text preview in **Settings → Text Size**.
+- Adaptive caption band height that expands with larger fonts.
+
+### 6. Dual-Mode Input
+- Touch-to-talk: tap or hold anywhere on the touchscreen.
+- Physical push-to-talk: press the lateral `PWR` button on the CoreS3.
+
+---
+
+## Flashing the Precompiled Firmware
+
+You do not need to install the ESP-IDF toolchain to flash Stack-Chan. Precompiled release binaries are provided.
+
+### Requirements
+Install `esptool`:
 ```bash
 pip install esptool
 ```
-Coloque o CoreS3 em **modo bootloader** (segure o botão lateral RST/G0 por 2 a 3 segundos até o LED acender em verde, depois solte). Em seguida, grave os binários:
+
+### Complete Flash (Recommended)
+Flashes the bootloader, partition table, valid OTA descriptor, and firmware:
 ```bash
-esptool.py --chip esp32s3 -p <PORTA_SERIAL> -b 460800 write_flash \
-  0x00000 bootloader.bin \
-  0x10000 partition-table.bin \
-  0x1d000 ota_data_initial.bin \
-  0x20000 muse-gadget.bin
+python -m esptool --chip esp32s3 -p <PORT> -b 460800 --after hard_reset write_flash 0x0 stackchan-muse-firmware-merged.bin
 ```
 
-### Passo 3: Envie o Token pela Serial Console
-Com o dispositivo conectado ao computador e rodando o firmware, você pode enviar o comando de configuração usando um script Python simples, um monitor serial (como Arduino IDE, miniterm ou PuTTY) ou o Web Serial.
+*(On macOS, `<PORT>` is typically `/dev/cu.usbmodem2101`; on Linux, `/dev/ttyACM0`).*
 
-#### Opção A: Script Python Automático (Recomendado)
-Crie um script `set_token.py` ou execute via terminal:
-
-```python
-import serial
-import time
-import sys
-
-PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbmodem2101" # Ajuste para a sua porta
-TOKEN = sys.argv[2] if len(sys.argv) > 2 else "mgst_SEU_TOKEN_AQUI"
-
-print(f"Conectando a {PORT}...")
-ser = serial.Serial(PORT, 115200, timeout=1)
-time.sleep(1)
-
-# Envia o comando de configuracao
-cmd = f">sdk_token={TOKEN}\n".encode()
-print(f"Enviando token: {TOKEN[:8]}...")
-ser.write(cmd)
-ser.flush()
-
-# Aguarda confirmacao
-time.sleep(1)
-resp = ser.read_all().decode("utf-8", errors="replace")
-print("Resposta do Stack-Chan:", resp.strip())
-
-if "@sdk_token ok" in resp or "stored the SDK token" in resp:
-    print(" Sucesso! O Stack-Chan salvou o token na NVS e reiniciou.")
-else:
-    print(" Verifique se o dispositivo esta rodando e se o token esta correto.")
-
-ser.close()
-```
-
-Execute com:
-```bash
-python set_token.py /dev/cu.usbmodem2101 mgst_SEU_TOKEN_AQUI
-```
-
-#### Opção B: Monitor Serial (Arduino IDE / miniterm / Screen)
-1. Abra a porta serial do CoreS3 a **115200 baud**.
-2. Digite ou cole a linha exatamente neste formato (com o caractere `>` no início):
-   ```text
-   >sdk_token=mgst_SEU_TOKEN_AQUI
-   ```
-3. Pressione **Enter**.
-4. A placa responderá `@sdk_token ok` e reiniciará automaticamente com o novo token salvo.
+### Entering Download Mode (If Needed)
+If the board does not restart into the bootloader automatically:
+1. Press and hold the **PWR/RST** button on the CoreS3 for **2 to 3 seconds**.
+2. Release when the internal green LED lights up. The device is now in ROM Download Mode.
 
 ---
 
-## Compilação a Partir do Código Fonte (Desenvolvedores)
+## Provisioning Your SDK Token (Zero-Recompile)
 
-Se você quiser modificar o código ou recompilar você mesmo:
+You do **not** need to recompile the firmware to add your private SDK token. The token is stored securely in NVS over serial:
 
-### 1. Requisitos
-- **ESP-IDF v6.0.3** com suporte ao alvo `esp32s3`.
-- Python 3.10 ou 3.11.
+### Step 1: Obtain Token
+Generate your token from [gadgets.muse.ai/settings/sdk-tokens](https://gadgets.muse.ai/settings/sdk-tokens) (begins with `mgst_`).
 
-### 2. Compilação
-No diretório `esp32/`:
-```bash
-tools/muse/board.sh build stackchan
+### Step 2: Send Token Over Serial
+Using a serial terminal (115200 baud) or Python:
+
+```python
+import serial, time
+
+s = serial.Serial("/dev/cu.usbmodem2101", 115200, timeout=1)
+time.sleep(1)
+s.write(b">sdk_token=mgst_YOUR_TOKEN_HERE\n")
+time.sleep(1)
+print(s.read_all().decode(errors="replace"))
+s.close()
 ```
 
-### 3. Gravação
+The device will respond with `@sdk_token ok` and automatically reboot into paired mode.
+
+---
+
+## Building from Source
+
+To build with the ESP-IDF environment:
+
 ```bash
-tools/muse/board.sh flash stackchan /dev/cu.usbmodem2101
+cd esp32
+./tools/muse/board.sh build stackchan
 ```
-*(Se o esptool não reiniciar o CoreS3 automaticamente, dê um clique rápido no botão lateral RST/Power ou reconecte o cabo USB-C).*
+
+To build and flash in one step:
+```bash
+./tools/muse/board.sh flash stackchan /dev/cu.usbmodem2101
+```
+
+---
+
+## Hardware Pinout Reference
+
+| Function | Pin / Interface | Notes |
+|---|---|---|
+| **Servos TX** | `GPIO 1` | UART1 TX @ 1 Mbps |
+| **Servos RX** | `GPIO 2` | UART1 RX @ 1 Mbps (Feetech SCS0009 bus) |
+| **Base I2C SDA** | `GPIO 12` | CoreS3 internal I2C bus |
+| **Base I2C SCL** | `GPIO 11` | CoreS3 internal I2C bus |
+| **Base Expander** | I2C `0x6F` | PY32L020 coprocessor (controls 12x WS2812C) |
+| **PMIC** | I2C `0x34` | AXP2101 Power Management |
+| **IO Expander** | I2C `0x58` | AW9523B |
+| **Display SPI** | `GPIO 35, 36, 37` | 320x240 ILI9342C |
+| **Touch I2C** | `GPIO 12, 11` | FT6336U Capacitive Touch (`0x38`) |
+| **Audio Codec** | `GPIO 12, 11, I2S` | ES7210 PDM ADC + AW88298 I2S DAC |
+
+---
+
+## Power & Battery Best Practices
+
+1. **Physical Power Switch:** The Stack-Chan base includes a physical slide switch on the rear/bottom. Ensure it is switched to **ON** to enable battery power and charging.
+2. **Connector Seating:** Firmly press the CoreS3 screen unit evenly down into the Stack-Chan base to ensure complete contact across the 30-pin M-Bus connector.
+3. **Charging Port:** Connect a 5V/2A USB-C charger directly to the CoreS3 side port (or base port) to charge the 550 mAh battery. Battery percentage and charging indicator are accessible via **Settings → Battery**.

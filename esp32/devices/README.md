@@ -459,7 +459,7 @@ R2-D2 chimes, dynamic caption font scaling (8px to 28px in Settings), and real-t
 touch-to-talk. To preserve battery life and prevent overheating, servo holding torque
 is automatically released after ~1.4 s in idle (0 mA idle draw), and the LEDs power down.
 The base battery powers the system via the M-Bus connector; ensure the base is firmly
-seated and its physical power switch is ON. Flash via `tools/muse/board.sh flash stackchan`.
+seated and its physical power switch is ON. See [Stack-Chan setup](m5stack-stackchan.md) for detailed hardware setup, kinematics, and serial configuration. Flash via `tools/muse/board.sh flash stackchan`.
 
 The M5Stack StickC Plus2 runs the full UI on a classic ESP32, as does the Core2
 below. It has
