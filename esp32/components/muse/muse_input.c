@@ -595,10 +595,11 @@ static void talk_input(unsigned ev)
             /* Confirmed a Muse app pairing (Link's setup button). */
             muse_state_poke();
             swallow = true;
-        } else if (muse_passcode_locked()) {
+        } else if (muse_passcode_locked_at_press()) {
             /* The passcode lock: a talk press opens the keypad,
              * "Unlock to talk", and is never replayed (a turn needs a new
-             * press). A talk from a dark panel is for unlocked only. */
+             * press). A talk from a dark panel is for unlocked only, "After
+             * 5 min" applied at the press itself. */
             if (muse_state_asleep()) {
                 set_asleep(false, muse_board->talk_button);
             }

@@ -60,7 +60,7 @@ static int64_t s_talk_released_us;
 static bool muse_state_asleep(void) { return false; }
 static bool muse_menu_is_open(void) { return false; }
 #define MUSE_PASS_WHY_TALK 2
-static bool muse_passcode_locked(void) { return false; }   /* test_muse_passcode covers the lock */
+static bool muse_passcode_locked_at_press(void) { return false; }   /* test_muse_passcode covers the lock */
 static void muse_passcode_request_keypad(int why) { (void)why; }
 static void muse_state_poke(void) {}
 static int64_t s_press_us;   /* when the touch went down (muse_ui.c) */

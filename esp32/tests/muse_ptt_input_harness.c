@@ -85,10 +85,12 @@ muse_link_state_t muse_link_state(void) { return MUSE_LINK_ONLINE; }
 bool muse_link_talk_press(void) { return pairing; }
 bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return pairing; }
 bool muse_menu_is_open(void) { return menu; }
-/* The passcode lock: unlocked unless a scenario locks it. */
-static bool locked;
+/* The passcode lock: unlocked unless a scenario locks it. lapse_due: "After 5 min" lapsed in the dark, applied at
+ * the next press (muse_passcode_locked_at_press) or the UI's tick. */
+static bool locked, lapse_due;
 static int keypads;
 bool muse_passcode_locked(void) { return locked; }
+bool muse_passcode_locked_at_press(void) { locked |= lapse_due; lapse_due = false; return locked; }
 void muse_passcode_request_keypad(muse_pass_why_t why) { assert(why==MUSE_PASS_WHY_TALK); ++keypads; }
 void muse_menu_key(muse_menu_key_t key) { selected=key; }
 static esp_err_t board_off(void) { assert(shutdown==1); ++powered_off; return ESP_FAIL; }
@@ -172,6 +174,11 @@ int main(int argc,char **argv) {
         pairing=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE); assert(!queue.n && keypads==1);
         pairing=false; locked=false; talk_button(0); assert(!queue.n);
         talk_button(MUSE_BTN_TALK_PRESS); assert(queue.n==1 && queue.items[0].type==MUSE_PTT_DOWN);
+    } else if(scenario==24) {
+        /* "After 5 min": the screen dark that long, before the UI's tick has applied the lock, a talk press wakes it
+         * and opens the keypad; it never talks. */
+        asleep=true; lapse_due=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
+        assert(!asleep && locked && !queue.n && keypads==1);
     } else if(scenario==8) {
         /* The routing is StopWatch-with-calls only; other builds keep mute. */
         muse_board=&stopwatch_board;

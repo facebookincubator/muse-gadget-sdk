@@ -459,6 +459,11 @@ class StopWatchPTT(unittest.TestCase):
         # Locked by the passcode, a talk press opens the keypad and is dropped.
         self.run_case('input', 7)
 
+    def test_a_talk_press_applies_the_lock_after_5_min_dark(self):
+        # "After 5 min" lapsed with the screen dark, before the UI's tick: the press itself locks and opens the keypad.
+        self.run_case('input', 24)
+        self.run_case('input', 24, board=0)
+
     def test_display_only_talk_press_never_posts(self):
         self.run_case('input', 22)
         self.run_case('input', 22, board=0)

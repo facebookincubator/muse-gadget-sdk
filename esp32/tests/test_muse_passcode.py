@@ -214,6 +214,17 @@ class WhenItLocks(Base):
         self.h("off %d 0" % (12 * MIN))
         self.assertEqual(self.h.kv("on %d" % (17 * MIN))["locked"], "1")
 
+    def test_after_5_min_a_press_in_the_dark_locks_before_the_tick(self):
+        self.h("set 1234 0")
+        self.h("setlock 1")
+        self.h("off 0 0")
+        self.assertEqual(self.h.kv("press %d" % (5 * MIN - 1))["locked"], "0")   # within: no code
+        self.assertEqual(self.h.kv("press %d" % (5 * MIN))["locked"], "1")       # dark 5 min, no tick yet
+        self.h("check 1234 %d" % (5 * MIN))
+        self.assertEqual(self.h.kv("press %d" % (20 * MIN))["locked"], "0")      # applied once: no second lock
+        self.h("setlock 0")
+        self.assertEqual(self.h.kv("press %d" % (21 * MIN))["locked"], "0")
+
     def test_a_screen_that_stays_on_locks_after_5_idle_minutes(self):
         self.h("set 1234 0")
         self.assertEqual(self.h.kv("tick 0 %d 1 0" % (5 * MIN - 1))["locked"], "0")

@@ -293,7 +293,8 @@ static uint32_t xTaskGetTickCount(void) { return tick; }
 static int64_t s_post_at_us;
 static int64_t esp_timer_get_time(void) { return (int64_t)tick * 1000; }
 /* The passcode lock: no camera view, and a talk press opens the keypad. */
-static bool muse_passcode_locked(void) { return locked; }
+__attribute__((unused)) static bool muse_passcode_locked(void) { return locked; }
+__attribute__((unused)) static bool muse_passcode_locked_at_press(void) { return locked; }
 enum { MUSE_PASS_WHY_TALK };
 static void muse_passcode_request_keypad(int why) { (void)why; }
 /* `confirm`: the next press confirms; `armed`: a pairing prompt waits for a press. */

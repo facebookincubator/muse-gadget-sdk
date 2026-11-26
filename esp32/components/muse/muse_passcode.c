@@ -102,6 +102,16 @@ bool muse_passcode_supported(void) { return atomic_load(&s_supported); }
 bool muse_passcode_on(void) { return atomic_load(&s_on); }
 bool muse_passcode_locked(void) { return atomic_load(&s_locked); }
 
+bool muse_passcode_locked_at_press(void)
+{
+    take();
+    if (muse_pass_press(&s_p, now_ms())) {
+        ESP_LOGI(TAG, "5 min with the screen off: locking at the press");
+    }
+    give();
+    return atomic_load(&s_locked);
+}
+
 void muse_passcode_request_keypad(muse_pass_why_t why)
 {
     atomic_store(&s_keypad_req, (int)why);

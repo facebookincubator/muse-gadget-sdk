@@ -112,6 +112,10 @@ bool muse_pass_screen_on(muse_pass_t *p, int64_t now_ms);
 /* Every frame or so. stays_on: the screen doesn't time out (USB power, or the
  * timeout Never): 5 minutes without input lock it. True if this locked it. */
 bool muse_pass_tick(muse_pass_t *p, int64_t now_ms, uint32_t idle_ms, bool stays_on, bool busy);
+/* A talk press: "After 5 min" locks here once 5 minutes passed in the dark (the
+ * press can come before the tick or the screen-on applies it). True if this
+ * locked it. */
+bool muse_pass_press(muse_pass_t *p, int64_t now_ms);
 /* The console's `pass lock` (a bench). No-op without a passcode. */
 void muse_pass_lock_now(muse_pass_t *p);
 

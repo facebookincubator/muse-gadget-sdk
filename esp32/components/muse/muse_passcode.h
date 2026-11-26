@@ -61,6 +61,10 @@ bool muse_passcode_supported(void);
 /* Any task, cheap. */
 bool muse_passcode_on(void);
 bool muse_passcode_locked(void);
+/* A talk press (the input task): "After 5 min" applied first if it lapsed
+ * while the screen was dark (the UI's tick or screen-on may not have run
+ * yet), then whether it's locked. */
+bool muse_passcode_locked_at_press(void);
 
 /* Any task: a talk or call press found the gadget locked. The press itself
  * is dropped (never replayed); the keypad opens with its reason. */
@@ -113,6 +117,7 @@ static inline void muse_passcode_set_supported(bool supported) { (void)supported
 static inline bool muse_passcode_supported(void) { return false; }
 static inline bool muse_passcode_on(void) { return false; }
 static inline bool muse_passcode_locked(void) { return false; }
+static inline bool muse_passcode_locked_at_press(void) { return false; }
 static inline void muse_passcode_request_keypad(muse_pass_why_t why) { (void)why; }
 static inline void muse_passcode_screen_off(bool busy) { (void)busy; }
 static inline void muse_passcode_screen_on(void) {}

@@ -95,6 +95,10 @@ int main(void)
             sscanf(line, "%*s %lld %d %d %d", &now, &n1, &n2, &n3);
             printf("now=%d ", muse_pass_tick(&p, now, (uint32_t)n1, n2, n3));
             state(&p, now);
+        } else if (!strcmp(cmd, "press")) {
+            sscanf(line, "%*s %lld", &now);
+            printf("now=%d ", muse_pass_press(&p, now));
+            state(&p, now);
         } else if (!strcmp(cmd, "locknow")) {
             muse_pass_lock_now(&p);
             state(&p, 0);

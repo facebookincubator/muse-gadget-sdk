@@ -66,7 +66,7 @@ static struct { int (*audio_init)(void), (*mic_init)(void); bool keyboard, touch
 static bool s_talk_down;
 static int64_t s_talk_released_us;
 #define MUSE_PASS_WHY_TALK 2
-static bool muse_passcode_locked(void) { return false; }   /* test_muse_passcode covers the lock */
+static bool muse_passcode_locked_at_press(void) { return false; }   /* test_muse_passcode covers the lock */
 static void muse_passcode_request_keypad(int why) { (void)why; }
 
 /* Link on a gadget build: a pairing waiting for its press (confirm_required), its prompt armed: one press

@@ -124,6 +124,11 @@ bool muse_pass_tick(muse_pass_t *p, int64_t now_ms, uint32_t idle_ms, bool stays
     return false;
 }
 
+bool muse_pass_press(muse_pass_t *p, int64_t now_ms)
+{
+    return p->dark && after_lapsed(p, now_ms);
+}
+
 void muse_pass_lock_now(muse_pass_t *p)
 {
     if (p->rec.on) {
