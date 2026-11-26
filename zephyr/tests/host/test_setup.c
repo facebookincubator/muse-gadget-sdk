@@ -1782,6 +1782,51 @@ static void test_unreadable_resetup_refused(void)
 	CHECK(mg_setup_store_erase() == 0);
 }
 
+extern int host_button_flushes;
+
+/* A press that began before the prompt armed (queued or down then: the core
+ * passes after_arm false) never confirms it: the prompt takes it, and its
+ * release; the next press confirms. On a gadget that isn't set up, with
+ * setup mode off and on, and on a set-up gadget's re-setup in setup mode. */
+static void test_press_before_prompt_never_confirms(void)
+{
+	static const char *const what[] = {"not set up", "not set up, setup mode",
+					   "set up, setup mode"};
+
+	printf("  setup: a press from before the prompt never confirms it\n");
+	for (int i = 0; i < 3; i++) {
+		int flushes;
+
+		host_setup_mode = i > 0;
+		if (i < 2) {
+			fresh();
+			CHECK(!mg_setup_store_complete());
+		} else {
+			CHECK(mg_setup_store_complete());
+		}
+		app_ctr = dev_ctr = 0;
+		flushes = host_button_flushes;
+		stop_at_prompt = true;
+		handshake();
+		stop_at_prompt = false;
+		CHECK(host_button_flushes == flushes + 1); /* the prompt armed the queue */
+		/* The press down when it armed, then its release (the core sends
+		 * setup nothing for a release). */
+		CHECK(mg_setup_button_at(true, false));
+		CHECK(mg_setup_confirm_pending() && host_pair_led && no_more());
+		/* A new press confirms. */
+		CHECK(mg_setup_button_at(true, true));
+		CHECK(!host_pair_led && status_is(app_recv_enc(), "pairing_confirmed"));
+		provision(i == 2 ? "access-two" : "access-one", "refresh");
+		CHECK(status_is(app_recv_enc(), "auth_ok"));
+		CHECK(holds_k_for(i == 2 ? "access-two" : "access-one"));
+		if (host_failures) {
+			printf("    (%s)\n", what[i]);
+		}
+	}
+	host_setup_mode = true;
+}
+
 /* On a release build (this one) only the button confirms a setup or a
  * re-setup: an injected press is taken by the prompt (never a talk press)
  * and confirms nothing, set up or not, in setup mode or not; the button's
@@ -2260,7 +2305,7 @@ HOST_MAIN(setup_all, test_resetup_bad_takeover, test_commit_hook, test_node_ids,
 	  test_reprovision_ends_session,
 #endif
 	  test_reprovision_boot_recovery, test_rollback, test_boot_recovery, test_boot_unreadable, test_boot_partial_listing, test_commit_doc_limit, test_timeouts,
-	  test_sensitive_before_confirm, test_token_proof, test_token_proof_key_error, test_boot_unreadable_fails_closed, test_unreadable_resetup_refused, test_injected_press_never_confirms, test_clips_owed, test_reset, test_small_mtu
+	  test_sensitive_before_confirm, test_token_proof, test_token_proof_key_error, test_boot_unreadable_fails_closed, test_unreadable_resetup_refused, test_injected_press_never_confirms, test_press_before_prompt_never_confirms, test_clips_owed, test_reset, test_small_mtu
 #if defined(CONFIG_MG_SDK_TOKEN_SLOT)
 	  , test_token_slot
 #endif

@@ -466,8 +466,14 @@ statuses, `link_pairing.c` session, `app.c` phases):
   confirmation is pending the press is never push-to-talk; the LED blinks
   very fast (50/50), and 3 quick blinks follow `auth_ok`. A first setup and
   a re-setup (**setting a set-up gadget up again**) are confirmed alike, by
-  ONE press of the button: no hold, no press time, no after-the-prompt edge
-  check (host `test_resetup_one_press`, BabbleSim `setup`). On release
+  ONE press of the button: no hold, no press time (host
+  `test_resetup_one_press`, BabbleSim `setup`), but only a press that began
+  after the prompt armed: arming it marks the button's queue
+  (`mg_button_flush_injected()`), and a press queued or down then (a
+  debounced press that began before it, `mg_input_after_arm()`) is taken by
+  the prompt with its release and confirms nothing, set up or not, in setup
+  mode or not; the next press confirms (`mg_setup_button_at()`, host
+  `test_press_before_prompt_never_confirms`). On release
   builds only the button's own press confirms, set up or not, in setup mode
   or not: an injected one (the USB console's `d`) is taken by the prompt,
   never push-to-talk, and confirms nothing (`mg_setup_button(real)`, host

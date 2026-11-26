@@ -80,10 +80,13 @@ void mg_setup_disconnected(void);
 
 /* A press while a pairing waits (the button, or the bench console's
  * >pair.confirm): one press confirms a first setup and a re-setup alike,
- * with no hold, no press time and no edge check; on a release build only a
- * real press (real: the button's GPIO) confirms, an injected one never. True
- * if a pending pairing took it (confirmed, refused, or swallowed before the
- * prompt is up), so it isn't push-to-talk. */
+ * with no hold and no press time; on a release build only a real press
+ * (real: the button's GPIO) confirms, an injected one never; and only one
+ * that began after the prompt was armed (after_arm, mg_button.c: not queued
+ * or down when it armed). True if a pending pairing took it (confirmed,
+ * refused, or swallowed before the prompt is up), so it isn't push-to-talk.
+ * mg_setup_button() is a scripted confirm: after the prompt. */
+bool mg_setup_button_at(bool real, bool after_arm);
 bool mg_setup_button(bool real);
 /* The back gesture on a board that has one: the prompt closes. */
 void mg_setup_dismiss(void);

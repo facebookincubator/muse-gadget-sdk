@@ -816,6 +816,9 @@ static void handle_client_finished(const struct mg_json_obj *o)
 		return;
 	}
 	s.armed = true;
+	/* A press already queued or down now is from before the prompt: it
+	 * never confirms it (mg_input_after_arm(), mg_setup_button_at()). */
+	mg_button_flush_injected();
 	takeover = false;
 	prompt_conn = mg_transport_conn_gen();
 	mg_led_set(MG_LED_PAIR_PENDING, true);
@@ -846,10 +849,10 @@ static void confirm_now(void)
 }
 
 /* One press confirms a first setup and a re-setup alike, whatever made it
- * (the button, or scripted input) and whenever it began: no hold, no press
- * time, no edge check. While the prompt waits, a press is never
- * push-to-talk. */
-bool mg_setup_button(bool real)
+ * (the button, or scripted input): no hold, no press time; but only a press
+ * that began after the prompt was armed (after_arm). While the prompt waits,
+ * a press is never push-to-talk. */
+bool mg_setup_button_at(bool real, bool after_arm)
 {
 	if (takeover) {
 		/* A hello took the prompt over: the button stays the prompt's
@@ -879,8 +882,23 @@ bool mg_setup_button(bool real)
 		mg_setup_dismiss();
 		return true;
 	}
+	if (!after_arm) {
+		/* Queued or down when the prompt armed (a debounced press that
+		 * began before it): it confirms nothing, set up or not, in setup
+		 * mode or not; the prompt takes it (and its release), and the
+		 * next press confirms. */
+		LOG_INF("setup: a press from before the prompt doesn't confirm it");
+		return true;
+	}
 	confirm_now();
 	return true;
+}
+
+bool mg_setup_button(bool real)
+{
+	/* A scripted confirm (the bench console, the Nordic UART) comes while
+	 * the prompt is up, after it by construction. */
+	return mg_setup_button_at(real, true);
 }
 
 /* The back gesture (a board with one): the prompt closes ("Not now"; it

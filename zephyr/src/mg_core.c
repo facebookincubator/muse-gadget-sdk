@@ -1359,7 +1359,7 @@ static void button_at(bool pressed, int64_t at_ms, bool real, bool after_arm)
 
 	if (pressed) {
 		postroll_end_now(); /* the last turn's post-roll gives way */
-		if (mg_setup_button(real)) {
+		if (mg_setup_button_at(real, after_arm)) {
 			/* Link setup took it (one press confirms, or a press
 			 * before its prompt is up); the release is swallowed too. */
 			c.button = false;

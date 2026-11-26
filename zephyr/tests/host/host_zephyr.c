@@ -454,6 +454,14 @@ void mg_ble_refresh_advertising(void)
 
 int host_proof_challenges; /* mg_core_proof_challenge */
 
+/* mg_button.c's, where a test links it (test_button): the prompts arm the
+ * button's queue here. */
+int host_button_flushes;
+__attribute__((weak)) void mg_button_flush_injected(void)
+{
+	host_button_flushes++;
+}
+
 int host_proof_results; /* mg_core_proof_result */
 void mg_core_proof_result(bool matched)
 {

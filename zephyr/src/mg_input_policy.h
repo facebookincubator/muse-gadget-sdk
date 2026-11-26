@@ -16,9 +16,9 @@
 
 /* Real presses vs injected input: whether a press came from the button's
  * GPIO is set at the source (mg_button.c's input callback) and travels with
- * that event, never read from a shared "last input" variable. A Link setup
- * confirm takes any one press; what follows serves the update prompt: a
- * press counts only once it was queued after the prompt was armed. The
+ * that event, never read from a shared "last input" variable. What follows
+ * serves both confirm prompts (Link setup's and the update's): a press counts
+ * only once it was queued after the prompt was armed. The
  * boot's holds (SAFE, reset) read the GPIO directly and have no injection
  * path. Host test_input_policy. */
 
