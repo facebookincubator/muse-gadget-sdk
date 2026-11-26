@@ -24,7 +24,8 @@
  * confirms nothing, and on the update card it cancels the update. On a screen
  * that went dark under the setup card, the waking tap lands on the sleep
  * cover and confirms nothing; the next tap, once lit, confirms. The asking
- * update card never goes dark. Built with
+ * update card never goes dark. An injected touch (a bench press: muse_touch_real() false) confirms nothing, a
+ * setup's, a re-setup's or the update's, in a release build (this one: no test or automation image). Built with
  * CONFIG_MUSE_GADGET_BLE_AUDIO, the BLE gadget's UI; its update and press
  * state are the fakes below.
  */
@@ -40,8 +41,12 @@
 
 static int confirms;
 static bool test_confirm_key_press(void);
+static bool touch_real = true;   /* the touch is a finger's, not a bench press */
+static bool test_touch_real(void) { return touch_real; }
 #define muse_link_confirm_key_press test_confirm_key_press   /* the setup prompt's confirm, counted */
+#define muse_touch_real test_touch_real
 #include "../../components/muse/muse_ui.c"
+#undef muse_touch_real
 #undef muse_link_confirm_key_press
 
 static bool test_confirm_key_press(void)
@@ -188,6 +193,25 @@ int main(int argc, char **argv)
         assert(lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && s_pair_ok == PAIR_OK_NONE);
     }
 
+    /* An injected touch on the disc (a bench press, over any link) confirms neither a first setup nor a re-setup;
+     * the finger's next tap does. */
+    for (int set_up = 0; set_up < 2; set_up++) {
+        sim_services_set_paired(set_up);
+        sim_services_set_link_state(MUSE_LINK_CONFIRM);
+        chrome();
+        assert(!lv_obj_has_flag(s_pair, LV_OBJ_FLAG_HIDDEN) && s_pair_ok == PAIR_OK_SETUP);
+        confirms = 0;
+        disc_center(&x, &y);
+        touch_real = false;
+        tap(x, y);
+        assert(confirms == 0);
+        touch_real = true;
+        tap(x, y);
+        assert(confirms == 1);
+        sim_services_set_link_state(MUSE_LINK_ONLINE);
+        chrome();
+    }
+
     /* The update card: the disc's tap is the update's (on_any_press, the indev's point), never a setup confirm; a
      * tap elsewhere cancels it. */
     s_upd_state = MG_BLE_UPDATE_UI_ASK;
@@ -216,6 +240,16 @@ int main(int argc, char **argv)
     disc_center(&x, &y);
     tap(x, y);
     assert(notes == 2 && cancels == 1 && confirms == 0);
+    /* An injected touch neither confirms nor cancels it. */
+    s_prompting = true;   /* asked again */
+    chrome();
+    touch_real = false;
+    disc_center(&x, &y);
+    tap(x, y);
+    elsewhere(&x, &y);
+    tap(x, y);
+    assert(notes == 2 && cancels == 1 && confirms == 0 && s_prompting);
+    touch_real = true;
     puts("PASS confirm disc");
     return 0;
 }

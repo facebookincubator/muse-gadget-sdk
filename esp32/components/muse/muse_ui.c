@@ -396,10 +396,9 @@ typedef enum {
 } pair_ok_t;
 static pair_ok_t s_pair_ok;
 
-/* A touch that may confirm the update prompt (not a setup: one tap of any kind confirms that): a finger on the
- * panel in a release build, never a bench press (the console's press= or a Nordic UART line's); with no person in
- * the loop (test and automation images, muse_input.h MUSE_NO_PERSON) the bench's presses too. */
-#if CONFIG_MUSE_GADGET_BLE_AUDIO   /* its only caller, on_any_press, is BLE-only */
+/* A touch that may confirm a prompt, a setup's, a re-setup's or the update's: a finger on the panel in a release
+ * build, never a bench press (the console's press= or a Nordic UART line's), whatever link it came over; with no
+ * person in the loop (test and automation images, muse_input.h MUSE_NO_PERSON) the bench's presses too. */
 static bool touch_confirms(void)
 {
 #if MUSE_NO_PERSON
@@ -408,7 +407,6 @@ static bool touch_confirms(void)
     return muse_touch_real();
 #endif
 }
-#endif
 
 static void on_pair_ok(lv_event_t *e)
 {
@@ -421,6 +419,10 @@ static void on_pair_ok(lv_event_t *e)
     }
 #endif
     if (lv_event_get_code(e) == LV_EVENT_PRESSED && s_pair_ok) {
+        if (!touch_confirms()) {
+            ESP_LOGW(TAG, "setup prompt: a real press is needed");
+            return;
+        }
         (void)muse_link_confirm_key_press();   /* one tap on Confirm pairs, a first setup or a re-setup */
     }
 }

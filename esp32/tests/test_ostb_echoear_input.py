@@ -79,6 +79,7 @@ static pair_ok_t s_pair_ok;
 #define ESP_LOGW(tag, ...) ((void)(tag))
 #define MUSE_PRESS_PANEL 2
 static bool muse_touch_real(void) { return true; }
+static bool touch_confirms(void) { return muse_touch_real(); }   /* a release image (muse_ui.c) */
 static void muse_input_press(int src) { (void)src; }
 static bool muse_input_talk_ok(bool real) { return real; }   /* a release image: the finger here is real */
 '''

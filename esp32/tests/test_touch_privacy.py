@@ -53,16 +53,19 @@ class ThePhoneGetsOnlyTheFacesTouches(unittest.TestCase):
 
 
 class OneTapOnConfirmPairsAndATapElsewhereDoesNothing(unittest.TestCase):
-    """A setup or a re-setup is confirmed by one tap on the card's Confirm (a generous hit area), whatever the tap (a
-    finger or a bench press) and however long; a tap anywhere else does nothing, and the back gesture (a swipe) ends
-    the prompt ("Not now"). The update card's Confirm still takes a finger only in a release build."""
+    """A setup or a re-setup is confirmed by one tap on the card's Confirm (a generous hit area), however long; a tap
+    anywhere else does nothing, and the back gesture (a swipe) ends the prompt ("Not now"). In a release build the
+    tap is a finger's, never a bench press (over any link), on the setup card's Confirm as on the update card's."""
 
     def test_the_confirm_paths(self) -> None:
         ui = (MUSE / "muse_ui.c").read_text()
         pair = body(ui, "static void on_pair_ok(lv_event_t *e)\n{")
         self.assertIn("if (lv_event_get_code(e) == LV_EVENT_PRESSED && s_pair_ok) {\n"
+                      "        if (!touch_confirms()) {\n"
+                      "            ESP_LOGW(TAG, \"setup prompt: a real press is needed\");\n"
+                      "            return;\n"
+                      "        }\n"
                       "        (void)muse_link_confirm_key_press();", pair)
-        self.assertNotIn("touch_confirms", pair)
         # A generous hit area on the Confirm control; a tap elsewhere does nothing; the back gesture (a swipe)
         # dismisses.
         self.assertIn("lv_obj_set_ext_click_area(s_pair_code, on ? (s_w < s_h ? s_w : s_h) / 10 : 0);", ui)
@@ -74,7 +77,7 @@ class OneTapOnConfirmPairsAndATapElsewhereDoesNothing(unittest.TestCase):
         self.assertIn('strlcpy(hint, "Tap Confirm to pair", sizeof(hint));\n                ok = true;', ui)
         for gone in ("Hold 3 s", "muse_link_confirm_hold", "s_pair_ok_pressed_us"):
             self.assertNotIn(gone, ui)
-        # The update card's Confirm (not a setup's): a finger only, in a release build.
+        # Every card's Confirm: a finger only, in a release build.
         ok = body(ui, "static bool touch_confirms(void)\n{")
         self.assertIn("#if MUSE_NO_PERSON\n    return true;\n#else\n    return muse_touch_real();", ok)
         self.assertIn("if (!touch_confirms()) {\n            ESP_LOGW(TAG, \"update prompt: a real press is needed\");", anyp)
