@@ -1,0 +1,21 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Google's LC3 codec for musegadgets BLE audio. The sources are the one copy
+# in xplat/liblc3, shared with the Zephyr SDK (see its README.md), or its
+# fixed-point port in xplat/lc3fx with CONFIG_MUSE_GADGET_BLE_LC3_FIXED; this
+# component only builds them for ESP-IDF.
+description: "Google's LC3 codec (Apache-2.0), built from xplat/liblc3 or its fixed-point port xplat/lc3fx"
+url: "https://github.com/google/liblc3"
+license: "Apache-2.0"
