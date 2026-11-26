@@ -189,6 +189,10 @@ menu "Muse"
             bool "M5Stack TriviaPOD (ESP32-S3, round touch AMOLED)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_SEEED_WIO_TRACKER_L2
+            bool "Seeed Wio Tracker L2 (3.2-inch IPS touch display)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_SEEED_XIAO_S3_147
             bool "Seeed XIAO ESP32-S3 1.47 Touch Display (PDM mic, no speaker)"
             depends on IDF_TARGET_ESP32S3
@@ -314,6 +318,7 @@ menu "Muse"
         default "m5stack_atoms3" if MUSE_BOARD_M5STACK_ATOMS3
         default "m5stack_stopwatch" if MUSE_BOARD_M5STACK_STOPWATCH
         default "m5stack_triviapod" if MUSE_BOARD_M5STACK_TRIVIAPOD
+        default "seeed_wio_tracker_l2" if MUSE_BOARD_SEEED_WIO_TRACKER_L2
         default "seeed_xiao_s3_147" if MUSE_BOARD_SEEED_XIAO_S3_147
         default "m5stack_cores3" if MUSE_BOARD_M5STACK_CORES3
         default "m5stack_cores3lite" if MUSE_BOARD_M5STACK_CORES3LITE

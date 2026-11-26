@@ -185,6 +185,8 @@ if(CONFIG_MUSE_ENABLED)
             # BMI270 registry/lifecycle adapter; vendor driver is a gated managed dependency.
             list(APPEND srcs "boards/bmi270_device.c" "boards/imu_events.c")
         endif()
+    elseif(CONFIG_MUSE_BOARD_SEEED_WIO_TRACKER_L2)
+        list(APPEND srcs "boards/board_seeed_wio_tracker_l2.c")
     elseif(CONFIG_MUSE_BOARD_SEEED_XIAO_S3_147)
         list(APPEND srcs "boards/board_seeed_xiao_s3_147.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3 OR CONFIG_MUSE_BOARD_M5STACK_CORES3LITE)

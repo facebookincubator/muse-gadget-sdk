@@ -88,6 +88,7 @@ before adding a feature to one.
 | Elecrow CrowPanel Advance 4.3 V1.3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-crowpanel-advance-43` | `tools/muse/board.sh build crowpanel-43` |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
 | M5Stack TriviaPOD (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod` | `tools/muse/board.sh build triviapod` |
+| Seeed Wio Tracker L2 (IPS, experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-wio-tracker-l2` | `tools/muse/board.sh build l2` |
 | Seeed XIAO ESP32-S3 1.47 Touch Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147` | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | M5Stack CoreS3 Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3lite` | `tools/muse/board.sh build cores3lite` |
