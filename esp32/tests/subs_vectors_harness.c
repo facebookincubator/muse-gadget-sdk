@@ -86,7 +86,7 @@ static uint32_t f_now(void *ctx) { (void)ctx; return 0; }
 static void hexs(const uint8_t *b, int n, char *out)
 {
     for (int i = 0; i < n; i++) {
-        sprintf(out + 2 * i, "%02x", b[i]);
+        snprintf(out + 2 * i, 3, "%02x", b[i]);
     }
     out[2 * n] = 0;
 }
