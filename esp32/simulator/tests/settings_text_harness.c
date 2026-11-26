@@ -48,7 +48,7 @@ void muse_avatar_clear(void) { avatar_clears++; }
 #endif
 
 void muse_voice_set_monitor(bool on) { (void)on; }
-float muse_voice_monitor_db(void) { abort(); }   /* no meter without a microphone */
+float muse_voice_monitor_db(void) { assert(muse_board->mic_init); return -40.0f; }   /* no meter without a microphone */
 void muse_ui_set_swipe_enabled(bool on) { (void)on; }
 /* Other settings pages are linked by the production navigation table. Any
  * accidental access to their device services fails this focused test. */
@@ -80,7 +80,7 @@ void muse_settings_set_sleep_s(int v) { (void)v; abort(); }
 void muse_settings_set_speaker_on(bool v) { (void)v; abort(); }
 void muse_settings_set_volume(int v) { (void)v; abort(); }
 void muse_settings_set_wifi_on(bool v) { (void)v; abort(); }
-int muse_settings_sleep_s(void) { abort(); }
+int muse_settings_sleep_s(void) { return 120; }
 int muse_settings_text_size(void) { return MUSE_TEXT_SMALL; }
 void muse_settings_set_text_size(int v) { (void)v; abort(); }
 bool muse_settings_speaker_on(void) { return true; }
@@ -99,7 +99,6 @@ size_t muse_settings_hatch_token_len(void) { return 0; }
 muse_power_t muse_state_power(void) { return (muse_power_t){.battery_pct=-1}; }
 void muse_battery_read(muse_battery_t *out) { *out = (muse_battery_t){0}; }
 bool muse_battery_drain(const muse_battery_t *b, int *rate, int *hours) { (void)b; (void)rate; (void)hours; return false; }
-const esp_app_desc_t *esp_app_get_description(void) { static const esp_app_desc_t desc = {.version="test"}; return &desc; }
 void muse_wifi_apply(void) { abort(); }
 void muse_wifi_forget(const char *ssid) { (void)ssid; abort(); }
 int muse_wifi_saved(muse_wifi_saved_t *out, int max) { (void)out; (void)max; abort(); }
@@ -112,13 +111,46 @@ bool muse_ui_text_size_applies(void) { return true; }
 void muse_voice_request_chirp(void) { abort(); }
 esp_err_t muse_wifi_scan(void) { abort(); }
 esp_err_t esp_read_mac(uint8_t *mac, int type) { (void)mac; (void)type; abort(); }
-int64_t esp_timer_get_time(void) { abort(); }
+int64_t esp_timer_get_time(void) { return 1000000; }   /* a page's tick reads the time */
 void muse_settings_set_wifi(const char *ssid, const char *pass)
 {
     strlcpy(saved_ssid, ssid, sizeof(saved_ssid));
     strlcpy(saved_pass, pass, sizeof(saved_pass));
     saves++;
 }
+/* The card list's rows for the Muse Gadgets pages (Talk, Passcode, Watch face, Developer, Tests): the home reads
+ * whether each shows; opening one fails this focused test. */
+bool muse_settings_developer(void) { return false; }
+void muse_settings_set_developer(bool v) { (void)v; abort(); }
+bool muse_settings_haptics(void) { return true; }
+void muse_settings_set_haptics(bool v) { (void)v; abort(); }
+muse_talk_mode_t muse_settings_talk_mode(void) { return MUSE_TALK_BOTH; }
+void muse_settings_set_talk_mode(muse_talk_mode_t mode) { (void)mode; abort(); }
+bool muse_settings_sleep_when_charged(void) { abort(); }
+void muse_settings_set_sleep_when_charged(bool v) { (void)v; abort(); }
+bool muse_passcode_supported(void) { return false; }
+bool muse_passcode_on(void) { return false; }
+muse_pass_lock_t muse_passcode_lock_mode(void) { return MUSE_PASS_LOCK_SCREEN_OFF; }
+void muse_passcode_set_lock_mode(muse_pass_lock_t mode) { (void)mode; abort(); }
+void muse_passcode_ui_flow(muse_pass_flow_t flow, void (*done)(bool changed)) { (void)flow; (void)done; abort(); }
+bool muse_link_face_available(void) { return false; }
+bool muse_link_face_size_small(void) { abort(); }
+void muse_link_face_size_set(bool small) { (void)small; abort(); }
+void muse_link_face_label(char *out, size_t cap) { (void)out; (void)cap; abort(); }
+void muse_link_face_pick(bool avatar) { (void)avatar; abort(); }
+bool muse_link_face_avatar_picked(void) { abort(); }
+bool muse_link_image_test(void) { return false; }
+bool muse_link_image_ask(char *why, size_t cap) { (void)why; (void)cap; abort(); }
+bool muse_link_image_status(char *out, size_t cap) { (void)out; (void)cap; abort(); }
+bool muse_link_sdk_token_fp(unsigned *len, char hex[MUSE_LINK_FP_HEX]) { (void)len; (void)hex; abort(); }
+void muse_ble_phone_setup(bool on) { (void)on; abort(); }
+bool muse_input_talk_choice(void) { return false; }
+bool muse_state_on_battery_real(void) { abort(); }
+bool mg_ble_haptic_test_caps(mght_caps_t *c) { (void)c; return false; }   /* no actuator: no Vibration tests */
+mght_result_t mg_ble_haptic_test(const mght_cmd_t *c) { (void)c; abort(); }
+void mg_ble_haptic_test_status(mght_status_t *st) { (void)st; abort(); }
+size_t heap_caps_get_free_size(uint32_t caps) { (void)caps; abort(); }
+void esp_log_write(esp_log_level_t level, const char *tag, const char *format, ...) { (void)level; (void)tag; (void)format; }
 size_t muse_sim_strlcpy(char *dst, const char *src, size_t cap)
 {
     size_t len = strlen(src);
@@ -191,6 +223,24 @@ static void one_line_in(lv_obj_t *l, lv_obj_t *card)
 static const char *child_text(lv_obj_t *parent, int i)
 {
     return lv_label_get_text(lv_obj_get_child(parent, i));
+}
+
+/* A page (page()): its title in a hit area (child 0), after the back chevron on a sub-page, then its list. */
+static const char *page_title(lv_obj_t *p)
+{
+    const char *t = child_text(lv_obj_get_child(p, 0), 0);
+    const char *chevron = LV_SYMBOL_LEFT " ";
+    return strncmp(t, chevron, strlen(chevron)) ? t : t + strlen(chevron);
+}
+
+static lv_obj_t *page_back(lv_obj_t *p)
+{
+    return lv_obj_get_user_data(p);   /* the title's hit area, as the bench's "back" */
+}
+
+static lv_obj_t *page_list(lv_obj_t *p)
+{
+    return lv_obj_get_child(p, 1);
 }
 
 static void check_entry(void)
@@ -283,10 +333,12 @@ int main(int argc, char **argv)
     s_home = lv_obj_create(s_tile);
     s_wifi = lv_obj_create(s_tile);
     s_current = s_wifi;
+    /* As muse_settings_ui_build: the card list's geometry and fonts for this panel. */
+    scale_geometry();
     if (test_board.round && test_board.height < 466) {
         s_text_scale = test_board.height;
     }
-    s_tiny = test_board.round && test_board.width < 300;   /* as muse_settings_ui_build */
+    const bool tiny = test_board.round && test_board.width < 300;
 #if CONFIG_MUSE_AVATAR_SYNC
     if (!strcmp(scenario, "avatar")) {
         build_avatar_page(s_tile);show(s_avatar);lv_obj_update_layout(s_avatar);
@@ -301,7 +353,7 @@ int main(int argc, char **argv)
             avatar_status_text=states[i];tick_avatar();lv_obj_update_layout(s_avatar);
             one_line_in(s_avatar_status,lv_obj_get_parent(s_avatar_status));
         }
-        lv_obj_t *list=lv_obj_get_child(s_avatar,2);
+        lv_obj_t *list=page_list(s_avatar);
         lv_obj_send_event(lv_obj_get_child(list,2),LV_EVENT_CLICKED,NULL);
         lv_obj_send_event(lv_obj_get_child(list,3),LV_EVENT_CLICKED,NULL);
         assert(avatar_refreshes==1&&avatar_clears==1);
@@ -318,7 +370,7 @@ int main(int argc, char **argv)
         for (unsigned visit = 0; visit < 200; ++visit) {
             lv_obj_send_event(lv_obj_get_parent(s_home_appearance), LV_EVENT_CLICKED, NULL);
             assert(s_current == s_appearance && lv_obj_is_valid(s_appearance));
-            assert(!strcmp(child_text(s_appearance, 0), "APPEARANCE"));
+            assert(!strcmp(page_title(s_appearance), "APPEARANCE"));
             for (unsigned change = 0; change < 3; ++change) {
 #if CONFIG_MUSE_AVATAR_SYNC
                 muse_avatar_source_t unchanged_source = avatar_source;
@@ -333,7 +385,7 @@ int main(int argc, char **argv)
                 assert(avatar_source == unchanged_source);
 #endif
             }
-            lv_obj_send_event(lv_obj_get_child(s_appearance, 1), LV_EVENT_CLICKED, NULL);
+            lv_obj_send_event(page_back(s_appearance), LV_EVENT_CLICKED, NULL);
             assert(s_current == s_home);
             lv_tick_inc(1);
             lv_timer_handler();   /* run the production deferred deletion */
@@ -343,11 +395,11 @@ int main(int argc, char **argv)
             muse_avatar_source_t wanted_source = avatar_source == MUSE_AVATAR_PERSONAL ? MUSE_AVATAR_BUILTIN : MUSE_AVATAR_PERSONAL;
             lv_obj_send_event(lv_obj_get_parent(s_home_avatar), LV_EVENT_CLICKED, NULL);
             assert(s_current == s_avatar && lv_obj_is_valid(s_avatar));
-            assert(!strcmp(child_text(s_avatar, 0), "AVATAR"));
+            assert(!strcmp(page_title(s_avatar), "AVATAR"));
             lv_obj_send_event(lv_obj_get_parent(s_avatar_source), LV_EVENT_CLICKED, NULL);
             muse_settings_ui_tick(true);
             assert(avatar_source == wanted_source && muse_theme_mode() == previous_theme);
-            lv_obj_send_event(lv_obj_get_child(s_avatar, 1), LV_EVENT_CLICKED, NULL);
+            lv_obj_send_event(page_back(s_avatar), LV_EVENT_CLICKED, NULL);
             lv_tick_inc(1);
             lv_timer_handler();
             assert(s_current == s_home && !s_avatar);
@@ -437,10 +489,17 @@ int main(int argc, char **argv)
         lv_obj_send_event(lv_obj_get_child(s_text, 0), LV_EVENT_CLICKED, NULL);
         assert(s_current == s_wifi && saves == 0);
     } else if (!strcmp(scenario, "switch")) {
-        lv_obj_t *sw = switch_row(s_wifi, "Wi-Fi", true, on_switch);
-        lv_obj_t *text = lv_obj_get_child(lv_obj_get_parent(sw), 0);
-        assert(lv_label_get_long_mode(text) ==
-               (stacked_rows() ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_WRAP));
+        /* A switch row's card: the label, then the switch, apart and inside the card. */
+        lv_obj_t *list;
+        lv_obj_t *p = page(s_tile, "WI-FI", true, &list);
+        lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t *sw = switch_row(list, "Wi-Fi", true, on_switch);
+        lv_obj_t *card = lv_obj_get_parent(sw);
+        lv_obj_t *text = lv_obj_get_child(card, 0);
+        assert(lv_obj_check_type(text, &lv_label_class) && !strcmp(lv_label_get_text(text), "Wi-Fi"));
+        assert(lv_obj_has_state(sw, LV_STATE_CHECKED));
+        lv_area_t t = area(text), w = area(sw), c = area(card);
+        assert(t.x2 < w.x1 && box_inside(t, c) && box_inside(w, c));
     } else if (!strcmp(scenario, "rows")) {
         /* Long values stay on bounded lines inside their cards. */
         lv_obj_t *list;
@@ -461,28 +520,40 @@ int main(int argc, char **argv)
         set_text(value, "Connected");
         one_line_in(lv_obj_get_child(card, 1), card);
         one_line_in(value, card);
-        if (s_tiny) {
-            /* The cards and the back arrow stay inside the circle, clear of the title. */
+        if (tiny) {
+            /* The cards and the title, the back chevron in it, stay inside the circle; the title is the back
+             * control. */
             assert(in_circle(area(lv_obj_get_parent(mac))));
-            lv_obj_t *title = lv_obj_get_child(p, 0), *back = lv_obj_get_child(p, 1);
-            lv_area_t arrow = area(lv_obj_get_child(back, 0)), t = area(title);
-            assert(in_circle(arrow));
-            assert(arrow.x2 < t.x1);
-            assert(in_circle(t));
+            lv_obj_t *title = lv_obj_get_child(p, 0);
+            assert(page_back(p) == title && lv_obj_has_flag(title, LV_OBJ_FLAG_CLICKABLE));
+            assert(!strcmp(page_title(p), "BLUETOOTH"));
+            assert(in_circle(area(lv_obj_get_child(title, 0))));
         }
     } else if (!strcmp(scenario, "screen") || !strcmp(scenario, "mic")) {
-        /* Only a board with neither speaker nor microphone loses the mic controls. */
+        /* Only a board with neither speaker nor microphone loses the mic controls: no Sound row or page, and the
+         * brightness on Display for every board. */
         test_board.mic_init = !strcmp(scenario, "mic") ? fake_mic_init : NULL;
-        build_sound_page(s_tile);
-        const char *title = child_text(s_sound, 0);
-        if (test_board.mic_init) {
-            assert(!strcmp(title, "SOUND") && s_gain_sl && s_mic_bar && s_bright_sl);
-        } else {
-            assert(!strcmp(title, "SCREEN") && !s_gain_sl && !s_mic_bar && s_bright_sl);
-            assert(!strcmp(lv_label_get_text(s_bright_val), "60%"));
-            s_current = s_sound;
-            tick_sound();   /* must not touch the absent meter */
+        build_home(s_tile);
+        show(s_home);
+        bool sound_row = false;
+        lv_obj_t *list = page_list(s_home);
+        for (uint32_t i = 0; i < lv_obj_get_child_count(list); i++) {
+            lv_obj_t *c = lv_obj_get_child(list, i);
+            for (uint32_t j = 0; j < lv_obj_get_child_count(c); j++) {
+                lv_obj_t *l = lv_obj_get_child(c, j);
+                sound_row |= lv_obj_check_type(l, &lv_label_class) && !strcmp(lv_label_get_text(l), "Sound");
+            }
         }
+        assert(sound_row == (test_board.mic_init != NULL));
+        muse_settings_ui_open("sound");
+        if (test_board.mic_init) {
+            assert(s_current == s_sound && !strcmp(page_title(s_sound), "Sound") && s_gain_sl && s_mic_bar);
+        } else {
+            assert(s_current == s_home && !s_sound && !s_gain_sl && !s_mic_bar);
+        }
+        muse_settings_ui_open("display");
+        assert(s_current == s_sleep && !strcmp(page_title(s_sleep), "Display") && s_bright_sl);
+        assert(!strcmp(lv_label_get_text(s_bright_val), "60%"));
     } else if (!strcmp(scenario, "bench")) {
         /* Opening a page from text entry drops the entry and the page under it. */
         test_board.talk_button = "screen";
@@ -490,19 +561,16 @@ int main(int argc, char **argv)
         check_entry();
         lv_textarea_set_text(s_text_ta, "2");
         lv_obj_t *ta = s_text_ta;
-        assert(muse_settings_ui_bench_open("power"));
+        build_home(s_tile);   /* Settings, which the bench goes back to first */
+        assert(muse_settings_ui_bench_open("battery"));
         assert(!muse_settings_ui_bench_open("nope"));
         bench_open_pending();   /* what the next visible tick does first */
-        assert(s_current == s_power && !s_wifi && !s_text);
+        assert(s_current == s_battery && !s_wifi && !s_text);
         assert(!strcmp(lv_textarea_get_text(ta), ""));
-        lv_obj_t *list = lv_obj_get_child(s_power, 2);
-        /* The question, then Power off, Restart and Cancel, then how to wake it. */
-        assert(lv_obj_get_child_count(list) == 5);
-        assert(!strcmp(child_text(lv_obj_get_child(list, 1), 0), LV_SYMBOL_POWER "  Power off"));
-        assert(!strcmp(child_text(lv_obj_get_child(list, 2), 0), LV_SYMBOL_REFRESH "  Restart"));
-        assert(!strcmp(child_text(lv_obj_get_child(list, 3), 0), "Cancel"));
-        const char *wake = child_text(list, (int)lv_obj_get_child_count(list) - 1);
-        assert(!strcmp(wake, "Tap the screen to turn it back on."));
+        assert(!strcmp(page_title(s_battery), "Battery"));
+        /* Back from the page: Settings, the page dropped. */
+        lv_obj_send_event(page_back(s_battery), LV_EVENT_CLICKED, NULL);
+        assert(s_current == s_home && !s_battery);
     } else {
         on_wifi_other(NULL);
         check_entry();

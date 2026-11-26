@@ -565,6 +565,7 @@ static lv_obj_t *row_with(lv_obj_t *list, const char *icon, bool img, const char
     lv_obj_t *sym = icon ? label(c, s_font_label, COLOR_ACCENT, icon) : NULL;
     lv_obj_t *t = label(c, s_font_label, COLOR_TEXT, text);
     lv_obj_set_flex_grow(t, 1);
+    lv_obj_set_height(t, lv_font_get_line_height(s_font_label));   /* one line, "…" past it */
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
     if (value_out) {
         lv_obj_t *v = label(c, s_font_value, COLOR_DIM, "");
@@ -701,10 +702,15 @@ static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
     lv_obj_set_height(c, 44);
-    label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
+    /* One line each (DOTS wraps an auto-height label): the name at most 60 % of the card, ending in dots past it. */
+    lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);
+    lv_obj_set_style_max_width(t, lv_pct(60), 0);
+    lv_obj_set_height(t, lv_font_get_line_height(lv_obj_get_style_text_font(t, 0)));
+    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
     /* The value takes what's left, right-aligned, and ends in dots when long. */
     lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_ACCENT, "");
     lv_obj_set_flex_grow(v, 1);
+    lv_obj_set_height(v, lv_font_get_line_height(lv_obj_get_style_text_font(v, 0)));
     lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
     return v;
@@ -3101,7 +3107,7 @@ static void bench_action_pending(void)
     if (!action) return;
     lv_obj_t *target = NULL;
     if (s_current == s_appearance || s_current == s_avatar) {
-        if (action == 2) target = lv_obj_get_child(s_current,1);
+        if (action == 2) target = lv_obj_get_user_data(s_current);   /* the title's chevron (named("back")) */
         else target = lv_obj_get_parent(s_current == s_appearance ? s_appearance_mode : s_avatar_source);
     }
     if (target) lv_obj_send_event(target,LV_EVENT_CLICKED,NULL);

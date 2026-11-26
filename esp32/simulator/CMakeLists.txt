@@ -419,28 +419,41 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     # headroom when firmware builds are running alongside the test.
     set_tests_properties(muse_ring_clip_pixels PROPERTIES TIMEOUT 180)
 
-    # main's settings harness (tests/settings_text_harness.c) includes
-    # muse_settings_ui.c with fakes for main's settings pages and checks main's
-    # layouts (TINY_*, wide, narrow, stacked rows). The settings are now a
-    # card list with Passcode, Watch face, Developer and haptics pages, which
-    # its fakes don't cover yet: off by default until it's ported.
-    option(MUSE_SIM_SETTINGS_TEXT_HARNESS "Build main's settings text/layout harness" OFF)
+    # The settings harness (tests/settings_text_harness.c) includes
+    # muse_settings_ui.c with fakes for the services under its pages and checks
+    # the card list's text entry, rows, Sound and Display, the bench's page
+    # opening and the Appearance and Avatar pages on round, flat and narrow
+    # panels. The Muse Gadgets pages (Talk, Passcode, Watch face, Developer,
+    # Tests) are only shown or hidden: opening one fails it.
+    option(MUSE_SIM_SETTINGS_TEXT_HARNESS "Build the settings text/layout harness" ON)
     if(MUSE_SIM_SETTINGS_TEXT_HARNESS)
-    add_executable(muse_settings_text_test
-        tests/settings_text_harness.c
+    set(muse_settings_includes
+        "${MUSE_COMPONENT_DIR}"
+        "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/include"
+        "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics"
+        "${MUSE_COMPONENT_DIR}/../../../protocols"
+    )
+    # The card list's real type sets, icons, home geometry and haptics test core (Developer > Tests > Vibration).
+    set(muse_settings_sources
         "${MUSE_COMPONENT_DIR}/muse_keypad.c"
         "${MUSE_COMPONENT_DIR}/muse_lang.c"
         "${MUSE_COMPONENT_DIR}/muse_text.c"
+        "${MUSE_COMPONENT_DIR}/muse_type.c"
+        ${MUSE_TYPE_FONTS}
+        "${MUSE_COMPONENT_DIR}/muse_icons.c"
+        "${MUSE_COMPONENT_DIR}/muse_home.c"
+        "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics/mg_haptics.c"
+        "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics/mg_haptic_test.c"
     )
+    add_executable(muse_settings_text_test tests/settings_text_harness.c ${muse_settings_sources})
     target_include_directories(muse_settings_text_test PRIVATE
-        tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}"
+        tests/settings_fakes compat ../tests/link_fakes ${muse_settings_includes}
     )
     target_compile_definitions(muse_settings_text_test PRIVATE _POSIX_C_SOURCE=200809L)
     add_executable(muse_settings_theme_test
-        tests/settings_text_harness.c "${MUSE_COMPONENT_DIR}/muse_keypad.c"
-        "${MUSE_COMPONENT_DIR}/muse_lang.c" "${MUSE_COMPONENT_DIR}/muse_text.c"
+        tests/settings_text_harness.c ${muse_settings_sources}
         "${MUSE_COMPONENT_DIR}/muse_theme.c" "${MUSE_COMPONENT_DIR}/muse_theme_policy.c" "${MUSE_COMPONENT_DIR}/muse_theme_lvgl.c")
-    target_include_directories(muse_settings_theme_test PRIVATE tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}")
+    target_include_directories(muse_settings_theme_test PRIVATE tests/settings_fakes compat ../tests/link_fakes ${muse_settings_includes})
     target_compile_definitions(muse_settings_theme_test PRIVATE _POSIX_C_SOURCE=200809L CONFIG_MUSE_UI_THEME=1)
     target_compile_options(muse_settings_theme_test PRIVATE -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections)
     target_link_libraries(muse_settings_theme_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
