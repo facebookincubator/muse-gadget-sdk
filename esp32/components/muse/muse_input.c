@@ -1284,6 +1284,30 @@ static unsigned bench_hold_take_due(void)
     return ms;
 }
 
+/* key=speaker|power|aux: a press of that button, its release on the next poll. While a setup or re-setup prompt is
+ * up, a wireless line's (the Nordic UART's) never presses on a release image: the press would confirm the prompt,
+ * which takes the gadget's own key, as a touch on its Confirm takes a finger (touch_confirms). The wired console's
+ * presses in every build, and test, bench and automation builds take both (line_talk_ok). */
+static void bench_key(const char *k)
+{
+    unsigned bit = !strcmp(k, "speaker") && muse_board->speaker_button ? MUSE_BTN_SPEAKER_PRESS
+                 : !strcmp(k, "power") && muse_board->power_button   ? MUSE_BTN_POWER_PRESS
+                 : !strcmp(k, "aux") && muse_board->aux_button       ? MUSE_BTN_AUX_PRESS
+                                                                     : 0;
+    if (!bit) {
+        ESP_LOGW("mg.bench", "key %s: no such button on this board", k);
+        return;
+    }
+    if (muse_link_state() == MUSE_LINK_CONFIRM && !line_talk_ok()) {
+        ESP_LOGW("mg.bench", "key %s: the Nordic UART on the setup prompt: real press needed", k);
+        printf("@key real press needed\n");
+        fflush(stdout);
+        return;
+    }
+    atomic_fetch_or(&s_bench_keys, bit);
+    ESP_LOGI("mg.bench", "key %s pressed", k);
+}
+
 /*
  * key=talk[,MS] (400 ms by default): asks the input task for the held press.
  * key=talk,MS,AFTER_S queues one to start AFTER_S (1 to 3600) s from now, up
@@ -2130,16 +2154,7 @@ static bool console_command(char *line, bool whole)
             bench_key_talk(k);
             return true;
         }
-        unsigned bit = !strcmp(k, "speaker") && muse_board->speaker_button ? MUSE_BTN_SPEAKER_PRESS
-                     : !strcmp(k, "power") && muse_board->power_button   ? MUSE_BTN_POWER_PRESS
-                     : !strcmp(k, "aux") && muse_board->aux_button       ? MUSE_BTN_AUX_PRESS
-                                                                         : 0;
-        if (!bit) {
-            ESP_LOGW("mg.bench", "key %s: no such button on this board", k);
-            return true;
-        }
-        atomic_fetch_or(&s_bench_keys, bit);
-        ESP_LOGI("mg.bench", "key %s pressed", k);
+        bench_key(k);
         return true;
     }
     if (!strncmp(line, "page=", 5)) {

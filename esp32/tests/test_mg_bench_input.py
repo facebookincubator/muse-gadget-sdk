@@ -233,6 +233,62 @@ class LvglPostTest(unittest.TestCase):
             self.assertIn("if (!muse_input_talk_ok(muse_touch_real())) {", (MUSE / f).read_text(), f)
         self.assertNotIn("press_window", (ROOT / "main/muse_glue.c").read_text())   # no window lets one through
 
+    def test_an_injected_key_never_confirms_a_setup_prompt_on_release(self) -> None:
+        # The Nordic UART's key=aux (or speaker, power) is the board's button pressed, and the second key confirms a
+        # setup or re-setup prompt (aux_key). On a release image a wireless key= while that prompt is up answers
+        # "real press needed" and presses nothing, as a bench touch on its Confirm confirms nothing; with no prompt
+        # it presses, the wired console's presses in every build, and test and automation builds take both.
+        # bench_key, line_talk_ok and muse_input_talk_ok compiled from muse_input.c.
+        inp = (MUSE / "muse_input.c").read_text()
+        hdr = (MUSE / "muse_input.h").read_text()
+        macro = hdr[hdr.index("#if (defined(CONFIG_MUSE_GADGET_TEST_BUILD)"):hdr.index("#define MUSE_NO_PERSON 0\n#endif\n") + len("#define MUSE_NO_PERSON 0\n#endif\n")]
+        macro += "#define MUSE_INJECTED_TALK_OK MUSE_NO_PERSON\n"
+        code = (function(inp, "bool muse_input_talk_ok(bool real)\n{") + function(inp, "static bool line_talk_ok(void)\n{")
+                + function(inp, "static void bench_key(const char *k)\n{"))
+        self.assertIn("        bench_key(k);\n        return true;", inp)   # the console's key= words
+        fakes = r"""
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#define MUSE_BTN_AUX_PRESS 4u
+#define MUSE_BTN_POWER_PRESS 16u
+#define MUSE_BTN_SPEAKER_PRESS 64u
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGI(tag, ...) ((void)(tag))
+typedef enum { MUSE_LINK_ONLINE, MUSE_LINK_CONFIRM } muse_link_state_t;
+static muse_link_state_t link_state;
+static muse_link_state_t muse_link_state(void) { return link_state; }
+static struct { const char *aux_button, *power_button, *speaker_button; } board = { "aux", "power", "speaker" }, *muse_board = &board;
+static atomic_uint s_bench_keys;
+static bool s_line_wireless;
+bool muse_input_talk_ok(bool real);
+"""
+        main = r"""
+int main(void) {
+    /* wireless, prompt up: one row per key; then no prompt; then the wired console with the prompt up */
+    const char *keys[] = { "aux", "power", "speaker" };
+    for (int i = 0; i < 3; i++) {
+        s_line_wireless = true; link_state = MUSE_LINK_CONFIRM; bench_key(keys[i]);
+        printf("%u ", atomic_exchange(&s_bench_keys, 0));
+    }
+    s_line_wireless = true; link_state = MUSE_LINK_ONLINE; bench_key("aux");
+    printf("%u ", atomic_exchange(&s_bench_keys, 0));
+    s_line_wireless = false; link_state = MUSE_LINK_CONFIRM; bench_key("aux");
+    printf("%u\n", atomic_exchange(&s_bench_keys, 0));
+    return 0;
+}
+"""
+        for defs, want in (("", "0 0 0 4 4"), ("#define CONFIG_MUSE_GADGET_TEST_BUILD 1\n", "4 16 64 4 4"),
+                           ("#define CONFIG_MUSE_GADGET_AUTOMATION 1\n", "4 16 64 4 4")):
+            src = (fakes + defs + macro + "#define printf(...) ((void)0)\n#define fflush(f) ((void)(f))\n" + code
+                   + "#undef printf\n#undef fflush\n" + main)
+            with tempfile.TemporaryDirectory(prefix="mg-key-") as tmp:
+                h = Path(tmp) / "a.c"
+                h.write_text(src)
+                out = compile_and_run(self, [h], [], []).strip()
+            self.assertEqual(out, want, defs)
+
     def test_one_slot_any_task_runs_on_the_frame_tick(self) -> None:
         # muse_ui_run_in_lvgl: a press that reads LVGL's objects waits for the
         # LVGL task's next frame; one at a time (a second is refused, never
