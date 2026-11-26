@@ -54,6 +54,7 @@ test_link_node_id
 test_link_config_store
 test_pairing_fresh_press
 test_muse_ble_gate
+test_mg_confirm
 test_mg_unlock
 
 # The passcode lock
@@ -67,3 +68,4 @@ test_video_untrusted
 test_mg_codecs
 test_ghash32
 test_secure_random
+test_token_logs

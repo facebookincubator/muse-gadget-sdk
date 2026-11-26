@@ -1,0 +1,65 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Zephyr SDK
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    # The host C tests (Link setup, token proof, device session, gadget
+    # basics) and the signing-key check; the native_sim and BabbleSim suites
+    # need a Zephyr workspace and run locally (zephyr/AGENTS.md, Tests).
+    name: Host tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # run.py needs mbedTLS 3.6 or newer, and Ubuntu 24.04's libmbedtls-dev
+      # is 2.28: build the 3.6 LTS release, checked against its published
+      # SHA-256, and point pkg-config at it.
+      - name: Build mbedTLS 3.6
+        env:
+          MBEDTLS_VERSION: 3.6.8
+          MBEDTLS_SHA256: bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake pkg-config openssl
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o mbedtls.tar.bz2 \
+            "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$MBEDTLS_VERSION/mbedtls-$MBEDTLS_VERSION.tar.bz2"
+          echo "$MBEDTLS_SHA256  mbedtls.tar.bz2" | sha256sum -c -
+          tar -xjf mbedtls.tar.bz2
+          cmake -S "mbedtls-$MBEDTLS_VERSION" -B mbedtls-build -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/mbedtls"
+          cmake --build mbedtls-build -j"$(nproc)"
+          cmake --install mbedtls-build
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/mbedtls/lib/pkgconfig" >> "$GITHUB_ENV"
+          PKG_CONFIG_PATH="$RUNNER_TEMP/mbedtls/lib/pkgconfig" pkg-config --atleast-version=3.6 mbedcrypto \
+            || { echo "mbedTLS 3.6 or newer needed"; exit 1; }
+
+      - name: Run tests
+        run: python3 zephyr/tests/host/run.py
