@@ -32,7 +32,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "muse_home_ui.h"
 #include "muse_passcode_core.h"
 
 #ifdef __cplusplus
@@ -46,6 +48,7 @@ typedef enum {
     MUSE_PASS_WHY_UPDATE,      /* "Unlock to update": an update over Bluetooth asks for its confirm press */
 } muse_pass_why_t;
 
+#if MUSE_HOME_UI
 /* Loads the record (a passcode that's on starts locked: a reboot locks).
  * Once, before the UI starts. */
 void muse_passcode_init(void);
@@ -102,6 +105,37 @@ bool muse_passcode_platform_salt(uint8_t salt[MUSE_PASS_SALT_LEN]);
 /* ...and every lock change (locked or not, the board showing the lock):
  * the video view holds a UI stream or camera view while locked. */
 void muse_passcode_platform_locked(bool locked);
+#else
+/* No passcode without the v1.0 home (muse_home_ui.h): never on, never locked,
+ * nothing stored. */
+static inline void muse_passcode_init(void) {}
+static inline void muse_passcode_set_supported(bool supported) { (void)supported; }
+static inline bool muse_passcode_supported(void) { return false; }
+static inline bool muse_passcode_on(void) { return false; }
+static inline bool muse_passcode_locked(void) { return false; }
+static inline void muse_passcode_request_keypad(muse_pass_why_t why) { (void)why; }
+static inline void muse_passcode_screen_off(bool busy) { (void)busy; }
+static inline void muse_passcode_screen_on(void) {}
+static inline void muse_passcode_tick(uint32_t idle_ms, bool stays_on, bool busy)
+{
+    (void)idle_ms;
+    (void)stays_on;
+    (void)busy;
+}
+static inline muse_pass_lock_t muse_passcode_lock_mode(void) { return MUSE_PASS_LOCK_SCREEN_OFF; }
+static inline void muse_passcode_set_lock_mode(muse_pass_lock_t mode) { (void)mode; }
+static inline void muse_passcode_lock_now(void) {}
+static inline void muse_passcode_forget(const char *why) { (void)why; }
+static inline bool muse_passcode_store_clean(void) { return true; }
+static inline void muse_passcode_clear(void) {}
+static inline void muse_passcode_status(char *out, size_t n)
+{
+    if (n) {
+        out[0] = 0;
+        strncat(out, "off (no lock screen on this board)", n - 1);
+    }
+}
+#endif
 
 #ifdef __cplusplus
 }

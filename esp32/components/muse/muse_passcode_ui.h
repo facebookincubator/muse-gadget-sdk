@@ -26,14 +26,23 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#include "muse_home_ui.h"
 #include "muse_touch.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef enum {
+    MUSE_PASS_FLOW_SETUP,    /* Choose, Confirm: "Passcode on" */
+    MUSE_PASS_FLOW_CHANGE,   /* the current code, then Choose, Confirm */
+    MUSE_PASS_FLOW_OFF,      /* the current code: "Passcode off" */
+} muse_pass_flow_t;
+
+#if MUSE_HOME_UI
 /* Once, from muse_ui.c's overlays, under the Link setup prompt and the
  * sleep cover (both stay over the lock). */
 void muse_passcode_ui_build(void);
@@ -55,11 +64,6 @@ bool muse_passcode_ui_covering(void);
 
 /* Settings > Passcode's flows over the keypad; done(true) once it changed
  * something (on, a new code, off), done(false) if it was left. */
-typedef enum {
-    MUSE_PASS_FLOW_SETUP,    /* Choose, Confirm: "Passcode on" */
-    MUSE_PASS_FLOW_CHANGE,   /* the current code, then Choose, Confirm */
-    MUSE_PASS_FLOW_OFF,      /* the current code: "Passcode off" */
-} muse_pass_flow_t;
 void muse_passcode_ui_flow(muse_pass_flow_t flow, void (*done)(bool changed));
 
 /* What's on show for the bench (muse_ui_page_name): "keypad", "wait",
@@ -73,6 +77,34 @@ const char *muse_passcode_ui_page_name(void);
  * key isn't a digit. LVGL task. */
 int muse_passcode_ui_bench_path(const char *keys, int *xs, int *ys, int max);
 bool muse_passcode_ui_bench_point(const char *what, muse_touch_gesture_t *g);
+#else
+/* No passcode screens without the v1.0 home (muse_home_ui.h). */
+static inline void muse_passcode_ui_build(void) {}
+static inline void muse_passcode_ui_tick(bool face) { (void)face; }
+static inline void muse_passcode_ui_screen_off(void) {}
+static inline bool muse_passcode_ui_locked_face(void) { return false; }
+static inline bool muse_passcode_ui_covering(void) { return false; }
+static inline void muse_passcode_ui_flow(muse_pass_flow_t flow, void (*done)(bool changed))
+{
+    (void)flow;
+    (void)done;
+}
+static inline const char *muse_passcode_ui_page_name(void) { return NULL; }
+static inline int muse_passcode_ui_bench_path(const char *keys, int *xs, int *ys, int max)
+{
+    (void)keys;
+    (void)xs;
+    (void)ys;
+    (void)max;
+    return 0;
+}
+static inline bool muse_passcode_ui_bench_point(const char *what, muse_touch_gesture_t *g)
+{
+    (void)what;
+    (void)g;
+    return false;
+}
+#endif
 
 #ifdef __cplusplus
 }

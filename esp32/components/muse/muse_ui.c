@@ -234,7 +234,11 @@ static lv_obj_t *s_dots[PAGE_DOTS];
 static int s_ndots;
 /* The v1.0 home: the reference layout on every full-layout touch
  * panel (muse_home.c). Compact and keys-only boards keep their faces. */
+#if MUSE_HOME_UI
 static bool s_home;
+#else
+static const bool s_home = false;   /* the v1.0 home: builds with BLE gadget audio (muse_home_ui.h) */
+#endif
 static muse_home_geom_t s_hg;
 static lv_obj_t *s_wifi_icon;
 static lv_obj_t *s_ble_icon;
@@ -2791,7 +2795,7 @@ static void update_chrome(float now)
         }
         int face_x = lv_obj_get_x(s_face), scroll_x = lv_obj_get_scroll_x(s_tv);
         muse_settings_ui_tick(scroll_x > face_x);
-        if (s_status && scroll_x < face_x && scroll_x > lv_obj_get_x(s_status) - s_w) {
+        if (s_home && s_status && scroll_x < face_x && scroll_x > lv_obj_get_x(s_status) - s_w) {
             muse_status_tick();
         }
         /* The menu (and Status) close to the home after 30 s untouched;
@@ -3813,7 +3817,9 @@ esp_err_t muse_ui_start(void)
         s_dy = 0;
     }
 
+#if MUSE_HOME_UI
     s_home = muse_board->touch && !s_small && !muse_board->epaper;
+#endif
     muse_passcode_set_supported(s_home);   /* the passcode lock on the v1.0 home's panels (Settings > Passcode) */
     if (s_home) {
         muse_home_geom(s_w, s_h, muse_board->round, muse_board->corner_px, &s_hg);
@@ -3851,7 +3857,7 @@ esp_err_t muse_ui_start(void)
     muse_theme_lvgl_init();
     muse_pixel_set_background(muse_theme_background());
     build_screen();
-    if (s_status) {
+    if (s_home && s_status) {   /* the Status page is the home's */
         muse_status_build(s_status);
     }
     if (s_settings) {

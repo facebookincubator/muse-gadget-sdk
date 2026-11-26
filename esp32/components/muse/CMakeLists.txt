@@ -49,10 +49,15 @@ if(CONFIG_MUSE_ENABLED)
         "muse_adpcm.c"
         "muse_settings.c"
         "muse_text.c"
-        "muse_lang.c"
-        "muse_passcode_core.c"  # the passcode lock: its rules, pure C
-        "muse_passcode.c"
-        "muse_passcode_esp.c"
+        "muse_lang.c")
+    if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+        # The passcode lock, with the v1.0 home (muse_home_ui.h): without them, the headers' stubs.
+        list(APPEND srcs
+            "muse_passcode_core.c"  # its rules, pure C
+            "muse_passcode.c"
+            "muse_passcode_esp.c")
+    endif()
+    list(APPEND srcs
         "muse_link.c"
         "muse_ble.c"
         "muse_ble_gate.c")
@@ -84,10 +89,18 @@ if(CONFIG_MUSE_ENABLED)
         # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
         list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
     else()
-        # The LVGL UI: the face, home, menu, Settings, keypad and passcode screens.
-        list(APPEND srcs "muse_ui.c" "muse_icons.c" "muse_home.c" "muse_type.c" "muse_touch.c"
-                         "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c"
-                         "muse_passcode_ui.c" "muse_lv_mem.c")
+        # The LVGL UI: the face, home, menu, Settings, keypad and passcode screens. The v1.0 home's icon set and
+        # passcode screens only with BLE gadget audio (muse_home_ui.h).
+        list(APPEND srcs "muse_ui.c")
+        if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+            list(APPEND srcs "muse_icons.c")
+        endif()
+        list(APPEND srcs "muse_home.c" "muse_type.c" "muse_touch.c"
+                         "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c")
+        if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+            list(APPEND srcs "muse_passcode_ui.c")
+        endif()
+        list(APPEND srcs "muse_lv_mem.c")
     endif()
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")

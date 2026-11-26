@@ -602,15 +602,20 @@ static lv_obj_t *row(lv_obj_t *list, const char *icon, const char *text, lv_obj_
     return row_with(list, icon, false, text, value_out, cb, user);
 }
 
-/* A row led by one of the standard icons rather than a symbol. */
+/* A row led by one of the standard icons rather than a symbol (without the
+ * icon set, muse_home_ui.h: the font's symbol for it, as row() draws one). */
 static lv_obj_t *icon_row(lv_obj_t *list, muse_icon_t icon, const char *text, lv_obj_t **value_out,
                           lv_event_cb_t cb, void *user)
 {
+#if MUSE_HOME_UI
     lv_obj_t *c = row_with(list, NULL, true, text, value_out, cb, user);
     lv_obj_t *img = muse_icon_create(c, icon, s_icon_px, COLOR_ACCENT);
     lv_obj_move_to_index(img, 0);
     center_row_caps(lv_obj_get_child(c, 1), value_out ? *value_out : NULL, s_icon_px);
     return c;
+#else
+    return row(list, muse_icon_symbol(icon), text, value_out, cb, user);
+#endif
 }
 
 static lv_obj_t *switch_row(lv_obj_t *list, const char *text, bool on, lv_event_cb_t cb)
