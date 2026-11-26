@@ -4454,14 +4454,17 @@ void app_run(void) {
         config_erase_key("noise_host");
     }
 
+    bool skip_boot_scan = false;
 #if CONFIG_MUSE_PIXEL_AVATAR && CONFIG_LV_USE_SNAPSHOT
-    bool pixel_boot_offline=muse_pixel_avatar_test_boot_offline();
+    const bool pixel_boot_offline = muse_pixel_avatar_test_boot_offline();
+    if (pixel_boot_offline) {
+        skip_boot_scan = true;
+        ESP_LOGI(TAG, "pixel bench: isolated boot; no Wi-Fi join or VM request");
+    }
 #else
-    const bool pixel_boot_offline=false;
+    const bool pixel_boot_offline = false;
 #endif
-    bool skip_boot_scan = pixel_boot_offline;
-    if(pixel_boot_offline)ESP_LOGI(TAG,"pixel bench: isolated boot; no Wi-Fi join or VM request");
-    if (setup_complete && !pixel_boot_offline && !CONFIG_HOMEHUB_WIFI_SSID[0]) {
+    if (setup_complete && !CONFIG_HOMEHUB_WIFI_SSID[0] && !pixel_boot_offline) {
         char hint_ssid[33] = {0};
         if (config_get_str("ssid", hint_ssid, sizeof(hint_ssid))
             && config_key_lookup("password") == CONFIG_KEY_FOUND
