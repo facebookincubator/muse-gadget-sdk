@@ -28,9 +28,22 @@
 #if CONFIG_MUSE_PIXEL_AVATAR
 #include "muse_pixel_avatar.h"
 static void pixel_owner_changed(const char *key) {
+    if(!strcmp(key,"rp_open") || !strcmp(key,"tok_update")) {
+        muse_pixel_avatar_journal_changed();return;
+    }
     const char *keys[]={"refresh_token","access_token","auth_token","node_id","noise_host","vm_url","setup_complete"};
-    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
-        if(!strcmp(key,keys[i])) {muse_pixel_avatar_invalidate();break;}
+    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
+        if(!strcmp(key,keys[i])) {
+            /* Per-key writes inside an open journal are provisional. Fence
+             * them without erasing the prior authoritative generation; the
+             * backend recognizes a real owner change after marker completion. */
+            if(config_key_lookup("rp_open")!=CONFIG_KEY_NOT_FOUND ||
+               config_key_lookup("tok_update")!=CONFIG_KEY_NOT_FOUND)
+                muse_pixel_avatar_journal_changed();
+            else muse_pixel_avatar_invalidate();
+            break;
+        }
+    }
 }
 #endif
 

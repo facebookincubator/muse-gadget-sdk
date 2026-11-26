@@ -79,6 +79,14 @@ static image_t *s_image;
 static avatar_identity_t s_identity;
 static uint8_t s_binding[32];
 #if CONFIG_MUSE_PIXEL_AVATAR
+/* Only the avatar worker writes this authority record. It belongs to content,
+ * not to the current still buffer: cached fallback images and source switches
+ * must never replace a successfully validated online generation. An invalid
+ * key here records a digest failure after authoritative metadata, not boot
+ * without metadata. Content/owner invalidation moves s_content_epoch. */
+static uint32_t s_pixel_authority_epoch;
+static uint8_t s_pixel_authority_key[32];
+static bool s_pixel_authority_valid;
 static bool pixel_identity_key(const avatar_identity_t *id,uint8_t key[32]) {
     if(!id)return false;
     mbedtls_md_context_t md;mbedtls_md_init(&md);
@@ -88,8 +96,30 @@ static bool pixel_identity_key(const avatar_identity_t *id,uint8_t key[32]) {
     mbedtls_md_free(&md);return ok;
 }
 static void pixel_identity(const avatar_identity_t *id) {
+    if(!id)return; /* temporary still teardown never revokes known authority */
+    uint32_t epoch=atomic_load(&s_content_epoch);
+    if(s_pixel_authority_epoch==epoch) {
+        if(s_pixel_authority_valid)muse_pixel_avatar_identity(s_pixel_authority_key);
+        else muse_pixel_avatar_identity_unavailable();
+        return;
+    }
     uint8_t key[32]={0};bool have=pixel_identity_key(id,key);
-    muse_pixel_avatar_identity(have?key:NULL);
+    if(epoch!=atomic_load(&s_content_epoch))return;
+    if(have)muse_pixel_avatar_identity(key);
+    else muse_pixel_avatar_identity_unavailable();
+}
+static void pixel_authoritative_identity(const avatar_identity_t *id,uint32_t epoch) {
+    if(epoch!=atomic_load(&s_content_epoch))return;
+    s_pixel_authority_epoch=epoch;s_pixel_authority_valid=false;
+    /* Record authority before attempting the digest. Failure revokes A and
+     * blocks owner-only restore; success with an unchanged key is a no-op in
+     * the backend, avoiding a periodic drop/reload of the same valid pack. */
+    uint8_t key[32]={0};bool have=pixel_identity_key(id,key);
+    if(epoch!=atomic_load(&s_content_epoch))return;
+    if(have) {
+        memcpy(s_pixel_authority_key,key,32);s_pixel_authority_valid=true;
+        muse_pixel_avatar_identity(key);
+    } else muse_pixel_avatar_identity_unavailable();
 }
 static bool set_image_pixel_key(image_t *image,const avatar_identity_t *id) {
     image->pixel_key_valid=pixel_identity_key(id,image->pixel_key);return image->pixel_key_valid;
@@ -424,6 +454,9 @@ static void cache_clear(void) {
 }
 static bool cache_load(void) {
     uint32_t content_epoch = atomic_load(&s_content_epoch);
+#if CONFIG_MUSE_PIXEL_AVATAR
+    unsigned generation=atomic_load(&s_generation);
+#endif
     if (!muse_avatar_files_mount()) return false;
     avatar_cache_header_t a, b, h;
     bool av = avatar_cache_read(CACHE_A, s_binding, &a, NULL, 0);
@@ -440,6 +473,9 @@ static bool cache_load(void) {
             if (!image) return false;
 #if CONFIG_MUSE_PIXEL_AVATAR
             if(!set_image_pixel_key(image,&h.identity)) {muse_avatar_release(&image->view);return false;}
+            if(cancelled(generation) || content_epoch!=atomic_load(&s_content_epoch) || atomic_load(&s_binding_blocked)) {
+                muse_avatar_release(&image->view);return false;
+            }
 #endif
             publish(image); s_identity = h.identity; motion_binding(&s_identity); s_cache_slot = slot; s_cache_sequence = h.sequence;
             s_image_saved = true;
@@ -489,7 +525,7 @@ static bool sync_once(unsigned generation) {
 #if CONFIG_MUSE_PIXEL_AVATAR
     /* A known new generation invalidates a pixel pack even if downloading
      * its still later fails. Keep the last good still as a separate fallback. */
-    pixel_identity(&identity);
+    pixel_authoritative_identity(&identity,content_epoch);
 #endif
     atomic_store(&s_path_id, avatar_cache_crc(identity.path, strlen(identity.path)));
     atomic_store(&s_revision_id, avatar_cache_crc(identity.revision, strlen(identity.revision)));

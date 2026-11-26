@@ -29,6 +29,14 @@ void muse_pixel_avatar_source_changed(void);
 /* A non-NULL authoritative generation hides stale models immediately. NULL
  * still/source teardown does not erase known generation information. */
 void muse_pixel_avatar_identity(const uint8_t source_key[32]);
+/* Validated metadata whose digest could not be computed: hide models and
+ * block owner-only restoration until a valid authoritative key is supplied.
+ * Unlike NULL/boot-without-identity this is a fail-closed known-identity state. */
+void muse_pixel_avatar_identity_unavailable(void);
+/* config_store calls this after a journal marker transition or a provisional
+ * key write (NVS already closed). Fence old probes/uploads immediately, retain
+ * generation knowledge, and defer raw owner reads until journals are absent. */
+void muse_pixel_avatar_journal_changed(void);
 /* Call at committed stored pairing/explicit endpoint/VM owner boundaries.
  * Snapshots begun before this fence cannot revalidate the old owner. Fresh
  * probes use stored ownership only and do not require cloud success. */

@@ -52,7 +52,7 @@ typedef struct { unsigned delay_s; int64_t next; } worker_state_t;
 static portMUX_TYPE s_guard=portMUX_INITIALIZER_UNLOCKED;
 static model_t *s_model;
 static uint8_t s_owner[32],s_identity[32];
-static bool s_have_owner,s_have_identity,s_clear_pending;
+static bool s_have_owner,s_owner_known,s_have_identity,s_identity_required,s_clear_pending;
 static unsigned s_epoch=1,s_clear_epoch;
 static _Atomic(SemaphoreHandle_t) s_cache_mutex;
 static atomic_uint s_revision;
@@ -96,8 +96,18 @@ static void cache_unlock(void) {xSemaphoreGive(atomic_load(&s_cache_mutex));}
 /* Stored pairing and explicit endpoint/VM settings define ownership. No live
  * VM token, resolved VM state, or cloud request participates in this digest.
  * Allocation/crypto failure is UNKNOWN, not proof that pairing was erased. */
+/* A journal's presence (including lookup failure) means the raw keys may be
+ * provisional or only partly rolled back. Do not invoke the committed token
+ * getters here: those may apply a legacy journal and write flash recursively.
+ * Both journal marker set/erase paths invalidate our epoch after NVS closes. */
+static bool owner_journals_closed(void) {
+    return config_key_lookup("rp_open")==CONFIG_KEY_NOT_FOUND &&
+        config_key_lookup("tok_update")==CONFIG_KEY_NOT_FOUND;
+}
 static owner_result_t owner_key_read(uint8_t out[32]) {
-    if(!config_is_provisioned() || !config_setup_complete())return OWNER_INVALID;
+    if(!owner_journals_closed())return OWNER_UNAVAILABLE;
+    if(!config_is_provisioned() || !config_setup_complete())
+        return owner_journals_closed()?OWNER_INVALID:OWNER_UNAVAILABLE;
     char *value=heap_caps_calloc(1,OWNER_TEXT_MAX,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!value)return OWNER_UNAVAILABLE;
     mbedtls_md_context_t md;mbedtls_md_init(&md);
@@ -115,7 +125,9 @@ static owner_result_t owner_key_read(uint8_t out[32]) {
     if(ok) {muse_settings_hatch_token(value);ok=!mbedtls_md_update(&md,(const uint8_t *)value,strlen(value)+1);}
     if(ok)ok=!mbedtls_md_finish(&md,out);
     memset(value,0,OWNER_TEXT_MAX);heap_caps_free(value);mbedtls_md_free(&md);
-    return ok?OWNER_VALID:OWNER_UNAVAILABLE;
+    /* The worker also rejects an epoch change, so even a journal that opened
+     * and closed entirely within this probe cannot publish its old snapshot. */
+    return ok && owner_journals_closed()?OWNER_VALID:OWNER_UNAVAILABLE;
 }
 static void release_model(model_t *model) {
     if(!model)return;
@@ -127,7 +139,7 @@ void muse_pixel_avatar_release(const muse_pixel_avatar_t *view) {release_model((
 static model_t *replace_locked(model_t *model) {model_t *old=s_model;s_model=model;return old;}
 static bool matches_locked(const model_t *model) {
     return !s_clear_pending && s_have_owner && model && !memcmp(model->owner,s_owner,32) &&
-        (!s_have_identity || !memcmp(model->view.pack.source_key,s_identity,32));
+        (!s_identity_required || (s_have_identity && !memcmp(model->view.pack.source_key,s_identity,32)));
 }
 static bool context_locked(unsigned epoch,const uint8_t owner[32]) {
     return epoch==s_epoch && !s_clear_pending && s_have_owner && !memcmp(owner,s_owner,32) &&
@@ -204,15 +216,34 @@ void muse_pixel_avatar_identity(const uint8_t source[32]) {
     bool changed=!s_have_identity || memcmp(source,s_identity,32);
     model_t *old=NULL;
     if(changed) {
-        s_have_identity=true;memcpy(s_identity,source,32);s_epoch++;
+        s_identity_required=true;s_have_identity=true;memcpy(s_identity,source,32);s_epoch++;
         if(!matches_locked(s_model))old=replace_locked(NULL);
     }
     portEXIT_CRITICAL(&s_guard);release_model(old);
     if(changed) {atomic_fetch_or(&s_jobs,JOB_RELOAD);kick();}
 }
+void muse_pixel_avatar_identity_unavailable(void) {
+    /* Validated online metadata with an uncomputable generation is different
+     * from boot without metadata: do not reopen any owner-only cached pack. */
+    portENTER_CRITICAL(&s_guard);
+    bool changed=!s_identity_required || s_have_identity;
+    s_identity_required=true;s_have_identity=false;
+    model_t *old=replace_locked(NULL);if(changed)s_epoch++;
+    portEXIT_CRITICAL(&s_guard);release_model(old);
+    if(changed) {atomic_fetch_or(&s_jobs,JOB_RELOAD);kick();}
+}
+void muse_pixel_avatar_journal_changed(void) {
+    /* A journal transition revokes snapshots/uploads, but is not a committed
+     * owner change. Keep the prior owner digest/identity so a rollback cannot
+     * erase an authoritative online mismatch and reopen its stale cache. */
+    portENTER_CRITICAL(&s_guard);
+    s_have_owner=false;s_epoch++;model_t *old=replace_locked(NULL);
+    portEXIT_CRITICAL(&s_guard);release_model(old);
+    atomic_fetch_or(&s_jobs,JOB_RELOAD);kick();
+}
 void muse_pixel_avatar_invalidate(void) {
     portENTER_CRITICAL(&s_guard);
-    s_have_owner=false;s_have_identity=false;s_epoch++;model_t *old=replace_locked(NULL);
+    s_have_owner=false;s_owner_known=false;s_have_identity=false;s_identity_required=false;s_epoch++;model_t *old=replace_locked(NULL);
     portEXIT_CRITICAL(&s_guard);release_model(old);
     atomic_fetch_or(&s_jobs,JOB_RELOAD);kick();
 }
@@ -222,7 +253,7 @@ void muse_pixel_avatar_source_changed(void) {
 }
 void muse_pixel_avatar_clear(void) {
     portENTER_CRITICAL(&s_guard);
-    s_clear_pending=true;s_have_identity=false;s_clear_epoch=++s_epoch;model_t *old=replace_locked(NULL);
+    s_clear_pending=true;s_have_identity=false;s_identity_required=false;s_clear_epoch=++s_epoch;model_t *old=replace_locked(NULL);
     atomic_fetch_or(&s_jobs,JOB_CLEAR|JOB_RELOAD);
     portEXIT_CRITICAL(&s_guard);release_model(old);kick();
 }
@@ -252,8 +283,12 @@ static void worker_step(worker_state_t *state) {
         bool valid=have==OWNER_VALID;
         changed=valid!=s_have_owner || (valid && memcmp(owner,s_owner,32));
         if(changed) {
-            if(!valid || s_have_owner)s_have_identity=false;
-            s_have_owner=valid;if(valid)memcpy(s_owner,owner,32);s_epoch++;old=replace_locked(NULL);
+            if(!valid || (s_owner_known && memcmp(owner,s_owner,32))) {
+                s_have_identity=false;s_identity_required=false;
+            }
+            s_have_owner=valid;s_owner_known=valid;
+            if(valid)memcpy(s_owner,owner,32);
+            s_epoch++;old=replace_locked(NULL);
         }
     }
     unsigned epoch=s_epoch;

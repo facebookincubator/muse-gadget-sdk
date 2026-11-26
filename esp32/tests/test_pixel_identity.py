@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import unittest
 from test_avatar_context import function
+from pixel_test_sanitizers import ASAN_OPTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,12 +50,12 @@ int main(void) {
                             '-I', str(stage), '-I', str(ROOT / 'components/muse'),
                             str(stage / 'test.c'), '-o', str(exe)], check=True)
             subprocess.run([str(exe)], check=True,
-                           env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'})
+                           env={**os.environ, 'ASAN_OPTIONS': ASAN_OPTIONS})
 
     def test_validated_metadata_invalidates_before_downloading_still(self):
         source = (ROOT / 'main/avatar_sync.c').read_text()
         update = function(source, 'static bool sync_once(')
-        self.assertLess(update.index('pixel_identity(&identity)'), update.index('fetch_webp('))
+        self.assertLess(update.index('pixel_authoritative_identity(&identity,content_epoch)'), update.index('fetch_webp('))
         self.assertIn('same_key', update)
         self.assertIn('set_image_pixel_key(image,&identity)', update)
 

@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import zlib
 from test_pixel_art import pack_bytes
+from pixel_test_sanitizers import ASAN_OPTIONS
 from test_muse_ptt_ui import LINK_GC
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +58,8 @@ void vTaskDeleteWithCaps(TaskHandle_t task);
 int xTaskCreateWithCaps(void (*fn)(void *),const char *name,unsigned stack,void *arg,unsigned priority,TaskHandle_t *task,unsigned caps);
 bool config_is_provisioned(void);
 bool config_setup_complete(void);
+typedef enum {CONFIG_KEY_LOOKUP_ERROR=-1,CONFIG_KEY_NOT_FOUND=0,CONFIG_KEY_FOUND=1} config_key_lookup_t;
+config_key_lookup_t config_key_lookup(const char *key);
 bool config_get_str(const char *key,char *out,size_t cap);
 bool config_set_str(const char *key,const char *value);
 void muse_settings_hatch_host(char *out);
@@ -170,6 +173,7 @@ int xTaskCreateWithCaps(void (*fn)(void *),const char *name,unsigned stack,void 
 }
 bool config_is_provisioned(void) {return atomic_load(&paired);}
 bool config_setup_complete(void) {return atomic_load(&setup);}
+config_key_lookup_t config_key_lookup(const char *key) {(void)key;return CONFIG_KEY_NOT_FOUND;}
 static atomic_bool test_offline;
 static atomic_uint test_flag_writes;
 bool config_get_str(const char *key,char *out,size_t cap) {
@@ -325,6 +329,14 @@ int main(int argc,char **argv) {
             uint8_t *bad=malloc(asset_size);assert(bad);memcpy(bad,asset_b,asset_size);bad[60]^=1;upload(bad);assert(!commit());disk_is(asset_a);live_is(asset_a);free(bad);
         } else if(!strcmp(which,"null_identity")) {
             muse_pixel_avatar_identity(key_b);muse_pixel_avatar_identity(NULL);assert(s_have_identity && !memcmp(s_identity,key_b,32));worker_state_t state={1,0};worker_step(&state);assert(!muse_pixel_avatar_acquire());disk_is(asset_a);
+        } else if(!strcmp(which,"unknown_identity")) {
+            muse_pixel_avatar_identity_unavailable();muse_pixel_avatar_identity(NULL);
+            assert(s_identity_required && !s_have_identity && !muse_pixel_avatar_acquire());
+            worker_state_t state={1,0};worker_step(&state);assert(!s_model);disk_is(asset_a);
+            atomic_store(&personal,false);muse_pixel_avatar_source_changed();
+            atomic_store(&personal,true);muse_pixel_avatar_source_changed();worker_step(&state);assert(!s_model);
+            muse_pixel_avatar_identity(key_a);worker_step(&state);live_is(asset_a);
+            muse_pixel_avatar_invalidate();worker_step(&state);live_is(asset_a);
         } else if(!strcmp(which,"owner_memory")) {
             atomic_store(&fail_owner,1);worker_state_t state={1,0};worker_step(&state);live_is(asset_a);assert(s_have_owner);
         } else if(!strcmp(which,"source_roundtrip")) {
@@ -407,7 +419,7 @@ class PixelBackend(unittest.TestCase):
         result = subprocess.run(
             [str(self.executables[snapshot]), case, str(self.stage / 'a.msp'), str(self.stage / 'b.msp')],
             capture_output=True, text=True, timeout=30,
-            env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1',
+            env={**os.environ, 'ASAN_OPTIONS': ASAN_OPTIONS,
                  'UBSAN_OPTIONS': 'halt_on_error=1'},
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -448,6 +460,9 @@ class PixelBackend(unittest.TestCase):
 
     def test_null_teardown_does_not_erase_known_online_mismatch(self):
         self.run_case('null_identity')
+
+    def test_authoritative_digest_failure_blocks_owner_only_restore_until_valid_identity(self):
+        self.run_case('unknown_identity')
 
     def test_owner_probe_allocation_failure_keeps_valid_model(self):
         self.run_case('owner_memory')

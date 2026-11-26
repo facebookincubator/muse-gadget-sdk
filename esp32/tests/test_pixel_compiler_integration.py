@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pixel_test_sanitizers import ASAN_OPTIONS
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT.parent))
@@ -54,7 +55,7 @@ class PixelCompilerIntegration(unittest.TestCase):
                         self.assertEqual(validate_pack(result.pack)['width'],profile)
                         asset=stage/(kind+str(profile)+'.mspix');asset.write_bytes(result.pack)
                         subprocess.run([str(exe),str(asset)],check=True,timeout=30,
-                                       env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1:halt_on_error=1'})
+                                       env={**os.environ,'ASAN_OPTIONS':ASAN_OPTIONS})
 
 
 if __name__=='__main__':
