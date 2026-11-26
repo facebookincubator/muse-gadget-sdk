@@ -47,6 +47,7 @@ void muse_vstream_start(muse_vstream_t *s)
     s->active = false;
     BARRIER();
     s->start_at = s->head;
+    s->start_losses = s->losses;
     s->received = 0;
     s->resyncs = s->overruns = 0;
     BARRIER();
@@ -94,6 +95,24 @@ void muse_vstream_commit(muse_vstream_t *s, uint32_t n)
     s->head += n;
 }
 
+/* The producer lost bytes at the head as it is now: published for the consumer. */
+static void lost_here(muse_vstream_t *s)
+{
+    s->loss_at = s->head;
+    BARRIER();
+    s->losses++;
+}
+
+void muse_vstream_drop(muse_vstream_t *s, size_t n)
+{
+    if (!s->active || !s->buf) {
+        return;
+    }
+    s->received += (uint32_t)n;
+    s->overruns += (uint32_t)n;
+    lost_here(s);   /* the frame these bytes belonged to can't be finished by later ones */
+}
+
 void muse_vstream_write(muse_vstream_t *s, const uint8_t *d, size_t n)
 {
     if (!s->active || !s->buf) {
@@ -101,7 +120,8 @@ void muse_vstream_write(muse_vstream_t *s, const uint8_t *d, size_t n)
     }
     s->received += (uint32_t)n;
     uint32_t room = muse_vstream_available(s);
-    if (n > room) {
+    bool lost = n > room;
+    if (lost) {
         s->overruns += (uint32_t)(n - room);
         n = room;   /* the rest is lost; the consumer resyncs on the next header */
     }
@@ -112,6 +132,9 @@ void muse_vstream_write(muse_vstream_t *s, const uint8_t *d, size_t n)
     memcpy(s->buf, d + first, n - first);
     BARRIER();
     s->head = h + (uint32_t)n;
+    if (lost) {
+        lost_here(s);   /* after what fit: the frame it cut short ends here */
+    }
 }
 
 static uint8_t peek(const muse_vstream_t *s, uint32_t off)
@@ -183,6 +206,13 @@ static bool vp8_frame_ok(const muse_vstream_t *s, uint32_t avail, const muse_vfr
     return vp8_tag_ok(s, avail, at + 4, len0, key) && vp8_tag_ok(s, avail, at + 4 + len0, f->len - 4 - len0, key);
 }
 
+/* The shortest frame: at least a start code. */
+static uint32_t min_len(const muse_vstream_t *s)
+{
+    (void)s;
+    return 4u;
+}
+
 static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
 {
     if (peek(s, 0) != MUSE_VIDEO_FRAME_MAGIC) {
@@ -192,12 +222,24 @@ static bool header_at(const muse_vstream_t *s, uint32_t avail, muse_vframe_t *f)
     f->number = (uint16_t)(peek(s, 2) | peek(s, 3) << 8);
     f->len = (uint32_t)peek(s, 4) | (uint32_t)peek(s, 5) << 8 | (uint32_t)peek(s, 6) << 16 |
              (uint32_t)peek(s, 7) << 24;
-    if (f->len < 4 || f->len > s->max_frame) {
+    if (f->len < min_len(s) || f->len > s->max_frame) {
         return false;
     }
     /* One layout for the check and the decode: the caller splits the bands
      * by f->bands. */
     f->bands = s->bands == 2 ? 2 : 1;
+    if (f->flags & MUSE_VIDEO_FRAME_STILL) {
+        /* A UI stream's still patch: x, y, w, h, a format (1: RGB565 zlib),
+         * then a zlib stream (its first byte 0x78 at the sizes we use; any
+         * CMF with method 8 passes). Checked as far as it's in. */
+        if (f->len < 9 + 2) {
+            return false;
+        }
+        if (avail >= MUSE_VIDEO_FRAME_HEADER_LEN + 9 && peek(s, MUSE_VIDEO_FRAME_HEADER_LEN + 8) != 1) {
+            return false;
+        }
+        return avail < MUSE_VIDEO_FRAME_HEADER_LEN + 10 || (peek(s, MUSE_VIDEO_FRAME_HEADER_LEN + 9) & 0x0F) == 8;
+    }
     if (s->codec == MUSE_VIDEO_CODEC_VP8) {
         return vp8_frame_ok(s, avail, f);
     }
@@ -238,11 +280,34 @@ int32_t muse_vstream_pop(muse_vstream_t *s, uint8_t *dst, uint32_t cap, muse_vfr
             BARRIER();
             s->tail = s->start_at;
             s->started = starts;
+            s->lost_seen = s->start_losses;   /* the old stream's losses are behind the new one; the new one's count */
             damaged = false;
         }
         uint32_t avail = s->head - s->tail;
         BARRIER();
-        if (avail < MUSE_VIDEO_FRAME_HEADER_LEN + 4) {
+        if (s->lost_seen != s->losses) {
+            /* Bytes were lost at loss_at: a frame at tail that doesn't end before it lost its rest, and what
+             * follows the boundary must never complete it. Everything up to the boundary goes then; a whole frame
+             * before it is taken first. Several losses since the last look: everything up to the last one goes. */
+            uint32_t n = s->losses;
+            BARRIER();
+            uint32_t at = s->loss_at;
+            uint32_t before = at - s->tail;
+            muse_vframe_t g;
+            if ((int32_t)before <= 0) {
+                s->lost_seen = n;   /* behind the consumer already: nothing of it left */
+            } else if (n - s->lost_seen > 1 || before < MUSE_VIDEO_FRAME_HEADER_LEN + min_len(s)
+                       || !header_at(s, before, &g) || MUSE_VIDEO_FRAME_HEADER_LEN + g.len > before) {
+                consume(s, before);
+                s->lost_seen = n;
+                if (!damaged) {
+                    s->resyncs++;
+                }
+                damaged = true;
+                continue;
+            }
+        }
+        if (avail < MUSE_VIDEO_FRAME_HEADER_LEN + min_len(s)) {
             return damaged ? -1 : 0;
         }
         if (!header_at(s, avail, f)) {

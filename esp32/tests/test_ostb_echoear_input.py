@@ -51,25 +51,40 @@ typedef int lv_event_t;
 #define MUSE_LINK_CONFIRM 1
 static int link_state;
 static int lv_event_get_code(lv_event_t *e) { return *e; }
-static int muse_link_state(void) { return link_state; }
+__attribute__((unused)) static int muse_link_state(void) { return link_state; }
 #define muse_board (&board)
 static bool muse_link_talk_press(void) { if (pending_pair) { confirmed++; return true; } return false; }
 static bool muse_link_confirm_press(int64_t released_us) { (void)released_us; return muse_link_talk_press(); }
-static int64_t esp_timer_get_time(void) { return 0; }
+static bool muse_link_confirm_key_press(void) { if (pending_pair) { confirmed++; return true; } return false; }
 static int64_t s_talk_released_us;
 static bool muse_state_asleep(void) { return false; }
 static bool muse_menu_is_open(void) { return false; }
+#define MUSE_PASS_WHY_TALK 2
+static bool muse_passcode_locked(void) { return false; }   /* test_muse_passcode covers the lock */
+static void muse_passcode_request_keypad(int why) { (void)why; }
 static void muse_state_poke(void) {}
+static int64_t s_press_us;   /* when the touch went down (muse_ui.c) */
+static void swipe_down(void) {}   /* the swipe tracker (muse_ui.c) */
+static int64_t esp_timer_get_time(void) { return 1; }
 static void muse_menu_key(int key) { (void)key; }
 static void set_asleep(bool sleep, const char *why) { (void)sleep; (void)why; }
 static void post(int type, bool wake) { (void)wake; if (type==MUSE_PTT_DOWN) down++; else up++; }
 static bool s_touch_talk_down;
 static int swipe_updates;
 static void update_tileview_swipe(void) { swipe_updates++; }
+typedef enum { PAIR_OK_NONE, PAIR_OK_SETUP, PAIR_OK_UPDATE } pair_ok_t;   /* whose Confirm (muse_ui.c) */
+static pair_ok_t s_pair_ok;
+/* The press sources (test_mg_ble, test_touch_privacy cover them): a finger on the panel here. */
+#define TAG "muse_ui"
+#define ESP_LOGW(tag, ...) ((void)(tag))
+#define MUSE_PRESS_PANEL 2
+static bool muse_touch_real(void) { return true; }
+static void muse_input_press(int src) { (void)src; }
+static bool muse_input_talk_ok(bool real) { return real; }   /* a release image: the finger here is real */
 '''
         code += function(source, 'muse_input_touch_talk') + '\n' + function(source, 'talk_input') + '\n' + function(source, 'talk_button')
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
-        code += '\n' + function(ui, 'on_touch_mic') + '\n' + function(ui, 'on_any_press')
+        code += '\n' + function(ui, 'on_touch_mic') + '\n' + function(ui, 'on_pair_ok') + '\n' + function(ui, 'on_any_press')
         code += r'''
 int main(void) {
     uint16_t x=9,y=8;
@@ -100,8 +115,12 @@ int main(void) {
     event=LV_EVENT_RELEASED;on_touch_mic(&event);
     talk_button(atomic_exchange(&s_touch_talk_events,0));assert(down==4 && up==4);
     on_any_press(&event);assert(atomic_load(&s_touch_talk_events)==0);
+    /* The pairing prompt: one tap on the card's Confirm pairs (a first setup or a re-setup, as a confirm key, never
+     * the talk key); a tap elsewhere does nothing: no talk press, no confirm, no dismiss. */
     pending_pair=true;link_state=MUSE_LINK_CONFIRM;on_any_press(&event);
     talk_button(atomic_exchange(&s_touch_talk_events,0));
+    assert(confirmed==1 && down==4 && up==4 && !s_talk_down);
+    s_pair_ok=true;event=LV_EVENT_PRESSED;on_pair_ok(&event);
     assert(confirmed==2 && down==4 && up==4 && !s_talk_down);
     board.touch_talk=false;on_any_press(&event);assert(atomic_load(&s_touch_talk_events)==0);
     return 0;

@@ -15,13 +15,22 @@
  */
 
 /*
- * Node ids: main/identity.c on the real main/config_store.c, over a fake NVS
- * that keeps its contents across "reboots" (identity_init() again). A new
- * setup offers gadget-XXXXXX with CONFIG_MUSE_GADGET_NODE_ID_PREFIX
- * (GADGET_IDS), else homelink-XXXXXX, and stores it with its tokens; a device set up
- * by earlier firmware, which stored no id, keeps homelink-XXXXXX through
- * reboots, updates and token refreshes until it is set up again. A stored id
- * is never renamed. XXXXXX is the Wi-Fi STA MAC's last three octets,
+ * Node ids: main/identity.c on the real
+ * main/config_store.c, over a fake NVS that keeps its contents across
+ * "reboots" (identity_init() again). With CONFIG_MUSE_GADGET_NODE_ID_PREFIX
+ * (GADGET_IDS) a Muse Gadget build's new setup offers gadget-XXXXXX, else
+ * homelink-XXXXXX (as a plain Home Link always does), and stores it with its
+ * tokens. A device set up earlier keeps its stored id
+ * (homelink-XXXXXX, or gadget-XXXXXX from a bench image), or the
+ * homelink-XXXXXX a setup that stored none was issued tokens for, through
+ * reboots, updates and token refreshes until a setup commits a new one. A
+ * stored id is never renamed.
+ *
+ * A setup stores the id before its tokens (app.c accept_pairing_credentials());
+ * a Muse Gadget build (GADGET_BUILD) also commits it with K through the
+ * re-provisioning journal (commit_setup()): an abandoned or power-cut
+ * re-setup keeps the old id, and the device session's handover names the
+ * current pair's. XXXXXX is the Wi-Fi STA MAC's last three octets,
  * lowercase, the BLE name's digits.
  */
 
@@ -113,16 +122,22 @@ esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) {
 }
 
 // The Wi-Fi STA MAC ends ab:cd:ef (lowercase in the node id, uppercase in
-// the name: the same digits).
+// the name: the same digits), the Bluetooth address 44:55:66.
 esp_err_t esp_read_mac(uint8_t *mac, int type) {
     memset(mac, 0, 6);
-    if (type != ESP_MAC_WIFI_STA) return ESP_FAIL;
-    mac[3] = 0xab, mac[4] = 0xcd, mac[5] = 0xef;
+    if (type == ESP_MAC_WIFI_STA) {
+        mac[3] = 0xab, mac[4] = 0xcd, mac[5] = 0xef;
+    } else if (type == ESP_MAC_BT) {
+        mac[3] = 0x44, mac[4] = 0x55, mac[5] = 0x66;
+    } else {
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
 
 #define NEW_ID "gadget-abcdef"
 #define OLD_ID "homelink-abcdef"
+#define K_HEX "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 
 static const char *nvs(const char *key) {
     int i = find(key);
@@ -131,10 +146,28 @@ static const char *nvs(const char *key) {
 
 static void wipe(void) { memset(s_nvs, 0, sizeof(s_nvs)); }
 
-static void boot(void) { identity_init(); }
+// A boot (or the first boot of an update): boot recovery, then the identity,
+// in app_run()'s order.
+static void boot(void) {
+    (void)config_reprovision_recover();
+    identity_init();
+}
 
 static void expect(const char *in_use, const char *when) {
     CHECK(strcmp(identity_node_id(), in_use) == 0, "%s: node id %s, not %s", when, identity_node_id(), in_use);
+}
+
+static void test_stored_id_never_renamed(void) {
+    wipe();
+    config_set_str("node_id", OLD_ID);
+    config_set_str("access_token", "access");
+    boot();
+    expect(OLD_ID, "stored homelink- id");
+    wipe();
+    config_set_str("node_id", NEW_ID);
+    config_set_str("access_token", "access");
+    boot();
+    expect(NEW_ID, "stored gadget- id");
 }
 
 // What a setup stores (app.c, accept_pairing_credentials() and the commit):
@@ -148,7 +181,7 @@ static void set_up(const char *access) {
 }
 
 // A device set up by earlier firmware: tokens, no stored id.
-static void old_setup(void) {
+static void earlier_setup(void) {
     wipe();
     config_set_str("ssid", "home");
     config_set_str("access_token", "old-access");
@@ -156,8 +189,10 @@ static void old_setup(void) {
     config_set_str("setup_complete", "1");
 }
 
-#ifdef GADGET_IDS
-static void test_new_setup_takes_gadget_id(void) {
+#if defined(GADGET_BUILD) && defined(GADGET_IDS)
+// A gadget's setup with gadget ids on, storing the id before its tokens
+// (accept_pairing_credentials()).
+static void test_setup_storing_the_id_first_takes_gadget_id(void) {
     wipe();
     boot();
     CHECK(strcmp(identity_setup_node_id(), NEW_ID) == 0, "setup id %s", identity_setup_node_id());
@@ -175,7 +210,7 @@ static void test_new_setup_takes_gadget_id(void) {
 }
 
 static void test_earlier_setup_keeps_homelink(void) {
-    old_setup();
+    earlier_setup();
     boot();
     expect(OLD_ID, "boot");
     CHECK(strcmp(identity_setup_node_id(), NEW_ID) == 0, "setup id %s", identity_setup_node_id());
@@ -192,21 +227,8 @@ static void test_earlier_setup_keeps_homelink(void) {
     expect(OLD_ID, "legacy auth token");
 }
 
-static void test_stored_id_never_renamed(void) {
-    wipe();
-    config_set_str("node_id", OLD_ID);
-    config_set_str("access_token", "access");
-    boot();
-    expect(OLD_ID, "stored homelink- id");
-    wipe();
-    config_set_str("node_id", NEW_ID);
-    config_set_str("access_token", "access");
-    boot();
-    expect(NEW_ID, "stored gadget- id");
-}
-
-static void test_set_up_again_takes_gadget_id(void) {
-    old_setup();
+static void test_accepted_setup_again_takes_gadget_id(void) {
+    earlier_setup();
     boot();
     set_up("second-access");
     expect(NEW_ID, "set up again");
@@ -215,7 +237,7 @@ static void test_set_up_again_takes_gadget_id(void) {
 }
 
 static void test_reset_or_unpair_then_setup_takes_gadget_id(void) {
-    old_setup();
+    earlier_setup();
     boot();
     CHECK(config_clear_setup(), "reset");
     boot();
@@ -228,16 +250,17 @@ static void test_reset_or_unpair_then_setup_takes_gadget_id(void) {
     CHECK(!nvs("node_id"), "unpair kept the node id");
     CHECK(identity_refresh_node_id() || strcmp(identity_node_id(), NEW_ID) == 0, "refresh");
     expect(NEW_ID, "unpaired");
-    old_setup();
+    earlier_setup();
     boot();
     CHECK(config_clear_pairing(), "credentials cleared");
     CHECK(identity_refresh_node_id(), "cleared credentials kept the homelink- id");
     expect(NEW_ID, "credentials cleared");
 }
-
 #else
-// Gadget ids off (the default): a new setup offers homelink- as before and
-// stores it; an id stored with gadget ids on is kept until the next setup.
+// Homelink- offered (a gadget release image, CONFIG_MUSE_GADGET_NODE_ID_PREFIX
+// off, or a plain Home Link with or without it): a new setup offers
+// homelink- as before and stores it; an id stored with gadget ids on is kept
+// until the next setup.
 static void test_off_offers_homelink(void) {
     wipe();
     boot();
@@ -250,7 +273,7 @@ static void test_off_offers_homelink(void) {
 }
 
 static void test_off_keeps_a_stored_gadget_id(void) {
-    old_setup();
+    earlier_setup();
     config_set_str("node_id", NEW_ID);
     boot();
     expect(NEW_ID, "boot");
@@ -261,20 +284,258 @@ static void test_off_keeps_a_stored_gadget_id(void) {
     set_up("second-access");
     expect(OLD_ID, "set up again");
 }
+
+#endif
+
+#ifdef GADGET_BUILD
+// What commit_setup() stores (app.c): the pair, K, the id device_info
+// offered, the setup marker; then the journal's end and the refresh.
+static void commit_setup(const char *access, bool again) {
+    CHECK(config_set_str("refresh_token", "refresh") && config_set_str("access_token", access)
+              && config_set_str("mg_proof_k", K_HEX) && config_set_str("node_id", identity_setup_node_id())
+              && config_mark_setup_complete(),
+          "setup writes");
+    if (again) CHECK(config_reprovision_commit(), "journal commit");
+    (void)identity_refresh_node_id();
+}
+
+// A gadget set up by firmware before gadget ids: its homelink- id
+// stored with K.
+static void old_setup(void) {
+    wipe();
+    config_set_str("access_token", "old-access");
+    config_set_str("refresh_token", "old-refresh");
+    config_set_str("mg_proof_k", K_HEX);
+    config_set_str("node_id", OLD_ID);
+    config_set_str("setup_complete", "1");
+}
+
+// The node id the device session's credentials hand over (mg_glue.c,
+// session_credentials()): the one stored with the current pair, else the id
+// in use.
+static const char *handover_node(void) {
+    static char node[64];
+    if (!config_get_node_id(node, sizeof(node))) snprintf(node, sizeof(node), "%s", identity_node_id());
+    return node;
+}
+
+#ifdef GADGET_IDS
+static void test_new_setup_takes_gadget_id(void) {
+    wipe();
+    boot();
+    CHECK(strcmp(identity_setup_node_id(), NEW_ID) == 0, "setup id %s", identity_setup_node_id());
+    expect(NEW_ID, "not set up");
+    CHECK(strcmp(identity_ble_name(), "MuseGadget-ABCDEF") == 0, "name %s", identity_ble_name());
+    commit_setup("access", false);
+    CHECK(strcmp(nvs("node_id"), NEW_ID) == 0, "stored %s", nvs("node_id"));
+    expect(NEW_ID, "set up");
+    boot();
+    expect(NEW_ID, "reboot after setup");
+}
+
+static void test_stored_homelink_id_kept(void) {
+    old_setup();
+    boot();
+    expect(OLD_ID, "boot");
+    CHECK(strcmp(identity_setup_node_id(), NEW_ID) == 0, "setup id %s", identity_setup_node_id());
+    boot();   // an update's first boot reads the same NVS
+    expect(OLD_ID, "reboot / OTA");
+    // A credentials update (the device session's, or a refresh): the pair
+    // changes in one journalled commit, K and the id stay.
+    CHECK(config_set_token_pair("new-access", "new-refresh", 0), "token update");
+    CHECK(!identity_refresh_node_id(), "a token update changed the id");
+    expect(OLD_ID, "credentials update");
+    boot();
+    expect(OLD_ID, "reboot after credentials update");
+    CHECK(strcmp(nvs("node_id"), OLD_ID) == 0, "stored id renamed to %s", nvs("node_id"));
+}
+
+static void test_credentials_without_stored_id_are_homelink(void) {
+    // Set up before the id was stored, or without a proof key: the tokens
+    // were issued for the homelink- id.
+    wipe();
+    config_set_str("access_token", "access");
+    config_set_str("setup_complete", "1");
+    boot();
+    expect(OLD_ID, "access token, no stored id");
+    wipe();
+    config_set_str("auth_token", "legacy");
+    boot();
+    expect(OLD_ID, "legacy auth token, no stored id");
+}
+
+static void test_setup_again_takes_gadget_id(void) {
+    old_setup();
+    boot();
+    CHECK(config_reprovision_begin(), "journal begin");
+    expect(OLD_ID, "during a re-setup, before its commit");
+    commit_setup("second-access", true);
+    expect(NEW_ID, "re-setup committed");
+    boot();
+    expect(NEW_ID, "reboot after re-setup");
+}
+
+static void test_abandoned_setup_again_keeps_old_id(void) {
+    old_setup();
+    boot();
+    CHECK(config_reprovision_begin(), "journal begin");
+    config_set_str("access_token", "second-access");
+    config_set_str("node_id", NEW_ID);
+    CHECK(config_reprovision_rollback(), "rollback");
+    CHECK(!identity_refresh_node_id(), "a rolled-back setup changed the id");
+    expect(OLD_ID, "rolled back");
+    // A power cut before the commit: boot recovery puts the old setup back.
+    CHECK(config_reprovision_begin(), "journal begin");
+    config_set_str("access_token", "third-access");
+    config_set_str("node_id", NEW_ID);
+    boot();
+    expect(OLD_ID, "power cut before the commit");
+    CHECK(strcmp(nvs("node_id"), OLD_ID) == 0, "stored %s", nvs("node_id"));
+}
+
+static void test_handover_names_the_current_pairs_id(void) {
+    // A homelink- gadget being set up again: device_info offers gadget-, the
+    // re-setup has written its id, but until the commit the handover names
+    // the id the current pair is for.
+    old_setup();
+    boot();
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "set up: %s", handover_node());
+    CHECK(config_reprovision_begin(), "journal begin");
+    CHECK(config_set_str("access_token", "second-access") && config_set_str("node_id", identity_setup_node_id()),
+          "re-setup writes");
+    CHECK(strcmp(identity_setup_node_id(), NEW_ID) == 0, "offer %s", identity_setup_node_id());
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "mid re-setup: %s", handover_node());
+    commit_setup("second-access", true);
+    CHECK(strcmp(handover_node(), NEW_ID) == 0, "committed: %s", handover_node());
+
+    // Abandoned: still the old id.
+    old_setup();
+    boot();
+    CHECK(config_reprovision_begin(), "journal begin");
+    CHECK(config_set_str("node_id", NEW_ID), "re-setup write");
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "mid re-setup: %s", handover_node());
+    CHECK(config_reprovision_rollback(), "rollback");
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "abandoned: %s", handover_node());
+
+    // Set up before ids were stored: the homelink- id throughout a re-setup,
+    // gadget- once it commits.
+    old_setup();
+    config_erase_key("node_id");
+    boot();
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "no stored id: %s", handover_node());
+    CHECK(config_reprovision_begin(), "journal begin");
+    CHECK(config_set_str("node_id", NEW_ID), "re-setup write");
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "no stored id, mid re-setup: %s", handover_node());
+    commit_setup("second-access", true);
+    CHECK(strcmp(handover_node(), NEW_ID) == 0, "no stored id, committed: %s", handover_node());
+}
+
+static void test_reset_then_setup_takes_gadget_id(void) {
+    old_setup();
+    boot();
+    CHECK(config_clear_setup(), "reset");
+    boot();   // a setup reset restarts
+    expect(NEW_ID, "after reset");
+    commit_setup("access", false);
+    expect(NEW_ID, "new setup after reset");
+    boot();
+    expect(NEW_ID, "reboot");
+}
+
+static void test_cleared_pairing_offers_gadget_id(void) {
+    // Credentials revoked (config_clear_pairing): nothing is set up for the
+    // old id any more, so the next setup and the id in use are gadget-.
+    old_setup();
+    boot();
+    CHECK(config_clear_pairing(), "clear pairing");
+    CHECK(identity_refresh_node_id(), "a cleared pairing kept the old id");
+    expect(NEW_ID, "cleared pairing");
+}
+#else
+// A release image (CONFIG_MUSE_GADGET_NODE_ID_PREFIX off): new setups offer
+// homelink- as before; the rest is the same, so an id stored by a bench image
+// (gadget-) survives too, until the next setup.
+static void test_release_offers_homelink(void) {
+    wipe();
+    boot();
+    CHECK(strcmp(identity_setup_node_id(), OLD_ID) == 0, "setup id %s", identity_setup_node_id());
+    expect(OLD_ID, "not set up");
+    commit_setup("access", false);
+    CHECK(strcmp(nvs("node_id"), OLD_ID) == 0, "stored %s", nvs("node_id"));   // stored either way
+    boot();
+    expect(OLD_ID, "reboot after setup");
+}
+
+static void test_release_keeps_a_stored_gadget_id(void) {
+    old_setup();
+    config_set_str("node_id", NEW_ID);   // set up by a bench image
+    boot();
+    expect(NEW_ID, "boot");
+    CHECK(config_set_token_pair("new-access", "new-refresh", 0), "token update");
+    CHECK(!identity_refresh_node_id(), "a token update changed the id");
+    boot();
+    expect(NEW_ID, "reboot after credentials update");
+    CHECK(strcmp(handover_node(), NEW_ID) == 0, "handover %s", handover_node());
+    // Set up again: the handover names the current pair's id until the
+    // commit, then the setup's (homelink- here).
+    CHECK(config_reprovision_begin(), "journal begin");
+    CHECK(config_set_str("node_id", identity_setup_node_id()), "re-setup write");
+    CHECK(strcmp(handover_node(), NEW_ID) == 0, "mid re-setup: %s", handover_node());
+    commit_setup("second-access", true);
+    expect(OLD_ID, "re-setup committed");
+    CHECK(strcmp(handover_node(), OLD_ID) == 0, "committed: %s", handover_node());
+}
+#endif
+#else
+// A plain Home Link: credentials from a setup that stored no id are the
+// homelink- id, as on a gadget.
+static void test_off_credentials_without_stored_id_are_homelink(void) {
+    wipe();
+    boot();
+    CHECK(strcmp(identity_setup_node_id(), OLD_ID) == 0, "setup id %s", identity_setup_node_id());
+    expect(OLD_ID, "not set up");
+    config_set_str("access_token", "access");
+    config_set_str("setup_complete", "1");
+    boot();
+    expect(OLD_ID, "set up, no stored id");
+}
 #endif
 
 int main(void) {
-#ifndef GADGET_IDS
+#if defined(GADGET_BUILD) && !defined(GADGET_IDS)
+    test_release_offers_homelink();
+    test_release_keeps_a_stored_gadget_id();
     test_off_offers_homelink();
     test_off_keeps_a_stored_gadget_id();
-    puts("node id harness (gadget ids off): PASS");
-#else
-    test_new_setup_takes_gadget_id();
-    test_earlier_setup_keeps_homelink();
     test_stored_id_never_renamed();
-    test_set_up_again_takes_gadget_id();
+    puts("node id harness (gadget, release): PASS");
+#elif defined(GADGET_BUILD)
+    test_new_setup_takes_gadget_id();
+    test_stored_homelink_id_kept();
+    test_credentials_without_stored_id_are_homelink();
+    test_stored_id_never_renamed();
+    test_setup_again_takes_gadget_id();
+    test_abandoned_setup_again_keeps_old_id();
+    test_handover_names_the_current_pairs_id();
+    test_reset_then_setup_takes_gadget_id();
+    test_cleared_pairing_offers_gadget_id();
+    test_setup_storing_the_id_first_takes_gadget_id();
+    test_earlier_setup_keeps_homelink();
+    test_accepted_setup_again_takes_gadget_id();
     test_reset_or_unpair_then_setup_takes_gadget_id();
-    puts("node id harness: PASS");
+    puts("node id harness (gadget): PASS");
+#else
+    // A plain Home Link offers homelink- with CONFIG_MUSE_GADGET_NODE_ID_PREFIX
+    // on too.
+    test_off_offers_homelink();
+    test_off_keeps_a_stored_gadget_id();
+    test_off_credentials_without_stored_id_are_homelink();
+    test_stored_id_never_renamed();
+#ifdef GADGET_IDS
+    puts("node id harness (Home Link, gadget ids on): PASS");
+#else
+    puts("node id harness (Home Link): PASS");
+#endif
 #endif
     return 0;
 }

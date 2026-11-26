@@ -37,6 +37,11 @@ set(GADGET_SRCS
     "bug_report.c"
     "ota.c"
     "image_fetch.c"
+    "session_image.c"
+    "mg_face.c"
+    "mg_face_core.c"
+    "mg_face_jpeg.c"
+    "session_image_core.c"
     "../avatar/happy_anim.c"
     "pixel_font.c"
     "button.c"
@@ -58,6 +63,8 @@ endif()
 set(GADGET_REQUIRES
     nvs_flash
     network_proxy
+    muse_restart
+    secure_random
     esp_wifi
     esp_event
     esp_netif
@@ -84,6 +91,8 @@ set(GADGET_REQUIRES
     mbedtls
     efuse
     muse
+    muse_gadget_ble
+    muse_image_id
     # WebAssembly apps (CONFIG_MUSE_WASM_APPS); without them it builds nothing.
     muse_apps
     # The M5Stack CoreMatrix's board support; it builds nothing on other boards.
@@ -141,6 +150,14 @@ endif()
 
 if(CONFIG_HOMEHUB_ERROR_REPORT)
     list(APPEND GADGET_SRCS "error_report.c")
+endif()
+
+if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+    list(APPEND GADGET_SRCS "mg_glue.c")
+endif()
+
+if(CONFIG_MUSE_GATT_DBHASH)
+    list(APPEND GADGET_SRCS "gatt_dbhash.c" "gatt_dbhash_core.c")
 endif()
 
 # image_fetch.c: the P4 has no JPEG decoder in ROM, so it uses the peripheral.
@@ -287,9 +304,10 @@ endif()
 # error_report.c records the fault in retained RAM before ESP-IDF's panic
 # handler prints and resets.
 if(CONFIG_HOMEHUB_ERROR_REPORT)
-    target_link_libraries(${COMPONENT_LIB} INTERFACE
-        "-Wl,--wrap=esp_panic_handler"
-        "-Wl,-u,__wrap_esp_panic_handler")
+    # error_report.c notes the fault from muse_restart's panic wrapper
+    # (muse_crashrec_panic_hook): a second --wrap=esp_panic_handler would
+    # define the wrapper twice.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,-u,muse_crashrec_panic_hook")
 endif()
 
 # ble_coex.c sits between the BLE controller and the coexistence scheduler

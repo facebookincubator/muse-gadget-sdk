@@ -54,6 +54,7 @@
 #include "driver/i2s_std.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_codec_dev.h"   /* esp_codec_dev_set_vol_curve */
 #include "esp_codec_dev_defaults.h"
 #include "esp_efuse.h"
 #include "esp_efuse_table.h"
@@ -68,7 +69,9 @@
 #include "i2c_bus.h"
 
 #include "muse_audio.h"
+#include "muse_audio_dma.h"
 #include "muse_board.h"
+#include "muse_settings.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #if CONFIG_MUSE_MOSAICO_CAMERA
@@ -104,10 +107,12 @@ static const char *TAG = "board";
 #define BOOT_GPIO GPIO_NUM_61
 
 #define GAUGE_ADDR 0x55                 /* BQ27220 */
+#define GAUGE_TEMP 0x06                 /* 0.1 K */
 #define GAUGE_VOLTAGE 0x08              /* mV */
 #define GAUGE_CURRENT 0x0C              /* mA, signed, negative discharging */
 #define GAUGE_SOC 0x2C                  /* % */
 #define GAUGE_STATUS 0x0A               /* BatteryStatus */
+#define GAUGE_STATUS_FC (1u << 9)       /* full charge: the gauge saw the charger terminate (taper current) */
 #define GAUGE_REMAINING 0x10            /* mAh */
 #define GAUGE_FULL 0x12                 /* FullChargeCapacity, mAh */
 #define GAUGE_DESIGN 0x3C               /* DesignCapacity, mAh */
@@ -124,7 +129,7 @@ static const pins_t *s_pins = &s_v1_2;
 
 static i2c_master_bus_handle_t s_i2c;
 static i2c_master_dev_handle_t s_gauge;
-static volatile bool s_gauge_ready;   /* its profile check has finished (or failed) */
+static volatile bool s_gauge_ready;   /* its battery profile checked (or programmed) */
 static void gauge_task(void *arg);
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
@@ -176,13 +181,44 @@ static void detect_revision(void)
     }
 }
 
+/* ESP-Iris on the USB-C port (once): Vibe Mode installs the next build over it,
+ * its console reaches the firmware, and its crash-loop record follows this
+ * image. In SAFE mode too, so the USB tier stays. */
+static void iris_start(void)
+{
+    static bool started;
+    if (!started && muse_mosaico_iris_start) {
+        started = true;
+        muse_mosaico_iris_start();
+    }
+}
+
+/* SAFE mode's minimum (in place of init): ESP-Iris on USB, and the power
+ * switch released as init() does, nothing else (no rails, display or codec). */
+static esp_err_t safe_init(void)
+{
+    iris_start();
+    detect_revision();
+    return output(PWR_SW, 1, true);
+}
+
+/* SAFE mode's key: the AI key (the talk key), read raw. */
+static bool safe_key(void)
+{
+    static bool set;
+    if (!set) {
+        set = true;
+        gpio_set_direction(AI_GPIO, GPIO_MODE_INPUT);
+        gpio_pullup_en(AI_GPIO);
+    }
+    return gpio_get_level(AI_GPIO) == 0;
+}
+
 static esp_err_t init(void)
 {
     /* ESP-Iris on the USB-C port, so Vibe Mode can install the next build
      * (components_mosaico/, in builds with Espressif's esp-mosaico-utils). */
-    if (muse_mosaico_iris_start) {
-        muse_mosaico_iris_start();
-    }
+    iris_start();
     detect_revision();
     /* PWR_SW released, then the peripheral rail up (the BSP ramps it with
      * PWM to bound inrush; the retained bootloader has normally turned it on
@@ -342,11 +378,32 @@ static void panel_sleep(bool sleep)
     vTaskDelay(pdMS_TO_TICKS(120));   /* settle before the next command */
 }
 
+/*
+ * The speaker's level (measured with a UMIK-1 at ~17 cm):
+ * the NS4150B clips at a DAC output of about -5 dBFS, at 1 and 3 kHz alike:
+ * its supply is the battery rail (3.83 V then), not the 5 V esp_codec_dev's
+ * hw_gain model assumes, whose -3.6 dB (3.3 V / 5 V) it subtracts and so
+ * ADDED 3.6 dB: the volume's top was DAC +3.5 dB, and anything above -8.5
+ * dBFS clipped (THD 86-225 %). So hw_gain is 0 dB (PA = DAC voltage) and the
+ * volume curve's top is -5 dB: volume 100 -> 0xB5 = -5.0 dB, 50 -> 0x83 =
+ * -30 dB, 1 -> -54.5 dB (0.5 dB a step), 0 -> mute (muse_spk_dsp.h's map,
+ * tests/test_muse_spk_dsp.py). That alone is 8.5 dB quieter at the top: the
+ * speech chain (.speaker_speech_chain, the limiter's -1 dBFS = DAC -6 dBFS at
+ * volume 100) makes it up, 64.7 dBA clean against the old map's 60.3 at the
+ * clip edge.
+ */
+#define SPK_HW_PA_V 3.3f
+#define SPK_HW_DAC_V 3.3f
+#define SPK_VOL_TOP_DB (-5.0f)
+
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
     i2s_chan_handle_t tx, rx;
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
+    /* Live reply audio: 30 ms of DMA each way, not ESP-IDF's 90 (muse_audio_dma.h). */
+    chan_cfg.dma_desc_num = MUSE_AUDIO_DMA_LIVE_DESC;
+    chan_cfg.dma_frame_num = MUSE_AUDIO_DMA_LIVE_FRAMES;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "i2s channel");
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
@@ -362,6 +419,7 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &std_cfg), TAG, "i2s tx");
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(rx, &std_cfg), TAG, "i2s rx");
+    muse_audio_attach_tx(tx);   /* a barge-in clears its DMA (muse_audio_tx.h); before enable, or ESP-IDF refuses */
     ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "i2s tx on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "i2s rx on");
 
@@ -378,7 +436,7 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
         .codec_mode = ESP_CODEC_DEV_WORK_MODE_BOTH,
         .pa_pin = SPK_PA,
         .use_mclk = true,
-        .hw_gain = { .pa_voltage = 5.0, .codec_dac_voltage = 3.3 },
+        .hw_gain = { .pa_voltage = SPK_HW_PA_V, .codec_dac_voltage = SPK_HW_DAC_V },
         .no_dac_ref = true,           /* as the BSP: the mic path has no DAC reference */
     };
     const audio_codec_if_t *codec = es8311_codec_new(&es_cfg);
@@ -388,6 +446,12 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     esp_codec_dev_cfg_t in_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = codec, .data_if = data_if };
     *spk = esp_codec_dev_new(&out_cfg);
     *mic = esp_codec_dev_new(&in_cfg);
+    if (*spk) {
+        esp_codec_dev_vol_map_t map[2] = { { .vol = 0, .db_value = SPK_VOL_TOP_DB - 50.0f },
+                                           { .vol = 100, .db_value = SPK_VOL_TOP_DB } };
+        esp_codec_dev_vol_curve_t curve = { .vol_map = map, .count = 2 };
+        esp_codec_dev_set_vol_curve(*spk, &curve);   /* (copied; volume 0 stays -96 dB, mute) */
+    }
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
@@ -502,6 +566,24 @@ static esp_err_t read_power(muse_power_t *out)
     out->battery_mv = mv;
     out->charging = (int16_t)ma > 0;
     out->usb = (int16_t)ma >= 0;
+    /* The charger has no status line to the S31, so "charge done" is
+     * the gauge's FC, set when it sees the charger terminate (taper
+     * current), never its SOC. */
+    uint16_t st;
+    out->charge_done = out->usb && gauge_read(GAUGE_STATUS, &st) == ESP_OK && (st & GAUGE_STATUS_FC);
+    /* What else the gauge knows, for report_battery_status: the
+     * current it measures, the cell's temperature and its capacities. */
+    out->has_current = true;
+    out->current_100ua = (int16_t)ma * 10;
+    uint16_t dk, rem, full;
+    if (gauge_read(GAUGE_TEMP, &dk) == ESP_OK && dk > 2000 && dk < 4000) {
+        out->has_temp = true;
+        out->temp_c = ((int)dk - 2731) / 10;   /* 0.1 K */
+    }
+    if (gauge_read(GAUGE_REMAINING, &rem) == ESP_OK && gauge_read(GAUGE_FULL, &full) == ESP_OK) {
+        out->remaining_mah = rem;
+        out->full_mah = full;
+    }
     return ESP_OK;
 }
 
@@ -514,10 +596,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;   /* still running: USB power keeps it on */
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the panel held in reset (it drops its frame and stays dark). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(s_pins->lcd_rst, 0);   /* this revision's (safe_init detected it) */
+}
+
 static const muse_board_t s_board = {
     .name = "Espressif ESP-Mosaico",
     .width = LCD_RES, .height = LCD_RES, .round = false, .no_ring = true, .touch = true, .diagonal_in = 2.16f,
-    .talk_button = "ai", .aux_button = "boot",
+    .panel_w_mm = 38.8,   /* derived from the 2.16" square */
+    .corner_px = 70,   /* the panel's visible corner radius, from desk photos of the mic ring at 50-80 (>ring.corner=N): its inner edge follows it */
+    .talk_button = "AI", .aux_button = "BOOT",   /* the keys as printed */
     /* Espressif's drawing, seen from the front with USB-C down: the AI key on
      * the top edge about 380 px from the left (the speaker grille left of
      * it); on the bottom edge BOOT left of the USB-C port (~125 px) and
@@ -530,18 +620,36 @@ static const muse_board_t s_board = {
     .aux_hint = { LV_ALIGN_BOTTOM_MID, 111, -6 },
     .frame_ms = 40,
     .init = init,
+    .safe_init = safe_init,
+    .safe_key = safe_key,
     .display_start = display_start,
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .draw_frame = muse_lcd_bands_frame,
+    .draw_windows = muse_lcd_bands_windows,   /* only what changed of a streamed picture */
+    .panel_writes = muse_lcd_bands_writes,
+    .panel_stack_free = muse_lcd_bands_stack_free,
     .audio_init = audio_init,
+    .speaker_speech_chain = true,   /* its replies and sounds through muse_spk_dsp (SPK_VOL_TOP_DB above) */
+    /* set_mic_gain's 100 (ES8311): the tuned gain, 30 dB, until this board's
+     * 30 cm speech clip check is measured; then raised to the measured ceiling. */
+    .mic_gain_speech_max_db = MUSE_MIC_GAIN_TUNED,
+    .i2s_dma_desc = MUSE_AUDIO_DMA_LIVE_DESC,   /* the channels as audio_init makes them */
+    .i2s_dma_frames = MUSE_AUDIO_DMA_LIVE_FRAMES,
     .mic_slot = 0,
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the BQ27220's FC bit; MUSE_CHARGED_PERCENT for the % fallback */
     .power_off = power_off,
+    .power_off_battery_only = true,   /* USB holds PWR_SW's latch on */
+    /* Low-battery shutdown: EDV1 of the 80 mAh cell's gauge profile
+     * (s_cedv above, characterized by Espressif at 25 C), about 3 % left;
+     * EDV0 (3.0 V) is empty. */
+    .battery_shutdown_mv = 3410,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

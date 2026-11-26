@@ -20,6 +20,8 @@
 #include "muse_apps.h"
 #endif
 #include "stack_monitor.h"
+#include "muse_wdt.h"
+#include "muse_stack.h"
 #include "noise_upgrade.h"
 #include "muse_server_hosts.h"
 #include "noise_tunnel.h"
@@ -42,6 +44,7 @@
 #include <atomic>
 
 #include "esp_log.h"
+#include "register_family.h"   // after sdkconfig.h, which esp_log.h brings
 #include "esp_timer.h"
 #include "esp_tls.h"
 #include "network_proxy_tls.h"
@@ -58,6 +61,11 @@
 extern "C" {
 #include "cJSON.h"
 #include "led_status.h"
+#include "muse_bootguard.h"
+#include "session_image_core.h"
+#if CONFIG_MUSE_AVATAR_FACE
+#include "mg_face.h"
+#endif
 #if CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_UC8179 || \
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_SPECTRA6 || \
     CONFIG_HOMEHUB_LED_BACKEND_RETERMINAL_IT8951
@@ -78,6 +86,10 @@ extern "C" {
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
 #include <xplat/noise/core/ServiceCodec.h>
+
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+#include "mg_ble.h"
+#endif
 
 using namespace musegadgets::noise::core;
 
@@ -164,9 +176,10 @@ static char s_noise_host[256] = NOISE_DEFAULT_HOST;
 #define SVC_FRAME_SCRATCH (SMALL_CONTROL_SESSION ? 17 * 1024 : 12288)
 #endif
 
-// These small boards cannot allocate the session with the larger inbound
-// buffers and the usual outbound buffers together. Keep this reduction local
-// to the profiles that need it.
+// The smallest buffers: the boards that cannot allocate the session with the
+// larger inbound buffers and the usual outbound buffers together (the
+// Cardputer ADV, the ESP32-C3 AI Passport, the AtomS3).
+// Keep this reduction local to the profiles that need it.
 #if SMALL_CONTROL_SESSION && (CONFIG_MUSE_BOARD_M5STACK_CARDPUTER_ADV || \
                               CONFIG_MUSE_BOARD_AI_PASSPORT || \
                               CONFIG_MUSE_BOARD_M5STACK_ATOMS3)
@@ -234,14 +247,32 @@ static std::atomic<bool> s_power_save{false};
 static char s_register_req_id[40] = {0};
 static bool s_register_acked = false;
 static bool s_heartbeat_registered = false;
+// The VM answered link.register with an error: not registered (no tunnel, no invokes), but no longer
+// waiting either, so the session can close when idle. A new session registers again.
+static bool s_register_rejected = false;
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+// The device session's own lines (what came in that it doesn't handle, what
+// it refused, link.register and its reply, session.ping) go to mg.session,
+// which the Nordic UART mirrors (CONFIG_MUSE_GADGET_BLE_NUS_LOG_TAGS takes
+// tags starting with "mg"), so a phone-side tester reads them with
+// mg_ble_client.py log. Types and sizes only: never a token, a payload or a
+// server's message text.
+static const char *const MG_SESSION_TAG = "mg.session";
+// When link.register finished going out on the device session
+// (esp_timer_get_time(); 0: not yet). Session-task-owned.
+static int64_t s_register_sent_us = 0;
+#endif
 static TaskHandle_t s_task = nullptr;
+static muse_task_slot_t s_task_slot;   // muse_stack.h: the session task, started again on each connect
 
 #define NOISE_CTRL_STACK 12288
-#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM
+#if CONFIG_MUSE_ENABLED && CONFIG_SPIRAM && !CONFIG_MUSE_STACKS_IN_PSRAM
 // Muse's display and audio leave internal RAM fragmented by the time a session
 // starts, often without a 12 KB block for this stack. Hold one from boot and
 // hand it over just before the task is created. The idle task frees a
-// deleted session task's stack, so let it run before either step.
+// deleted session task's stack, so let it run before either step. With
+// CONFIG_MUSE_STACKS_IN_PSRAM the stack is in PSRAM (muse_stack.h) and
+// nothing is held.
 static void *s_stack_reserve;
 static void reserve_stack(void) {
     vTaskDelay(pdMS_TO_TICKS(20));
@@ -268,6 +299,7 @@ struct pending_result {
     noise_ctrl_session_generation_t session_generation;
     char *request_id;
     cJSON *result;
+    int64_t queued_us;   // when it was queued (a BLE session's next one takes it within 10 s)
 };
 static QueueHandle_t s_result_q = nullptr;
 
@@ -315,6 +347,17 @@ static void copy_reset_reason(StringView reason, char *out, size_t out_len) {
 
 static constexpr int64_t WS_FRAME_TIMEOUT_US = 15000000;
 
+// A TLS read or write that would block (the session's socket is non-blocking
+// once it's up): wait a tick and try again. Every loop that calls this is
+// bounded by its own deadline (WS_FRAME_TIMEOUT_US, 15 s) and gives up after
+// it, so the Link session's watchdog (muse_wdt.h, 30 s) is fed here: a
+// Wi-Fi stall the deadline will end can't trip it, while loop work that hangs
+// still does.
+static void io_retry_wait(void) {
+    muse_wdt_feed(MUSE_WDT_LINK_SESSION);
+    vTaskDelay(1);
+}
+
 static ssize_t write_all(esp_tls_t *tls, const void *buf, size_t len) {
     const uint8_t *p = static_cast<const uint8_t *>(buf);
     size_t off = 0;
@@ -325,7 +368,7 @@ static ssize_t write_all(esp_tls_t *tls, const void *buf, size_t len) {
         if (n > 0) {
             off += static_cast<size_t>(n);
         } else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) {
-            vTaskDelay(1);
+            io_retry_wait();
         } else {
             return n;
         }
@@ -480,7 +523,7 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
         } else if (n == 0) {
             return 0; // connection closed
         } else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) {
-            vTaskDelay(1);
+            io_retry_wait();
         } else {
             return -1;
         }
@@ -498,7 +541,7 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t n = esp_tls_conn_read(tls, ext + have, 2 - have);
             if (n > 0) have += static_cast<size_t>(n);
-            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
         payload_len = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
@@ -509,7 +552,7 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t n = esp_tls_conn_read(tls, ext + have, 8 - have);
             if (n > 0) have += static_cast<size_t>(n);
-            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
         payload_len = 0;
@@ -526,7 +569,7 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t n = esp_tls_conn_read(tls, mask_key + have, 4 - have);
             if (n > 0) have += static_cast<size_t>(n);
-            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
     }
@@ -555,7 +598,7 @@ static ssize_t ws_recv_frame(esp_tls_t *tls, uint8_t *buf, size_t buf_cap) {
         } else if (n == 0) {
             return 0;
         } else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) {
-            vTaskDelay(1);
+            io_retry_wait();
         } else {
             return -1;
         }
@@ -618,7 +661,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
         if (!s_running || esp_timer_get_time() >= deadline) return -1;
         ssize_t r = esp_tls_conn_read(tls, &hdr1, 1);
         if (r > 0) { have = 1; break; }
-        if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) { vTaskDelay(1); continue; }
+        if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) { io_retry_wait(); continue; }
         return -1;
     }
 
@@ -633,7 +676,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t r = esp_tls_conn_read(tls, ext + have, 2 - have);
             if (r > 0) have += static_cast<size_t>(r);
-            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
         payload_len = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
@@ -643,7 +686,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t r = esp_tls_conn_read(tls, ext + have, 8 - have);
             if (r > 0) have += static_cast<size_t>(r);
-            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
         payload_len = 0;
@@ -657,7 +700,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
             if (!s_running || esp_timer_get_time() >= deadline) return -1;
             ssize_t r = esp_tls_conn_read(tls, mask_key + have, 4 - have);
             if (r > 0) have += static_cast<size_t>(r);
-            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+            else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
             else return -1;
         }
     }
@@ -679,7 +722,7 @@ static ssize_t ws_recv_frame_nonblock(esp_tls_t *tls, uint8_t *buf, size_t cap) 
         ssize_t r = esp_tls_conn_read(tls, buf + have, plen - have);
         if (r > 0) have += static_cast<size_t>(r);
         else if (r == 0) return 0;
-        else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) vTaskDelay(1);
+        else if (r == ESP_TLS_ERR_SSL_WANT_READ || r == ESP_TLS_ERR_SSL_WANT_WRITE) io_retry_wait();
         else return -1;
     }
 
@@ -818,7 +861,7 @@ static noise_upgrade_result_t ws_upgrade(esp_tls_t *tls) {
             // step back 3 bytes rather than rescanning from the start.
             scanned = (have >= 3) ? have - 3 : 0;
         } else if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) {
-            vTaskDelay(1);
+            io_retry_wait();
         } else {
             ESP_LOGE(TAG, "upgrade read err %d", (int)n);
             break;
@@ -920,6 +963,12 @@ static bool flush_outbound(esp_tls_t *tls, ClientSession &session,
     return true;
 }
 
+// The largest control BodyChunk the session's transport takes. The device
+// session over BLE (below) may take less: the client's max_message.
+static size_t body_chunk_max(const ClientSession &) {
+    return CTRL_BODY_CHUNK_MAX;
+}
+
 // Owned by the session task. Registration, results and heartbeats share one
 // slot, so another u32-LE message never interleaves with a paused message.
 struct pending_json_body {
@@ -949,7 +998,30 @@ enum class json_send_status { Pending, Complete, Failed };
 // traffic and WS keepalives between chunks even when DMA headroom stays high.
 // Pending preserves ownership and framing state; only an attempted send failure
 // is fatal. Never retry that failure: sealing can irrecoverably poison Noise.
-static json_send_status send_json_body_chunk(esp_tls_t *tls, ClientSession &session,
+// Session is ClientSession, or the device session over BLE (BleSessionOut).
+// Whether a session's sends need the TLS path's internal DMA reserve
+// (noise_tx_has_dma_headroom(): esp_tls writes from internal DMA memory, so
+// Wi-Fi parks a send until 16 KB is free). The device session over BLE
+// (BleSessionOut) doesn't: its messages are copied PSRAM first and leave as
+// NimBLE notifications, so it never waits for internal RAM. On the
+// Watcher's BLE-only build, which idles near 12 KB internal, that wait
+// would park link.register forever, silently, right after POST /link-control.
+template <typename Session>
+struct tx_needs_dma_reserve {
+    static constexpr bool value = true;
+};
+
+// The service a session's control stream is on: the VM's Gadget API over
+// Wi-Fi (POST /api/gadget/control); the device session over BLE
+// (BleSessionOut) keeps POST /link-control on the daemon, the route the
+// phone's relay carries.
+template <typename Session>
+struct control_service {
+    static constexpr ServiceType value = GADGET_SERVICE;
+};
+
+template <typename Session>
+static json_send_status send_json_body_chunk(esp_tls_t *tls, Session &session,
                                  pending_json_body &body,
                                  uint8_t *svc_scratch, uint8_t *env_scratch,
                                  uint8_t *ws_buf, bool end_body = false) {
@@ -960,15 +1032,16 @@ static json_send_status send_json_body_chunk(esp_tls_t *tls, ClientSession &sess
     }
     // Recheck both budgets before EVERY chunk, including retained registration:
     // the queue-boundary sample cannot cover later turns of a paused message.
-    if (!noise_tx_has_dma_headroom(nullptr)
-        || !noise_tx_has_contiguous_dma_headroom()) {
+    if (tx_needs_dma_reserve<Session>::value
+        && (!noise_tx_has_dma_headroom(nullptr) || !noise_tx_has_contiguous_dma_headroom())) {
         return json_send_status::Pending;
     }
 
     size_t prefix_len = body.prefix_sent ? 0 : 4;
     size_t n = body.json_len - body.json_offset;
-    if (n > CTRL_BODY_CHUNK_MAX - prefix_len) {
-        n = CTRL_BODY_CHUNK_MAX - prefix_len;
+    size_t chunk_max = body_chunk_max(session);
+    if (n > chunk_max - prefix_len) {
+        n = chunk_max - prefix_len;
     }
     const uint8_t *data = reinterpret_cast<const uint8_t *>(body.json)
         + body.json_offset;
@@ -992,7 +1065,7 @@ static json_send_status send_json_body_chunk(esp_tls_t *tls, ClientSession &sess
     chunk.data = ConstByteSpan(data, prefix_len + n);
     chunk.end_body = last && end_body;
     auto sws = session.StartOutboundBodyChunk(
-        GADGET_SERVICE, CTRL_STREAM_ID, chunk,
+        control_service<Session>::value, CTRL_STREAM_ID, chunk,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1133,12 +1206,33 @@ struct req_op {
     size_t len;
     noise_ctrl_req_cb cb;
     void *ctx;
+    int64_t opened_us;   // Open: when noise_ctrl_req_open() made it (the 10 s wait counts from there)
+    bool resent;         // Open: re-sent after a session's unasked end (once only)
+    noise_ctrl_req_hdr_cb hdr_cb;   // Open: the response head's headers (nullptr: not wanted)
 };
+
+// The BLE device session keeps what a GET or HEAD request sent (its Open and
+// body) until the first response bytes, so one in flight when the session ends
+// unasked can go again in the next (mgcommands.h, the relay). Any other method
+// fails with the session and its caller retries: nothing whose effect must
+// happen at most once goes again blind.
+#define REQ_REPLAY_MAX 2048
+static bool req_resendable(const char *verb) {
+    return !strcmp(verb, "GET") || !strcmp(verb, "HEAD");
+}
+static bool s_req_replay_on;   // set by the BLE device session's first begin (never on Wi-Fi)
+static const char *const REQ_BLE_TAG = "mg.session";   // the BLE session's re-sends (the Nordic UART mirror shows mg.*)
 
 struct req_stream {
     int64_t id;  // 0: free
     noise_ctrl_req_cb cb;
     void *ctx;
+    uint8_t *replay;     // the Open's packed data, then the body sent so far (nullptr: none kept)
+    size_t open_len, replay_len;
+    bool open_end, body_end;   // the Open ended the body / the body's last chunk went
+    bool resent;         // this is the re-send: a second unasked end fails it
+    int64_t opened_us;
+    noise_ctrl_req_hdr_cb hdr_cb;   // the response head's headers, before cb (nullptr: none)
 };
 
 static QueueHandle_t s_req_q = nullptr;
@@ -1171,22 +1265,25 @@ static req_stream *req_find(int64_t id) {
     return nullptr;
 }
 
-static void req_drop(req_op &op) {
-    if (op.kind == req_op_kind::Open) op.cb(op.ctx, -1, nullptr, 0, true);
+static void req_drop(req_op &op, int status = -1) {
+    if (op.kind == req_op_kind::Open) op.cb(op.ctx, status, nullptr, 0, true);
     free(op.data);
+}
+
+// Frees a stream's slot (and what it kept to re-send).
+static void req_clear(req_stream *s) {
+    free(s->replay);
+    *s = {};
 }
 
 static void req_fail(req_stream *s, int status = -1) {
     req_stream gone = *s;
-    *s = {};
+    req_clear(s);
     gone.cb(gone.ctx, status, nullptr, 0, true);
 }
 
-// The session is gone, and every request with it: NOISE_CTRL_REQ_TOO_LARGE
-// when a frame too big for this board's buffers ended it.
-static void req_end_all(void) {
-    req_op op;
-    while (req_take(&op)) req_drop(op);
+// The session is gone, and the requests it carried (their streams).
+static void req_streams_end(void) {
     int status = s_req_too_large ? NOISE_CTRL_REQ_TOO_LARGE : -1;
     s_req_too_large = false;
     for (auto &s : s_req_streams) {
@@ -1194,7 +1291,80 @@ static void req_end_all(void) {
     }
 }
 
-static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
+// The session is gone, and every request with it: NOISE_CTRL_REQ_TOO_LARGE
+// when a frame too big for this board's buffers ended it.
+static void req_end_all(void) {
+    req_op op;
+    while (req_take(&op)) req_drop(op);
+    req_streams_end();
+}
+
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+// The session ended with a state the gadget didn't ask for (closed,
+// no_network): a request in flight that got no response bytes yet goes back
+// to the front of the queue once, in its order, to be re-sent after the
+// reopen and the link.register ack, its 10 s still counted from its open.
+// One that got bytes, or was already re-sent, fails as before; what's queued
+// waits for the next session. Returns the requests re-queued.
+static int req_streams_requeue(int64_t *oldest_us) {
+    req_stream *mine[REQ_MAX_STREAMS];
+    int n = 0;
+    for (auto &s : s_req_streams) {
+        if (s.id && s.replay && !s.resent) mine[n++] = &s;
+    }
+    // Oldest id first in the queue: pushed to the front newest first, each Open ahead of its body.
+    for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+            if (mine[j]->id > mine[i]->id) {
+                req_stream *t = mine[i];
+                mine[i] = mine[j];
+                mine[j] = t;
+            }
+        }
+    }
+    int requeued = 0;
+    for (int i = 0; i < n; i++) {
+        req_stream *s = mine[i];
+        size_t body_len = s->replay_len - s->open_len;
+        uint8_t *open = static_cast<uint8_t *>(malloc(s->open_len));
+        uint8_t *body = body_len ? static_cast<uint8_t *>(malloc(body_len)) : nullptr;
+        if (!open || (body_len && !body)) {
+            free(open);
+            free(body);
+            continue;   // fails below with the rest
+        }
+        memcpy(open, s->replay, s->open_len);
+        if (body_len) memcpy(body, s->replay + s->open_len, body_len);
+        bool ok = true;
+        if (body_len || (s->body_end && !s->open_end)) {
+            req_op b = {req_op_kind::Body, s->body_end, s->id, body, body_len, nullptr, nullptr, 0, false, nullptr};
+            s_req_queued_bytes += (int32_t)body_len;
+            ok = xQueueSendToFront(s_req_q, &b, 0) == pdTRUE;
+            if (!ok) {
+                s_req_queued_bytes -= (int32_t)body_len;
+                free(body);
+            }
+        }
+        req_op o = {req_op_kind::Open, s->open_end, s->id, open, s->open_len, s->cb, s->ctx, s->opened_us, true, s->hdr_cb};
+        s_req_queued_bytes += (int32_t)s->open_len;
+        if (!ok || xQueueSendToFront(s_req_q, &o, 0) != pdTRUE) {
+            s_req_queued_bytes -= (int32_t)s->open_len;
+            free(open);
+            continue;
+        }
+        ESP_LOGI(REQ_BLE_TAG, "request %lld was in flight with no reply when the session ended unasked: "
+                                 "it goes again after the reopen", (long long)s->id);
+        if (s->opened_us && (!*oldest_us || s->opened_us < *oldest_us)) *oldest_us = s->opened_us;
+        free(s->replay);
+        *s = {};
+        requeued++;
+    }
+    return requeued;
+}
+#endif
+
+template <typename Session>
+static bool req_open(esp_tls_t *tls, Session &session, req_op &op,
                      uint8_t *svc_scratch, uint8_t *env_scratch, uint8_t *ws_buf) {
     req_stream *slot = req_find(0);
     if (!slot) {
@@ -1227,23 +1397,41 @@ static bool req_open(esp_tls_t *tls, ClientSession &session, req_op &op,
         return true;
     }
     ESP_LOGD(TAG, "request %lld: %s %s", (long long)op.id, verb, path);
-    *slot = {op.id, op.cb, op.ctx};
-    free(op.data);
+    *slot = {};
+    slot->id = op.id;
+    slot->cb = op.cb;
+    slot->ctx = op.ctx;
+    slot->hdr_cb = op.hdr_cb;
+    slot->resent = op.resent;
+    slot->opened_us = op.opened_us;
+    slot->open_end = op.end_body;
+    if (op.resent) {
+        ESP_LOGI(REQ_BLE_TAG, "request %lld re-sent after the session's unasked end", (long long)op.id);
+    }
+    if (s_req_replay_on && !op.resent && op.len <= REQ_REPLAY_MAX && req_resendable(verb)) {
+        // Kept until the first response bytes: it may go again once.
+        slot->replay = op.data;
+        slot->open_len = slot->replay_len = op.len;
+    } else {
+        free(op.data);
+    }
     return flush_outbound(tls, session, ws_buf);
 }
 
 // Sends at most one queued request operation per loop turn. False only if the
 // transport failed.
-static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
+template <typename Session>
+static bool req_pump_tx(esp_tls_t *tls, Session &session,
                         uint8_t *svc_scratch, uint8_t *env_scratch,
                         uint8_t *ws_buf, bool *did) {
     // The loop turns every tick; the heap checks below walk the heap, so only
     // when there is something to send.
     if (!uxQueueMessagesWaiting(s_req_q)) return true;
     int32_t queued = s_req_queued_bytes;
-    if (!noise_tx_has_dma_headroom_reclaiming(queued > 0 ? (size_t)queued : 0)
-        || !noise_tx_has_contiguous_dma_headroom()) return true;
-    if (REQ_LOW_RAM
+    if (tx_needs_dma_reserve<Session>::value
+        && (!noise_tx_has_dma_headroom_reclaiming(queued > 0 ? (size_t)queued : 0)
+            || !noise_tx_has_contiguous_dma_headroom())) return true;
+    if (tx_needs_dma_reserve<Session>::value && REQ_LOW_RAM
         && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < REQ_TLS_BLOCK) return true;
     req_op op;
     if (!req_take(&op)) return true;
@@ -1262,6 +1450,21 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) {
+            if (s->replay) {
+                // What a re-send would carry: the body so far, while it fits.
+                uint8_t *grown = s->replay_len + op.len <= REQ_REPLAY_MAX
+                                     ? static_cast<uint8_t *>(realloc(s->replay, s->replay_len + op.len))
+                                     : nullptr;
+                if (grown) {
+                    memcpy(grown + s->replay_len, op.data, op.len);
+                    s->replay = grown;
+                    s->replay_len += op.len;
+                    s->body_end = op.end_body;
+                } else {
+                    free(s->replay);
+                    s->replay = nullptr;
+                }
+            }
             ok = flush_outbound(tls, session, ws_buf);
         } else {
             ESP_LOGW(TAG, "request %lld: body chunk failed: %s", (long long)op.id,
@@ -1269,7 +1472,7 @@ static bool req_pump_tx(esp_tls_t *tls, ClientSession &session,
             req_fail(s);
         }
     } else if (s) {
-        *s = {};
+        req_clear(s);
         ResetView rv{ResetCode::Cancelled, StringView("cancelled")};
         auto sws = session.StartOutboundReset(
             ServiceType::Daemon, op.id, rv,
@@ -1288,8 +1491,19 @@ static bool req_on_frame(const DecodedServiceFrame &frame) {
     req_stream *s = req_find(frame.stream_id);
     if (!s) return true;
     req_stream cur = *s;
+    if (frame.kind != ServiceFrameKind::Reset && s->replay) {
+        free(s->replay);   // response bytes: it can't go again (it fails as before at a session's end)
+        s->replay = nullptr;
+        cur.replay = nullptr;
+    }
     if (frame.kind == ServiceFrameKind::Response) {
         if (frame.response.end_body) *s = {};
+        if (cur.hdr_cb) {
+            for (size_t i = 0; i < frame.response.headers.size(); i++) {
+                const HeaderView &h = frame.response.headers[i];
+                cur.hdr_cb(cur.ctx, h.key.data(), h.key.size(), h.value.data(), h.value.size());
+            }
+        }
         cur.cb(cur.ctx, frame.response.status, frame.response.body.data(),
                frame.response.body.size(), frame.response.end_body);
     } else if (frame.kind == ServiceFrameKind::BodyChunk) {
@@ -1309,6 +1523,7 @@ static void req_init(void) {
 #else
 static void req_init(void) {}
 static void req_end_all(void) {}
+static void req_streams_end(void) {}
 static bool req_on_frame(const DecodedServiceFrame &) { return false; }
 #endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS
 
@@ -1399,13 +1614,10 @@ static void identity_on_frame(identity_fetch &f, const DecodedServiceFrame &fram
 
 // ---- JSON message builders -------------------------------------------------
 
-#ifndef MUSE_DEVICE_FAMILY
-#define MUSE_DEVICE_FAMILY "gadget"
-#endif
-
 extern "C" const char muse_device_guide_md[];
 
-static cJSON *string_param(const char *description) {
+// Unused on a build without the display, image or face commands.
+[[maybe_unused]] static cJSON *string_param(const char *description) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "string");
     if (description) {
@@ -1414,7 +1626,7 @@ static cJSON *string_param(const char *description) {
     return param;
 }
 
-#if CONFIG_HOMEHUB_NET_FORWARD
+#if CONFIG_HOMEHUB_NET_FORWARD && CONFIG_HOMEHUB_TUNNEL && !CONFIG_MUSE_GADGET_BLE_STANDALONE
 static cJSON *integer_param(void) {
     cJSON *param = cJSON_CreateObject();
     cJSON_AddStringToObject(param, "type", "integer");
@@ -1422,8 +1634,9 @@ static cJSON *integer_param(void) {
 }
 #endif
 
-#if CONFIG_HOMEHUB_DISPLAY_COMMANDS
-// The optional `row` of display.draw_url and display.draw_file.
+#if CONFIG_HOMEHUB_DISPLAY_COMMANDS && !CONFIG_MUSE_SESSION_IMAGE
+// The optional `row` of display.draw_url and display.draw_file (neither is
+// registered beside display.show_image).
 static cJSON *row_params(void) {
     cJSON *optional = cJSON_CreateObject();
     cJSON *top_param = cJSON_CreateObject();
@@ -1490,12 +1703,22 @@ static char *build_register_json(void) {
     cJSON_AddStringToObject(params, "platform", "esp32");
     const esp_app_desc_t *desc = esp_app_get_description();
     cJSON_AddStringToObject(params, "version", desc ? desc->version : "unknown");
-    cJSON_AddStringToObject(params, "device_family", MUSE_DEVICE_FAMILY);
-    cJSON_AddStringToObject(params, "model_id", CONFIG_MUSE_DEVICE_MODEL_ID);
+    // Every build registers as "gadget"; model_id is the board's overlay id
+    // (register_family.h).
+    cJSON_AddStringToObject(params, "device_family", register_device_family());
+    cJSON_AddStringToObject(params, "model_id", register_model_id());
     cJSON_AddBoolToObject(params, "is_wakeup_supported", false);
     cJSON *metadata = nullptr;
-    add_register_metadata_string(&metadata, params, "model_name",
-                                 CONFIG_MUSE_DEVICE_MODEL_NAME);
+    // metadata.model_name, once: the board's short product name where its
+    // overlay sets one (StopWatch, Watcher, ...,
+    // CONFIG_HOMEHUB_MODEL_NAME), so the agent names the gadget in hand; else
+    // the model name every overlay sets (CONFIG_MUSE_DEVICE_MODEL_NAME).
+    if (register_model_name()[0]) {
+        add_register_metadata_string(&metadata, params, "model_name", register_model_name());
+    } else {
+        add_register_metadata_string(&metadata, params, "model_name",
+                                     CONFIG_MUSE_DEVICE_MODEL_NAME);
+    }
     add_register_metadata_string(&metadata, params, "network_ssid", wifi_ssid);
 #if CONFIG_HOMEHUB_TUNNEL
     // The LAN the tunnel reaches, where LAN devices find a net.forward port. A
@@ -1524,7 +1747,8 @@ static char *build_register_json(void) {
                 " Also returns structured capabilities: board, devices and WASM API discovery."
 #endif
                 , nullptr, nullptr);
-#if CONFIG_HOMEHUB_TUNNEL
+#if CONFIG_HOMEHUB_TUNNEL && !CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // Offered only where app.c handles it: a BLE-only gadget has no network to scan.
     add_command(commands, "device.discover",
                 "Scan local network for devices (ARP, mDNS, SSDP, WSD, SNMP, NetBIOS, vendor)",
                 nullptr, nullptr);
@@ -1646,6 +1870,9 @@ static char *build_register_json(void) {
 #endif
                  );
 #endif
+#if !CONFIG_MUSE_GADGET_BLE_STANDALONE
+        // A BLE-only gadget has no network of its own (image_fetch.c refuses
+        // a URL there): only display.draw_file, from the VM.
         cJSON *url_required = cJSON_CreateObject();
         cJSON_AddItemToObject(url_required, "url",
                               string_param("http:// or https:// URL of the image."));
@@ -1655,11 +1882,27 @@ static char *build_register_json(void) {
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_url"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
+#endif
+#if CONFIG_MUSE_SESSION_IMAGE
+        // display.show_image (below) shows a file from the VM, for a while
+        // or until dismissed: one way to show a picture, so Muse never picks
+        // the older one (with both registered, Muse kept using
+        // draw_file, which worked earlier in the same chat, and timed the
+        // 5 s itself with display.show_animation). draw_file still answers.
+#else
         cJSON *path_required = cJSON_CreateObject();
         cJSON_AddItemToObject(path_required, "path",
                               string_param("Path of the image file on this VM, relative, "
                                            "as the VM's file API takes it, e.g. "
                                            "workspace/picture.jpg."));
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+        // display.draw_url isn't offered here, so this one says it all
+        // (desc's room, not another buffer: this runs on the session task).
+        size_t used = strlen(desc);
+        snprintf(desc + used, sizeof(desc) - used, " Takes a path on this VM: the device "
+                 "reads the file over its connection to the VM.");
+        add_command(commands, "display.draw_file", desc, path_required, row_params());
+#else
         add_command(commands, "display.draw_file",
                     "Draw an image file from this VM on the screen. The same as "
                     "display.draw_url, with the same image formats and screen, "
@@ -1668,6 +1911,7 @@ static char *build_register_json(void) {
                     "need not be on the internet. Replies when the image is "
                     "drawn.",
                     path_required, row_params());
+#endif
         cJSON_AddNumberToObject(
             cJSON_GetObjectItem(commands, "display.draw_file"), "timeout_ms",
             bits == 4 ? 120000 : 60000);
@@ -1689,7 +1933,68 @@ static char *build_register_json(void) {
         add_command(commands, gray_command, gray_help, gray_required, row_params());
         cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, gray_command), "timeout_ms", 150000);
 #endif
+#endif
         add_command(commands, "display.show_animation", restore, nullptr, nullptr);
+#if CONFIG_MUSE_SESSION_IMAGE
+        // A use case taught to Muse by this description alone (session_image.h):
+        // what the command is for, what the screen takes, and how to get there.
+        // In desc's room again (add_command copied the last one).
+        snprintf(desc, sizeof(desc),
+                 "Show a picture on this gadget's screen for duration_ms, then go "
+                 "back to what it was showing. This is how to show any picture "
+                 "here, including one you make for the user: make or find it "
+                 "first (generate one if they ask for a new or random picture), "
+                 "save it on this VM as a baseline (not progressive) JPEG of "
+                 "%dx%d pixels, quality about 70 and under 30 KB (it travels over "
+                 "Bluetooth: smaller shows sooner), and pass its path. The screen "
+                 "is %s%dx%d: keep the subject in the middle. A larger JPEG is only "
+                 "shrunk by 1/2, 1/4 or 1/8, so resize it yourself. The gadget "
+                 "downloads the file over its own connection and replies once the "
+                 "picture is on screen, with its size and how long the download "
+                 "took; an error says what to fix.",
+                 disp_w, disp_h, led_status_display_round() ? "round (the corners are cut off), " : "",
+                 disp_w, disp_h);
+        cJSON *show_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(show_required, "path",
+                              string_param("Path of the JPEG on this VM, relative to the "
+                                           "home folder, e.g. workspace/picture.jpg."));
+        cJSON *show_optional = cJSON_CreateObject();
+        cJSON *ms_param = cJSON_CreateObject();
+        cJSON_AddStringToObject(ms_param, "type", "integer");
+        cJSON_AddStringToObject(ms_param, "description",
+                                "How long to show it, in ms: 1000 to 60000, default 5000; "
+                                "0 keeps it until a tap or display.show_animation.");
+        cJSON_AddItemToObject(show_optional, "duration_ms", ms_param);
+        add_command(commands, "display.show_image", desc, show_required, show_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "display.show_image"),
+                                "timeout_ms", SIMG_COMMAND_TIMEOUT_MS);
+#endif
+    }
+#endif
+
+#if CONFIG_MUSE_AVATAR_FACE
+    {
+        // The avatar face (mg_face.h): Muse tells the gadget its face
+        // picture is ready; the gadget reads it itself (GET /fs/raw ranges).
+        char face_desc[480];
+        snprintf(face_desc, sizeof(face_desc),
+                 "Tell this gadget that its watch-face picture, the user's dark avatar, is ready "
+                 "at %s: a baseline (not progressive) JPEG of at most %u bytes, black background. "
+                 "The gadget reads the file over its own connection, stores it and shows its home "
+                 "face over it, then replies with the size it took; an error says what to fix. "
+                 "Call it after writing or updating that file.",
+                 mg_face_own_path(), (unsigned)mg_face_max_bytes());
+        cJSON *face_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(face_required, "path",
+                              string_param("The JPEG's path on this VM: exactly the path above."));
+        cJSON *len_param = cJSON_CreateObject();
+        cJSON_AddStringToObject(len_param, "type", "integer");
+        cJSON_AddStringToObject(len_param, "description", "The file's size in bytes.");
+        cJSON_AddItemToObject(face_required, "byte_len", len_param);
+        cJSON *face_optional = cJSON_CreateObject();
+        cJSON_AddItemToObject(face_optional, "etag", string_param("The file's ETag, if known."));
+        add_command(commands, "face.set", face_desc, face_required, face_optional);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "face.set"), "timeout_ms", 120000);
     }
 #endif
 
@@ -1761,6 +2066,20 @@ static char *build_register_json(void) {
 #if CONFIG_HOMEHUB_BLE_COMMANDS
     ble_commands_register(commands);
 #endif
+#if CONFIG_MUSE_BOOTGUARD_SAFE_LINK_QUIET
+    // SAFE mode on a build without musegadgets: link.register lists
+    // only what says how the device is.
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) {
+        cJSON *c = commands->child;
+        while (c) {
+            cJSON *next = c->next;
+            if (strcmp(c->string, "device.health") != 0) {
+                cJSON_Delete(cJSON_DetachItemViaPointer(commands, c));
+            }
+            c = next;
+        }
+    }
+#endif
 
 #ifdef PRODUCT_CONTROL_REGISTER_COMMANDS
     PRODUCT_CONTROL_REGISTER_COMMANDS(commands);
@@ -1799,6 +2118,7 @@ static void queue_result(noise_ctrl_session_generation_t session_generation,
     pr.session_generation = session_generation;
     pr.request_id = strdup(request_id);
     pr.result = result;
+    pr.queued_us = esp_timer_get_time();
     if (pr.request_id == nullptr) {
         cJSON_Delete(result);
         return;
@@ -1822,6 +2142,11 @@ extern "C" cJSON *noise_ctrl_device_health_json(bool for_bug_report) {
 
     cJSON *health = cJSON_CreateObject();
     cJSON_AddStringToObject(health, "overall", "ok");
+#if CONFIG_MUSE_BOOTGUARD_SAFE_LINK_QUIET
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) {
+        cJSON_AddBoolToObject(health, "safe", true);   // SAFE mode: the Link's commands are off
+    }
+#endif
     cJSON_AddItemToObject(health, "levels", cJSON_CreateObject());
     cJSON_AddItemToObject(health, "critical", cJSON_CreateArray());
     cJSON_AddItemToObject(health, "warnings", cJSON_CreateArray());
@@ -1938,11 +2263,53 @@ static void send_device_guide(
     queue_result(session_generation, request_id, result);
 }
 
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+// A name from a message for the log (its type, method, event or error
+// code): at most 32 characters of [A-Za-z0-9._:-], "-" when it isn't a
+// string, "?" when it holds anything else. Never more of the message.
+static const char *log_name(const cJSON *j, char out[34]) {
+    if (!cJSON_IsString(j) || !j->valuestring) return "-";
+    const char *s = j->valuestring;
+    size_t n = strlen(s);
+    if (!n || n > 32) return "?";
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                  || c == '.' || c == '_' || c == ':' || c == '-';
+        if (!ok) return "?";
+    }
+    memcpy(out, s, n + 1);
+    return out;
+}
+
+// A control message on the device session that nothing here handles (a
+// reply nobody waits for, an event or a method this gadget doesn't know):
+// the placeholder for what the server sends back through the phone. Its
+// type and size are logged, never its content, and it's accepted: its bytes
+// were credited back when the session took it, and the session stays open.
+static void log_control_unhandled(const cJSON *root, size_t len) {
+    if (!cJSON_IsObject(root)) {
+        ESP_LOGW(MG_SESSION_TAG, "refused a control message that isn't a JSON object (%u bytes)", (unsigned)len);
+        return;
+    }
+    char type[34], method[34], event[34];
+    ESP_LOGI(MG_SESSION_TAG, "unhandled control message: type %s, method %s, event %s (%u bytes): accepted",
+             log_name(cJSON_GetObjectItem(root, "type"), type),
+             log_name(cJSON_GetObjectItem(root, "method"), method),
+             log_name(cJSON_GetObjectItem(root, "event"), event), (unsigned)len);
+}
+#endif
+
 static void handle_invoke_request(
     const char *data, size_t len,
     noise_ctrl_session_generation_t session_generation) {
     cJSON *root = cJSON_ParseWithLength(data, len);
-    if (!root) return;
+    if (!root) {
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        ESP_LOGW(MG_SESSION_TAG, "refused a control message that isn't JSON (%u bytes)", (unsigned)len);
+#endif
+        return;
+    }
 
     cJSON *type_j = cJSON_GetObjectItem(root, "type");
     if (cJSON_IsString(type_j) && strcmp(type_j->valuestring, "event") == 0) {
@@ -1953,6 +2320,11 @@ static void handle_invoke_request(
             ESP_LOGW(TAG, "received link.unpaired event from server");
             notify_status("ws_unpaired");
         }
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        else {
+            log_control_unhandled(root, len);
+        }
+#endif
         cJSON_Delete(root);
         return;
     }
@@ -1960,6 +2332,9 @@ static void handle_invoke_request(
     cJSON *method = cJSON_GetObjectItem(root, "method");
     if (!cJSON_IsString(method) || !method->valuestring
         || strcmp(method->valuestring, "link.invoke") != 0) {
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        log_control_unhandled(root, len);
+#endif
         cJSON_Delete(root);
         return;
     }
@@ -1974,6 +2349,9 @@ static void handle_invoke_request(
     if (!cJSON_IsObject(cmd_params)) cmd_params = nullptr;
 
     if (!request_id) {
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        ESP_LOGW(MG_SESSION_TAG, "refused a link.invoke without an id (%u bytes)", (unsigned)len);
+#endif
         cJSON_Delete(root);
         return;
     }
@@ -2151,6 +2529,10 @@ static void process_inbound_body_chunk(
         // Detect the link.register reply (id matches our request) so the
         // caller can open the tunnel stream only once the server has
         // recorded this connection's device registration.
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        bool register_reply = false;
+        long long since_ms = s_register_sent_us ? (long long)((esp_timer_get_time() - s_register_sent_us) / 1000) : -1;
+#endif
         if (!s_register_acked && s_register_req_id[0]) {
             cJSON *msg = cJSON_ParseWithLength(
                 reinterpret_cast<const char *>(p), msg_len);
@@ -2164,9 +2546,16 @@ static void process_inbound_body_chunk(
                         // tunnel and the Muse can't invoke this device.
                         cJSON *reason = cJSON_IsObject(failure)
                             ? cJSON_GetObjectItem(failure, "message") : failure;
+                        s_register_rejected = true;   /* answered: nothing waits for it any more */
                         ESP_LOGE(TAG, "link.register rejected: %s",
                                  cJSON_IsString(reason) && reason->valuestring
                                      ? reason->valuestring : "no reason given");
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+                        char code[34];
+                        ESP_LOGW(MG_SESSION_TAG, "link.register reply: rejected, code %s (%u bytes, %lld ms after it went)",
+                                 log_name(cJSON_IsObject(failure) ? cJSON_GetObjectItem(failure, "code") : nullptr, code),
+                                 (unsigned)msg_len, since_ms);
+#endif
                     } else {
                         s_register_acked = true;
                         ESP_LOGI(TAG, "link.register acked; tunnel may open");
@@ -2178,11 +2567,25 @@ static void process_inbound_body_chunk(
                             && cJSON_IsString(status)
                             && strcmp(status->valuestring, "registered") == 0
                             && !failure;
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+                        char st[34];
+                        ESP_LOGI(MG_SESSION_TAG, "link.register reply: %s, status %s (%u bytes, %lld ms after it went)",
+                                 s_heartbeat_registered ? "registered" : "accepted, not registered",
+                                 log_name(status, st), (unsigned)msg_len, since_ms);
+#endif
                     }
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+                    register_reply = true;
+#endif
                 }
                 cJSON_Delete(msg);
             }
         }
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+        // Handled: handle_invoke_request would only drop it, and log it as
+        // unhandled.
+        if (register_reply) return;
+#endif
         handle_invoke_request(reinterpret_cast<const char *>(p), msg_len,
                               session_generation);
     };
@@ -2256,6 +2659,101 @@ static void process_inbound_body_chunk(
     }
 }
 
+// One turn of the control stream's sender, the same over either transport.
+// It keeps exactly one control message in flight across loop turns: a paused
+// slot prevents dequeue/serialization of the next result. A stale message is
+// dropped first. Unreachable today: the generations come from the same
+// session local, so they cannot diverge. Kept deliberately — if generation
+// ownership ever moves, its absence would send a stale result on a new
+// session, silently and without a test to catch it. Then the heartbeat when
+// it's due, the next result, and at most one BodyChunk. False if a send
+// failed: the session is over.
+template <typename Session>
+static bool control_tx_step(esp_tls_t *tls, Session &session, pending_json_body &control_tx,
+                            noise_ctrl_session_generation_t session_generation,
+                            bool &heartbeat_sent, uint64_t &last_heartbeat_us,
+                            uint8_t *svc_scratch, uint8_t *env_scratch, uint8_t *ws_buf,
+                            bool *did, uint64_t *last_activity_us) {
+    if (control_tx.json && !noise_ctrl_session_is_current(
+            control_tx.session_generation, session_generation)) {
+        clear_pending_json_body(control_tx);
+    }
+    if (!control_tx.json &&
+        noise_ctrl_heartbeat_due(s_heartbeat_registered, heartbeat_sent,
+                                 esp_timer_get_time(), last_heartbeat_us)) {
+        char *json = strdup("{\"method\":\"link.heartbeat\"}");
+        if (json) {
+            control_tx = {json, strlen(json), 0, false, session_generation};
+            control_tx.is_heartbeat = true;
+        }
+    }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+    // Same gate as heartbeats: only a VM that confirmed this registration
+    // gets the report, and it stays queued until a send completes. Over
+    // either transport: a BLE-only gadget reports its crashes too.
+    if (!control_tx.json && s_heartbeat_registered) {
+        char *json = error_report_pending_json();
+        if (json) {
+            control_tx = {json, strlen(json), 0, false, session_generation};
+            control_tx.is_error_report = true;
+        }
+    }
+#endif
+    pending_result pr;
+    while (!control_tx.json && (!tx_needs_dma_reserve<Session>::value || noise_tx_has_dma_headroom(nullptr))
+           && xQueueReceive(s_result_q, &pr, 0) == pdTRUE) {
+        if (!noise_ctrl_session_is_current(
+                pr.session_generation, session_generation)) {
+            ESP_LOGW(TAG, "dropping invoke result from stale control session");
+            free(pr.request_id);
+            cJSON_Delete(pr.result);
+            continue;
+        }
+        // wrap_result_json consumes the result tree. Retain its output
+        // directly; there is no second whole-message allocation/copy.
+        char *json = wrap_result_json(pr.request_id, pr.result);
+        free(pr.request_id);
+        if (json) {
+            control_tx = {json, strlen(json), 0, false, session_generation};
+        }
+    }
+    if (control_tx.json) {
+        size_t old_offset = control_tx.json_offset;
+        bool old_prefix_sent = control_tx.prefix_sent;
+        auto status = send_json_body_chunk(
+            tls, session, control_tx, svc_scratch, env_scratch, ws_buf);
+        if (status == json_send_status::Failed) {
+            if (control_tx.is_heartbeat) {
+                ESP_LOGW(TAG, "heartbeat send failed");
+            }
+            return false;
+        }
+        if (!control_tx.is_heartbeat &&
+            (control_tx.json_offset != old_offset
+             || control_tx.prefix_sent != old_prefix_sent)) {
+            *did = true;
+            *last_activity_us = esp_timer_get_time();
+        }
+        if (status == json_send_status::Complete) {
+            if (control_tx.is_heartbeat) {
+                heartbeat_sent = true;
+                last_heartbeat_us = esp_timer_get_time();
+            }
+#if CONFIG_HOMEHUB_ERROR_REPORT
+            if (control_tx.is_error_report) error_report_mark_sent();
+#endif
+            ESP_LOGI(TAG, "sent %s (%u bytes)",
+                     control_tx.is_registration ? "link.register" :
+                     control_tx.is_heartbeat ? "link.heartbeat" :
+                     control_tx.is_error_report ? "link.error_report" :
+                     "control message",
+                     (unsigned)control_tx.json_len);
+            clear_pending_json_body(control_tx);
+        }
+    }
+    return true;
+}
+
 // The session loop's pause after a turn with nothing to do: a tick while
 // traffic is recent, then until the server sends something, for at most
 // IDLE_POLL_MS (POWER_SAVE_POLL_MS in power save). What the session sends
@@ -2287,6 +2785,85 @@ static bool control_stream_ended(const DecodedServiceFrame &frame) {
     if (frame.kind == ServiceFrameKind::BodyChunk) return frame.body_chunk.end_body;
     if (frame.kind == ServiceFrameKind::Response) return frame.response.end_body;
     return false;
+}
+
+// One whole service frame from the VM, the same over either transport: the
+// extra daemon requests, the identity reply, the tunnel's stream and the
+// control stream. False if it ends the session (the control stream reset or
+// refused), with *end_reason (when given) saying why for the connectivity
+// history.
+static bool dispatch_inbound_frame(const DecodedServiceFrame &frame, identity_fetch &identity,
+                                   noise_ctrl_session_generation_t session_generation,
+                                   const char **end_reason = nullptr) {
+    bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
+    if (req_on_frame(frame)) {
+        // One of the extra daemon requests.
+    } else if (frame.stream_id == IDENTITY_STREAM_ID) {
+        identity_on_frame(identity, frame);
+    } else if (frame.kind == ServiceFrameKind::BodyChunk) {
+        if (is_tunnel) {
+            noise_tunnel_on_inbound(frame.body_chunk.data.data(),
+                                    frame.body_chunk.data.size());
+        } else {
+            process_inbound_body_chunk(frame.body_chunk.data,
+                                       session_generation);
+            if (frame.stream_id == CTRL_STREAM_ID && frame.body_chunk.end_body) {
+                // The VM ended the control stream: nothing more can come on it, so the session ends (over the
+                // phone's relay too, where no socket closes to say so).
+                ESP_LOGW(TAG, "server ended the control stream");
+                return false;
+            }
+        }
+    } else if (frame.kind == ServiceFrameKind::Reset) {
+        if (is_tunnel) {
+            // Tunnel stream reset is non-fatal for the control
+            // session; drop the tunnel and keep control alive.
+            // The reason is bytes off the wire: printable ASCII
+            // only, capped. The code alone doesn't say which of
+            // the server's ProtocolError cases this was.
+            char reason[RESET_REASON_MAX + 1];
+            copy_reset_reason(frame.reset.reason, reason, sizeof(reason));
+            ESP_LOGW(TAG, "server reset tunnel stream: code=%d reason=\"%s\"",
+                     (int)frame.reset.code, reason);
+            char why[TUNNEL_FAILURE_MAX];
+            snprintf(why, sizeof(why), "server reset stream, code=%d%s%s",
+                     (int)frame.reset.code, reason[0] ? ": " : "", reason);
+            noise_tunnel_on_server_drop(why);
+        } else {
+            ESP_LOGW(TAG, "server reset stream %lld",
+                     (long long)frame.stream_id);
+            if (end_reason) *end_reason = "server reset control stream";
+            return false;
+        }
+    } else if (frame.kind == ServiceFrameKind::Response) {
+        ESP_LOGI(TAG, "got response status=%d on stream %lld",
+                 frame.response.status, (long long)frame.stream_id);
+        if (frame.response.status == 200 && frame.stream_id == CTRL_STREAM_ID && frame.response.end_body) {
+            // Its inline messages first (a final node.unpaired among them), as a BodyChunk's above.
+            process_inbound_body_chunk(frame.response.body, session_generation);
+            ESP_LOGW(TAG, "server ended the control stream in its response");   // as a BodyChunk's end_body above
+            return false;
+        }
+        if (frame.response.status != 200) {
+            if (is_tunnel) {
+                ESP_LOGW(TAG, "server rejected " GADGET_TUNNEL_PATH ": %d",
+                         frame.response.status);
+                char why[TUNNEL_FAILURE_MAX];
+                snprintf(why, sizeof(why), "server rejected open: %d",
+                         (int)frame.response.status);
+                noise_tunnel_on_server_drop(why);
+            } else {
+                ESP_LOGE(TAG, "server rejected the control stream: %d",
+                         frame.response.status);
+                if (end_reason) *end_reason = "server rejected the control stream";
+                return false;
+            }
+        } else if (frame.stream_id == CTRL_STREAM_ID) {
+            // A Response's inline body carries messages too.
+            process_inbound_body_chunk(frame.response.body, session_generation);
+        }
+    }
+    return true;
 }
 
 // Connectivity history: failed attempts between sessions are summarized in
@@ -2532,6 +3109,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     // under DMA pressure while the event loop services RX and WS keepalives.
     {
         s_register_acked = false;
+        s_register_rejected = false;
         s_heartbeat_registered = false;
         char *reg_json = build_register_json();
         if (!reg_json) {
@@ -2599,6 +3177,7 @@ static session_result_t run_session(stack_monitor_t *stack) {
     uint64_t last_busy_us = esp_timer_get_time();
 
     while (!error && s_running) {
+        muse_wdt_feed(MUSE_WDT_LINK_SESSION);   // the session loop is watched (each wait in it is bounded)
         bool did = false;
 
         // Ask for the agent's name (once) after the register ack, so the
@@ -2655,68 +3234,12 @@ static session_result_t run_session(stack_monitor_t *stack) {
                     break;
                 }
                 if (inbound.frame_status == InboundFrameStatus::Complete) {
-                    auto &frame = inbound.frame;
-                    bool is_tunnel = (frame.stream_id == TUNNEL_STREAM_ID);
-                    if (!is_tunnel) rx_drain = false;
-                    if (req_on_frame(frame)) {
-                        // One of the extra daemon requests.
-                    } else if (frame.stream_id == IDENTITY_STREAM_ID) {
-                        identity_on_frame(identity, frame);
-                    } else if (frame.kind == ServiceFrameKind::BodyChunk) {
-                        if (is_tunnel) {
-                            noise_tunnel_on_inbound(frame.body_chunk.data.data(),
-                                                    frame.body_chunk.data.size());
-                        } else {
-                            process_inbound_body_chunk(frame.body_chunk.data,
-                                                       session_generation);
-                        }
-                    } else if (frame.kind == ServiceFrameKind::Reset) {
-                        if (is_tunnel) {
-                            // Tunnel stream reset is non-fatal for the control
-                            // session; drop the tunnel and keep control alive.
-                            // The reason is bytes off the wire: printable ASCII
-                            // only, capped. The code alone doesn't say which of
-                            // the server's ProtocolError cases this was.
-                            char reason[RESET_REASON_MAX + 1];
-                            copy_reset_reason(frame.reset.reason, reason, sizeof(reason));
-                            ESP_LOGW(TAG, "server reset tunnel stream: code=%d reason=\"%s\"",
-                                     (int)frame.reset.code, reason);
-                            char why[TUNNEL_FAILURE_MAX];
-                            snprintf(why, sizeof(why), "server reset stream, code=%d%s%s",
-                                     (int)frame.reset.code, reason[0] ? ": " : "", reason);
-                            noise_tunnel_on_server_drop(why);
-                        } else {
-                            ESP_LOGW(TAG, "server reset stream %lld",
-                                     (long long)frame.stream_id);
-                            end_reason = "server reset control stream";
-                            error = true;
-                            break;
-                        }
-                    } else if (frame.kind == ServiceFrameKind::Response) {
-                        ESP_LOGI(TAG, "got response status=%d on stream %lld",
-                                 frame.response.status, (long long)frame.stream_id);
-                        if (frame.response.status != 200) {
-                            if (is_tunnel) {
-                                ESP_LOGW(TAG, "server rejected /api/gadget/tunnel: %d",
-                                         frame.response.status);
-                                char why[TUNNEL_FAILURE_MAX];
-                                snprintf(why, sizeof(why), "server rejected open: %d",
-                                         (int)frame.response.status);
-                                noise_tunnel_on_server_drop(why);
-                            } else {
-                                ESP_LOGE(TAG, "server rejected /api/gadget/control: %d",
-                                         frame.response.status);
-                                end_reason = "server rejected /api/gadget/control";
-                                error = true;
-                                break;
-                            }
-                        } else if (frame.stream_id == CTRL_STREAM_ID) {
-                            // A Response's inline body carries messages too.
-                            process_inbound_body_chunk(frame.response.body,
-                                                       session_generation);
-                        }
+                    if (inbound.frame.stream_id != TUNNEL_STREAM_ID) rx_drain = false;
+                    if (!dispatch_inbound_frame(inbound.frame, identity, session_generation, &end_reason)) {
+                        error = true;
+                        break;
                     }
-                    if (control_stream_ended(frame)) {
+                    if (control_stream_ended(inbound.frame)) {
                         ESP_LOGW(TAG, "server ended " GADGET_CONTROL_PATH);
                         end_reason = "server ended control stream";
                         error = true;
@@ -2744,89 +3267,15 @@ static session_result_t run_session(stack_monitor_t *stack) {
         }
         if (error) break;
 
-        // TX: keep exactly one control message in flight across loop turns.
-        // A paused slot prevents dequeue/serialization of the next result.
-        // Unreachable today: both generations come from the same run_session
-        // local, so they cannot diverge. Kept deliberately — if generation
-        // ownership ever moves, its absence would send a stale result on a
-        // new session, silently and without a test to catch it.
-        if (control_tx.json && !noise_ctrl_session_is_current(
-                control_tx.session_generation, session_generation)) {
-            clear_pending_json_body(control_tx);
-        }
-        if (!control_tx.json &&
-            noise_ctrl_heartbeat_due(s_heartbeat_registered, heartbeat_sent,
-                                     esp_timer_get_time(), last_heartbeat_us)) {
-            char *json = strdup("{\"method\":\"link.heartbeat\"}");
-            if (json) {
-                control_tx = {json, strlen(json), 0, false, session_generation};
-                control_tx.is_heartbeat = true;
-            }
-        }
-#if CONFIG_HOMEHUB_ERROR_REPORT
-        // Same gate as heartbeats: only a VM that confirmed this registration
-        // gets the report, and it stays queued until a send completes.
-        if (!control_tx.json && s_heartbeat_registered) {
-            char *json = error_report_pending_json();
-            if (json) {
-                control_tx = {json, strlen(json), 0, false, session_generation};
-                control_tx.is_error_report = true;
-            }
-        }
-#endif
-        pending_result pr;
-        while (!control_tx.json && noise_tx_has_dma_headroom(nullptr)
-               && xQueueReceive(s_result_q, &pr, 0) == pdTRUE) {
-            if (!noise_ctrl_session_is_current(
-                    pr.session_generation, session_generation)) {
-                ESP_LOGW(TAG, "dropping invoke result from stale control session");
-                free(pr.request_id);
-                cJSON_Delete(pr.result);
-                continue;
-            }
-            // wrap_result_json consumes the result tree. Retain its output
-            // directly; there is no second whole-message allocation/copy.
-            char *json = wrap_result_json(pr.request_id, pr.result);
-            free(pr.request_id);
-            if (json) {
-                control_tx = {json, strlen(json), 0, false, session_generation};
-            }
-        }
-        if (control_tx.json) {
-            size_t old_offset = control_tx.json_offset;
-            bool old_prefix_sent = control_tx.prefix_sent;
-            auto status = send_json_body_chunk(
-                tls, session, control_tx, svc_scratch, env_scratch, ws_buf);
-            if (status == json_send_status::Failed) {
-                if (control_tx.is_heartbeat) {
-                    ESP_LOGW(TAG, "heartbeat send failed");
-                }
-                end_reason = "control send failed";
-                error = true;
-                break;
-            }
-            if (!control_tx.is_heartbeat &&
-                (control_tx.json_offset != old_offset
-                 || control_tx.prefix_sent != old_prefix_sent)) {
-                did = true;
-                last_activity_us = esp_timer_get_time();
-            }
-            if (status == json_send_status::Complete) {
-                if (control_tx.is_heartbeat) {
-                    heartbeat_sent = true;
-                    last_heartbeat_us = esp_timer_get_time();
-                }
-#if CONFIG_HOMEHUB_ERROR_REPORT
-                if (control_tx.is_error_report) error_report_mark_sent();
-#endif
-                ESP_LOGI(TAG, "sent %s (%u bytes)",
-                         control_tx.is_registration ? "link.register" :
-                         control_tx.is_heartbeat ? "link.heartbeat" :
-                         control_tx.is_error_report ? "link.error_report" :
-                         "control message",
-                         (unsigned)control_tx.json_len);
-                clear_pending_json_body(control_tx);
-            }
+        // TX: keep exactly one control message in flight across loop turns
+        // (control_tx_step, which the device session over BLE runs too).
+        if (!control_tx_step(tls, session, control_tx, session_generation,
+                             heartbeat_sent, last_heartbeat_us,
+                             svc_scratch, env_scratch, ws_buf,
+                             &did, &last_activity_us)) {
+            end_reason = "control send failed";
+            error = true;
+            break;
         }
         // A control message Link holds back while DMA-capable RAM is under its
         // reserve (the registration, a command's result) otherwise waits
@@ -3015,6 +3464,9 @@ static void noise_ctrl_task(void *arg) {
         }
         uint64_t t0 = esp_timer_get_time();
         session_result_t result = run_session(&stack);
+        // Connect, handshake and the reconnect wait aren't watched: each has
+        // its own timeout (muse_wdt.h); the session loop is.
+        muse_wdt_remove(MUSE_WDT_LINK_SESSION);
         uint64_t up_ms = (esp_timer_get_time() - t0) / 1000;
         if (update_reconnect_policy(result, up_ms, &backoff, &short_failures)) {
             notify_status("ws_refresh_needed");
@@ -3029,8 +3481,1134 @@ static void noise_ctrl_task(void *arg) {
     }
     stack_monitor_record(NULL);
     s_task = nullptr;
-    vTaskDelete(nullptr);
+    MUSE_TASK_END();
 }
+
+// ---- Device session over BLE (mg_command_session) ---------------------------
+//
+// A BLE-only gadget reaches its VM the way a Wi-Fi gadget does, with the
+// phone as its network (protocols/mgcommands.h, Device session): the phone
+// runs TLS, the WebSocket and Noise as this gadget's node and carries that
+// session's messages over BLE. What goes over it comes from the code
+// run_session() runs: link.register on the control stream (POST /link-control
+// on the daemon here, the route the phone's relay carries), the heartbeat,
+// link.invoke and link.result (control_tx_step, dispatch_inbound_frame), and
+// the extra daemon requests (req_pump_tx). Only the transport differs: each
+// ServiceFrame goes out as one ServiceRequestEnvelope (mg_ble_session_send()),
+// and each ServiceResponseEnvelope from the session is decoded and dispatched
+// as run_session() dispatches a frame Noise opened. There's no tunnel, and no
+// GET /identity (not among the gadget role's routes yet).
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+
+#define BLE_SESSION_STACK_FULL 8192
+#define BLE_SESSION_STACK BLE_SESSION_STACK_FULL
+// What a BodyChunk frame and its envelope add to a control chunk's data.
+#define BLE_CHUNK_OVERHEAD 32
+// Messages from the VM are taken only while the result queue (8 deep) has
+// fewer than this many waiting: each link.invoke queues a result, and this
+// task is the queue's only reader, so a burst taken whole would block it
+// and drop the results past the eighth. What it leaves stays in the device
+// session, its credit not yet given back, so the client waits.
+#define BLE_RX_RESULTS_MAX 4
+
+// Stands in for ClientSession in the shared senders (send_json_body_chunk,
+// control_tx_step, req_open, req_pump_tx): StartOutbound* encode the
+// ServiceFrame and its ServiceRequestEnvelope as ClientSession does, and
+// flush_outbound() hands the envelope to the device session where
+// ClientSession would seal it for the WebSocket.
+class BleSessionOut {
+ public:
+    // max_envelope: the client's max_message; session: the device session's
+    // id (mg_ble_session_id()), so nothing goes into a later one.
+    void Reset(size_t max_envelope, uint32_t session) {
+        max_envelope_ = max_envelope;
+        session_ = session;
+        pending_size_ = 0;
+        last_sent_us_ = esp_timer_get_time();
+    }
+    StatusWithSize StartOutboundApplicationRequest(
+        ServiceType service, int64_t stream_id, ApplicationRequestView request,
+        ByteSpan frame_scratch, ByteSpan envelope_scratch) noexcept {
+        return Start(service,
+                     ServiceFrameView{stream_id, ServiceFrameKind::Request, request, {}, {}, {}},
+                     frame_scratch, envelope_scratch);
+    }
+    StatusWithSize StartOutboundBodyChunk(
+        ServiceType service, int64_t stream_id, BodyChunkView chunk,
+        ByteSpan frame_scratch, ByteSpan envelope_scratch) noexcept {
+        return Start(service,
+                     ServiceFrameView{stream_id, ServiceFrameKind::BodyChunk, {}, {}, chunk, {}},
+                     frame_scratch, envelope_scratch);
+    }
+    StatusWithSize StartOutboundReset(
+        ServiceType service, int64_t stream_id, ResetView reset,
+        ByteSpan frame_scratch, ByteSpan envelope_scratch) noexcept {
+        return Start(service,
+                     ServiceFrameView{stream_id, ServiceFrameKind::Reset, {}, {}, {}, reset},
+                     frame_scratch, envelope_scratch);
+    }
+    // Queues the envelope a Start left: every message this session sends
+    // (POST /link-control, link.register, the heartbeat and session.ping,
+    // results, request operations) goes out here, through
+    // mg_ble_session_send(), which reaches mg_session_send(), where a sealed
+    // session's data is sealed (mgcommands.h, Sealed data). False if the
+    // device session didn't take it (it ended, or has no room): the session
+    // is over.
+    bool Flush() {
+        if (!pending_size_) return true;
+        bool ok = mg_ble_session_send(session_, pending_, pending_size_);
+        if (ok) last_sent_us_ = esp_timer_get_time();
+        if (!ok) {
+            ESP_LOGW(MG_SESSION_TAG, "a message of %u bytes didn't go (room %u, the client takes %u): the session ends",
+                     (unsigned)pending_size_, (unsigned)mg_ble_session_room(), (unsigned)mg_ble_session_client_max());
+        }
+        pending_size_ = 0;
+        return ok;
+    }
+    size_t max_envelope() const { return max_envelope_; }
+    // When the last message went (the keepalive's clock).
+    int64_t last_sent_us() const { return last_sent_us_; }
+
+ private:
+    StatusWithSize Start(ServiceType service, ServiceFrameView frame,
+                         ByteSpan frame_scratch, ByteSpan envelope_scratch) noexcept {
+        if (pending_size_) return StatusWithSize(Status::FailedPrecondition(), 0);
+        StatusWithSize encoded = EncodeServiceFrame(frame, frame_scratch);
+        if (!encoded.ok()) return encoded;
+        StatusWithSize envelope = EncodeServiceRequestEnvelope(
+            service, frame_scratch.subspan(0, encoded.size()), envelope_scratch);
+        if (!envelope.ok()) return envelope;
+        // Larger than the client takes: refused here, so a request body that
+        // can't go ends its request, not the session.
+        if (envelope.size() > max_envelope_) return StatusWithSize(Status::ResourceExhausted(), 0);
+        pending_ = envelope_scratch.data();
+        pending_size_ = envelope.size();
+        return envelope;
+    }
+    size_t max_envelope_ = 0;
+    uint32_t session_ = 0;
+    const uint8_t *pending_ = nullptr;
+    size_t pending_size_ = 0;
+    int64_t last_sent_us_ = 0;
+};
+
+template <>
+struct tx_needs_dma_reserve<BleSessionOut> {
+    static constexpr bool value = false;
+};
+
+template <>
+struct control_service<BleSessionOut> {
+    static constexpr ServiceType value = ServiceType::Daemon;
+};
+
+static bool flush_outbound(esp_tls_t *, BleSessionOut &out, uint8_t *) {
+    return out.Flush();
+}
+
+static size_t body_chunk_max(const BleSessionOut &out) {
+    size_t max = out.max_envelope() > BLE_CHUNK_OVERHEAD ? out.max_envelope() - BLE_CHUNK_OVERHEAD : 0;
+    return max < CTRL_BODY_CHUNK_MAX ? max : CTRL_BODY_CHUNK_MAX;
+}
+
+// One VM session over BLE, from the client's open to the state after it.
+// Owned by the BLE session task.
+struct ble_link {
+    bool active;
+    uint32_t id;               // the device session it runs or last ran (mg_ble_session_id())
+    int64_t began_us;
+    BleSessionOut out;
+    noise_ctrl_session_generation_t session_generation;
+    uint32_t pairing_gen;      // s_ble_pairing_gen when it began
+    pending_json_body control_tx;
+    identity_fetch identity;   // never requested
+    bool heartbeat_sent;
+    uint64_t last_heartbeat_us;
+    uint64_t last_activity_us;
+    uint8_t *svc_scratch, *env_scratch;
+    uint8_t *chunk_scratch;    // send_json_body_chunk's first chunk (ws_buf over Wi-Fi)
+    uint8_t *rx;               // one message from the VM
+    size_t rx_cap;
+    // session.ping: asked for (waiting for the control slot), and in the slot.
+    bool ping_pending;
+    bool ping_in_slot;
+};
+
+// The client's state reports (mg_ble's session_state, on the BLE host or
+// worker task): the latest state, and how many there have been.
+static std::atomic<uint8_t> s_ble_state{mg_session_state_closed};
+static std::atomic<uint32_t> s_ble_seq{0};
+// A failure ended the session: once the client has closed it and the backoff
+// has passed, ask it to open a new one (run_session()'s reconnect over Wi-Fi,
+// with its policy, so a VM that keeps refusing isn't asked again at once).
+// Task-owned.
+static bool s_ble_reopen;          // asked the client to close after a failure
+static bool s_ble_reopen_closed;   // ... and it has
+static int64_t s_ble_reopen_at;    // not before this (esp_timer_get_time())
+static uint32_t s_ble_backoff_ms = RECONNECT_MIN_MS;
+static uint8_t s_ble_short_failures;
+// The client reported a session state the gadget didn't ask for (no_network,
+// or closed) while none was open: ask for one again with open_request [1] at
+// once, then with backoff, only while the link stays connected. A failed open
+// counts the same (mg-session-v1 exchange 14: connecting, then closed or
+// no_network with no session ever open; mg_session.c reports every state):
+// the open_request that went is followed by that kind's next step, so the
+// gadget is never left with nothing armed. Two series,
+// neither restarting the other: after closed (the server's end or refusal) 1, 2, 4 ... s capped
+// at 60 s; after no_network (the phone's network, or an OS that killed the
+// app's socket) 1, 2, 4 ... s capped at 15 s. A series starts over only
+// after a session that stayed open 60 s (BLE_ASK_STABLE_MS: after a shorter
+// one the same kind of end continues it, so a server that keeps ending at
+// once is never asked faster); both start over at a hello answered (which drops an ask still
+// waiting), at a credentials_update saved, which asks at once if the
+// session is closed (since the hello the last state ended one: new
+// credentials may fix what ended it, even auth_failed; that ask is the first
+// of the ended kind's series; mg_ble_session_reask_marks(), as
+// mg_session_ref.py and the Zephyr side), and at the link's end (a gadget
+// that registered commands must stay reachable, and the client never reopens
+// on its own; iOS suspends the Muse app in the background and ends its
+// sockets at each Bluetooth wake, so the relay reports closed every ~30 s on
+// the Watcher; a phone can answer no_network while the handed-off
+// token refreshes, and never try again). Never after
+// auth_failed, not_enrolled or too_large: those need something else than a
+// retry, and one cancels an ask still waiting. Task-owned.
+#define BLE_ASK_FIRST_MS 1000
+#define BLE_ASK_STABLE_MS 60000   // a session open this long restarts the series at its end
+enum { BLE_ASK_CLOSED, BLE_ASK_NO_NETWORK, BLE_ASK_KINDS };
+static const uint32_t BLE_ASK_MAX_MS[BLE_ASK_KINDS] = {60000, 15000};
+static uint32_t s_ble_ask_ms[BLE_ASK_KINDS];   // each series' last delay
+static uint8_t s_ble_asks[BLE_ASK_KINDS];      // asks in each series: the first goes at once
+static int64_t s_ble_ask_sent_us[BLE_ASK_KINDS];   // when each series' last ask went
+static int64_t s_ble_opened_us;      // when the client's open session opened (0: none open)
+static uint32_t s_ble_ask_hellos, s_ble_ask_saved;  // mg_ble_session_reask_marks() as last seen
+// ...and as they were when the last state was reported (noise_ctrl_ble_state(),
+// under the protocol lock), so a pass orders them around that state.
+static std::atomic<uint32_t> s_ble_state_hellos{0}, s_ble_state_saved{0};
+// The last state ended a session (closed, no_network, not_enrolled,
+// auth_failed, too_large; not open or connecting) and no hello came since:
+// a credentials_update saved now asks at once (mgcommands.h).
+static bool s_ble_ended;
+static int s_ble_ended_kind;   // ...and the series that end continues (closed's unless no_network)
+static bool s_ble_asking;   // the reopen waiting is such an ask (not a failure's)
+// ...set when the last ask went, the client silent since: counted only when
+// it goes; a state the client reports replaces it.
+static bool s_ble_silent;
+static uint8_t s_ble_ask_kinds;   // ...for these series (1 << BLE_ASK_CLOSED, BLE_ASK_NO_NETWORK)
+// The last session ended with a state the gadget didn't ask for (closed or
+// no_network: iOS ending the relay at a wake): its invoke results go in the next.
+static bool s_ble_carry;
+// Bumped by noise_ctrl_ble_pairing_changed() (any task); the task's pass drops
+// what came before it, and a session carries nothing across it.
+static std::atomic<uint32_t> s_ble_pairing_gen{0};
+static uint32_t s_ble_pairing_seen;
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+// Requests made while the session isn't ready (open, its link.register
+// acknowledged) wait in s_req_q, in order, for NOISE_CTRL_REQ_WAIT_OPEN_MS at
+// most (mgcommands.h; iOS ends the relay's sockets at each
+// Bluetooth wake, and a picture test pressed in that gap failed with "press
+// again"); the first asks the client for a session at once.
+static std::atomic<bool> s_req_ready{false};       // the session is open and link.register acknowledged
+static std::atomic<int64_t> s_req_wait_since{0};   // a request waits since (0: none)
+static std::atomic<int> s_req_wait_opens{0};       // ...this many (at most REQ_MAX_STREAMS)
+#endif
+// noise_ctrl_ble_request_open(): ask now (the picture test's press with no
+// session), from any task.
+static std::atomic<bool> s_ble_ask_now{false};
+static TaskHandle_t s_ble_task = nullptr;
+// session.ping from the console or the Nordic UART (noise_ctrl_ble_ping()):
+// the task takes it on its next pass.
+static std::atomic<bool> s_ble_ping{false};
+// The active task (noise_control.h): each kind's hold, until this
+// time (esp_timer_get_time(); 0 none), any task. s_ble_task_on: the last
+// pass's verdict (task-owned), so the start and the end are logged and acted
+// on once.
+static std::atomic<int64_t> s_task_until[NOISE_TASK_KINDS];
+static bool s_ble_task_on;
+// The gadget's own close of an open session with no task: due
+// at this time (0: none armed), and whether this session already got it (a
+// close goes once; the client's closed state follows).
+static int64_t s_ble_idle_close_at;
+static bool s_ble_idle_closed;
+static const char *const TASK_NAMES[NOISE_TASK_KINDS] = {"user action", "face", "picture test"};
+
+// What session.ping sends: the heartbeat a registered gadget already sends
+// on its own (noise_ctrl_heartbeat_due()), byte for byte. The VM takes it
+// from any registered gadget node and only marks the node alive: no id, no
+// reply to wait for, nothing stored or run on either side.
+#define BLE_PING_JSON "{\"method\":\"link.heartbeat\"}"
+
+static uint8_t *ble_alloc(size_t n) {
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return static_cast<uint8_t *>(p ? p : malloc(n));
+}
+
+#if CONFIG_SPIRAM
+// cJSON's allocations on this task (link.register, link.invoke, results)
+// PSRAM first, as ble_alloc: hundreds of small nodes that the malloc
+// threshold would otherwise put in internal RAM. free() takes either heap.
+// Only boards with PSRAM install it (noise_ctrl_ble_start()).
+static void *ble_json_alloc(size_t n) {
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(n);
+}
+#endif
+
+// The internal heap on mg.session at the session's milestones (open,
+// link.register gone, end, a send that failed), so a capture shows where it
+// went: free, largest block, lowest ever.
+static void ble_heap_note(const char *when) {
+    ESP_LOGI(MG_SESSION_TAG, "internal heap %s: %uK free, %uK largest, %uK lowest", when,
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024));
+}
+
+static void ble_session_end(ble_link &link, bool too_large) {
+    if (!link.active) return;
+    link.active = false;
+    s_connected = false;
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    // As over Wi-Fi: requests end with NOISE_CTRL_REQ_TOO_LARGE when a frame
+    // too large for this gadget ended the session (the client's too_large).
+    s_req_too_large = too_large;
+    if (!s_req_ready.exchange(false)) {
+        // Never ready (link.register not acknowledged): nothing went yet, so
+        // what's queued keeps waiting for the next session, its 10 s counted
+        // from here if it wasn't already.
+        req_streams_end();
+        int64_t none = 0;
+        if (uxQueueMessagesWaiting(s_req_q)) s_req_wait_since.compare_exchange_strong(none, esp_timer_get_time());
+    } else if (s_ble_carry && !too_large && mg_ble_connected()) {
+        // Ended unasked (closed, no_network: iOS ends the relay at a wake) on
+        // a link that's still up: a request in flight with no reply yet goes
+        // again once, after the reopen; the rest of the queue waits for it
+        // too. The link's loss fails them as before.
+        int64_t oldest = 0;
+        int requeued = req_streams_requeue(&oldest);
+        req_streams_end();
+        s_req_wait_opens += requeued;
+        if (uxQueueMessagesWaiting(s_req_q)) {
+            int64_t now = esp_timer_get_time();
+            int64_t since = oldest ? oldest : now;
+            int64_t cur = s_req_wait_since.load();
+            if (!cur || since < cur) s_req_wait_since = since;
+        }
+    } else {
+        req_end_all();
+    }
+#else
+    (void)too_large;
+    req_end_all();
+#endif
+    clear_pending_json_body(link.control_tx);
+    free(link.identity.body);
+    link.identity = {};
+    free(link.svc_scratch);
+    free(link.env_scratch);
+    free(link.chunk_scratch);
+    free(link.rx);
+    link.svc_scratch = link.env_scratch = link.chunk_scratch = link.rx = nullptr;
+    link.ping_pending = link.ping_in_slot = false;
+    s_register_sent_us = 0;
+    ESP_LOGI(MG_SESSION_TAG, "device session ended");
+    ble_heap_note("at the end");
+}
+
+// What run_session() does once Noise is up, on the daemon's POST
+// /link-control (run_session() opens /api/gadget/control on the Gadget API),
+// then link.register in the control slot, in device session id. False if it
+// couldn't start.
+static bool ble_session_begin(ble_link &link, uint32_t id) {
+    link.id = id;
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    s_req_replay_on = true;   // requests keep what they sent until a reply (req_streams_requeue)
+#endif
+    link.began_us = esp_timer_get_time();
+    link.pairing_gen = s_ble_pairing_gen.load();
+    s_ble_idle_close_at = 0;
+    s_ble_idle_closed = false;   // a new session may be closed once
+    link.rx_cap = mg_ble_session_max_message();
+    link.svc_scratch = ble_alloc(OUT_SVC_SCRATCH);
+    link.env_scratch = ble_alloc(OUT_ENV_SCRATCH);
+    link.chunk_scratch = ble_alloc(CTRL_BODY_CHUNK_MAX);
+    link.rx = link.rx_cap ? ble_alloc(link.rx_cap) : nullptr;
+    link.out.Reset(mg_ble_session_client_max(), id);
+    link.control_tx = {};
+    link.identity = {};
+    link.ping_pending = link.ping_in_slot = false;
+    s_register_sent_us = 0;
+    link.heartbeat_sent = false;
+    link.last_heartbeat_us = 0;
+    link.last_activity_us = esp_timer_get_time();
+    noise_ctrl_session_generation_t prev_generation = s_session_generation_counter;
+    link.session_generation = noise_ctrl_next_session_generation(s_session_generation_counter);
+    s_session_generation_counter = link.session_generation;
+    link.active = true;
+    if (!link.svc_scratch || !link.env_scratch || !link.chunk_scratch || !link.rx) {
+        ESP_LOGE(MG_SESSION_TAG, "device session: buffer alloc failed");
+        return false;
+    }
+
+    ApplicationRequestView req;
+    req.verb = StringView("POST");
+    req.path = StringView("/link-control");
+    req.end_body = false;
+    auto open_sws = link.out.StartOutboundApplicationRequest(
+        ServiceType::Daemon, CTRL_STREAM_ID, req,
+        ByteSpan(link.svc_scratch, OUT_SVC_SCRATCH),
+        ByteSpan(link.env_scratch, OUT_ENV_SCRATCH));
+    if (!open_sws.ok() || !flush_outbound(nullptr, link.out, nullptr)) {
+        ESP_LOGE(MG_SESSION_TAG, "device session: POST /link-control failed");
+        return false;
+    }
+
+    // A result for the session that just ended with a state the gadget didn't
+    // ask for (closed, no_network: iOS ends it at each wake), queued within
+    // the last 10 s, goes in this one (mgcommands.h); any other, and
+    // after a failure, too_large or auth_failed, is dropped.
+    // Requests waiting for a session stay queued, in order.
+    pending_result pr;
+    int kept = 0;
+    for (int n = (int)uxQueueMessagesWaiting(s_result_q); n > 0; n--) {
+        if (xQueueReceive(s_result_q, &pr, 0) != pdTRUE) break;
+        if (s_ble_carry && pr.session_generation == prev_generation
+            && esp_timer_get_time() - pr.queued_us <= (int64_t)NOISE_CTRL_REQ_WAIT_OPEN_MS * 1000) {
+            pr.session_generation = link.session_generation;
+            if (xQueueSend(s_result_q, &pr, 0) == pdTRUE) {
+                kept++;
+                continue;
+            }
+        }
+        free(pr.request_id);
+        cJSON_Delete(pr.result);
+    }
+    s_ble_carry = false;
+    if (kept) ESP_LOGI(MG_SESSION_TAG, "%d invoke result(s) from the last session go in this one", kept);
+    req_streams_end();
+
+    s_register_acked = false;
+    s_register_rejected = false;
+    s_heartbeat_registered = false;
+    char *reg_json = build_register_json();
+    if (!reg_json) {
+        ESP_LOGE(MG_SESSION_TAG, "device session: could not build link.register");
+        return false;
+    }
+    link.control_tx = {reg_json, strlen(reg_json), 0, false, link.session_generation};
+    link.control_tx.is_registration = true;
+    s_connected = true;
+    ESP_LOGI(MG_SESSION_TAG, "device session open: POST /link-control over BLE");
+    ble_heap_note("at open");
+    return true;
+}
+
+// Why the codec refused a message, for the log.
+static const char *ble_codec_error(ServiceCodecError e) {
+    switch (e) {
+    case ServiceCodecError::MalformedVarint: return "malformed varint";
+    case ServiceCodecError::InvalidFieldKey: return "invalid field key";
+    case ServiceCodecError::WrongWireType: return "wrong wire type";
+    case ServiceCodecError::LengthOutOfRange: return "length out of range";
+    case ServiceCodecError::ValueOutOfRange: return "value out of range";
+    case ServiceCodecError::HeaderStorageTooSmall: return "more than 16 headers";
+    case ServiceCodecError::UnknownEnvelopeService: return "unknown service";
+    case ServiceCodecError::EmptyEnvelopePayload: return "empty payload";
+    case ServiceCodecError::UnknownServiceFrameKind: return "unknown frame kind";
+    case ServiceCodecError::UnexpectedRequestFrame: return "a Request frame";
+    case ServiceCodecError::InvalidClientFrameKind: return "invalid frame kind";
+    case ServiceCodecError::StreamIdReserved: return "reserved stream id";
+    case ServiceCodecError::RequestPathInvalid: return "invalid request path";
+    default: return "malformed";
+    }
+}
+
+static const char *ble_frame_kind(ServiceFrameKind k) {
+    switch (k) {
+    case ServiceFrameKind::Request: return "Request";
+    case ServiceFrameKind::Response: return "Response";
+    case ServiceFrameKind::BodyChunk: return "BodyChunk";
+    case ServiceFrameKind::Reset: return "Reset";
+    default: return "unknown";
+    }
+}
+
+// A frame on a stream this session runs: /link-control, or an open daemon
+// request. There's no tunnel and no GET /api/gadget/me over BLE, so anything on
+// another stream (theirs, a request that has ended, one never opened) is
+// nobody's: over Wi-Fi dispatch_inbound_frame() would read its BodyChunks as
+// control messages, and end the session on its Reset or refusal.
+static bool ble_frame_ours(const DecodedServiceFrame &frame) {
+    if (frame.stream_id == CTRL_STREAM_ID) return true;
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    if (frame.stream_id >= REQ_STREAM_BASE && req_find(frame.stream_id)) return true;
+#endif
+    return false;
+}
+
+// One whole message from the VM (n bytes in link.rx), already credited back
+// to the client when the session took it. What nothing here handles (a frame
+// of an unknown kind, a Request from the VM, a frame on a stream nobody runs,
+// a control message of a type this gadget doesn't know) is logged by type and
+// size on mg.session and accepted; a malformed one (not a
+// ServiceResponseEnvelope, a frame that doesn't decode) is refused, logged
+// the same way, and dropped. Neither ends the session: each message reaches
+// the gadget whole (the device session frames them), so a bad one can't put
+// the next out of step. False only for what ends a Wi-Fi session too: the
+// VM resetting or refusing /link-control (dispatch_inbound_frame()).
+static bool ble_session_inbound(ble_link &link, size_t n) {
+    DecodedServiceResponseEnvelope envelope;
+    auto er = DecodeServiceResponseEnvelopeDetailed(ConstByteSpan(link.rx, n), envelope);
+    if (!er.ok() || envelope.payload.empty()) {
+        ESP_LOGW(MG_SESSION_TAG, "refused a message that isn't a ServiceResponseEnvelope (%u bytes, %s): dropped",
+                 (unsigned)n, er.ok() ? "empty payload" : ble_codec_error(er.error));
+        return true;
+    }
+    HeaderView headers[16];
+    DecodedServiceFrame frame;
+    auto fr = DecodeServerServiceFrameDetailed(envelope.payload, Span<HeaderView>(headers, 16), frame);
+    if (!fr.ok()) {
+        if (fr.error == ServiceCodecError::UnknownServiceFrameKind
+            || fr.error == ServiceCodecError::UnexpectedRequestFrame) {
+            ESP_LOGI(MG_SESSION_TAG, "unhandled service frame: %s (%u bytes): accepted",
+                     ble_codec_error(fr.error), (unsigned)n);
+        } else {
+            ESP_LOGW(MG_SESSION_TAG, "refused a service frame that doesn't decode (%u bytes, %s): dropped",
+                     (unsigned)n, ble_codec_error(fr.error));
+        }
+        return true;
+    }
+    if (!ble_frame_ours(frame)) {
+        ESP_LOGI(MG_SESSION_TAG, "unhandled %s frame on stream %lld (%u bytes): accepted",
+                 ble_frame_kind(frame.kind), (long long)frame.stream_id, (unsigned)n);
+        return true;
+    }
+    return dispatch_inbound_frame(frame, link.identity, link.session_generation);
+}
+
+// session.ping, on the session task: the heartbeat waits for the control
+// slot (a result or link.register may be in it), so it never splits another
+// control message. Refused without a session, and before the register
+// reply (a gadget never sends a heartbeat before it's registered).
+static void ble_session_ping(ble_link &link) {
+    if (!link.active) {
+        ESP_LOGI(MG_SESSION_TAG, "session.ping: no session");
+    } else if (!s_heartbeat_registered) {
+        ESP_LOGI(MG_SESSION_TAG, "session.ping: not registered yet (no link.register reply, or not registered)");
+    } else if (link.ping_pending || link.ping_in_slot) {
+        ESP_LOGI(MG_SESSION_TAG, "session.ping: one is already on its way");
+    } else {
+        link.ping_pending = true;
+    }
+}
+
+// One turn: the messages from the VM while results have room, then at most
+// one control BodyChunk and one request operation, each while the device
+// session can queue the largest envelope they make. False if the session
+// must end.
+static bool ble_session_turn(ble_link &link, bool *did) {
+    size_t n;
+    while (uxQueueMessagesWaiting(s_result_q) < BLE_RX_RESULTS_MAX
+           && (n = mg_ble_session_take(link.id, link.rx, link.rx_cap)) > 0) {
+        *did = true;
+        if (!ble_session_inbound(link, n)) return false;
+    }
+    if (mg_ble_session_room() >= OUT_ENV_SCRATCH) {
+        if (link.ping_pending && !link.control_tx.json) {
+            link.ping_pending = false;
+            char *json = strdup(BLE_PING_JSON);
+            if (json) {
+                link.control_tx = {json, strlen(json), 0, false, link.session_generation};
+                link.ping_in_slot = true;
+            } else {
+                ESP_LOGW(MG_SESSION_TAG, "session.ping: out of memory");
+            }
+        }
+        // link.register and a ping are logged once they've gone whole.
+        bool reg = link.control_tx.json && link.control_tx.is_registration;
+        size_t len = link.control_tx.json ? link.control_tx.json_len : 0;
+        if (!control_tx_step(nullptr, link.out, link.control_tx, link.session_generation,
+                             link.heartbeat_sent, link.last_heartbeat_us,
+                             link.svc_scratch, link.env_scratch, link.chunk_scratch,
+                             did, &link.last_activity_us)) {
+            return false;
+        }
+        if (len && !link.control_tx.json) {
+            if (reg) {
+                s_register_sent_us = esp_timer_get_time();
+                ESP_LOGI(MG_SESSION_TAG, "link.register sent (%u bytes)", (unsigned)len);
+                ble_heap_note("after link.register");
+            } else if (link.ping_in_slot) {
+                link.ping_in_slot = false;
+                ESP_LOGI(MG_SESSION_TAG, "session.ping: sent link.heartbeat (%u bytes) on /link-control%s",
+                         (unsigned)len, mg_ble_session_sealed() ? ", sealed" : "");
+            }
+        }
+    }
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    // Requests go once link.register is acknowledged (the session is ready).
+    if (s_register_acked && !s_req_ready.exchange(true)) {
+        if (s_req_wait_since.exchange(0)) {
+            ESP_LOGI(MG_SESSION_TAG, "requests that waited for the session go now");
+        }
+        s_req_wait_opens = 0;
+    }
+    if (s_req_ready && mg_ble_session_room() >= OUT_ENV_SCRATCH
+        && !req_pump_tx(nullptr, link.out, link.svc_scratch, link.env_scratch,
+                        link.chunk_scratch, did)) {
+        return false;
+    }
+#endif
+    return true;
+}
+
+// The session failed on the gadget's side: ask the client to close it, and
+// for a new one once it has and the backoff has passed.
+static void ble_session_failed(const ble_link &link) {
+    uint64_t up_ms = (uint64_t)(esp_timer_get_time() - link.began_us) / 1000;
+    update_reconnect_policy(SESSION_FAILED, up_ms, &s_ble_backoff_ms, &s_ble_short_failures);
+    ESP_LOGW(MG_SESSION_TAG, "device session failed after %llu ms; asking the client for a new one in %u ms",
+             (unsigned long long)up_ms, (unsigned)s_ble_backoff_ms);
+    s_ble_reopen = true;
+    s_ble_reopen_closed = false;
+    s_ble_asking = false;
+    s_ble_silent = false;
+    s_ble_reopen_at = esp_timer_get_time() + (int64_t)s_ble_backoff_ms * 1000;
+    mg_ble_session_request(false);
+}
+
+// A state the gadget didn't ask for that it asks again after
+// (mgcommands.h): closed or no_network; never open or connecting, nor auth_failed,
+// not_enrolled or too_large.
+static bool ble_state_reasks(uint8_t st) {
+    return st == mg_session_state_closed || st == mg_session_state_no_network;
+}
+
+// The series an unasked end continues: closed's or no_network's.
+static int ble_ask_kind(uint8_t st) {
+    return st == mg_session_state_no_network ? BLE_ASK_NO_NETWORK : BLE_ASK_CLOSED;
+}
+
+// Both re-ask series start over.
+static void ble_ask_restart() {
+    for (int k = 0; k < BLE_ASK_KINDS; k++) {
+        s_ble_ask_ms[k] = 0;
+        s_ble_asks[k] = 0;
+        s_ble_ask_sent_us[k] = 0;
+    }
+}
+
+// The series' next step for kind k: at once for its first ask, then 1, 2,
+// 4 ... s, capped at 60 s after closed and at 15 s after no_network
+// (mgcommands.h). ble_ask_peek() only looks;
+// ble_ask_step() counts the ask.
+static uint32_t ble_ask_peek(int k) {
+    uint32_t ms = s_ble_ask_ms[k];
+    return !s_ble_asks[k] ? 0
+           : !ms ? BLE_ASK_FIRST_MS
+           : ms >= BLE_ASK_MAX_MS[k] / 2 ? BLE_ASK_MAX_MS[k]
+                                         : ms * 2;
+}
+
+static uint32_t ble_ask_step(int k) {
+    s_ble_ask_ms[k] = ble_ask_peek(k);
+    if (s_ble_asks[k] < UINT8_MAX) s_ble_asks[k]++;
+    return s_ble_ask_ms[k];
+}
+
+// An ask after such a state, still waiting, is dropped (a failure's reopen stays).
+static void ble_ask_cancel() {
+    if (s_ble_asking) {
+        s_ble_reopen = s_ble_reopen_closed = s_ble_asking = s_ble_silent = false;
+    }
+}
+
+// A hello answered or a credentials_update saved since the last marks seen
+// (hellos, saved: mg_ble_session_reask_marks()) restarts both re-ask series.
+// A hello drops an ask still waiting (a new client; its states come next). A
+// saved update with the session closed (since the hello the last state ended
+// one), whether or not an ask waits, asks at once, the first of the ended
+// kind's new series (closed's unless no_network ended it, as the Zephyr side),
+// so that kind's next step is 1 s and the other's first goes at once; saved
+// while open or before any state, nothing more: new
+// credentials may fix what ended it, even auth_failed, and nothing else may
+// ask (mgcommands.h). Each save asks once: no loop. True if it
+// changed something.
+static bool ble_task_active(const ble_link &link);
+
+static bool ble_ask_marks(const ble_link &link, uint32_t hellos, uint32_t saved) {
+    // Only marks newer than those taken (a state's noted marks can be older
+    // than the current ones a previous pass already took).
+    bool hello = (int32_t)(hellos - s_ble_ask_hellos) > 0;
+    bool update = (int32_t)(saved - s_ble_ask_saved) > 0;
+    if (!hello && !update) return false;
+    if (hello) s_ble_ask_hellos = hellos;
+    if (update) s_ble_ask_saved = saved;
+    ble_ask_restart();
+    if (hello) {
+        ble_ask_cancel();
+        s_ble_ended = false;
+    } else if (s_ble_ended && !s_ble_opened_us && mg_ble_connected() && ble_task_active(link)) {
+        // Only with an active task (as on Zephyr): a token refresh on an idle
+        // gadget opens no session.
+        // With none it's saved and the series restart; a task's start asks.
+        s_ble_asks[s_ble_ended_kind] = 1;   // the first of the ended kind's new series (as Zephyr)
+        s_ble_ask_kinds = (uint8_t)(1u << s_ble_ended_kind);
+        s_ble_reopen = s_ble_reopen_closed = s_ble_asking = true;
+        s_ble_silent = false;
+        s_ble_reopen_at = esp_timer_get_time();
+        ESP_LOGI(MG_SESSION_TAG, "new credentials saved with the session closed: asking for one now");
+    }
+    return true;
+}
+
+// Traffic the gadget owes (an active task by itself): results to send,
+// requests queued, waiting for a session or open on their streams, and, with
+// a session open, link.register unanswered or a control message on its way.
+static bool ble_task_owed(const ble_link &link) {
+    if (uxQueueMessagesWaiting(s_result_q)) return true;
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    if (uxQueueMessagesWaiting(s_req_q) || s_req_wait_since.load()) return true;
+    for (const auto &s : s_req_streams) {
+        if (s.id) return true;
+    }
+#endif
+    return link.active && ((!s_register_acked && !s_register_rejected) || link.control_tx.json || link.ping_pending);
+}
+
+// The first hold still running (a user action or a wait), or -1.
+static int ble_task_held(int64_t now) {
+    for (int k = 0; k < NOISE_TASK_KINDS; k++) {
+        if (s_task_until[k].load() > now) return k;
+    }
+    return -1;
+}
+
+static bool ble_task_active(const ble_link &link) {
+    return ble_task_held(esp_timer_get_time()) >= 0 || ble_task_owed(link);
+}
+
+// The task's start and end, once each: a task that starts with no
+// session open and none asked for asks as the next of the ended kind's series
+// (closed's unless no_network ended the last session): at once when that series
+// hasn't asked yet, else at its next step; the other series is untouched
+// (mg-session-v1.json, mg_session_ref.py set_task, as the Zephyr gadget). The
+// end drops an ask still waiting (a failure's reopen too) and sends no more
+// keepalives: the session closes when the client lets it, and nothing asks
+// again. True if it did something.
+static bool ble_task_update(const ble_link &link) {
+    bool active = ble_task_active(link);
+    if (active == s_ble_task_on) return false;
+    s_ble_task_on = active;
+    if (!active) {
+        s_ble_reopen = s_ble_reopen_closed = s_ble_asking = s_ble_silent = false;
+        ESP_LOGI(MG_SESSION_TAG, "task ended: no more asks or keepalives; an open session closes in %d s unless a task comes",
+                 NOISE_CTRL_IDLE_CLOSE_MS / 1000);
+        return true;
+    }
+    int held = ble_task_held(esp_timer_get_time());
+    const char *why = held >= 0 ? TASK_NAMES[held] : "traffic owed";
+    if (link.active || mg_ble_session_id() || !mg_ble_connected() || s_ble_reopen) {
+        ESP_LOGI(MG_SESSION_TAG, "task active (%s)", why);
+        return true;
+    }
+    // The ended kind's next ask: this pass for its first, else when its next
+    // step after its last ask comes due (at once if that's past already).
+    int k = s_ble_ended_kind;
+    int64_t now = esp_timer_get_time();
+    int64_t at = s_ble_asks[k] ? s_ble_ask_sent_us[k] + (int64_t)ble_ask_peek(k) * 1000 : now;
+    if (at < now) at = now;
+    ble_ask_step(k);
+    s_ble_ask_kinds = (uint8_t)(1u << k);
+    s_ble_reopen = s_ble_reopen_closed = s_ble_asking = true;
+    s_ble_silent = false;
+    s_ble_reopen_at = at;
+    ESP_LOGI(MG_SESSION_TAG, "task active (%s): asking the client for a session%s", why,
+             at > now ? " at its series' next step" : "");
+    return true;
+}
+
+// While a task is active, an open session is kept awake (the keepalive): an
+// empty BodyChunk on the existing /link-control stream once
+// nothing has gone for NOISE_CTRL_KEEPALIVE_MS, between control messages
+// (never inside one) and never a new POST. True if it sent one; false if the
+// send failed (the session ends) through *failed.
+static bool ble_keepalive(ble_link &link, bool *failed) {
+    if (!link.active || !s_ble_task_on || link.control_tx.json || link.ping_pending || link.ping_in_slot
+        || esp_timer_get_time() - link.out.last_sent_us() < (int64_t)NOISE_CTRL_KEEPALIVE_MS * 1000
+        || mg_ble_session_room() < OUT_ENV_SCRATCH) {
+        return false;
+    }
+    BodyChunkView chunk;
+    chunk.end_body = false;   // no data: the stream stays open
+    auto sws = link.out.StartOutboundBodyChunk(ServiceType::Daemon, CTRL_STREAM_ID, chunk,
+                                               ByteSpan(link.svc_scratch, OUT_SVC_SCRATCH),
+                                               ByteSpan(link.env_scratch, OUT_ENV_SCRATCH));
+    if (!sws.ok() || !flush_outbound(nullptr, link.out, nullptr)) {
+        *failed = true;
+        return false;
+    }
+    ESP_LOGI(MG_SESSION_TAG, "keepalive: an empty /link-control frame (task active)");
+    return true;
+}
+
+// An open session with no task left: the
+// gadget closes it itself NOISE_CTRL_IDLE_CLOSE_MS after the last task ended,
+// with open_request [0] (the gadget-asked close both apps drain gracefully),
+// once per session. A task meanwhile cancels it and the session is reused.
+// The one place [0] goes at a task's end: a waiting re-ask is still dropped
+// silently (ble_task_update). True if it sent the close.
+static bool ble_idle_close(const ble_link &link) {
+    if (!link.active || s_ble_task_on || s_ble_idle_closed) {
+        s_ble_idle_close_at = 0;
+        return false;
+    }
+    int64_t now = esp_timer_get_time();
+    if (!s_ble_idle_close_at) {
+        s_ble_idle_close_at = now + (int64_t)NOISE_CTRL_IDLE_CLOSE_MS * 1000;
+        return false;
+    }
+    if (now < s_ble_idle_close_at) return false;
+    s_ble_idle_close_at = 0;
+    s_ble_idle_closed = true;
+    mg_ble_session_request(false);
+    ESP_LOGI(MG_SESSION_TAG, "no task for %d s: closing the session (open_request [0])", NOISE_CTRL_IDLE_CLOSE_MS / 1000);
+    return true;
+}
+
+// One pass of the BLE session task: follows the client's state reports
+// (seen: the last one acted on) by the device session's id, which every
+// report changes, so a session that ended and a new one that opened between
+// two passes are told apart, and the open one is never begun twice. Then it
+// moves messages both ways. True if it did something, so the task goes again
+// at once.
+static bool ble_session_poll(ble_link &link, uint32_t &seen) {
+    bool did = false;
+    uint32_t pairing = s_ble_pairing_gen.load();
+    if (pairing != s_ble_pairing_seen) {
+        // The last pairing's requests and results go nowhere: none waits for,
+        // or is carried into, a session under the new one.
+        s_ble_pairing_seen = pairing;
+        s_ble_carry = false;
+        req_end_all();
+        pending_result pr;
+        while (xQueueReceive(s_result_q, &pr, 0) == pdTRUE) {
+            free(pr.request_id);
+            cJSON_Delete(pr.result);
+        }
+        did = true;
+    }
+    uint32_t seq = s_ble_seq.load();
+    // Hellos answered and credentials_updates saved (mg_ble_session_reask_marks()):
+    // those before the state this pass takes go before it, the rest after.
+    uint32_t hellos, saved;
+    mg_ble_session_reask_marks(&hellos, &saved);
+    if (seq != seen) {
+        seen = seq;
+        did = true;
+        did |= ble_ask_marks(link, s_ble_state_hellos.load(), s_ble_state_saved.load());
+        uint32_t id = mg_ble_session_id();
+        if (id != link.id) {
+            // An open restarts the series only after a session that stayed
+            // open BLE_ASK_STABLE_MS (mgcommands.h); after a shorter
+            // one the backoff continues where it was.
+            int64_t now = esp_timer_get_time();
+            if (s_ble_opened_us && now - s_ble_opened_us >= (int64_t)BLE_ASK_STABLE_MS * 1000) {
+                ble_ask_restart();
+            }
+            s_ble_opened_us = id ? now : 0;
+            if (link.active) {
+                s_ble_carry = ble_state_reasks(s_ble_state.load()) && link.pairing_gen == s_ble_pairing_gen.load();
+            }
+            ble_session_end(link, s_ble_state.load() == mg_session_state_too_large);
+            link.id = id;
+            if (id) {
+                s_ble_reopen = s_ble_silent = false;   // the client opened one: run it
+                if (!ble_session_begin(link, id)) {
+                    ble_session_end(link, false);
+                    ble_session_failed(link);
+                }
+            }
+        }
+        if (!id && s_ble_reopen) s_ble_reopen_closed = true;
+        uint8_t st = s_ble_state.load();
+        s_ble_ended = !id && st != mg_session_state_open && st != mg_session_state_connecting;
+        s_ble_ended_kind = ble_ask_kind(st);
+        if (id) {
+            s_ble_asking = false;   // the series goes on: only its end restarts it (above)
+        } else if (!mg_ble_connected()) {
+            // The link went (its session's end reports closed): nobody to ask; the next link starts at once.
+            ble_ask_cancel();
+            s_ble_ended = false;
+            ble_ask_restart();
+        } else if (!ble_state_reasks(st)) {
+            if (st != mg_session_state_connecting) ble_ask_cancel();   // auth_failed, not_enrolled, too_large
+        } else if (!ble_task_active(link)) {
+            // No active task, no re-ask (an idle session closing is normal).
+            ble_ask_cancel();
+            ESP_LOGI(MG_SESSION_TAG, "the client reported the session %s; no active task, so not asking again",
+                     st == mg_session_state_no_network ? "no_network" : "closed");
+        } else if (!s_ble_reopen || s_ble_silent || (s_ble_asking && !(s_ble_ask_kinds & (1u << ble_ask_kind(st))))) {
+            // At once, then 1, 2, 4 ... s, capped at 60 s after closed and at
+            // 15 s after no_network, each kind its own series
+            // (mgcommands.h). An ask of the other kind still waiting
+            // stays; whichever comes due first asks for both. One set for a
+            // silent client (below) is replaced: the client has spoken.
+            int k = ble_ask_kind(st);
+            if (s_ble_silent) s_ble_reopen = s_ble_silent = false;
+            bool waiting = s_ble_reopen;
+            uint32_t ms = ble_ask_step(k);
+            int64_t at = esp_timer_get_time() + (int64_t)ms * 1000;
+            if (!waiting || at < s_ble_reopen_at) s_ble_reopen_at = at;
+            s_ble_ask_kinds = (waiting ? s_ble_ask_kinds : 0) | (1u << k);
+            s_ble_reopen = true;
+            s_ble_reopen_closed = true;
+            s_ble_asking = true;
+            ESP_LOGI(MG_SESSION_TAG, "the client reported the session %s; asking for one in %u ms",
+                     st == mg_session_state_no_network ? "no_network" : "closed", (unsigned)ms);
+        }
+    }
+    did |= ble_ask_marks(link, hellos, saved);
+    // A request that waits for a session (noise_ctrl_ble_request_open: owed
+    // traffic, a task by itself): never an ask without an active task.
+    if (s_ble_ask_now.exchange(false) && !link.active && !mg_ble_session_id() && ble_task_active(link)) {
+        did = true;
+        s_ble_reopen = s_ble_reopen_closed = s_ble_asking = s_ble_silent = false;
+        mg_ble_session_request(true);
+        ESP_LOGI(MG_SESSION_TAG, "asked the client for a session now");
+    }
+    if (s_ble_ping.exchange(false)) {
+        did = true;
+        ble_session_ping(link);
+    }
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+    // Requests that waited NOISE_CTRL_REQ_WAIT_OPEN_MS for a session end with NOISE_CTRL_REQ_NO_SESSION.
+    int64_t since = s_req_wait_since.load();
+    const int64_t wait_us = (int64_t)NOISE_CTRL_REQ_WAIT_OPEN_MS * 1000;
+    if (since && !s_req_ready && esp_timer_get_time() - since >= wait_us) {
+        // Only those that waited their own 10 s (the first one's deadline failed newer ones too). Each
+        // Open's wait counts from opened_us; its body and cancel go with it. The rest stay, in order, at the front.
+        int64_t now = esp_timer_get_time(), oldest = 0;
+        size_t queued = (size_t)uxQueueMessagesWaiting(s_req_q);
+        req_op *keep = queued ? static_cast<req_op *>(calloc(queued, sizeof(req_op))) : nullptr;
+        int64_t *gone = queued ? static_cast<int64_t *>(calloc(queued, sizeof(int64_t))) : nullptr;
+        size_t nkeep = 0, ngone = 0;
+        req_op op;
+        int n = 0;
+        // At most the counted ones: keep/gone are sized from that count, and the queue may refill while this
+        // drains; anything newer waits in the queue behind the ones put back.
+        for (size_t taken = 0; taken < queued && req_take(&op); taken++) {
+            bool drop = !keep || !gone;   // no room to sort them: all go, as before
+            if (!drop && op.kind == req_op_kind::Open) {
+                drop = now - op.opened_us >= wait_us;
+                if (drop) gone[ngone++] = op.id;
+            } else if (!drop) {
+                for (size_t i = 0; i < ngone && !drop; i++) drop = gone[i] == op.id;
+            }
+            if (drop) {
+                n += op.kind == req_op_kind::Open;
+                req_drop(op, NOISE_CTRL_REQ_NO_SESSION);
+                continue;
+            }
+            if (op.kind == req_op_kind::Open && (!oldest || op.opened_us < oldest)) oldest = op.opened_us;
+            keep[nkeep++] = op;
+        }
+        for (size_t i = nkeep; i-- > 0;) {   // back in front of anything queued meanwhile, oldest first
+            s_req_queued_bytes += (int32_t)keep[i].len;
+            if (xQueueSendToFront(s_req_q, &keep[i], 0) != pdTRUE) {
+                s_req_queued_bytes -= (int32_t)keep[i].len;
+                n += keep[i].kind == req_op_kind::Open;
+                req_drop(keep[i], NOISE_CTRL_REQ_NO_SESSION);
+            }
+        }
+        free(keep);
+        free(gone);
+        s_req_wait_opens = s_req_wait_opens > n ? s_req_wait_opens - n : 0;
+        s_req_wait_since = nkeep ? (oldest ? oldest : now) : 0;
+        ESP_LOGW(MG_SESSION_TAG, "%d request(s) waited %d s for the session and failed (%u still wait)", n,
+                 NOISE_CTRL_REQ_WAIT_OPEN_MS / 1000, (unsigned)nkeep);
+        did = true;
+    }
+#endif
+    if (link.active && !ble_session_turn(link, &did)) {
+        ble_session_end(link, false);
+        did = true;
+        // Ended under us (a state report is waiting): nothing to ask for.
+        if (s_ble_seq.load() == seen) ble_session_failed(link);
+    }
+    did |= ble_task_update(link);
+    did |= ble_idle_close(link);
+    bool failed = false;
+    if (ble_keepalive(link, &failed)) {
+        did = true;
+    } else if (failed) {
+        ble_session_end(link, false);
+        did = true;
+        if (s_ble_seq.load() == seen) ble_session_failed(link);
+    }
+    if (s_ble_reopen && s_ble_reopen_closed && esp_timer_get_time() >= s_ble_reopen_at) {
+        bool asking = s_ble_asking;
+        bool silent = s_ble_silent;
+        s_ble_reopen = s_ble_reopen_closed = s_ble_asking = s_ble_silent = false;
+        did = true;
+        if (asking && !mg_ble_connected()) {
+            ble_ask_restart();   // gone meanwhile: only while connected, and the next link starts over
+        } else if (!ble_task_active(link)) {
+            ESP_LOGI(MG_SESSION_TAG, "no active task: the ask that was due doesn't go");
+        } else {
+            int k = s_ble_ended_kind;
+            if (silent) ble_ask_step(k);   // a silent client's ask counts as it goes
+            mg_ble_session_request(true);
+            int64_t sent = esp_timer_get_time();
+            for (int j = 0; j < BLE_ASK_KINDS; j++) {
+                if (j == k || (s_ble_ask_kinds & (1u << j))) s_ble_ask_sent_us[j] = sent;
+            }
+            if (asking) {
+                // The next ask is set when this one goes, not only when a state
+                // is heard (otherwise the asks stop after
+                // the first timed ask while the client stays silent): the
+                // series of the last end the client reported (closed's unless
+                // no_network), its next step, counted when it goes. A state
+                // the client reports meanwhile replaces it with that state's
+                // own step, as before.
+                int64_t now = esp_timer_get_time();
+                int64_t at = now + (int64_t)ble_ask_peek(k) * 1000;
+                s_ble_reopen = s_ble_reopen_closed = s_ble_asking = s_ble_silent = true;
+                s_ble_ask_kinds = (uint8_t)(1u << k);
+                s_ble_reopen_at = at;
+                ESP_LOGI(MG_SESSION_TAG, "asked the client for a session (open_request); the next in %u ms",
+                         (unsigned)((at - now) / 1000));
+            } else {
+                ESP_LOGI(MG_SESSION_TAG, "asked the client for a session (open_request)");
+            }
+        }
+    }
+    return did;
+}
+
+static void noise_ctrl_ble_task(void *arg) {
+    (void)arg;
+    static ble_link link;
+    stack_monitor_t stack = STACK_MONITOR_INIT;
+    uint32_t seen = 0;
+    for (;;) {
+        bool did = ble_session_poll(link, seen);
+        stack_monitor_poll(&stack);
+        if (did) {
+            taskYIELD();
+            continue;
+        }
+        // Results and requests from other tasks don't wake it: poll while
+        // open. Waiting to ask again, sleep until the backoff's end.
+        TickType_t wait = portMAX_DELAY;
+        if (link.active) {
+            wait = pdMS_TO_TICKS(IDLE_POLL_MS);
+        } else if (s_ble_reopen) {
+            int64_t left_ms = (s_ble_reopen_at - esp_timer_get_time()) / 1000;
+            wait = pdMS_TO_TICKS(left_ms > IDLE_POLL_MS ? left_ms : IDLE_POLL_MS);
+        }
+#if CONFIG_HOMEHUB_DAEMON_REQUESTS
+        int64_t since = s_req_wait_since.load();
+        if (since && !link.active) {
+            // A request waits for a session: wake at its deadline.
+            int64_t left_ms = (since + (int64_t)NOISE_CTRL_REQ_WAIT_OPEN_MS * 1000 - esp_timer_get_time()) / 1000;
+            TickType_t w = pdMS_TO_TICKS(left_ms > 1 ? left_ms : 1);
+            wait = w < wait ? w : wait;
+        }
+#endif
+        ulTaskNotifyTake(pdTRUE, wait);
+    }
+}
+
+extern "C" bool noise_ctrl_ble_start(const char *node_id, const char *display_name) {
+    if (s_ble_task) return true;
+    strncpy(s_node_id, node_id, sizeof(s_node_id) - 1);
+    strncpy(s_display_name, display_name, sizeof(s_display_name) - 1);
+    if (!s_result_q) s_result_q = xQueueCreate(8, sizeof(pending_result));
+    req_init();
+#if CONFIG_SPIRAM
+    // A BLE-only build's cJSON is this session's (and its commands'): its
+    // nodes PSRAM first.
+    cJSON_Hooks hooks = {ble_json_alloc, free};
+    cJSON_InitHooks(&hooks);
+#endif
+    // Its stack follows CONFIG_MUSE_STACKS_IN_PSRAM (muse_stack.h; 8 KB of
+    // internal RAM back on the Watcher), like the Wi-Fi session task's:
+    // nothing it runs maps flash. Its commands (on_ws_command()) hand
+    // anything that does to a task of their own with an internal stack (the
+    // bug report), and device.unpair's NVS erases are flash writes, which
+    // leave the cache on where the option exists.
+    if (!s_result_q
+        || muse_task_create(noise_ctrl_ble_task, "mg_vm", BLE_SESSION_STACK, nullptr, 4, &s_ble_task,
+                            tskNO_AFFINITY) != pdPASS) {
+        s_ble_task = nullptr;
+        ESP_LOGE(MG_SESSION_TAG, "failed to start the device session task");
+        return false;
+    }
+    return true;
+}
+
+extern "C" void noise_ctrl_ble_state(uint8_t state, uint16_t epoch) {
+    (void)epoch;
+    // Called with the protocol locked (recursive): the marks as of this state.
+    uint32_t hellos, saved;
+    mg_ble_session_reask_marks(&hellos, &saved);
+    s_ble_state_hellos = hellos;
+    s_ble_state_saved = saved;
+    s_ble_state = state;
+    s_ble_seq++;
+    if (s_ble_task) xTaskNotifyGive(s_ble_task);
+}
+
+extern "C" void noise_ctrl_ble_message(void) {
+    if (s_ble_task) xTaskNotifyGive(s_ble_task);
+}
+
+extern "C" void noise_ctrl_ble_request_open(void) {
+    s_ble_ask_now = true;   // the task's next pass takes it
+    if (s_ble_task) xTaskNotifyGive(s_ble_task);
+}
+
+extern "C" void noise_ctrl_ble_pairing_changed(void) {
+    s_ble_pairing_gen++;   // the task's next pass drops what came before
+    if (s_ble_task) xTaskNotifyGive(s_ble_task);
+}
+
+extern "C" void noise_ctrl_ble_ping(void) {
+    if (!s_ble_task) {
+        ESP_LOGI(MG_SESSION_TAG, "session.ping: no session");
+        return;
+    }
+    s_ble_ping = true;
+    xTaskNotifyGive(s_ble_task);
+}
+
+extern "C" void noise_ctrl_task_hold(noise_task_t kind, uint32_t ms) {
+    if ((int)kind < 0 || kind >= NOISE_TASK_KINDS) return;
+    if (!ms) {
+        s_task_until[kind] = 0;
+    } else {
+        if (ms > NOISE_CTRL_WAIT_MAX_MS) ms = NOISE_CTRL_WAIT_MAX_MS;
+        int64_t until = esp_timer_get_time() + (int64_t)ms * 1000;
+        int64_t cur = s_task_until[kind].load();
+        while (cur < until && !s_task_until[kind].compare_exchange_weak(cur, until)) {
+        }
+    }
+    if (s_ble_task) xTaskNotifyGive(s_ble_task);   // the start asks at once; the end stops the keepalive
+}
+
+extern "C" void noise_ctrl_user_action(void) {
+    noise_ctrl_task_hold(NOISE_TASK_USER, NOISE_CTRL_USER_TASK_MS);
+}
+#else
+// A Wi-Fi gadget's own session is always open (the active-task rule covers
+// phone-relayed sessions only): the task holds change nothing here.
+extern "C" void noise_ctrl_task_hold(noise_task_t kind, uint32_t ms) {
+    (void)kind;
+    (void)ms;
+}
+
+extern "C" void noise_ctrl_user_action(void) {}
+#endif  // CONFIG_MUSE_GADGET_BLE_SESSION
 
 // ---- Public API (extern "C") ------------------------------------------------
 
@@ -3043,6 +4621,10 @@ extern "C" void noise_ctrl_init(const char *node_id, const char *display_name,
     s_result_q = xQueueCreate(8, sizeof(pending_result));
     req_init();
     reserve_stack();
+}
+
+extern "C" void noise_ctrl_set_status_cb(noise_ctrl_status_cb on_status) {
+    s_status_cb = on_status;
 }
 
 extern "C" void noise_ctrl_set_agent_name_cb(noise_ctrl_agent_name_cb cb) {
@@ -3059,7 +4641,8 @@ extern "C" void noise_ctrl_set_power_save(bool on) {
 
 extern "C" void noise_ctrl_set_node_id(const char *node_id) {
     if (!node_id || !*node_id || strncmp(s_node_id, node_id, sizeof(s_node_id)) == 0) return;
-    // Changes only when setup stores new credentials; a registration follows.
+    // Changes only when a setup commits (stores new credentials); a
+    // registration then follows.
     snprintf(s_node_id, sizeof(s_node_id), "%s", node_id);
 }
 
@@ -3094,7 +4677,8 @@ extern "C" bool noise_ctrl_connect(const char *vm_id, const char *auth_token,
 
     s_running = true;
     release_stack();
-    if (xTaskCreate(noise_ctrl_task, "noise_ctrl", NOISE_CTRL_STACK, nullptr, 5, &s_task) != pdPASS) {
+    if (muse_task_slot_run(&s_task_slot, noise_ctrl_task, "noise_ctrl", NOISE_CTRL_STACK, nullptr, 5, &s_task,
+                           tskNO_AFFINITY) != pdPASS) {
         s_running = false;
         s_task = nullptr;
         reserve_stack();
@@ -3174,7 +4758,24 @@ extern "C" void noise_ctrl_send_command_result(
 extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
                                        const char *const *headers, bool end_body,
                                        noise_ctrl_req_cb cb, void *ctx) {
-    if (!s_req_q || !s_connected || !verb || !path || !cb) return 0;
+    return noise_ctrl_req_open_hdr(verb, path, headers, end_body, cb, nullptr, ctx);
+}
+
+extern "C" int64_t noise_ctrl_req_open_hdr(const char *verb, const char *path,
+                                           const char *const *headers, bool end_body,
+                                           noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb,
+                                           void *ctx) {
+    bool waits = false;
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+    // The BLE device session: a request made while it isn't ready (open, its
+    // link.register acknowledged) waits for it (NOISE_CTRL_REQ_WAIT_OPEN_MS),
+    // three at most, and asks for it at once.
+    if (s_ble_task && !s_req_ready.load()) {
+        if (s_req_wait_opens.load() >= REQ_MAX_STREAMS) return 0;
+        waits = true;
+    }
+#endif
+    if (!s_req_q || (!s_connected && !waits) || !verb || !path || !cb) return 0;
     size_t n = 0, len = strlen(verb) + strlen(path) + 3;
     for (const char *const *h = headers; h && *h; h++, n++) len += strlen(*h) + 1;
     if (n % 2 || n / 2 > REQ_MAX_HEADERS) return 0;
@@ -3195,11 +4796,20 @@ extern "C" int64_t noise_ctrl_req_open(const char *verb, const char *path,
     *p = '\0';
     int64_t id = s_req_next_id.fetch_add(1);
     req_op op = {req_op_kind::Open, end_body, id,
-                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx};
+                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, esp_timer_get_time(), false, hdr_cb};
     if (!req_put(op, 0)) {
         free(blob);
         return 0;
     }
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+    if (waits) {
+        s_req_wait_opens++;
+        int64_t none = 0;
+        s_req_wait_since.compare_exchange_strong(none, esp_timer_get_time());
+        ESP_LOGI(MG_SESSION_TAG, "request %lld waits for the session (asking the client for one now)", (long long)id);
+        noise_ctrl_ble_request_open();   // at once
+    }
+#endif
     return id;
 }
 
@@ -3209,7 +4819,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
     uint8_t *copy = static_cast<uint8_t *>(malloc(len ? len : 1));
     if (!copy) return false;
     if (len) memcpy(copy, data, len);
-    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr};
+    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr, 0, false, nullptr};
     int64_t deadline = esp_timer_get_time() + (int64_t)wait_ms * 1000;
     while (s_req_queued_bytes > 0
            && s_req_queued_bytes + (int32_t)len > REQ_QUEUE_BYTES) {
@@ -3230,7 +4840,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 
 extern "C" void noise_ctrl_req_cancel(int64_t id) {
     if (!s_req_q || id < REQ_STREAM_BASE) return;
-    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr};
+    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr, 0, false, nullptr};
     req_put(op, pdMS_TO_TICKS(100));
 }
 
@@ -3239,6 +4849,11 @@ extern "C" void noise_ctrl_req_cancel(int64_t id) {
 #define REQ_FRAME_OVERHEAD 2048
 
 extern "C" size_t noise_ctrl_req_max_body(void) {
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+    // Over BLE a frame has to fit the device session's max_message instead.
+    size_t max = mg_ble_session_max_message();
+    if (max && max < SVC_FRAME_SCRATCH) return max - REQ_FRAME_OVERHEAD;
+#endif
     return SVC_FRAME_SCRATCH - REQ_FRAME_OVERHEAD;
 }
 #endif  // CONFIG_HOMEHUB_DAEMON_REQUESTS

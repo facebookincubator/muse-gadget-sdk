@@ -171,11 +171,11 @@ def check_board(st):
     # Either reaches the Muse's VM, as muse_hatch_configured() says.
     if not hatch.get("token") and not dev.get("link", {}).get("paired"):
         raise Stop(f"Your {name} isn't connected to your Muse: it isn't paired in the Muse app and has "
-                   "no device token. Pair it in the Muse app, or set a device token from your phone "
-                   "(tools/muse/ble_setup.html), then run this again.", 3)
+                   "no device token. Pair it in the Muse app (or set a device token with the setup page on test "
+                   "builds), then run this again.", 3)
     if wifi.get("state") != "connected":
-        raise Stop(f"Your {name} isn't on Wi-Fi ({wifi.get('state', 'unknown')}). Set it up from your phone "
-                   "(tools/muse/ble_setup.html) or over USB with '>wifi.ssid=NAME', '>wifi.pass=PASSWORD' "
+        raise Stop(f"Your {name} isn't on Wi-Fi ({wifi.get('state', 'unknown')}). Set it up in the Muse app "
+                   "(or the setup page on test builds) or over USB with '>wifi.ssid=NAME', '>wifi.pass=PASSWORD' "
                    "and '>wifi.connect', then run this again.", 3)
 
 
@@ -225,7 +225,8 @@ def ask(board, text, what):
     except chat.BoardError as e:
         if "NOT SET UP" in str(e) or "CAN'T REACH" in str(e):   # older firmware too
             raise Stop(f"{e}. The board can't reach your Muse: check it's paired in the Muse app, or check "
-                       "its device token (and VM, if set) in tools/muse/ble_setup.html, then run this again.", 3)
+                       "its device token (and VM, if set) over USB (or the setup page on test builds), then "
+                       "run this again.", 3)
         raise
     finally:
         if got[0]:
@@ -343,6 +344,12 @@ def copy_tree(dest):
 PROFILE_ENV = (("MUSE_VIDEO", "-video"), ("MUSE_MIRROR", "-mirror"), ("MUSE_BENCH", "-bench"))
 
 
+def profile_on(var):
+    """Whether board.sh takes the build option `var`: MUSE_BENCH only at 1, the others when set and not empty."""
+    value = os.environ.get(var)
+    return value == "1" if var == "MUSE_BENCH" else bool(value)
+
+
 def build_dir(key, root=ROOT):
     """board.sh's build directory for `key`: build-muse-PROFILE, then the enabled
     -video, -mirror and -bench suffixes in that order."""
@@ -350,7 +357,7 @@ def build_dir(key, root=ROOT):
         m = re.search(rf"^\s*{re.escape(key)}\)\s+profile=([\w.-]+);", f.read(), re.M)
     if not m:
         raise Stop(f"tools/muse/board.sh has no board {key}.", 2)
-    return f"build-muse-{m.group(1)}" + "".join(s for var, s in PROFILE_ENV if os.environ.get(var))
+    return f"build-muse-{m.group(1)}" + "".join(s for var, s in PROFILE_ENV if profile_on(var))
 
 
 def build_candidate(src, key, work):

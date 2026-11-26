@@ -23,6 +23,6 @@ if(CONFIG_MUSE_POWER_TEST)
 endif()
 idf_component_register(
     SRCS ${srcs}
-    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery esp_timer muse muse_mirror esp_pm
+    PRIV_REQUIRES esp_iris esp_mosaico_app_recovery esp_timer muse muse_mirror esp_pm muse_restart
     WHOLE_ARCHIVE
 )

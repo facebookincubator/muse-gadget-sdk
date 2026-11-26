@@ -284,11 +284,18 @@ static void long_reply(void) {
 #define MUSE_BTN_REVIEW_NEXT (1u << 16)
 #define portTICK_PERIOD_MS 1
 #define ESP_LOGI(...) ((void)0)
-static bool asleep, confirm, armed;
+static bool asleep, confirm, armed, locked;
 static uint32_t tick;
 static int talks, releases, cameras, confirmations;
+static int64_t post_at_us[8];   /* s_post_at_us as each talk press saw it */
 static uint32_t xTaskGetTickCount(void) { return tick; }
+/* muse_input.c's: a wheel hold's press goes out with the press's own time. */
+static int64_t s_post_at_us;
 static int64_t esp_timer_get_time(void) { return (int64_t)tick * 1000; }
+/* The passcode lock: no camera view, and a talk press opens the keypad. */
+static bool muse_passcode_locked(void) { return locked; }
+enum { MUSE_PASS_WHY_TALK };
+static void muse_passcode_request_keypad(int why) { (void)why; }
 /* `confirm`: the next press confirms; `armed`: a pairing prompt waits for a press. */
 static bool muse_link_confirm_press(int64_t released_us) {
     (void)released_us;
@@ -306,7 +313,11 @@ static muse_mode_t muse_state_mode(float *since) { (void)since; return mode; }
 static void muse_state_set_caption(const char *text) { strlcpy(caption, text, sizeof(caption)); }
 static void set_asleep(bool value, const char *why) { (void)why; asleep = value; }
 typedef enum { MUSE_PTT_DOWN, MUSE_PTT_UP } muse_ptt_t;
-static void post(muse_ptt_t type, bool wake) { (void)wake; talks += type == MUSE_PTT_DOWN; releases += type == MUSE_PTT_UP; }
+static void post(muse_ptt_t type, bool wake) {
+    (void)wake;
+    if (type == MUSE_PTT_DOWN && talks < 8) post_at_us[talks] = s_post_at_us;
+    talks += type == MUSE_PTT_DOWN; releases += type == MUSE_PTT_UP;
+}
 static int fake_audio(void) { return 0; }
 static const struct { int (*audio_init)(void), (*mic_init)(void); bool keyboard; const char *talk_button; } board = {
     .audio_init = fake_audio, .talk_button = "wheel" }, *muse_board = &board;
@@ -335,6 +346,7 @@ static void routing(void) {
     assert(!talks);
     input(0, 2300); input(2, 2800);
     assert(talks == 1 && releases == 1 && !asleep);
+    assert(post_at_us[0] == 2000000 && !s_post_at_us);   /* the press's time, not the hold's decision at 2300 */
     confirm = true;
     input(1, 3000); input(0, 4000); input(2, 4100);
     assert(talks == 1 && releases == 1 && !asleep);
@@ -343,21 +355,20 @@ static void routing(void) {
     assert(muse_review_active() && talks == 1);
 }
 /* A pairing prompt that appears while the wheel is already held (a BLE peer
- * finishing its handshake just after the press) waits for a press of its own:
- * the hold that started before it only talks. */
+ * finishing its handshake just after the press): the hold's press, reported
+ * once it's a hold, is one press while the prompt is up and confirms it,
+ * whenever it began; it doesn't talk. The next hold talks. */
 static void late_prompt(void) {
     muse_review_init();
     input(1, 0);   /* the press edge: nothing to confirm yet */
     assert(!confirmations);
     armed = true;  /* the prompt arrives mid-hold */
-    input(0, 100); input(0, 300);   /* the hold becomes push-to-talk */
-    assert(!confirmations && armed && talks == 1);
+    input(0, 100); input(0, 300);   /* the hold's press goes out: it confirms */
+    assert(confirmations == 1 && !armed && !talks);
     input(2, 400);
-    assert(releases == 1 && armed);
-    input(1, 1000);   /* a fresh press confirms it, and doesn't talk */
-    assert(confirmations == 1 && !armed);
-    input(0, 1400); input(2, 1500);
-    assert(talks == 1 && releases == 1);
+    assert(!releases);
+    input(1, 1000); input(0, 1400); input(2, 1500);
+    assert(confirmations == 1 && talks == 1 && releases == 1);
 }
 /* Let go on the very poll the hold would start: a click, not a press and release. */
 static void threshold(void) {
@@ -378,11 +389,21 @@ static void nothing_to_review(void) {
     assert(!strcmp(caption, "CAN'T REACH MUSE") && !muse_review_active());
     mode = MUSE_MODE_IDLE;
     input(MUSE_BTN_REVIEW_NEXT, 200);
-    assert(!strcmp(caption, "NO REPLY YET"));
+    assert(!strcmp(caption, "No reply yet"));
+}
+/* The passcode lock: a double click opens no camera view; the clicks
+ * only sleep, as they would without the camera. */
+static void locked_camera(void) {
+    muse_review_init();
+    locked = true;
+    input(1, 1000); input(2, 1100);
+    input(1, 1200); input(2, 1250); input(0, 1600);
+    assert(!cameras && !talks && asleep);
 }
 int main(int argc, char **argv) {
     assert(argc == 2);
     if (!strcmp(argv[1], "click")) click();
+    else if (!strcmp(argv[1], "locked")) locked_camera();
     else if (!strcmp(argv[1], "pairing")) pairing();
     else if (!strcmp(argv[1], "pages")) pages();
     else if (!strcmp(argv[1], "cjk")) cjk_capacity();
@@ -458,7 +479,7 @@ int main(int argc, char **argv) {
             result = subprocess.run([str(binary), "threshold"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_hold_started_before_a_pairing_prompt_does_not_confirm_it(self):
+    def test_hold_started_before_a_pairing_prompt_confirms_it(self):
         for binary in (self.binary, self.camera_binary):
             result = subprocess.run([str(binary), "late"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -468,6 +489,10 @@ int main(int argc, char **argv) {
 
     def test_camera_double_click_does_not_record_or_sleep(self):
         result = subprocess.run([str(self.camera_binary), "routing"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_no_camera_view_while_locked(self):
+        result = subprocess.run([str(self.camera_binary), "locked"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_snapshots_failures_revisions_and_utf8_truncation(self):

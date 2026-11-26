@@ -109,7 +109,12 @@ static int body(const uint8_t *pcm, size_t n)
     muse_hatch_wav_header(wav, 16000);
     memcpy(wav + MUSE_HATCH_WAV_HEADER, pcm, n);
     size_t b64_len = muse_hatch_base64(wav, wav_len, b64);
-    fputs(MUSE_HATCH_NOTE_HEAD, stdout);
+    char head[MUSE_NOTE_HEAD_MAX];
+    size_t head_len = muse_note_head(head, sizeof(head), "homelink-0a1b2c");
+    if (!head_len) {
+        return 2;
+    }
+    fwrite(head, 1, head_len, stdout);
     fwrite(b64, 1, b64_len, stdout);
     fputs(MUSE_HATCH_NOTE_TAIL, stdout);
     free(wav);

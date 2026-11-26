@@ -125,7 +125,7 @@ int main(int argc, char **argv)
     assert(!lv_obj_has_flag(lv_obj_get_parent(panel),LV_OBJ_FLAG_HIDDEN));
     /* The whole picker owns vertical scrolling, never the face's tile navigation. */
     touch(s_w/2,s_h/2,true); touch(s_w/2,s_h/2-60,true); touch(s_w/2,s_h/2-60,false);
-    assert(!muse_options_pending() && lv_obj_get_scroll_x(s_tv) == 0);
+    assert(!muse_options_pending() && lv_obj_get_scroll_x(s_tv) == lv_obj_get_x(s_face));
     assert_panel_inside(panel);
     frame(); tap(lv_obj_get_parent(answer));
     assert(muse_options_snapshot(&q) && q.status==MUSE_OPTIONS_QUEUED && q.selected==0);

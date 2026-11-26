@@ -73,17 +73,70 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
     memcpy(rejected->ids[rejected->count++], id, len + 1);
 }
 
+/*
+ * Every POST /chat/stream body names this gadget's node at its top level
+ * (the VM's chat API: a gadget's
+ * chat turn carries device_id or node_id, and never chat_context, which the
+ * VM refuses with 400). Provided by the app: Link's node id
+ * ("gadget-xxxxxx"; a gadget set up by older firmware keeps "homelink-xxxxxx";
+ * the one link.register sends), a RAM string, "" if
+ * unknown. Called on the session task, whose stack may be in PSRAM: it must
+ * not read flash.
+ */
+const char *muse_chat_node_id(void);
+
+/* The longest node id a body carries; longer ones are cut. */
+#define MUSE_CHAT_NODE_MAX 64
+/* "node_id":"<id>", for a JSON body built as text: only a node id's own
+ * characters (letters, digits, - _ . :) are kept, so nothing needs escaping.
+ * Returns the length, 0 if it doesn't fit cap. */
+static inline size_t muse_chat_node_field(char *out, size_t cap, const char *node)
+{
+    static const char head[] = "\"node_id\":\"";
+    size_t o = sizeof(head) - 1;
+    if (cap < o + MUSE_CHAT_NODE_MAX + 3) return 0;
+    memcpy(out, head, o);
+    size_t k = 0;
+    for (const char *c = node ? node : ""; *c && k < MUSE_CHAT_NODE_MAX; c++) {
+        char ch = *c;
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' ||
+            ch == '_' || ch == '.' || ch == ':') {
+            out[o++] = ch;
+            k++;
+        }
+    }
+    out[o++] = '"';
+    out[o++] = ',';
+    out[o] = '\0';
+    return o;
+}
+
 /* Identifies spoken turns (voice notes and dictation) as coming from a small
  * microcontroller voice device, so Muse answers in short plain sentences.
  * Typed turns leave it out. */
 #define MUSE_CHAT_SPOKEN_DEVICE "mcu-wearable"
 
-/* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
-#define MUSE_HATCH_NOTE_HEAD \
-    "{\"message\":\"\",\"output_modality\":\"text\",\"device\":\"" MUSE_CHAT_SPOKEN_DEVICE "\"," \
+/* A voice note is a POST /chat/stream body: the head (muse_note_head:
+ * {"node_id":..., then NOTE_FIELDS), a base64 WAV, NOTE_TAIL. */
+#define MUSE_NOTE_FIELDS \
+    "\"message\":\"\",\"output_modality\":\"text\",\"device\":\"" MUSE_CHAT_SPOKEN_DEVICE "\"," \
     "\"items\":[{\"type\":\"file\"," \
     "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
+#define MUSE_NOTE_HEAD_MAX (1 + 16 + MUSE_CHAT_NODE_MAX + sizeof(MUSE_NOTE_FIELDS))
+
+/* The note's head for node into out (cap >= MUSE_NOTE_HEAD_MAX); the
+ * length, 0 if it doesn't fit. */
+static inline size_t muse_note_head(char *out, size_t cap, const char *node)
+{
+    if (cap < MUSE_NOTE_HEAD_MAX) return 0;
+    out[0] = '{';
+    size_t n = muse_chat_node_field(out + 1, cap - 1, node);
+    if (!n) return 0;
+    n += 1;
+    memcpy(out + n, MUSE_NOTE_FIELDS, sizeof(MUSE_NOTE_FIELDS));
+    return n + sizeof(MUSE_NOTE_FIELDS) - 1;
+}
 #define MUSE_HATCH_WAV_HEADER 44
 
 /* A voice note's photo (CONFIG_MUSE_PHOTO_NOTES) follows its audio as an

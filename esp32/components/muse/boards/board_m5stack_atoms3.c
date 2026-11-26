@@ -41,6 +41,7 @@
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_lvgl_hold.h"   /* every pause bounded (muse_lvgl_hold.h) */
 #include "muse_input.h"
 #include "muse_mem.h"
 
@@ -214,8 +215,8 @@ static void set_brightness(int pct)
 
 static void display_pause(bool pause)
 {
-    if (pause) esp_lv_adapter_pause(-1);
-    else esp_lv_adapter_resume();
+    if (pause) muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);
+    else muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
 }
 
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)

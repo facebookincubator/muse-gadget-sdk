@@ -14,14 +14,22 @@
  * limitations under the License.
  */
 #include "muse_yuv.h"
+#include "muse_video_fit.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
+#include "muse_mem.h"   /* MUSE_SIMD_CAPS */
 
 #include "esp_attr.h"
+#if defined(ESP_PLATFORM)
+#include "esp_cpu.h"
+#endif
+
+/* The converters in IRAM: they run for every pixel of every picture. */
+#define YUV_HOT IRAM_ATTR
 #include "esp_log.h"
 #include "sdkconfig.h"
 
@@ -29,14 +37,14 @@
 #define OFS 384
 
 /* Only the last pixels of a row use these: in PSRAM, to spare internal RAM. */
-static uint16_t *s_tr, *s_tgh, *s_tb;
-static int16_t *s_rv, *s_gu, *s_gv, *s_bu, *s_y;
+static const uint16_t *s_tr, *s_tgh, *s_tb;
+static const int16_t *s_rv, *s_gu, *s_gv, *s_bu, *s_y;
 static bool s_init;
 
 /* The SIMD kernel's constants, 8 lanes each: 128, 204, 50, 104, 258, then 16,
  * 149, 255, 0xF8, 0xF8, 0xE0, 0x1C (see muse_yuv_pie.S). */
 static int16_t s_k[12][8] __attribute__((aligned(16)));
-static int16_t s_scratch[8][8] __attribute__((aligned(16)));
+static int16_t s_scratch[8][8] __attribute__((aligned(16), unused));   /* the SIMD kernels' (unused without them: the C6) */
 
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S31
 #define HAVE_PIE 1
@@ -65,28 +73,24 @@ static void init_tables(void)
         t = t ? t : malloc(3 * 1024 * sizeof(uint16_t));
         c5 = c5 ? c5 : malloc(5 * 256 * sizeof(int16_t));
     }
-    s_tr = t;
-    s_tgh = t + 1024;
-    s_tb = t + 2048;
-    s_y = c5;
-    s_rv = c5 + 256;
-    s_gu = c5 + 512;
-    s_gv = c5 + 768;
-    s_bu = c5 + 1024;
+    uint16_t *tr = t, *tgh = t + 1024, *tb = t + 2048;
+    int16_t *ty = c5, *rv = c5 + 256, *gu = c5 + 512, *gv = c5 + 768, *bu = c5 + 1024;
     for (int i = 0; i < 1024; i++) {
         int c = i - OFS;
         c = c < 0 ? 0 : c > 255 ? 255 : c;
-        s_tr[i] = (uint16_t)(c & 0xF8);
-        s_tgh[i] = (uint16_t)(((c & 0xE0) >> 5) | ((c & 0x1C) << 11));
-        s_tb[i] = (uint16_t)((c & 0xF8) << 5);
+        tr[i] = (uint16_t)(c & 0xF8);
+        tgh[i] = (uint16_t)(((c & 0xE0) >> 5) | ((c & 0x1C) << 11));
+        tb[i] = (uint16_t)((c & 0xF8) << 5);
     }
     for (int i = 0; i < 256; i++) {
-        s_y[i] = (int16_t)((((i - 16) * 149) >> 7) + OFS);
-        s_rv[i] = (int16_t)(((i - 128) * 204) >> 7);
-        s_gu[i] = (int16_t)(((i - 128) * 50) >> 7);
-        s_gv[i] = (int16_t)(((i - 128) * 104) >> 7);
-        s_bu[i] = (int16_t)(((i - 128) * 258) >> 7);
+        ty[i] = (int16_t)((((i - 16) * 149) >> 7) + OFS);
+        rv[i] = (int16_t)(((i - 128) * 204) >> 7);
+        gu[i] = (int16_t)(((i - 128) * 50) >> 7);
+        gv[i] = (int16_t)(((i - 128) * 104) >> 7);
+        bu[i] = (int16_t)(((i - 128) * 258) >> 7);
     }
+    s_tr = tr, s_tgh = tgh, s_tb = tb;
+    s_y = ty, s_rv = rv, s_gu = gu, s_gv = gv, s_bu = bu;
     static const int16_t kv[12] = { 128, 204, 50, 104, 258, 16, 149, 255, 0xF8, 0xF8, 0xE0, 0x1C };
     for (int j = 0; j < 12; j++) {
         for (int l = 0; l < 8; l++) {
@@ -103,68 +107,57 @@ static inline uint32_t px2(int y, int rv, int g, int bu)
     return p | p << 16;
 }
 
-/* The last n (1 to 3) output rows of a two times upscaled source row pair,
- * on the C path: output row i comes from source row i / 2, so the pair's
- * second row is read only for a third output row. */
-static void IRAM_ATTR up2_part(const uint8_t *y0, int ystride, const uint8_t *cu, const uint8_t *cv, int src_w,
-                               uint8_t *out, int out_stride, int n)
-{
-    for (int i = 0; i < n; i++) {
-        const uint8_t *ys = i < 2 ? y0 : y0 + ystride;
-        uint32_t *w = (uint32_t *)(out + (size_t)i * out_stride);
-        for (int x = 0; x < src_w; x += 2) {
-            int U = cu[x >> 1], V = cv[x >> 1];
-            int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
-            w[x] = px2(s_y[ys[x]], rv, g, bu);
-            w[x + 1] = px2(s_y[ys[x + 1]], rv, g, bu);
-        }
-    }
-}
-
-void IRAM_ATTR muse_yuv_up2(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
-                            int src_w, int out_rows, uint8_t *out, int out_stride)
+void YUV_HOT muse_yuv_up2(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+                          int src_w, int out_rows, uint8_t *out, int out_stride)
 {
     if (!s_init) {
         init_tables();
     }
     int simd_w = s_pie ? src_w & ~15 : 0;
-    /* Whole source row pairs make four output rows each; a destination
-     * that ends inside a pair gets only the rows it has room for. */
-    int src_rows = (out_rows & ~3) / 2;
-    for (int r = 0; r < src_rows; r += 2) {
-        const uint8_t *y0 = y + r * ystride, *y1 = y0 + ystride;
+    /* Each source row pair makes four output rows: a pair whose four don't
+     * all fit the slice (out_rows not a multiple of 4) writes only those that
+     * do, on the C path, and reads its second row only if it shows. */
+    for (int r = 0; 2 * r < out_rows; r += 2) {
+        int n = out_rows - 2 * r < 4 ? out_rows - 2 * r : 4;   /* output rows of this pair */
+        const uint8_t *y0 = y + r * ystride, *y1 = n > 2 ? y0 + ystride : y0;
         const uint8_t *cu = u + (r / 2) * cstride, *cv = v + (r / 2) * cstride;
-        uint8_t *o0 = out + 2 * r * out_stride, *o2 = o0 + 2 * out_stride;
+        uint8_t *o0 = out + 2 * r * out_stride;
+        int sw = n == 4 ? simd_w : 0;   /* the kernel writes all four rows */
 #if HAVE_PIE
-        if (simd_w) {
-            muse_yuv_pie_2rows_up2(y0, y1, cu, cv, o0, o2, simd_w / 16, &s_k[0][0], &s_scratch[0][0],
+        /* Aligned rows only (muse_yuv_1x). */
+        if (sw && ((((uintptr_t)y0 | (uintptr_t)y1) & 15) ||
+                   (((uintptr_t)o0 | (uintptr_t)out_stride | (uintptr_t)cu | (uintptr_t)cv) & 7))) {
+            sw = 0;
+        }
+        if (sw) {
+            muse_yuv_pie_2rows_up2(y0, y1, cu, cv, o0, o0 + 2 * out_stride, sw / 16, &s_k[0][0], &s_scratch[0][0],
                                    (uint32_t)out_stride);
         }
 #endif
-        uint32_t *w0 = (uint32_t *)o0, *w1 = (uint32_t *)(o0 + out_stride);
-        uint32_t *w2 = (uint32_t *)o2, *w3 = (uint32_t *)(o2 + out_stride);
-        for (int x = simd_w; x < src_w; x += 2) {
+        uint32_t *w[4];
+        for (int k = 0; k < 4; k++) {
+            w[k] = (uint32_t *)(o0 + (size_t)(k < n ? k : 0) * out_stride);   /* rows past the slice: never written */
+        }
+        for (int x = sw; x < src_w; x += 2) {
             int U = cu[x >> 1], V = cv[x >> 1];
             int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
-            uint32_t p;
-            p = px2(s_y[y0[x]], rv, g, bu);
-            w0[x] = p;
-            w1[x] = p;
-            p = px2(s_y[y0[x + 1]], rv, g, bu);
-            w0[x + 1] = p;
-            w1[x + 1] = p;
-            p = px2(s_y[y1[x]], rv, g, bu);
-            w2[x] = p;
-            w3[x] = p;
-            p = px2(s_y[y1[x + 1]], rv, g, bu);
-            w2[x + 1] = p;
-            w3[x + 1] = p;
+            uint32_t p0 = px2(s_y[y0[x]], rv, g, bu), p1 = px2(s_y[y0[x + 1]], rv, g, bu);
+            w[0][x] = p0;
+            w[0][x + 1] = p1;
+            if (n > 1) {
+                w[1][x] = p0;
+                w[1][x + 1] = p1;
+            }
+            if (n > 2) {
+                uint32_t q0 = px2(s_y[y1[x]], rv, g, bu), q1 = px2(s_y[y1[x + 1]], rv, g, bu);
+                w[2][x] = q0;
+                w[2][x + 1] = q1;
+                if (n > 3) {
+                    w[3][x] = q0;
+                    w[3][x + 1] = q1;
+                }
+            }
         }
-    }
-    if (out_rows & 3) {
-        int r = src_rows;
-        up2_part(y + (size_t)r * ystride, ystride, u + (size_t)(r / 2) * cstride, v + (size_t)(r / 2) * cstride,
-                 src_w, out + (size_t)2 * r * out_stride, out_stride, out_rows & 3);
     }
 }
 
@@ -173,41 +166,113 @@ static inline uint16_t px1(int y, int rv, int g, int bu)
     return s_tr[y + rv] | s_tgh[y - g] | s_tb[y + bu];
 }
 
-void IRAM_ATTR muse_yuv_1x(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+void YUV_HOT muse_yuv_1x(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
                            int src_w, int src_rows, uint8_t *out, int out_stride)
 {
     if (!s_init) {
         init_tables();
     }
     int simd_w = s_pie ? src_w & ~15 : 0;
-    int pairs = src_rows & ~1;
-    for (int r = 0; r < pairs; r += 2) {
-        const uint8_t *y0 = y + r * ystride, *y1 = y0 + ystride;
+    for (int r = 0; r < src_rows; r += 2) {
+        /* An odd slice's last row is a pair's first alone (C path; its second row is neither read nor written). */
+        bool two = r + 1 < src_rows;
+        const uint8_t *y0 = y + r * ystride, *y1 = two ? y0 + ystride : y0;
         const uint8_t *cu = u + (r / 2) * cstride, *cv = v + (r / 2) * cstride;
-        uint32_t *w0 = (uint32_t *)(out + r * out_stride), *w1 = (uint32_t *)(out + (r + 1) * out_stride);
+        uint32_t *w0 = (uint32_t *)(out + r * out_stride), *w1 = (uint32_t *)(out + (r + (two ? 1 : 0)) * out_stride);
+        int sw = two ? simd_w : 0;
 #if HAVE_PIE
-        if (simd_w) {
-            muse_yuv_pie_2rows(y0, y1, cu, cv, (uint8_t *)w0, (uint8_t *)w1, simd_w / 16, &s_k[0][0], &s_scratch[0][0]);
+        /* The vector loads and stores ignore the low bits of an address:
+         * luma loads are 16 bytes (muse_yuv_pie.S: ee.vld.128), chroma
+         * loads and the stores 8 (ee.vld.l.64, ee.vst.l/h.64). A row that
+         * doesn't start on that (a 466 px UI picture's 932 B output rows:
+         * every odd row 4 bytes off) would land up to 2 pixels early, so
+         * such rows go the scalar way. A 240 px video's 120 B chroma rows
+         * are 8-aligned and stay on the vector path. */
+        if (sw && ((((uintptr_t)y0 | (uintptr_t)y1) & 15) ||
+                   (((uintptr_t)w0 | (uintptr_t)w1 | (uintptr_t)cu | (uintptr_t)cv) & 7))) {
+            sw = 0;
+        }
+        if (sw) {
+            muse_yuv_pie_2rows(y0, y1, cu, cv, (uint8_t *)w0, (uint8_t *)w1, sw / 16, &s_k[0][0], &s_scratch[0][0]);
         }
 #endif
-        for (int x = simd_w; x < src_w; x += 2) {
+        for (int x = sw; x < src_w; x += 2) {
             int U = cu[x >> 1], V = cv[x >> 1];
             int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
             w0[x >> 1] = px1(s_y[y0[x]], rv, g, bu) | (uint32_t)px1(s_y[y0[x + 1]], rv, g, bu) << 16;
-            w1[x >> 1] = px1(s_y[y1[x]], rv, g, bu) | (uint32_t)px1(s_y[y1[x + 1]], rv, g, bu) << 16;
+            if (two) {
+                w1[x >> 1] = px1(s_y[y1[x]], rv, g, bu) | (uint32_t)px1(s_y[y1[x + 1]], rv, g, bu) << 16;
+            }
         }
     }
-    if (src_rows & 1) {
-        /* An odd last row on its own (C path): the row after it is neither
-         * read nor written. */
-        int r = pairs;
-        const uint8_t *y0 = y + (size_t)r * ystride;
-        const uint8_t *cu = u + (size_t)(r / 2) * cstride, *cv = v + (size_t)(r / 2) * cstride;
-        uint32_t *w0 = (uint32_t *)(out + (size_t)r * out_stride);
-        for (int x = 0; x < src_w; x += 2) {
-            int U = cu[x >> 1], V = cv[x >> 1];
-            int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
-            w0[x >> 1] = px1(s_y[y0[x]], rv, g, bu) | (uint32_t)px1(s_y[y0[x + 1]], rv, g, bu) << 16;
+}
+
+/*
+ * BT.601 limited range in Q12, rounded: R = 1.164 (Y-16) + 1.596 (V-128),
+ * G = 1.164 (Y-16) - 0.391 (U-128) - 0.813 (V-128), B = 1.164 (Y-16) + 2.018 (U-128).
+ */
+#define HQ_Y 4769
+#define HQ_RV 6537
+#define HQ_GU 1604
+#define HQ_GV 3330
+#define HQ_BU 8263
+/* 4x4 Bayer thresholds in 1/16 of a step, centred (-7.5..7.5 as 2x-15..15). */
+static const int8_t s_bayer[4][4] = { { -15, 1, -11, 5 }, { 9, -7, 13, -3 }, { -9, 7, -13, 3 }, { 15, -1, 11, -5 } };
+
+static inline int clamp255(int x)
+{
+    return x < 0 ? 0 : x > 255 ? 255 : x;
+}
+
+/* One RGB565 pixel (the panel's byte order, as px1) from Q12 RGB and a dither offset. */
+static inline uint16_t hq_px(int y12, int u, int v, int d)
+{
+    /* u, v: chroma - 128 in Q4 (bilinear sums of 16). */
+    int r = y12 + (HQ_RV * v >> 4);
+    int g = y12 - ((HQ_GU * u + HQ_GV * v) >> 4);
+    int b = y12 + (HQ_BU * u >> 4);
+    /* Q12 -> 8 bits with rounding, then the dither at the 5/6-bit step. */
+    /* The bits RGB565 drops are truncated, so the dither spans one whole
+     * step (d + 16 = 1..31 thirty-seconds of it): on average unbiased. R and
+     * B steps are 8 levels of 8 bits (8 << 12 in Q12, so a 32nd is 1 << 10),
+     * G's 4 (1 << 9). */
+    int r8 = clamp255((r + (d + 16) * 1024) >> 12);
+    int g8 = clamp255((g + (d + 16) * 512) >> 12);
+    int b8 = clamp255((b + (d + 16) * 1024) >> 12);
+    return (uint16_t)((r8 & 0xF8) | (((g8 & 0xE0) >> 5) | ((g8 & 0x1C) << 11)) | ((b8 & 0xF8) << 5));
+}
+
+void muse_yuv_1x_hq(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+                              int src_w, int src_h, int row, int rows, uint8_t *out, int out_stride)
+{
+    muse_yuv_1x_hq_cols(y, u, v, ystride, cstride, src_w, src_h, row, rows, 0, src_w, out, out_stride);
+}
+
+void muse_yuv_1x_hq_cols(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+                         int src_w, int src_h, int row, int rows, int x0, int x1, uint8_t *out, int out_stride)
+{
+    int cw = src_w / 2, ch = (src_h + 1) / 2;
+    for (int r = 0; r < rows; r++) {
+        int sy = row + r;                      /* source row */
+        int cy = sy >> 1;                      /* its chroma row */
+        int cy2 = sy & 1 ? cy + 1 : cy - 1;    /* the neighbour row it leans towards */
+        cy2 = cy2 < 0 ? 0 : cy2 >= ch ? ch - 1 : cy2;
+        const uint8_t *yr = y + (size_t)sy * ystride;
+        const uint8_t *u0 = u + (size_t)cy * cstride, *u1 = u + (size_t)cy2 * cstride;
+        const uint8_t *v0 = v + (size_t)cy * cstride, *v1 = v + (size_t)cy2 * cstride;
+        uint16_t *o = (uint16_t *)(out + (size_t)r * out_stride);
+        const int8_t *dith = s_bayer[sy & 3];
+        for (int cx = x0 / 2; cx < x1 / 2; cx++) {
+            int cl = cx > 0 ? cx - 1 : 0, cr = cx + 1 < cw ? cx + 1 : cw - 1;
+            /* vertical blend (3:1) at this column and its neighbours, in Q2 */
+            int uc = 3 * u0[cx] + u1[cx], ul = 3 * u0[cl] + u1[cl], ur = 3 * u0[cr] + u1[cr];
+            int vc = 3 * v0[cx] + v1[cx], vl = 3 * v0[cl] + v1[cl], vr = 3 * v0[cr] + v1[cr];
+            /* horizontal blend (3:1) for the left and right pixel: Q4, minus 128 */
+            int ua = 3 * uc + ul - 2048, ub = 3 * uc + ur - 2048;
+            int va = 3 * vc + vl - 2048, vb = 3 * vc + vr - 2048;
+            int x = 2 * cx;
+            o[x] = hq_px(HQ_Y * (yr[x] - 16), ua, va, dith[x & 3]);
+            o[x + 1] = hq_px(HQ_Y * (yr[x + 1] - 16), ub, vb, dith[(x + 1) & 3]);
         }
     }
 }
@@ -222,7 +287,7 @@ int muse_yuv_src_rows(int src_h, int out_h, int out_rows)
     return last > src_h ? src_h : last;
 }
 
-void IRAM_ATTR muse_yuv_scaled(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+void YUV_HOT muse_yuv_scaled(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
                                int src_w, int src_h, int out_w, int out_h, int row, int rows, uint8_t *out,
                                int out_stride)
 {
@@ -267,8 +332,202 @@ void IRAM_ATTR muse_yuv_scaled(const uint8_t *y, const uint8_t *u, const uint8_t
     }
 }
 
+/* muse_yuv_fill(): one source row converted, and which source column each
+ * output column takes (its key: what it was built for). The show task's only. */
+#define FILL_MAX_SRC MUSE_YUV_FILL_MAX_SRC
+#define FILL_MAX_OUT 512
+static uint16_t s_fline[FILL_MAX_SRC];
+static int s_fkey[4] = { -1, -1, -1, -1 };
+
+int muse_yuv_fill_src_rows(int src_h, int num, int den, int crop_y, int out_rows)
+{
+    return out_rows > 0 ? muse_video_fill_src(out_rows - 1, crop_y, num, den, src_h) + 1 : 0;
+}
+
+/* Each source column's run of output columns (its repeat count), from the first source column used. */
+static uint8_t s_frun[FILL_MAX_SRC];
+static int s_fs0, s_fs1, s_frun_min, s_frun_max;   /* the runs' shortest and longest (the ends' included) */
+
+
+static void fill_xmap(int src_w, int num, int den, int crop_x, int out_w)
+{
+    if (s_fkey[0] != src_w || s_fkey[1] != (num << 12 | den) || s_fkey[2] != crop_x || s_fkey[3] != out_w) {
+        memset(s_frun, 0, sizeof(s_frun));
+        for (int x = 0; x < out_w; x++) {
+            int sx = muse_video_fill_src(x, crop_x, num, den, src_w);
+            if (s_frun[sx] < 255) {
+                s_frun[sx]++;
+            }
+        }
+        s_fs0 = muse_video_fill_src(0, crop_x, num, den, src_w);
+        s_fs1 = muse_video_fill_src(out_w - 1, crop_x, num, den, src_w);
+        s_frun_min = 255;
+        s_frun_max = 0;
+        for (int i = s_fs0; i <= s_fs1; i++) {
+            s_frun_min = s_frun[i] < s_frun_min ? s_frun[i] : s_frun_min;
+            s_frun_max = s_frun[i] > s_frun_max ? s_frun[i] : s_frun_max;
+        }
+        s_fkey[0] = src_w;
+        s_fkey[1] = num << 12 | den;
+        s_fkey[2] = crop_x;
+        s_fkey[3] = out_w;
+    }
+}
+
+void muse_yuv_fill_row565(const uint16_t *src, int src_w, int num, int den, int crop_x, int out_w,
+                                    uint16_t *out)
+{
+    if (src_w > FILL_MAX_SRC || out_w > FILL_MAX_OUT || src_w < 1 || num <= 0 || den <= 0) {
+        memset(out, 0, (size_t)out_w * 2);
+        return;
+    }
+    fill_xmap(src_w, num, den, crop_x, out_w);
+    uint16_t *d = out;
+    for (int x = s_fs0; x <= s_fs1; x++) {
+        for (int k = 0; k < s_frun[x]; k++) {
+            *d++ = src[x];
+        }
+    }
+}
+
+/* The last output row made, kept for the next piece's first row (its source row,
+ * -1: none; a new frame starts at output row 0 and forgets it). */
+static uint16_t s_frow[FILL_MAX_OUT + 3];
+static int s_frow_sy = -1;
+static uint32_t s_fill_cycles, s_fill_cconv, s_fill_cexp, s_fill_ccopy;   /* the last three: a breakdown (bench) */
+
+uint32_t muse_yuv_fill_cycles(void)
+{
+    uint32_t c = s_fill_cycles;
+    s_fill_cycles = 0;
+    return c;
+}
+
+void muse_yuv_fill_breakdown(uint32_t *conv, uint32_t *exp, uint32_t *copy)
+{
+    *conv = s_fill_cconv;
+    *exp = s_fill_cexp;
+    *copy = s_fill_ccopy;
+    s_fill_cconv = s_fill_cexp = s_fill_ccopy = 0;
+}
+
+static inline uint32_t cycles_now(void)
+{
+#if defined(ESP_PLATFORM)
+    return (uint32_t)esp_cpu_get_cycle_count();
+#else
+    return 0;
+#endif
+}
+
+void IRAM_ATTR muse_yuv_fill(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+                             int src_w, int src_h, int num, int den, int crop_x, int crop_y, int out_w, int row,
+                             int rows, uint8_t *out, int out_stride)
+{
+    if (!s_init) {
+        init_tables();
+    }
+    if (src_w > FILL_MAX_SRC || out_w > FILL_MAX_OUT || src_w < 2 || num <= 0 || den <= 0) {
+        for (int r = 0; r < rows; r++) {
+            memset(out + (size_t)r * out_stride, 0, (size_t)out_w * 2);
+        }
+        return;
+    }
+    uint32_t c0 = cycles_now();
+    fill_xmap(src_w, num, den, crop_x, out_w);
+    if (row == 0) {
+        s_frow_sy = -1;   /* a new frame */
+    }
+    const size_t n = (size_t)out_w * 2;
+    int last = s_frow_sy;   /* the source row the row above holds (the piece before's last: s_frow) */
+    for (int r = 0; r < rows; r++) {
+        int sy = muse_video_fill_src(row + r, crop_y, num, den, src_h);
+        uint16_t *o = (uint16_t *)(out + (size_t)r * out_stride);
+        if (sy == last) {
+            /* The same source row again: a copy of the row above (the piece before's, kept, for a piece's first). */
+            uint32_t t = cycles_now();
+            memcpy(o, r ? (const uint8_t *)o - out_stride : (const uint8_t *)s_frow, n);
+            s_fill_ccopy += cycles_now() - t;
+            continue;
+        }
+        uint32_t t0 = cycles_now();
+        const uint8_t *yr = y + (size_t)sy * ystride;
+        const uint8_t *cu = u + (size_t)(sy / 2) * cstride, *cv = v + (size_t)(sy / 2) * cstride;
+        const int x0 = s_fs0 & ~1, x1 = s_fs1 + 1;
+        for (int x = x0; x < x1; x += 2) {
+            int U = cu[x >> 1], V = cv[x >> 1];
+            int rv = s_rv[V], g = s_gu[U] + s_gv[V], bu = s_bu[U];
+            s_fline[x] = px1(s_y[yr[x]], rv, g, bu);
+            s_fline[x + 1] = px1(s_y[yr[x + 1]], rv, g, bu);
+        }
+        uint32_t t1 = cycles_now();
+        s_fill_cconv += t1 - t0;
+        /* Each source pixel written its run of times: two or three at this scale. */
+        uint16_t *d = o;
+        if (s_frun_min >= 2 && s_frun_max <= 3) {
+            /* Two or three each (scales 2-3): two always, a third that the next pixel overwrites when the run is
+             * two; the last pixel on its own, so nothing is written past the row. */
+            for (int x = s_fs0; x < s_fs1; x++) {
+                uint16_t px = s_fline[x];
+                d[0] = px;
+                d[1] = px;
+                d[2] = px;
+                d += s_frun[x];
+            }
+            for (int k = 0; k < s_frun[s_fs1]; k++) {
+                d[k] = s_fline[s_fs1];
+            }
+            s_fill_cexp += cycles_now() - t1;
+            last = sy;
+            continue;
+        }
+        for (int x = s_fs0; x <= s_fs1; x++) {
+            uint16_t px = s_fline[x];
+            switch (s_frun[x]) {
+            case 3:
+                d[2] = px;
+                /* fall through */
+            case 2:
+                d[1] = px;
+                /* fall through */
+            case 1:
+                d[0] = px;
+                /* fall through */
+            case 0:
+                break;
+            default:
+                for (int k = 0; k < s_frun[x]; k++) {
+                    d[k] = px;
+                }
+                break;
+            }
+            d += s_frun[x];
+        }
+        s_fill_cexp += cycles_now() - t1;
+        last = sy;
+    }
+    /* The piece's last row, for the next piece's first if it's the same source row. */
+    if (rows > 0) {
+        memcpy(s_frow, out + (size_t)(rows - 1) * out_stride, n);
+        s_frow_sy = last;
+    }
+    s_fill_cycles += cycles_now() - c0;
+}
+
+void YUV_HOT muse_yuv_fill_win(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+                               int src_w, int src_h, int num, int den, int crop_x, int crop_y, int out_x, int w,
+                               int row, int rows, bool first, uint8_t *out, int out_stride)
+{
+    if (first) {
+        s_frow_sy = -1;   /* the kept row is another window's (or the whole picture's) */
+    }
+    /* Output column o of the window is the picture's out_x + o: the same source column with the crop moved. */
+    muse_yuv_fill(y, u, v, ystride, cstride, src_w, src_h, num, den, crop_x + out_x, crop_y, w, row, rows, out,
+                  out_stride);
+}
+
 /* 2 -> 3 along a row: a, (a + b + 1) / 2, b. */
-static void IRAM_ATTR expand32(const uint8_t *s, int n, uint8_t *d)
+static void YUV_HOT expand32(const uint8_t *s, int n, uint8_t *d)
 {
     for (int i = 0; i < n; i += 2) {
         int a = s[i], b = s[i + 1];
@@ -279,7 +538,7 @@ static void IRAM_ATTR expand32(const uint8_t *s, int n, uint8_t *d)
     }
 }
 
-static void IRAM_ATTR avg_rows(const uint8_t *a, const uint8_t *b, int n, uint8_t *d)
+static void YUV_HOT avg_rows(const uint8_t *a, const uint8_t *b, int n, uint8_t *d)
 {
     const uint32_t *wa = (const uint32_t *)a, *wb = (const uint32_t *)b;
     uint32_t *wd = (uint32_t *)d;
@@ -320,7 +579,7 @@ int muse_yuv_up32_src_rows(int src_h, int out_rows)
     return need > src_h ? src_h : need;
 }
 
-void IRAM_ATTR muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
+void YUV_HOT muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *v, int ystride, int cstride,
                              int src_w, int src_h, int row, int rows, uint8_t *out, int out_stride)
 {
     enum { MAXW = 512 };   /* a multiple of 16, as the SIMD kernels want strides */
@@ -328,7 +587,7 @@ void IRAM_ATTR muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *
      * pictures need it): 2.5 KB of internal RAM other builds keep. */
     static uint8_t *buf;
     if (!buf) {
-        buf = heap_caps_aligned_alloc(16, 5 * MAXW, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        buf = heap_caps_aligned_alloc(16, 5 * MAXW, MUSE_SIMD_CAPS);   /* main SRAM: SIMD rows (muse_mem.h) */
         if (!buf) {
             return;
         }
@@ -340,7 +599,7 @@ void IRAM_ATTR muse_yuv_up32(const uint8_t *y, const uint8_t *u, const uint8_t *
         return;
     }
     for (int r = row; r < row + rows; r += 2) {
-        /* Row pairs; a destination that ends inside one gets its first row only. */
+        /* The slice's rows only: an odd slice ends on a pair's first row. */
         int n = row + rows - r < 2 ? 1 : 2;
         row32(y, ystride, src_w, src_h, r, t0, t1, yp[0]);
         if (n == 2) {

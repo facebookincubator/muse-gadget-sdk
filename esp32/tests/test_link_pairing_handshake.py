@@ -94,7 +94,8 @@ class LinkPairingHandshakeTest(unittest.TestCase):
             run([cmake, "--build", str(build), "--target", "tfpsacrypto", "-j", "4"], temp)
             built_crypto = build / "tf-psa-crypto"
             includes = [
-                ROOT / "tests/pairing_fakes", compat, ROOT / "main", cjson,
+                ROOT / "tests/pairing_fakes", ROOT / "tests/secure_random_fakes",
+                ROOT / "components/secure_random/include", compat, ROOT / "main", cjson,
                 crypto / "include", crypto / "drivers/builtin/include", crypto / "core",
                 crypto / "drivers/builtin/src", built_crypto / "core",
             ]
@@ -103,13 +104,19 @@ class LinkPairingHandshakeTest(unittest.TestCase):
             # v6.0.3 has 1.1).
             core = built_crypto / "core/libtfpsacrypto.a"
             libraries = [core, *sorted(set(built_crypto.rglob("*.a")) - {core})]
-            for enabled in (False, True):
-                with self.subTest(manufacturer_attestation=enabled):
-                    executable = temp / f"pairing-{int(enabled)}"
+            # A Muse Gadget build too (CONFIG_MUSE_GADGET_BLE_AUDIO): its prompt has no timer and one press
+            # confirms it, whenever it began.
+            for enabled, gadget in ((False, False), (True, False), (False, True)):
+                with self.subTest(manufacturer_attestation=enabled, gadget=gadget):
+                    executable = temp / f"pairing-{int(enabled)}-{int(gadget)}"
                     command = [
                         *cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
                         "-Wno-unused-function", "-Wno-unused-variable",
                         f"-DTEST_PAIRING_EFUSE_AUTH={int(enabled)}",
+                        f"-DCONFIG_MUSE_GADGET_BLE_AUDIO={int(gadget)}",
+                        # secure_random.c with the BT controller's status faked
+                        # (the harness turns the radio off and on).
+                        "-DCONFIG_BT_CONTROLLER_ENABLED=1", "-DTEST_COUNT_RNG_DRAWS=1",
                     ]
                     for include in includes:
                         command.extend(["-I", str(include)])
@@ -120,14 +127,17 @@ class LinkPairingHandshakeTest(unittest.TestCase):
                         str(ROOT / "tests/link_pairing_handshake_harness.c"),
                         str(ROOT / "main/pairing_transcript.c"),
                         str(ROOT / "main/pairing_signer_policy.c"), str(ROOT / "main/token_fp.c"),
+                        str(ROOT / "components/secure_random/secure_random.c"),
                         *cjson_source(cjson),
                         *library_args, "-o", str(executable),
                     ])
                     run(command, temp)
                     out = run([str(executable)], temp)
                     self.assertIn("PASS actual pairing:", out)
-                    # token_fp_text(): the length and a SHA-256 prefix, none of the
-                    # token's characters.
+                    # Each of the hello's security draws refused without a radio (secure_random).
+                    self.assertRegex(out, r"no radio: hello refused at each of its \d+ security draws")
+                    # token_fp_text(): the length and a SHA-256 prefix (what tools/redact.py's
+                    # fingerprint() prints too), none of the token's characters.
                     fake = "mgst_FAKEfakeFAKEfake0123456789abcdefghijklmnopq"
                     want = f"48 chars, sha256 {hashlib.sha256(fake.encode()).hexdigest()[:8]}"
                     self.assertIn(f"FP {want}\n", out)

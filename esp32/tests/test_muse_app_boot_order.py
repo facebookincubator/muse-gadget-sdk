@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""muse_app_run() opens audio before the boot animation's pause. Link's Wi-Fi
-and TLS take internal RAM during that pause; opened after it, the I2S DMA
-buffers can fail to allocate and i2s_rx_channel_start() crashes on boot."""
+"""muse_app_run() opens audio before Muse's session and Wi-Fi start (there is
+no boot animation pause: the fast start). Link's Wi-Fi and TLS take internal
+RAM as they come up; opened after them, the I2S DMA buffers can fail to
+allocate and i2s_rx_channel_start() crashes on boot."""
 
 from __future__ import annotations
 
@@ -40,8 +41,8 @@ class MuseAppBootOrderTest(unittest.TestCase):
     def test_audio_starts_before_the_boot_pause(self) -> None:
         run = body(APP.read_text(), "void muse_app_run(")
         self.assertEqual(run.count("muse_voice_start("), 1)
-        self.assertLess(run.index("muse_voice_start("),
-                        run.index("vTaskDelay(pdMS_TO_TICKS(1400))"))
+        self.assertLess(run.index("muse_voice_start("), run.index("muse_hatch_start()"))
+        self.assertLess(run.index("muse_voice_start("), run.index("muse_wifi_apply()"))
 
     def test_display_only_boards_still_skip_audio(self) -> None:
         run = body(APP.read_text(), "void muse_app_run(")

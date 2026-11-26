@@ -1,0 +1,68 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP-Mosaico (MuseGadget-EMO1) GATT table walk from '>gatt.dump': the attributes
+# as gatt_dbhash.c walked them (handle, type, value; type 0000 = a value the hash skips) and its hash.
+attr 1 2800 0018
+attr 2 2803 020300002a
+attr 3 0000 
+attr 4 2803 020500012a
+attr 5 0000 
+attr 6 2800 0118
+attr 7 2803 200800052a
+attr 8 0000 
+attr 9 2902 
+attr 10 2803 0a0b00292b
+attr 11 0000 
+attr 12 2803 020d002a2b
+attr 13 0000 
+attr 14 2800 0c245fcf4e31468bcf46ea381c3ddd7f
+attr 15 2803 0c1000019b8f5e2d3cf0a16e4aa2282930594d
+attr 16 0000 
+attr 17 2803 1212006c5b4a3f2e1d0a8f9c4e2b7bcac45dd7
+attr 18 0000 
+attr 19 2902 
+attr 20 2800 9ecc68e1c8eac9b32c41bcca3a78c89f
+attr 21 2803 0216004c0c1709cd1dea963e42e53d4abe2f13
+attr 22 0000 
+attr 23 2803 12180018d72a70741e018411417480c885b926
+attr 24 0000 
+attr 25 2902 
+attr 26 2800 632a7cededd15e80f04a4a175d63e665
+attr 27 2803 141c00c497ce4fac0b4791114f369fabe42c73
+attr 28 0000 
+attr 29 2902 
+attr 30 2803 141f00b3ab974a4a51e689ef4f313bdfaf845b
+attr 31 0000 
+attr 32 2902 
+attr 33 2800 0f18
+attr 34 2803 122300192a
+attr 35 0000 
+attr 36 2902 
+attr 37 2800 0a18
+attr 38 2803 022700292a
+attr 39 0000 
+attr 40 2803 022900242a
+attr 41 0000 
+attr 42 2803 022b00262a
+attr 43 0000 
+attr 44 2803 022d00282a
+attr 45 0000 
+attr 46 2800 9ecadc240ee5a9e093f3a3b50100406e
+attr 47 2803 0c30009ecadc240ee5a9e093f3a3b50200406e
+attr 48 0000 
+attr 49 2803 1032009ecadc240ee5a9e093f3a3b50300406e
+attr 50 0000 
+attr 51 2902 
+hash 1aca9a256281712aa7e6afdeb2dd5626

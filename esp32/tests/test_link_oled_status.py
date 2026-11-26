@@ -147,6 +147,7 @@ static esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) {
     return ESP_OK;
 }
 
+
 #include "oled_defs.inc"
 #include "oled_impl.inc"
 
@@ -292,6 +293,10 @@ int main(void) {
     for (int y = 2 * OLED_LINE_H; y < OLED_HEIGHT; y++) {
         for (int x = 0; x < OLED_WIDTH; x++) assert(!lit(s_oled_fb, x, y));
     }
+
+    /* A first setup's confirmation and a re-setup's alike: one press. */
+    oled_show_state(LED_STATE_PAIRING_CONFIRM_REQUIRED);
+    assert(strcmp(s_oled_status, "Press BOOT to confirm") == 0);
     puts("ok");
     return 0;
 }

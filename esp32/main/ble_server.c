@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#include "muse_restart.h"
 #include "ble_server.h"
+#include "adv_pace.h"
+#include "muse_local_press.h"
+#include "muse_wdt.h"
 #include "stack_monitor.h"
 
 #include <string.h>
@@ -24,6 +28,8 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 
+#include "esp_timer.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "sdkconfig.h"
@@ -41,6 +47,8 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
+#include "host/ble_store.h"
+#include "nvs.h"
 #include "host/util/util.h"
 #include "host/ble_uuid.h"
 #include "host/ble_gap.h"
@@ -51,7 +59,12 @@
 #include "cJSON.h"
 #include "config_store.h"
 #include "link_pairing.h"
+#include "resetup_gap.h"
+#include "app.h"
 #include "factory_test.h"
+#if CONFIG_MUSE_GATT_DBHASH
+#include "gatt_dbhash.h"
+#endif
 #include "helper_task.h"
 #include "muse_server_hosts.h"
 
@@ -72,6 +85,12 @@ static const ble_uuid128_t TX_UUID = BLE_UUID128_INIT(
     0x6c, 0x5b, 0x4a, 0x3f, 0x2e, 0x1d, 0x0a, 0x8f,
     0x9c, 0x4e, 0x2b, 0x7b, 0xca, 0xc4, 0x5d, 0xd7);
 
+// Link setup's manufacturer data: the test company id 0xFFFF, then one
+// flags byte (protocols/README.md, Gadget setup v2). Firmware without
+// gadget support sends 0x00 or 0x01, as it always has.
+#define LINK_ADV_SET_UP     0x01   // setup is complete
+#define LINK_ADV_BLE_GADGET 0x02   // a Muse Gadget over Bluetooth: serves musegadgets, needs no Wi-Fi
+
 #define MAX_NOTIFY_CHUNK   160
 #define CHUNK_HEADER_BYTES 3
 #define CHUNK_MAGIC        0xFE
@@ -83,8 +102,40 @@ static const char *s_device_name = NULL;
 static uint16_t s_rx_handle = 0;
 static uint16_t s_tx_handle = 0;
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+#if CONFIG_MUSE_GADGET_BLE_AUDIO   /* a gadget's re-setup only (resetup_gap.h) */
+static volatile uint32_t s_conn_seq;   /* every connection: the re-setup prompt's per-connection gap */
+#endif
 static bool s_subscribed = false;
 static bool s_started = false;
+static bool s_gatt_failed;   // a service didn't register: never advertise
+static volatile bool s_ever_reachable;   // advertised or connected this boot (the boot guard's health)
+static bool s_bench_silent;   // ble_server_bench_silence: not paused on purpose, so unreachable
+// Bench (>ble.pause=SECS): no link and no advertising until this time (0: not paused).
+static volatile int64_t s_bench_pause_until_us;
+// ...or (>ble.pause=SECS,ADDR) advertising on, connectable only from that address (the accept list).
+static bool s_bench_pause_only;
+static ble_addr_t s_bench_pause_peer[2];   // the address as public and as random static: either type
+static struct ble_npl_callout s_bench_pause_co;
+static bool s_bench_pause_co_ready;
+// The companion's advertising interval, fast for 30 s after a trigger,
+// then 417.5 ms (adv_pace.h). s_adv_paced: the running advertisement is the
+// paced one (the companion's, set up), at s_adv_paced_fast.
+static adv_pace_t s_adv_pace;
+static bool s_adv_paced, s_adv_paced_fast;
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+static struct ble_npl_callout s_adv_pace_co;
+static bool s_adv_pace_co_ready, s_adv_pace_logged_fast;
+#endif
+static void adv_pace_fast_now(const char *why);
+// SAFE mode can't serve Muse, so it advertises as someone else: a static
+// random address derived from the public one, the name
+// "SAFE-<product>-<tail>" and no service UUIDs, so neither a phone's saved
+// reconnect (by address or identifier) nor a scan for the musegadgets or Link
+// setup UUID lands on it. The GATT table is unchanged: the bench recovers it
+// over the Nordic UART console (safe.off) and SMP, found by name.
+static bool s_safe_public;     // SAFE on the public address (both random addresses refused): SAFE name, no UUIDs, Muse GATT refused
+static bool s_stall_quiet;     // a companion's protocol is stalled: the normal identity doesn't advertise
+static bool s_safe_identity;   // advertising as SAFE's identity (above)
 static bool s_shutting_down = false;
 static bool s_synced = false;
 static bool s_advertising_enabled = false;
@@ -92,10 +143,29 @@ static bool s_advertising_enabled = false;
 static int s_companion_interval_ms = CONFIG_HOMEHUB_BLE_PERSISTENT_ADV_INTERVAL_MS;
 #endif
 static bool s_advertising_active = false;
+// What the running advertisement carries (see advertising_wanted()).
+static bool s_adv_link = false;
+static const ble_companion_t *s_adv_other = NULL;
 static bool s_plaintext_status_blocked = false;
-static ble_companion_t s_companion = {0};
+static void send_hello_answer_plaintext(const char *status);   /* the re-setup rate's answer */
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+static resetup_gap_t s_prompt_gap;   /* the re-setup prompt's connection and last dismiss (resetup_gap.h) */
+#endif
+#if CONFIG_MUSE_GADGET_TEST_BUILD || CONFIG_MUSE_GADGET_AUTOMATION
+#define RESETUP_EXEMPT true   /* test and bench builds: exempt from the dismiss rule only */
+#else
+#define RESETUP_EXEMPT false
+#endif
+#define MAX_COMPANIONS 2
+static ble_companion_t s_companions[MAX_COMPANIONS];
+static int s_ncompanions = 0;
 static bool s_companion_advertising = false;
 static volatile bool s_quiet = false;     // ble_server_set_quiet
+// While Link's own advertising and a companion's UUID are both wanted, the
+// payload alternates between them every ADV_TURN_MS (legacy advertising fits
+// one 128-bit UUID).
+#define ADV_TURN_MS 1500
+static bool s_adv_turn = false;
 
 static SemaphoreHandle_t s_tx_mutex = NULL;
 static SemaphoreHandle_t s_rx_mutex = NULL;
@@ -111,6 +181,7 @@ static uint8_t s_rx_count = 0;
 static uint8_t s_rx_next_idx = 0;
 
 static void start_advertising(void);
+static const ble_companion_t *advertised_companion(void);
 
 // ---- Worker tasks for command dispatch -------------------------------------
 
@@ -290,6 +361,12 @@ void ble_server_delayed_disconnect(uint32_t ms) {
 
 // ---- Command dispatch ------------------------------------------------------
 
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+#define PROVISION_STACK 4096
+#else
+#define PROVISION_STACK 8192
+#endif
+
 static bool is_sensitive_setup_action(const char *act) {
     return strcmp(act, "provision") == 0
            || strcmp(act, "provision_v2") == 0
@@ -344,14 +421,48 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
     const char *act = (cJSON_IsString(action) && action->valuestring) ? action->valuestring : "";
     ESP_LOGI(TAG, "RX action: %s", act);
 
-    if (!decrypted && strcmp(act, "pairing_client_hello") == 0 && config_setup_complete()) {
+    if (!decrypted && strcmp(act, "pairing_client_hello") == 0 && config_setup_complete()
+        && !link_pairing_mgcommands()) {
         // BLE outlives setup only for a companion service (Muse phone setup).
         // Re-pairing goes through unpair/reset, never a new session here.
+        // A gadget takes a new setup any time instead (Gadget setup v2,
+        // re-provisioning): the same handshake and press, and its commit
+        // replaces the old tokens and proof key (app.c).
         ble_server_send_status("error_pairing_unavailable");
+#if CONFIG_MUSE_GADGET_BLE_AUDIO   // a gadget's re-setup: without it, a set-up device took the branch above
+    } else if (!decrypted && strcmp(act, "pairing_client_hello") == 0 && config_setup_complete()
+               && !app_resetup_open()) {
+        /* A set-up gadget whose only key is its talk key takes a re-setup only in its setup mode, and none in
+         * SAFE: nothing shows. */
+        ESP_LOGW(TAG, "pairing_client_hello: a re-setup outside setup mode (press the key at power-on): refused");
+        send_hello_answer_plaintext("error_pairing_unavailable");
+    } else if (!decrypted && strcmp(act, "pairing_client_hello") == 0
+               && resetup_hello(&s_prompt_gap, RESETUP_EXEMPT, config_setup_complete(), s_conn_seq,
+                                esp_timer_get_time()) == RESETUP_BUSY) {
+        /* Another connection's hello while the prompt is up, or this connection's within 10 s of its dismiss:
+         * nothing shows. */
+        ESP_LOGW(TAG, "pairing_client_hello: the re-setup prompt is busy (another connection's, or dismissed in "
+                      "the last 10 s on this one)");
+        send_hello_answer_plaintext("error_operation_in_progress");
+#endif
     } else if (!decrypted && strcmp(act, "pairing_client_hello") == 0) {
+        uint32_t replaced = link_pairing_session_generation();   /* the session this hello starts over from */
         char *reply = NULL;
         const char *err = link_pairing_handle_client_hello(root, &reply);
-        if (err) {
+        if (err && replaced) {
+            /* A hello that fails on a link with a session (a takeover's included): it's answered, under that
+             * session's keys while they're there (refused on its own fields or keys, before any wipe), else in
+             * plaintext (failed after the wipe); then the session ends at once, and a prompt up for it with the
+             * link, as a dismissed one's does. */
+            ESP_LOGW(TAG, "pairing_client_hello failed with a session up: it ends, and the link drops");
+            if (link_pairing_session_is_current(replaced)) {
+                ble_server_send_status(err);
+                (void)link_pairing_reset_session(replaced);
+            } else {
+                send_hello_answer_plaintext(err);
+            }
+            ble_server_delayed_disconnect(300);
+        } else if (err) {
             ble_server_send_status(err);
         } else if (reply) {
             s_plaintext_status_blocked = true;
@@ -439,12 +550,27 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
         cJSON *u = cJSON_GetObjectItem(root, "username");
         cJSON *tt = cJSON_GetObjectItem(root, "token_type");
         const char *ota_url = optional_ota_url(root);
-        if (!cJSON_IsString(s) || !cJSON_IsString(p) || !cJSON_IsString(at)
-            || !s->valuestring || !p->valuestring || !at->valuestring
-            || !*s->valuestring || !*p->valuestring || !*at->valuestring
-            || !cJSON_IsString(rt) || !rt->valuestring || !*rt->valuestring
-            || !cJSON_IsString(tt) || !tt->valuestring
-            || strcmp(tt->valuestring, "device") != 0) {
+        if (*ota_url && config_setup_complete()) {
+            // Setting a set-up gadget up again never takes an image to install.
+            ESP_LOGW(TAG, "provision on a set-up gadget: ota_url ignored");
+            ota_url = "";
+        }
+        link_wifi_mode_t wifi = link_pairing_wifi_mode();
+        bool tokens_ok = cJSON_IsString(at) && at->valuestring && *at->valuestring
+                         && cJSON_IsString(rt) && rt->valuestring && *rt->valuestring
+                         && cJSON_IsString(tt) && tt->valuestring
+                         && strcmp(tt->valuestring, "device") == 0;
+        bool wifi_ok = cJSON_IsString(s) && cJSON_IsString(p)
+                       && s->valuestring && p->valuestring
+                       && *s->valuestring && *p->valuestring;
+        // A gadget whose Wi-Fi is optional or absent provisions tokens only
+        // when ssid and password are both absent or empty.
+        bool token_only = wifi != LINK_WIFI_REQUIRED
+                          && (!s || (cJSON_IsString(s) && s->valuestring && !*s->valuestring))
+                          && (!p || (cJSON_IsString(p) && p->valuestring && !*p->valuestring));
+        if (tokens_ok && wifi == LINK_WIFI_NONE && !token_only) {
+            ble_server_send_status("error_wifi_unsupported");
+        } else if (!tokens_ok || (!token_only && !wifi_ok)) {
             ble_server_send_status("error_missing_credentials");
         } else if (!setup_hosts_allowed(root)) {
             ble_server_send_status("error_invalid_host");
@@ -463,18 +589,38 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                 delete_command_json(root, decrypted);
                 return;
             }
-            a->ssid = dup_str(s->valuestring);
-            a->password = dup_str(p->valuestring);
-            a->access_token = dup_str(at->valuestring);
-            if (cJSON_IsString(rt) && rt->valuestring) {
-                a->refresh_token = dup_str(rt->valuestring);
+            // Token-only: no ssid reaches on_provision, which skips Wi-Fi.
+            if (!token_only) {
+                a->ssid = dup_str(s->valuestring);
+                a->password = dup_str(p->valuestring);
             }
-            if (cJSON_IsString(u) && u->valuestring) {
+            a->access_token = dup_str(at->valuestring);
+            a->refresh_token = dup_str(rt->valuestring);
+            if (wifi != LINK_WIFI_NONE && cJSON_IsString(u) && u->valuestring) {
                 a->username = dup_str(u->valuestring);
             }
-            if (*ota_url) {
+            if (*ota_url && !token_only) {
                 a->ota_url = dup_str(ota_url);
                 a->ota_force = optional_ota_force(root);
+            }
+            // On a gadget an empty ssid means token-only, so out of memory
+            // must not turn a Wi-Fi request into one.
+            if (wifi != LINK_WIFI_REQUIRED
+                && (!a->access_token || !a->refresh_token
+                    || (!token_only && (!a->ssid || !a->password)))) {
+                secure_free_str(a->ssid);
+                secure_free_str(a->password);
+                secure_free_str(a->access_token);
+                secure_free_str(a->refresh_token);
+                secure_free_str(a->username);
+                secure_free_str(a->ota_url);
+                network_proxy_wipe(&a->proxy, sizeof(a->proxy));
+                free(a);
+                ble_server_send_status("error_operation_in_progress");
+                delete_command_json(root, decrypted);
+                return;
+            }
+            if (*ota_url && !token_only) {
                 if (!a->ota_url) {
                     secure_free_str(a->ssid);
                     secure_free_str(a->password);
@@ -488,24 +634,28 @@ static void dispatch_command_ex(const uint8_t *data, size_t len, bool decrypted)
                     return;
                 }
             }
+            // Endpoints let a device that joins Wi-Fi later reach Muse; a
+            // device without Wi-Fi has no use for them.
             cJSON *au = cJSON_GetObjectItem(root, "api_url");
-            if (cJSON_IsString(au) && au->valuestring && *au->valuestring) {
+            if (wifi != LINK_WIFI_NONE && cJSON_IsString(au) && au->valuestring && *au->valuestring) {
                 a->api_url = dup_str(au->valuestring);
             }
             // Older firmware ignores api_url_v2 and keeps reading api_url.
             cJSON *au2 = cJSON_GetObjectItem(root, "api_url_v2");
-            if (cJSON_IsString(au2) && au2->valuestring && *au2->valuestring) {
+            if (wifi != LINK_WIFI_NONE && cJSON_IsString(au2) && au2->valuestring && *au2->valuestring) {
                 a->api_url_v2 = dup_str(au2->valuestring);
             }
             cJSON *nh = cJSON_GetObjectItem(root, "noise_host");
-            if (cJSON_IsString(nh) && nh->valuestring && *nh->valuestring) {
+            if (wifi != LINK_WIFI_NONE && cJSON_IsString(nh) && nh->valuestring && *nh->valuestring) {
                 a->noise_host = dup_str(nh->valuestring);
             }
             // 8 KB stack — mbedtls 3.6 (IDF v6) needs significantly more
             // stack during TLS handshake than v5's 3.x (~2 KB more peak).
+            // A BLE-only gadget's provisioning is token-only (no TLS): it
+            // peaks at 2.4 KB (StopWatch), so 4 KB of internal RAM.
             a->session_generation = link_pairing_mark_provisioning_active();
             if (a->session_generation == 0
-                || helper_task_create(provision_task, "prov", 8192, a, 5, NULL) != pdPASS) {
+                || helper_task_create(provision_task, "prov", PROVISION_STACK, a, 5, NULL) != pdPASS) {
                 uint32_t generation = a->session_generation;
                 secure_free_str(a->ssid);
                 secure_free_str(a->password);
@@ -656,6 +806,7 @@ static stack_monitor_t s_host_stack = STACK_MONITOR_INIT;
 static int rx_access(uint16_t conn_handle, uint16_t attr_handle,
                      struct ble_gatt_access_ctxt *ctxt, void *arg) {
     if (s_shutting_down) return BLE_ATT_ERR_UNLIKELY;
+    if (ble_server_muse_gatt_refused()) return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
     uint16_t total = OS_MBUF_PKTLEN(ctxt->om);
     if (total == 0) return 0;
@@ -680,6 +831,7 @@ static int rx_access_cb(uint16_t conn_handle, uint16_t attr_handle,
 static int tx_access_cb(uint16_t conn_handle, uint16_t attr_handle,
                         struct ble_gatt_access_ctxt *ctxt, void *arg) {
     if (s_shutting_down) return BLE_ATT_ERR_UNLIKELY;
+    if (ble_server_muse_gatt_refused()) return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_UNLIKELY;
     int rc = os_mbuf_append(ctxt->om, s_last_status, strlen(s_last_status));
     stack_monitor_record(&s_host_stack);
@@ -725,6 +877,21 @@ static bool notify_payload(const uint8_t *data, size_t len) {
         ESP_LOGW(TAG, "notify rc=%d", rc);
     }
     return rc == 0;
+}
+
+// A pairing_client_hello's answer that goes in plaintext whatever came before (Gadget setup v2):
+// error_operation_in_progress (the re-setup prompt's rate refusal) or error_pairing_unavailable (a re-setup outside
+// setup mode). It carries no secret; every other status keeps plaintext_status_allowed's rule.
+static void send_hello_answer_plaintext(const char *status) {
+    if ((strcmp(status, "error_operation_in_progress") != 0 && strcmp(status, "error_pairing_unavailable") != 0
+         && strcmp(status, "error_pairing_invalid_hello") != 0)
+        || !s_tx_mutex || s_shutting_down) return;
+    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
+    size_t n = strlen(status);
+    memcpy(s_last_status, status, n + 1);
+    bool sent = notify_payload((const uint8_t *)s_last_status, n);
+    xSemaphoreGive(s_tx_mutex);
+    if (sent) ESP_LOGI(TAG, "status: %s (plaintext, a hello's answer)", status);
 }
 
 static bool plaintext_status_allowed(const char *status) {
@@ -823,6 +990,7 @@ bool ble_server_send_encrypted_json(const char *json, uint32_t generation) {
 }
 
 static void shutdown_stack(bool release_memory);
+static void host_wdt_stop(void);
 
 void ble_server_full_shutdown(void) {
     shutdown_stack(true);
@@ -839,6 +1007,7 @@ static void shutdown_stack(bool release_memory) {
     s_shutting_down = true;
     s_advertising_enabled = false;
     ESP_LOGI(TAG, "shutting down BLE");
+    host_wdt_stop();   // the host task ends on purpose
 
     int rc = ble_gap_adv_stop();
     if (rc != 0) {
@@ -876,7 +1045,7 @@ static void shutdown_stack(bool release_memory) {
     s_started = false;
     s_synced = false;
     s_advertising_active = false;
-    if (phone_conn != BLE_HS_CONN_HANDLE_NONE && s_companion.on_gap_event) {
+    if (phone_conn != BLE_HS_CONN_HANDLE_NONE) {
         // Otherwise a companion such as ble_basic keeps the dead handle and
         // goes on notifying into a stopped stack.
         struct ble_gap_event ev;
@@ -884,7 +1053,9 @@ static void shutdown_stack(bool release_memory) {
         ev.type = BLE_GAP_EVENT_DISCONNECT;
         ev.disconnect.reason = BLE_HS_ENOTCONN;
         ev.disconnect.conn.conn_handle = phone_conn;
-        (void)s_companion.on_gap_event(&ev);
+        for (int i = 0; i < s_ncompanions; i++) {
+            if (s_companions[i].on_gap_event) (void)s_companions[i].on_gap_event(&ev);
+        }
     }
 
     s_shutting_down = false;
@@ -911,14 +1082,25 @@ static void shutdown_stack(bool release_memory) {
 
 static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     int companion_rc = 0;
-    if (s_companion.on_gap_event && !s_shutting_down) {
-        companion_rc = s_companion.on_gap_event(event);
+    for (int i = 0; i < s_ncompanions && !s_shutting_down; i++) {
+        if (s_companions[i].on_gap_event) {
+            int rc = s_companions[i].on_gap_event(event);
+            if (rc && !companion_rc) companion_rc = rc;
+        }
     }
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
             if (s_shutting_down) break;
             if (event->connect.status == 0) {
                 s_conn_handle = event->connect.conn_handle;
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+                s_conn_seq++;   /* the re-setup prompt's per-connection gap */
+#endif
+                s_ever_reachable = true;
+                muse_local_press_link_new();   // a press counts for the link that's up when it comes
+#if CONFIG_MUSE_GATT_DBHASH
+                gatt_dbhash_conn(s_conn_handle, true);
+#endif
                 s_advertising_active = false;
                 s_plaintext_status_blocked = false;
                 ESP_LOGI(TAG, "connected conn_handle=%d", s_conn_handle);
@@ -929,8 +1111,14 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             }
             break;
         case BLE_GAP_EVENT_DISCONNECT:
+#if CONFIG_MUSE_GATT_DBHASH
+            gatt_dbhash_conn(event->disconnect.conn.conn_handle, false);
+#endif
             ESP_LOGI(TAG, "disconnect reason=%d", event->disconnect.reason);
             s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+            resetup_gap_ended(&s_prompt_gap, false, esp_timer_get_time());   /* its prompt ends with the link */
+#endif
             s_subscribed = false;
             s_mtu = 23;
             s_advertising_active = false;
@@ -939,8 +1127,18 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             link_pairing_reset();
             factory_test_on_disconnect();
             if (s_cb.on_client_disconnected) s_cb.on_client_disconnected();
+            adv_pace_fast_now("disconnect");   // fast for 30 s from the link's loss
             if (!s_shutting_down && s_advertising_enabled) start_advertising();
             else if (!s_shutting_down && s_companion_advertising) start_advertising();
+            else if (!s_shutting_down && advertised_companion()) start_advertising();
+            break;
+        case BLE_GAP_EVENT_ADV_COMPLETE:
+            // A timed turn ended (see ADV_TURN_MS): the other payload's turn.
+            s_advertising_active = false;
+            if (!s_shutting_down && event->adv_complete.reason == BLE_HS_ETIMEOUT) {
+                s_adv_turn = !s_adv_turn;
+                start_advertising();
+            }
             break;
         case BLE_GAP_EVENT_SUBSCRIBE:
             if (event->subscribe.attr_handle == s_tx_handle) {
@@ -961,19 +1159,68 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     return companion_rc;
 }
 
-static void start_advertising(void) {
-    if (s_shutting_down) return;
-    if (s_quiet) return;   // a Wi-Fi video stream wants the radio (ble_server_set_quiet)
+// The companion whose UUID wants advertising now, if any.
+static const ble_companion_t *advertised_companion(void) {
+#if CONFIG_MUSE_GADGET_BLE_AUDIO   // only the musegadgets companion (mg_glue.c) has its own UUID
+    for (int i = 0; i < s_ncompanions; i++) {
+        const ble_companion_t *c = &s_companions[i];
+        if (c->adv_uuid128 && c->wants_advertising && c->wants_advertising()) return c;
+    }
+#endif
+    return NULL;
+}
+
+// Bench (the musegadgets console's !SETUP ADV): Link setup advertised
+// after setup too, flagged as not set up, until then (RAM only).
+static int64_t s_bench_setup_until_us = 0;
+
+static bool bench_setup_adv(void) {
+    return s_bench_setup_until_us && esp_timer_get_time() < s_bench_setup_until_us;
+}
+
+// What advertising should carry now: Link setup's UUID (link), a companion's
+// (other), both taking turns, or nothing (returns false).
+static bool advertising_wanted(bool *link, const ble_companion_t **other) {
+    // A companion with its own UUID (musegadgets) is found after setup too.
+    *other = advertised_companion();
+    *link = true;
     // The companion service keeps the device visible after setup.
     if (!s_companion_advertising) {
-        if (config_setup_complete()) return;
-        if (!s_advertising_enabled) return;
+        *link = !config_setup_complete() && s_advertising_enabled;
+        if (bench_setup_adv()) {   // !SETUP ADV: Link setup found after setup too
+            *link = true;
+            return true;
+        }
+        if (!*other) {
+            if (config_setup_complete()) return false;
+            if (!s_advertising_enabled) return false;
+        }
     }
+    return true;
+}
+
+static void start_advertising(void) {
+    if (s_shutting_down) return;
+    if (s_gatt_failed) {   // never advertise without the whole GATT table
+        ESP_LOGE(TAG, "advertising held: the GATT table didn't register");
+        return;
+    }
+    if (s_quiet) return;   // a Wi-Fi video stream wants the radio (ble_server_set_quiet)
+    if (s_bench_silent) return;   // bench: a stack that stopped advertising (ble_server_bench_silence)
+    if (s_bench_pause_until_us && !s_bench_pause_only) return;   // bench: off the phone (ble_server_bench_pause)
+    if (s_stall_quiet && !s_safe_identity) return;   // a stalled Muse protocol isn't advertised
+    const ble_companion_t *other;
+    bool link;
+    if (!advertising_wanted(&link, &other)) return;
     if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) return;
     if (s_advertising_active) return;
+    bool rotate = link && other;
+    bool show_other = other && (!link || s_adv_turn);
     struct ble_gap_adv_params advp = {0};
     advp.conn_mode = BLE_GAP_CONN_MODE_UND;
     advp.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    // >ble.pause=SECS,ADDR: found by anyone, connectable only from the accept list.
+    advp.filter_policy = s_bench_pause_only ? BLE_HCI_ADV_FILT_CONN : BLE_HCI_ADV_FILT_NONE;
 #if CONFIG_HOMEHUB_BLE_PERSISTENT
     // When only the companion service is advertising (after setup), advertise
     // slowly: each advertising event takes the shared radio from Wi-Fi. Setup
@@ -985,17 +1232,67 @@ static void start_advertising(void) {
 #endif
 
     // Adv packet: flags + 128-bit service UUID + manufacturer data (~26 bytes).
-    // Manufacturer data: 0xFFFF (test/unassigned company ID) + 1 byte paired flag.
-    uint8_t mfg_data[] = { 0xFF, 0xFF, config_setup_complete() ? 0x01 : 0x00 };
+    // Manufacturer data: 0xFFFF (test/unassigned company ID) + the flags byte.
+    uint8_t mfg_data[] = {
+        0xFF, 0xFF,
+        (uint8_t)((config_setup_complete() && !bench_setup_adv() ? LINK_ADV_SET_UP : 0)
+                  | (link_pairing_mgcommands() ? LINK_ADV_BLE_GADGET : 0)),
+    };
+    ble_uuid128_t other_uuid;
 
     struct ble_hs_adv_fields adv = {0};
     adv.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    adv.uuids128 = (ble_uuid128_t *)&SVC_UUID;
     adv.num_uuids128 = 1;
     adv.uuids128_is_complete = 1;
-    adv.mfg_data = mfg_data;
-    adv.mfg_data_len = sizeof(mfg_data);
+    if (show_other) {
+        other_uuid.u.type = BLE_UUID_TYPE_128;
+        memcpy(other_uuid.value, other->adv_uuid128, sizeof(other_uuid.value));
+        adv.uuids128 = &other_uuid;
+        static ble_uuid16_t other_uuid16;
+        uint16_t u16 = other->adv_uuid16 ? other->adv_uuid16() : 0;
+        uint16_t appearance = other->adv_appearance ? other->adv_appearance() : 0;
+        if (u16) {
+            other_uuid16 = (ble_uuid16_t)BLE_UUID16_INIT(u16);
+            adv.uuids16 = &other_uuid16;
+            adv.num_uuids16 = 1;
+            adv.uuids16_is_complete = 0;
+        }
+        if (appearance) {
+            adv.appearance = appearance;
+            adv.appearance_is_present = 1;
+        }
+        if (config_setup_complete()) {
+            // Fast (30-50 ms) for 30 s after boot, a disconnect or a
+            // talk press with no app; then Apple's 417.5 ms.
+            bool fast = adv_pace_fast(&s_adv_pace, esp_timer_get_time());
+            adv_pace_itvl(&s_adv_pace, esp_timer_get_time(), &advp.itvl_min, &advp.itvl_max);
+            s_adv_paced = true;
+            s_adv_paced_fast = fast;
+        } else {
+            // Before setup the companion takes turns with Link setup: 100-150 ms.
+            advp.itvl_min = BLE_GAP_ADV_ITVL_MS(100);
+            advp.itvl_max = BLE_GAP_ADV_ITVL_MS(150);
+            s_adv_paced = false;
+        }
+    } else {
+        s_adv_paced = false;
+        adv.uuids128 = (ble_uuid128_t *)&SVC_UUID;
+        adv.mfg_data = mfg_data;
+        adv.mfg_data_len = sizeof(mfg_data);
+    }
 
+    static char safe_name[32];
+    const char *name = s_device_name;
+    if (s_safe_identity) {
+        // No UUIDs, no Link flags: nothing a Muse scan matches.
+        memset(&adv, 0, sizeof(adv));
+        adv.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+        const char *tail = strncmp(s_device_name, "MuseGadget-", 11) == 0 ? s_device_name + 11 : s_device_name;
+        snprintf(safe_name, sizeof(safe_name), "SAFE-%s", tail);
+        name = safe_name;
+        rotate = false;
+        show_other = false;
+    }
     int rc = ble_gap_adv_set_fields(&adv);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_set_fields rc=%d", rc);
@@ -1005,32 +1302,225 @@ static void start_advertising(void) {
     // Scan response: complete local name (split out so the UUID + name
     // both fit within the 31-byte legacy advertising limit).
     struct ble_hs_adv_fields rsp = {0};
-    rsp.name = (uint8_t *)s_device_name;
-    rsp.name_len = strlen(s_device_name);
+    rsp.name = (uint8_t *)name;
+    rsp.name_len = strlen(name);
     rsp.name_is_complete = 1;
     rc = ble_gap_adv_rsp_set_fields(&rsp);
     if (rc != 0) {
         ESP_LOGW(TAG, "adv_rsp_set_fields rc=%d", rc);
     }
 
-    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
-                           &advp, gap_event_cb, NULL);
+    rc = ble_gap_adv_start(s_safe_identity && !s_safe_public ? BLE_OWN_ADDR_RANDOM : BLE_OWN_ADDR_PUBLIC, NULL,
+                           rotate ? ADV_TURN_MS : BLE_HS_FOREVER, &advp, gap_event_cb, NULL);
+    if (rc != 0 && s_safe_identity && !s_safe_public) {
+        // Never a silent SAFE board, and never the Muse identity: the public
+        // address with the SAFE name, no Muse UUIDs, and
+        // the Muse GATT refused (ble_server_muse_gatt_refused).
+        ESP_LOGE(TAG, "adv_start rc=%d with the SAFE random address: SAFE name on the public address", rc);
+        s_safe_public = true;
+        start_advertising();
+        return;
+    }
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_start rc=%d", rc);
     } else {
         s_advertising_active = true;
-        ESP_LOGI(TAG, "advertising as %s", s_device_name);
+        s_ever_reachable = true;
+        s_adv_link = link;
+        s_adv_other = other;
+        ESP_LOGI(TAG, "advertising as %s%s", name,
+                 rotate ? " (taking turns)" : show_other ? " (companion)" : "");
     }
 }
 
+// Starts advertising, or restarts it when what's running isn't what's wanted
+// now: host sync can start a companion's advertising before Link setup asks
+// for its own, and a running advertisement never picks up the change itself.
+static void update_advertising(void) {
+    if (!s_synced) return;
+    if (s_advertising_active) {
+        const ble_companion_t *other;
+        bool link;
+        if (advertising_wanted(&link, &other) && link == s_adv_link && other == s_adv_other) return;
+        int rc = ble_gap_adv_stop();
+        if (rc != 0) ESP_LOGD(TAG, "adv_stop rc=%d", rc);
+        s_advertising_active = false;
+    }
+    start_advertising();
+}
+
+#if CONFIG_MUSE_GADGET_WDT
+// The gadget watchdog's NimBLE host user (muse_wdt.h): a callout on the host's
+// own event queue feeds it, so a host task that stops running stops the feeds.
+#define HOST_WDT_FEED_MS 10000
+static struct ble_npl_callout s_host_wdt;
+static bool s_host_wdt_on;
+
+static void host_wdt_feed(struct ble_npl_event *ev) {
+    (void)ev;
+    muse_wdt_feed(MUSE_WDT_BLE_HOST);
+    ble_npl_callout_reset(&s_host_wdt, ble_npl_time_ms_to_ticks32(HOST_WDT_FEED_MS));
+}
+
+/* A stalled Muse protocol stops advertising the Muse identity within
+ * 10 s. Every second, on the host task: a companion that missed its
+ * heartbeat (stalled()) takes the normal identity off the air until it
+ * beats again. The task watchdog still resets a stall that lasts 15 s. */
+static struct ble_npl_callout s_stall_check;
+static void stall_check(struct ble_npl_event *ev) {
+    (void)ev;
+    bool stalled = false;
+    for (int i = 0; i < s_ncompanions; i++) {
+        if (s_companions[i].stalled && s_companions[i].stalled()) stalled = true;
+    }
+    if (stalled && !s_stall_quiet) {
+        s_stall_quiet = true;
+        if (!s_safe_identity && s_advertising_active) {
+            int rc = ble_gap_adv_stop();
+            s_advertising_active = false;
+            ESP_LOGE(TAG, "the Muse protocol is stalled: advertising stopped (rc=%d)", rc);
+        }
+    } else if (!stalled && s_stall_quiet) {
+        s_stall_quiet = false;
+        ESP_LOGW(TAG, "the Muse protocol is back: advertising again");
+        start_advertising();
+    }
+    ble_npl_callout_reset(&s_stall_check, ble_npl_time_ms_to_ticks32(1000));
+}
+
+static void host_wdt_start(void) {
+    if (s_host_wdt_on) return;
+    ble_npl_callout_init(&s_host_wdt, nimble_port_get_dflt_eventq(), host_wdt_feed, NULL);
+    ble_npl_callout_init(&s_stall_check, nimble_port_get_dflt_eventq(), stall_check, NULL);
+    s_host_wdt_on = true;
+    host_wdt_feed(NULL);   // on the host task: on_sync runs there
+    ble_npl_callout_reset(&s_stall_check, ble_npl_time_ms_to_ticks32(1000));
+}
+
+static void host_wdt_stop(void) {
+    if (!s_host_wdt_on) return;
+    ble_npl_callout_stop(&s_host_wdt);
+    ble_npl_callout_stop(&s_stall_check);
+    muse_wdt_remove(MUSE_WDT_BLE_HOST);
+    s_host_wdt_on = false;
+}
+#else
+static void host_wdt_start(void) {}
+static void host_wdt_stop(void) {}
+#endif
+
+/* SAFE on the public address (no random address could be set) refuses
+ * the Muse services (musegadgets, Link setup): a phone's saved record that
+ * reconnects by address finds nothing Muse to talk to. SMP and the console
+ * stay, as in every SAFE boot (the recovery tiers). */
+bool ble_server_muse_gatt_refused(void) {
+    return s_safe_identity && s_safe_public;
+}
+
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+// On the NimBLE host task: the fast window started or ended. A running
+// paced advertisement restarts at the interval due now; at the end, the
+// slow set (logged).
+static void adv_pace_event(struct ble_npl_event *ev) {
+    (void)ev;
+    int64_t now = esp_timer_get_time();
+    bool fast = adv_pace_fast(&s_adv_pace, now);
+    if (!fast && s_adv_pace_logged_fast) {
+        s_adv_pace_logged_fast = false;
+        ESP_LOGI(TAG, "adv: slow 417.5 ms");
+    }
+    if (s_advertising_active && s_adv_paced && s_adv_paced_fast != fast) {
+        ble_gap_adv_stop();
+        s_advertising_active = false;
+        start_advertising();
+    }
+    if (fast) {
+        ble_npl_callout_reset(&s_adv_pace_co, ble_npl_time_ms_to_ticks32((uint32_t)((s_adv_pace.fast_until_us - now) / 1000) + 1));
+    }
+}
+#endif
+
+// A fast window for 30 s from now (boot, a disconnect, a talk press
+// with no app connected), re-armed by each trigger. Any task: the host task
+// applies it. Without BLE gadget audio nothing is paced (no companion has a
+// UUID of its own): no window, no log.
+static void adv_pace_fast_now(const char *why) {
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    if (!s_started || s_shutting_down) return;
+    if (!s_adv_pace_co_ready) {
+        ble_npl_callout_init(&s_adv_pace_co, nimble_port_get_dflt_eventq(), adv_pace_event, NULL);
+        s_adv_pace_co_ready = true;
+    }
+    adv_pace_trigger(&s_adv_pace, esp_timer_get_time(), why);
+    s_adv_pace_logged_fast = true;
+    ESP_LOGI(TAG, "adv: fast 30 s (%s)", why);
+    ble_npl_callout_reset(&s_adv_pace_co, 1);   // the host task's next round
+#else
+    (void)why;
+#endif
+}
+
+void ble_server_adv_fast(const char *why) {
+    adv_pace_fast_now(why);
+}
+
 static void on_sync(void) {
+    host_wdt_start();
     int rc = ble_hs_util_ensure_addr(0);
     if (rc != 0) {
         ESP_LOGE(TAG, "ensure_addr rc=%d", rc);
         return;
     }
+    if (s_safe_identity) {
+        uint8_t a[6];   // little-endian: a[5] is the most significant byte
+        if (ble_hs_id_copy_addr(BLE_ADDR_PUBLIC, a, NULL) == 0) {
+            a[4] ^= 0x5A;          // never the public address
+            a[5] |= 0xC0;          // static random: the two top bits set
+            rc = ble_hs_id_set_rnd(a);
+            ESP_LOGW(TAG, "SAFE identity: %02x:%02x:%02x:%02x:%02x:%02x (rc=%d)", a[5], a[4], a[3], a[2], a[1], a[0], rc);
+        } else {
+            rc = -1;
+        }
+        // The SAFE identity never falls back to the Muse one.
+        // A second random address, else the public address with the SAFE
+        // name, no Muse UUIDs and the Muse GATT refused.
+        if (rc != 0) {
+            ble_addr_t r;
+            rc = ble_hs_id_gen_rnd(0, &r);
+            if (rc == 0) rc = ble_hs_id_set_rnd(r.val);
+            ESP_LOGE(TAG, "SAFE address refused: a second random address (rc=%d)", rc);
+        }
+        if (rc != 0) {
+            s_safe_public = true;
+            ESP_LOGE(TAG, "SAFE: no random address: SAFE name on the public address, Muse GATT refused");
+        }
+    }
     s_synced = true;
+#if CONFIG_MUSE_GATT_DBHASH
+    gatt_dbhash_sync();   // the hash over the live table, before anyone can read it
+#endif
+    adv_pace_fast_now("boot");   // fast for 30 s after boot
     start_advertising();
+    muse_boot_mark("advertising");
+    static bool s_version_logged;
+    if (!s_version_logged) {
+        // The controller's HCI version is its LL version (Core 5.1 = 0x0A):
+        // Android reads the GATT Database Hash only from LL >= 0x0A.
+        extern uint8_t ble_hs_hci_get_hci_version(void);   // NimBLE host, ble_hs_hci_priv.h
+        s_version_logged = true;
+        ESP_LOGI(TAG, "controller LL version 0x%02x", ble_hs_hci_get_hci_version());
+    }
+}
+
+void ble_server_bench_setup_adv(uint32_t secs) {
+    if (!s_started || s_shutting_down) return;
+    s_bench_setup_until_us = secs ? esp_timer_get_time() + (int64_t)secs * 1000000 : 0;
+    ESP_LOGW(TAG, "bench: Link setup advertising %s", secs ? "on after setup (!SETUP ADV)" : "off");
+    if (s_advertising_active) {   // the new payload now; with a client on, at its disconnect
+        ble_gap_adv_stop();
+        s_advertising_active = false;
+        start_advertising();
+    }
 }
 
 static void on_reset(int reason) {
@@ -1086,26 +1576,38 @@ void ble_server_start(const char *device_name, const ble_callbacks_t *cb) {
 
     nimble_port_init();
     ble_svc_gap_init();
+#if CONFIG_MUSE_GATT_DBHASH
+    gatt_dbhash_init();   // Generic Attribute with the Database Hash (gatt_dbhash.h)
+#else
     ble_svc_gatt_init();
+#endif
 
+    // The whole GATT table, the companions' (the Muse service) included,
+    // is registered here, before the host starts and so before any
+    // advertisement; nothing is added later (ble_server_set_companion refuses
+    // after start). A table that didn't register holds advertising.
+    s_gatt_failed = false;
     int rc = ble_gatts_count_cfg(s_svcs);
     if (rc != 0) ESP_LOGE(TAG, "gatts_count_cfg rc=%d", rc);
-    rc = ble_gatts_add_svcs(s_svcs);
-    if (rc != 0) ESP_LOGE(TAG, "gatts_add_svcs rc=%d", rc);
+    rc = rc ? rc : ble_gatts_add_svcs(s_svcs);
+    if (rc != 0) { ESP_LOGE(TAG, "gatts_add_svcs rc=%d", rc); s_gatt_failed = true; }
 
     const struct ble_gatt_svc_def *ft = factory_test_svcs();
     rc = ble_gatts_count_cfg(ft);
     if (rc != 0) ESP_LOGE(TAG, "ft gatts_count_cfg rc=%d", rc);
-    rc = ble_gatts_add_svcs(ft);
-    if (rc != 0) ESP_LOGE(TAG, "ft gatts_add_svcs rc=%d", rc);
+    rc = rc ? rc : ble_gatts_add_svcs(ft);
+    if (rc != 0) { ESP_LOGE(TAG, "ft gatts_add_svcs rc=%d", rc); s_gatt_failed = true; }
 
-    if (s_companion.svcs) {
-        rc = ble_gatts_count_cfg(s_companion.svcs);
-        if (rc != 0) ESP_LOGE(TAG, "companion gatts_count_cfg rc=%d", rc);
-        rc = ble_gatts_add_svcs(s_companion.svcs);
-        if (rc != 0) ESP_LOGE(TAG, "companion gatts_add_svcs rc=%d", rc);
+    for (int i = 0; i < s_ncompanions; i++) {
+        const ble_companion_t *c = &s_companions[i];
+        if (c->svcs) {
+            rc = ble_gatts_count_cfg(c->svcs);
+            if (rc != 0) ESP_LOGE(TAG, "companion gatts_count_cfg rc=%d", rc);
+            rc = rc ? rc : ble_gatts_add_svcs(c->svcs);
+            if (rc != 0) { ESP_LOGE(TAG, "companion gatts_add_svcs rc=%d", rc); s_gatt_failed = true; }
+        }
+        if (c->configure_host) c->configure_host();
     }
-    if (s_companion.configure_host) s_companion.configure_host();
 
     ble_svc_gap_device_name_set(device_name);
 
@@ -1166,7 +1668,7 @@ void ble_server_set_quiet(bool quiet) {
 void ble_server_begin_advertising(void) {
     if (!s_started || s_shutting_down) return;
     s_advertising_enabled = true;
-    if (s_synced) start_advertising();
+    update_advertising();
 }
 
 void ble_server_disconnect_client(void) {
@@ -1183,6 +1685,9 @@ void ble_server_disconnect_client(void) {
 void ble_server_stop_advertising(bool disconnect_client) {
     if (!s_started || s_shutting_down) return;
     s_advertising_enabled = false;
+    // A setup's end (stop_setup_ble) also ends !SETUP ADV; a dropped pairing
+    // session (disconnect_client) keeps it for another try.
+    if (!disconnect_client) s_bench_setup_until_us = 0;
     int rc = ble_gap_adv_stop();
     if (rc != 0) {
         ESP_LOGD(TAG, "adv_stop rc=%d", rc);
@@ -1196,30 +1701,42 @@ void ble_server_stop_advertising(bool disconnect_client) {
         link_pairing_reset();
         s_plaintext_status_blocked = false;
     }
-    if (s_companion_advertising && s_synced) start_advertising();
+    // A companion may still want to be found (start_advertising decides).
+    if (s_synced) start_advertising();
 }
 
 void ble_server_set_companion(const ble_companion_t *companion) {
-    if (s_started) return;
-    if (companion) {
-        s_companion = *companion;
-    } else {
-        memset(&s_companion, 0, sizeof(s_companion));
+    if (s_started) {
+        // The table is fixed once the host runs; a late service would
+        // be missing from the first advertisements and the phone's cache.
+        ESP_LOGE(TAG, "BLE companion added after start: refused");
+        return;
     }
+    if (!companion) {
+        memset(s_companions, 0, sizeof(s_companions));
+        s_ncompanions = 0;
+    } else if (s_ncompanions < MAX_COMPANIONS) {
+        s_companions[s_ncompanions++] = *companion;
+    } else {
+        ESP_LOGE(TAG, "too many BLE companions");
+    }
+}
+
+void ble_server_refresh_advertising(void) {
+    if (!s_started || s_shutting_down || !s_synced) return;
+    if (s_advertising_active) {
+        // Restart with what's wanted now; a turn in progress ends early.
+        int rc = ble_gap_adv_stop();
+        if (rc != 0) ESP_LOGD(TAG, "adv_stop rc=%d", rc);
+        s_advertising_active = false;
+    }
+    start_advertising();
 }
 
 void ble_server_set_companion_advertising(bool enabled) {
     s_companion_advertising = enabled;
     if (!s_started || s_shutting_down) return;
-    if (enabled) {
-        if (s_synced) start_advertising();
-    } else if (!s_advertising_enabled && s_advertising_active) {
-        int rc = ble_gap_adv_stop();
-        if (rc != 0) {
-            ESP_LOGD(TAG, "adv_stop rc=%d", rc);
-        }
-        s_advertising_active = false;
-    }
+    update_advertising();
 }
 
 #if CONFIG_HOMEHUB_BLE_PERSISTENT
@@ -1256,6 +1773,180 @@ bool ble_server_is_started(void) {
     return s_started && !s_shutting_down;
 }
 
+void ble_server_forget_bonds(void) {
+    if (ble_server_is_started()) {
+        int rc = ble_store_clear();
+        ESP_LOGI(TAG, "forgot all bonded phones (rc=%d)", rc);
+        return;
+    }
+#if CONFIG_BT_NIMBLE_NVS_PERSIST
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("nimble_bond", NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        err = nvs_erase_all(h);
+        if (err == ESP_OK) err = nvs_commit(h);
+        nvs_close(h);
+    }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "forgot all bonded phones (BLE off)");
+    } else {
+        ESP_LOGE(TAG, "couldn't forget bonded phones: %s", esp_err_to_name(err));
+    }
+#endif
+}
+
+bool ble_server_forget_bonds_but_connected(void) {
+    if (!ble_server_is_started() || s_conn_handle == BLE_HS_CONN_HANDLE_NONE) return false;
+    struct ble_gap_conn_desc desc;
+    if (ble_gap_conn_find(s_conn_handle, &desc) != 0) return false;
+    ble_addr_t peers[MYNEWT_VAL(BLE_STORE_MAX_BONDS)];
+    int n = 0;
+    if (ble_store_util_bonded_peers(peers, &n, MYNEWT_VAL(BLE_STORE_MAX_BONDS)) != 0) return false;
+    int dropped = 0;
+    for (int i = 0; i < n; i++) {
+        if (ble_addr_cmp(&peers[i], &desc.peer_id_addr) == 0) continue;   // the connected phone keeps its bond
+        int rc = ble_gap_unpair(&peers[i]);
+        if (rc != 0 && rc != BLE_HS_ENOENT) {
+            ESP_LOGE(TAG, "couldn't forget a bonded phone (rc=%d)", rc);
+            return false;
+        }
+        dropped++;
+    }
+    ESP_LOGI(TAG, "forgot %d bonded phone(s); the connected one keeps its bond", dropped);
+    return true;
+}
+
+bool ble_server_ever_reachable(void) {
+    return s_ever_reachable;
+}
+
+void ble_server_set_safe_identity(bool safe) {
+    s_safe_identity = safe;
+}
+
+// Bench (!SAFEID): one boot in the SAFE identity while in normal mode, to
+// verify the way back from SAFE (finding it by name, the console and SMP
+// from that address) before forcing SAFE itself. The flag lives in RTC
+// no-init memory and is taken at the next boot, which restarts back to the
+// normal identity after SAFEID_BOOT_MS by itself.
+#define SAFEID_MAGIC 0x53414649u   // "SAFI"
+#define SAFEID_BOOT_MS 120000
+#if CONFIG_SOC_RTC_FAST_MEM_SUPPORTED || CONFIG_SOC_RTC_SLOW_MEM_SUPPORTED
+static RTC_NOINIT_ATTR uint32_t s_bench_safeid;
+#else
+static __NOINIT_ATTR uint32_t s_bench_safeid;   /* no RTC memory (the C61): kept across a restart all the same */
+#endif
+static esp_timer_handle_t s_safeid_timer;
+
+static void safeid_back(void *arg) {
+    (void)arg;
+    ESP_LOGW(TAG, "bench: SAFE identity boot over: restarting as the gadget");
+    muse_restart(MUSE_RESTART_CONSOLE);
+}
+
+void ble_server_bench_safe_identity(void) {
+    s_bench_safeid = SAFEID_MAGIC;   // the caller restarts
+}
+
+bool ble_server_bench_safe_identity_take(void) {
+    if (s_bench_safeid != SAFEID_MAGIC) {
+        s_bench_safeid = 0;
+        return false;
+    }
+    s_bench_safeid = 0;
+    const esp_timer_create_args_t a = { .callback = safeid_back, .name = "safeid_back" };
+    if (esp_timer_create(&a, &s_safeid_timer) != ESP_OK ||
+        esp_timer_start_once(s_safeid_timer, (uint64_t)SAFEID_BOOT_MS * 1000) != ESP_OK) {
+        ESP_LOGE(TAG, "bench: no timer for the way back: staying the gadget");
+        return false;
+    }
+    ESP_LOGW(TAG, "bench: this boot advertises the SAFE identity; back to the gadget in %d s", SAFEID_BOOT_MS / 1000);
+    return true;
+}
+
+void ble_server_bench_silence(void) {
+    if (!s_started || s_shutting_down) return;
+    ESP_LOGW(TAG, "bench: advertising off and the link closed until a restart (stay-reachable check)");
+    s_bench_silent = true;
+    if (s_advertising_active) {
+        ble_gap_adv_stop();
+        s_advertising_active = false;
+    }
+    ble_server_disconnect_client();
+}
+
+// >ble.pause: the pause is over (on the NimBLE host task): the normal
+// connection policy and advertising as before; with a link up (the one
+// address a pause admitted), at its disconnect.
+static void bench_pause_over(struct ble_npl_event *ev) {
+    (void)ev;
+    if (!s_bench_pause_until_us) return;
+    bool only = s_bench_pause_only;
+    s_bench_pause_until_us = 0;
+    s_bench_pause_only = false;
+    if (only) {
+        if (s_advertising_active) {   // the filtered advertisement: back to everyone
+            ble_gap_adv_stop();
+            s_advertising_active = false;
+        }
+        ble_gap_wl_set(NULL, 0);
+    }
+    ESP_LOGW(TAG, "bench: BLE pause over: the normal connection policy and advertising");
+    if (s_synced && !s_shutting_down) start_advertising();
+}
+
+void ble_server_bench_pause(uint32_t secs, const uint8_t *only_addr) {
+    if (!s_started || s_shutting_down || secs == 0) return;
+    if (!s_bench_pause_co_ready) {
+        ble_npl_callout_init(&s_bench_pause_co, nimble_port_get_dflt_eventq(), bench_pause_over, NULL);
+        s_bench_pause_co_ready = true;
+    }
+    if (s_advertising_active) {
+        ble_gap_adv_stop();
+        s_advertising_active = false;
+    }
+    s_bench_pause_only = false;
+    if (only_addr) {
+        for (int t = 0; t < 2; t++) {
+            s_bench_pause_peer[t].type = t ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+            for (int i = 0; i < 6; i++) s_bench_pause_peer[t].val[i] = only_addr[5 - i];   // little-endian
+        }
+        int rc = ble_gap_wl_set(s_bench_pause_peer, 2);
+        if (rc == 0) {
+            s_bench_pause_only = true;
+        } else {
+            ESP_LOGW(TAG, "bench: BLE pause: the accept list was refused (rc=%d): no one for %u s", rc, (unsigned)secs);
+        }
+    }
+    s_bench_pause_until_us = esp_timer_get_time() + (int64_t)secs * 1000000;
+    ble_npl_callout_reset(&s_bench_pause_co, ble_npl_time_ms_to_ticks32(secs * 1000));
+    ESP_LOGW(TAG, "bench: BLE paused for %u s: the link closed, %s", (unsigned)secs,
+             s_bench_pause_only ? "advertising connectable from one address only" : "no advertising");
+    ble_server_disconnect_client();
+    if (s_bench_pause_only) start_advertising();   // no link: now; with one, at its disconnect
+}
+
+bool ble_server_reachable_now(void) {
+    if (!s_started || s_shutting_down) return true;   // shut down on purpose (Link builds after setup)
+    if (s_quiet) return true;                         // paused on purpose (Wi-Fi video)
+    if (s_bench_pause_until_us) return true;          // paused on purpose (>ble.pause, at most 600 s)
+    return s_synced && (s_advertising_active || s_conn_handle != BLE_HS_CONN_HANDLE_NONE);
+}
+
 bool ble_server_has_connection(void) {
     return s_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+}
+
+void ble_server_resetup_prompt_shown(void) {
+#if CONFIG_MUSE_GADGET_BLE_AUDIO   // without it a set-up device never shows a re-setup prompt
+    resetup_gap_shown(&s_prompt_gap, s_conn_seq);
+#endif
+}
+
+void ble_server_resetup_prompt_ended(bool dismissed) {
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    resetup_gap_ended(&s_prompt_gap, dismissed, esp_timer_get_time());
+#else
+    (void)dismissed;
+#endif
 }

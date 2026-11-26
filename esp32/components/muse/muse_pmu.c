@@ -18,16 +18,21 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "muse_pmu";
 
 #define AXP2101_ADDR 0x34
 
 #define REG_STATUS1 0x00        /* bit5 VBUS good, bit3 battery present */
-#define REG_STATUS2 0x01        /* bits[6:5] 01 = charging */
+#define REG_STATUS2 0x01        /* bits[6:5] 01 = charging; bits[2:0] the charger's state, 100 = charge done */
+#define CHG_STATE_DONE 0x4
 #define REG_COMMON_CFG 0x10     /* bit0 = soft power-off, bit2 = shut down after 16 s of PWR */
-#define REG_PWROFF_STATUS 0x21  /* what powered it off last */
+#define REG_PWRON_STATUS 0x20   /* what turned it on: bit0 PWRON key, bit2 VBUS insert (datasheet 6.13.2.17) */
+#define REG_PWROFF_STATUS 0x21  /* what turned it off: bit1 software, bit3 VSYS under voltage */
 #define REG_PWROFF_EN 0x22      /* bit1 = power off when PWR is held past the hold-off */
+#define REG_GAUGE_CTRL 0x18     /* bit3 = fuel gauge (REG_BAT_PERCENT) */
 #define REG_IRQ_LEVEL 0x27      /* bits[3:2] power-key hold-to-off time */
 #define REG_ADC_ENABLE 0x30     /* bit0 = battery voltage */
 #define REG_VBAT_H 0x34         /* bits[4:0]; 1 mV per count with REG_VBAT_L */
@@ -39,6 +44,7 @@ static const char *TAG = "muse_pmu";
 #define REG_DCDC_ONOFF 0x80     /* bits[4:0] = DCDC5..1 */
 #define REG_LDO_ONOFF0 0x90     /* ALDO1-4, BLDO1-2, CPUSLDO, DLDO1 from bit0 */
 #define REG_LDO_ONOFF1 0x91     /* bit0 = DLDO2 */
+#define REG_BAT_DETECT 0x68     /* bit0 = battery detection: REG_STATUS1 bit3 */
 #define REG_BAT_PERCENT 0xA4
 
 /* INTEN2 / INTSTS2 power-key bits. */
@@ -75,14 +81,49 @@ static esp_err_t wr(uint8_t reg, uint8_t val)
     return i2c_master_transmit(s_dev, buf, sizeof(buf), 50);
 }
 
-esp_err_t muse_pmu_init(i2c_master_bus_handle_t bus, bool key_irqs)
+/*
+ * What the battery reading needs, all on by default after the AXP2101's own
+ * power-on reset (datasheet 6.13.2.14, .29, .65) but kept across ESP32 resets
+ * and power-offs, so whatever firmware ran before can leave them off (Waveshare's
+ * AXP2101 ADC example turns detection and the ADCs off in its adcOff()). With
+ * detection off, REG_STATUS1 says no battery and the board reads none (W175:
+ * battery_mv 0 and battery_pct -1 with a cell that kept it running):
+ * no low-battery shutdown, no charge dark. Returns whether it changed anything.
+ */
+static bool battery_reading_on(void)
 {
+    static const struct { uint8_t reg, bit; const char *what; } need[] = {
+        { REG_BAT_DETECT, 0x01, "battery detection" },
+        { REG_ADC_ENABLE, 0x01, "battery voltage ADC" },
+        { REG_GAUGE_CTRL, 0x08, "fuel gauge" },
+    };
+    bool changed = false;
+    for (size_t i = 0; i < sizeof(need) / sizeof(need[0]); i++) {
+        uint8_t v;
+        if (rd(need[i].reg, &v) == ESP_OK && !(v & need[i].bit) && wr(need[i].reg, v | need[i].bit) == ESP_OK) {
+            ESP_LOGW(TAG, "%s was off (left by earlier firmware): on", need[i].what);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+static esp_err_t attach(i2c_master_bus_handle_t bus)
+{
+    if (s_dev) {
+        return ESP_OK;   /* muse_pmu_early() came first */
+    }
     i2c_device_config_t cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = AXP2101_ADDR,
         .scl_speed_hz = 400000,
     };
-    ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bus, &cfg, &s_dev), TAG, "add device");
+    return i2c_master_bus_add_device(bus, &cfg, &s_dev);
+}
+
+esp_err_t muse_pmu_init(i2c_master_bus_handle_t bus, bool key_irqs)
+{
+    ESP_RETURN_ON_ERROR(attach(bus), TAG, "add device");
 
     uint8_t v;
     ESP_RETURN_ON_ERROR(rd(REG_IRQ_LEVEL, &v), TAG, "AXP2101 not responding");
@@ -106,8 +147,7 @@ esp_err_t muse_pmu_init(i2c_master_bus_handle_t bus, bool key_irqs)
                  sts[0], sts[1], sts[2]);
     }
 
-    ESP_RETURN_ON_ERROR(rd(REG_ADC_ENABLE, &v), TAG, "read adc enable");
-    ESP_RETURN_ON_ERROR(wr(REG_ADC_ENABLE, v | 0x01), TAG, "enable battery voltage");
+    battery_reading_on();
 
     uint8_t common = 0, en = 0, off = 0;
     rd(REG_COMMON_CFG, &common);
@@ -208,6 +248,10 @@ esp_err_t muse_pmu_read_power(muse_power_t *out)
     bool battery = s1 & (1u << 3);
     out->usb = s1 & (1u << 5);
     out->charging = battery && ((s2 >> 5) & 0x3) == 0x1;
+    /* The charger's own charge-done state (datasheet 6.13.2.2, REG01
+     * bits[2:0]: 000 trickle, 001 pre-charge, 010 CC, 011 CV, 100 done, 101
+     * not charging), never the gauge's percentage. */
+    out->charge_done = out->usb && battery && (s2 & 0x7) == CHG_STATE_DONE;
     out->battery_pct = -1;
     out->battery_mv = 0;
     if (battery && rd(REG_BAT_PERCENT, &pct) == ESP_OK && pct <= 100) {
@@ -216,6 +260,38 @@ esp_err_t muse_pmu_read_power(muse_power_t *out)
     if (battery && rd(REG_VBAT_H, &hi) == ESP_OK && rd(REG_VBAT_L, &lo) == ESP_OK) {
         out->battery_mv = (hi & 0x1F) << 8 | lo;
     }
+    return ESP_OK;
+}
+
+/*
+ * (muse_charge_dark.h). Whether VBUS insertion turns the AXP2101 on is
+ * fixed in its eFuse ("VBUS low go high ... configured by customization",
+ * datasheet 6.5.4.2), not a register: REG20 says after the fact what did.
+ * With VBUS the AXP2101's power path runs VSYS from VBUS while it charges,
+ * so a low cell can't brown the board out.
+ */
+esp_err_t muse_pmu_early(i2c_master_bus_handle_t bus, muse_cd_reading_t *out)
+{
+    static bool s_logged;
+    static uint8_t s_on;
+    ESP_RETURN_ON_ERROR(attach(bus), TAG, "add device");
+    if (!s_logged) {
+        uint8_t off = 0;
+        ESP_RETURN_ON_ERROR(rd(REG_PWRON_STATUS, &s_on), TAG, "AXP2101 not responding");
+        rd(REG_PWROFF_STATUS, &off);
+        s_logged = true;
+        ESP_LOGI(TAG, "power-on source 0x%02x%s%s, last power-off 0x%02x%s%s", s_on, s_on & 0x04 ? " (USB)" : "",
+                 s_on & 0x01 ? " (key)" : "", off, off & 0x02 ? " (software)" : "", off & 0x08 ? " (low VSYS)" : "");
+        if (battery_reading_on()) {
+            vTaskDelay(pdMS_TO_TICKS(500));   /* a detection and an ADC pass before the first reading */
+        }
+    }
+    muse_power_t p = { 0 };
+    ESP_RETURN_ON_ERROR(muse_pmu_read_power(&p), TAG, "power");
+    out->usb = p.usb;
+    out->usb_on = s_on & 0x04;
+    out->by_key = s_on & 0x01;
+    out->battery_mv = p.battery_mv;
     return ESP_OK;
 }
 

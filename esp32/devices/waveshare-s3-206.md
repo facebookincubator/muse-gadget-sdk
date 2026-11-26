@@ -58,10 +58,11 @@ The board ships with Waveshare's factory firmware. Back up the flash before
 the first Muse flash:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT -b 921600 read-flash 0 0x2000000 waveshare-s3-2.06-factory.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 921600 read-flash 0 0x2000000 "$BK/waveshare-s3-2.06-factory.bin")
 ```
 
-To go back, `python -m esptool --chip esp32s3 -p PORT write-flash 0 waveshare-s3-2.06-factory.bin`.
+To go back, `python -m esptool --chip esp32s3 -p PORT write-flash 0 "$BK/waveshare-s3-2.06-factory.bin"`.
 Restore the whole image, not just the app: the factory partition table is
 different.
 

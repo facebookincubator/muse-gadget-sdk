@@ -29,11 +29,14 @@ export const STRINGS = Object.freeze({
 
     "token.heading": "SDK token",
     "token.change": "Change",
-    "token.forget": "Forget",
+    "token.clear": "Clear",
     "token.intro.before": "A gadget needs your SDK token to pair. Get it from ",
-    "token.intro.after": " (Account > SDK tokens). It's sent to the gadget over USB after installing, the gadget keeps it through updates, and this browser remembers it for next time.",
+    "token.intro.after": " (Account > SDK tokens). It's sent to the gadget over USB after installing, and the gadget keeps it through updates.",
     "token.label": "SDK token",
     "token.invalid": "That isn't an SDK token. Copy it again from gadgets.muse.ai.",
+    "token.remember": "Remember this token on this computer",
+    "token.forgetSaved": "Forget saved token",
+    "token.rememberNote": "Off unless you tick it. When it's on, the page saves the token in this browser's local storage once it reaches a gadget, unencrypted, so anyone who uses this browser profile on this computer can read it. Untick it or press Forget saved token to delete it.",
 
     "install.heading": "Install",
     "install.board": "Board",
@@ -42,10 +45,31 @@ export const STRINGS = Object.freeze({
     "install.button": "Connect & install",
     "install.unsupported": "Your browser doesn't support Web Serial. Use Chrome or Edge on a desktop computer.",
     "install.notAllowed": "Web Serial needs a secure (https) connection.",
-    "install.note": "Keep this tab in front while installing. Updating keeps your pairing, Wi-Fi settings and token. When it's done, close the installer: the page sends your token, and you set the gadget up in the Muse app.",
+    "install.note": "Keep this tab in front while installing. Updating keeps your pairing, Wi-Fi settings and token. Once the firmware is written, the page checks the version the gadget runs, sends your token and says Done; then you set the gadget up in the Muse app.",
     "install.dialogLanguage": "",
     "install.holdsPort": "Device settings below is connected to a gadget. Disconnect it there to install.",
-    "install.needToken": "Installed. Now enter your SDK token in step 1, then send it under “Already installed?”.",
+    "install.written": "Written. Checking the version on the gadget…",
+    "install.checking": "Checking the version on the gadget…",
+    "install.noVersion": "The firmware is written, but the gadget didn't report its version, so this can't confirm the update. Unplug the gadget, plug it back in, then use Check version under “Already installed?”.",
+    "install.wrongVersion": "The update didn't take: the gadget reports {version}, not {expected}. Install again.",
+    "install.wrongVersionUnknown": "The update didn't take: the gadget reports {version}, not this page's version. Install again.",
+    "install.needToken": "Installed and checked: the gadget runs {version}. Now enter your SDK token in step 1, then send it under “Already installed?”.",
+    "install.sendingToken": "The gadget runs {version}. Sending your SDK token…",
+    "install.tokenFailed": "{version} is installed and checked, but your SDK token didn't go through: {error}",
+    "install.done": "Done. The gadget runs {version} and restarts with your token; set it up in the Muse app.",
+
+    "stop.cancelled": "Nothing was installed; your gadget still runs {version}.",
+    "stop.cancelledUnknown": "Nothing was installed; your gadget still runs the firmware it had.",
+    "stop.failed": "The update stopped before it finished. Nothing was installed; your gadget still runs {version}.",
+    "stop.failedUnknown": "The update stopped before it finished. Nothing was installed; your gadget still runs the firmware it had.",
+    "stop.erased": "The update stopped before it finished: the gadget was erased and nothing new was installed, so it won't start until you install again.",
+    "stop.partial": "The update stopped before it finished: the new firmware is only partly written, so the gadget may not start. Keep it plugged in and install again.",
+
+    "transfer.noTouch": "Don't unplug or touch the gadget until this says Done.",
+    "transfer.wrist": "Take the gadget off your wrist and set it down first: moving it can wake it and stall the update.",
+
+    "log.save": "Save log",
+    "log.note": "Something went wrong? Save this page's log and attach it to your report. Your token shows only as its length and a fingerprint.",
 
     "token.sending": "Sending your SDK token to the gadget…",
     "token.sent": "Done. The gadget restarts with your token; set it up in the Muse app.",
@@ -53,13 +77,21 @@ export const STRINGS = Object.freeze({
     "token.rejected": "The gadget says that isn't an SDK token.",
     "token.storeFailed": "The gadget couldn't store the token ({answer}).",
     "token.writeTimeout": "The serial write stalled. Unplug the gadget to release the port, then plug it back in and retry.",
+    "version.writeTimeout": "The serial write stalled. Unplug the gadget to release the port, then plug it back in and retry.",
     "token.noAnswer": "The gadget didn't answer. Check it runs firmware from this page and you picked its console port. If it still doesn't answer, unplug it, plug it back in and try again.",
 
-    "already.summary": "Already installed? Send your token to a gadget",
+    "already.summary": "Already installed? Send your token or check the version",
     "already.note": "For a gadget running firmware from this page. Pick its port when asked.",
     "already.send": "Send token to gadget",
+    "already.checkVersion": "Check version",
     "already.holds": "Disconnect Device settings below first.",
     "already.needToken": "Enter your SDK token in step 1 first.",
+
+    "version.asking": "Asking the gadget for its version…",
+    "version.none": "The gadget didn't report its version. Check it runs firmware from this page and you picked its console port.",
+    "version.current": "This gadget runs {version}, the version this page installs for {board}.",
+    "version.other": "This gadget runs {version}. This page installs {expected} for {board}.",
+    "version.noBuild": "This gadget runs {version}. This page has no build for {board}.",
 
     "settings.summary": "Device settings",
     "settings.intro": "Read a gadget's screen and sound settings over USB and change them. For boards with the Muse screen UI, running firmware from this page. Pick its port when asked. Nothing else on the gadget changes.",
@@ -154,11 +186,14 @@ export const STRINGS = Object.freeze({
 
     "token.heading": "SDKトークン",
     "token.change": "変更",
-    "token.forget": "削除",
+    "token.clear": "クリア",
     "token.intro.before": "実機のペアリングにはSDKトークンが必要です。",
-    "token.intro.after": "（Account > SDK tokens）から取得してください。トークンはインストール後にUSB経由で実機へ送信され、ファームウェアを更新しても実機に保持されます。また、次回のためにこのブラウザにも保存されます。",
+    "token.intro.after": "（Account > SDK tokens）から取得してください。トークンはインストール後にUSB経由で実機へ送信され、ファームウェアを更新しても実機に保持されます。",
     "token.label": "SDKトークン",
     "token.invalid": "有効なSDKトークンではありません。gadgets.muse.ai からもう一度コピーしてください。",
+    "token.remember": "このコンピューターにトークンを保存する",
+    "token.forgetSaved": "保存したトークンを削除",
+    "token.rememberNote": "チェックを入れない限りオフです。オンにすると、トークンが実機に届いた時点で、このブラウザのローカルストレージに暗号化せずに保存されます。そのため、このコンピューターでこのブラウザのプロファイルを使う人なら誰でも読み取れます。削除するには、チェックを外すか「保存したトークンを削除」を押してください。",
 
     "install.heading": "インストール",
     "install.board": "ボード",
@@ -167,10 +202,31 @@ export const STRINGS = Object.freeze({
     "install.button": "接続してインストール",
     "install.unsupported": "お使いのブラウザはWeb Serialに対応していません。PCのChromeまたはEdgeをご利用ください。",
     "install.notAllowed": "Web Serialには安全な接続（https）が必要です。",
-    "install.note": "インストール中はこのタブを前面に表示したままにしてください。更新してもペアリング情報、Wi-Fi設定、トークンは保持されます。完了したらインストーラーを閉じてください。このページからトークンが送信され、その後Museアプリで実機をセットアップできます。",
+    "install.note": "インストール中はこのタブを前面に表示したままにしてください。更新してもペアリング情報、Wi-Fi設定、トークンは保持されます。ファームウェアの書き込みが終わると、このページが実機のバージョンを確認してトークンを送信し、「完了」と表示します。その後、Museアプリで実機をセットアップしてください。",
     "install.dialogLanguage": "インストーラーのウィンドウは英語で表示されます。",
     "install.holdsPort": "下の「デバイス設定」が実機に接続されています。インストールするには、そちらで切断してください。",
-    "install.needToken": "インストールが完了しました。ステップ1でSDKトークンを入力し、「インストール済みの場合」から送信してください。",
+    "install.written": "書き込みが終わりました。実機のバージョンを確認しています…",
+    "install.checking": "実機のバージョンを確認しています…",
+    "install.noVersion": "ファームウェアは書き込まれましたが、実機からバージョンの応答がなかったため、更新を確認できません。実機のUSBを抜き差ししてから、「インストール済みの場合」の「バージョンを確認」をお使いください。",
+    "install.wrongVersion": "更新が反映されていません。実機のバージョンは {version} で、{expected} ではありません。もう一度インストールしてください。",
+    "install.wrongVersionUnknown": "更新が反映されていません。実機のバージョン {version} は、このページのバージョンと一致しません。もう一度インストールしてください。",
+    "install.needToken": "インストールと確認が完了しました。実機は {version} で動作しています。ステップ1でSDKトークンを入力し、「インストール済みの場合」から送信してください。",
+    "install.sendingToken": "実機は {version} で動作しています。SDKトークンを送信しています…",
+    "install.tokenFailed": "{version} のインストールと確認は完了しましたが、SDKトークンを送信できませんでした：{error}",
+    "install.done": "完了しました。実機は {version} で動作し、トークンを反映して再起動します。Museアプリでセットアップしてください。",
+
+    "stop.cancelled": "何もインストールされていません。実機は引き続き {version} で動作しています。",
+    "stop.cancelledUnknown": "何もインストールされていません。実機は引き続き以前のファームウェアで動作しています。",
+    "stop.failed": "更新が途中で止まりました。何もインストールされていません。実機は引き続き {version} で動作しています。",
+    "stop.failedUnknown": "更新が途中で止まりました。何もインストールされていません。実機は引き続き以前のファームウェアで動作しています。",
+    "stop.erased": "更新が途中で止まりました。実機のフラッシュメモリは消去されましたが、新しいファームウェアはインストールされていません。もう一度インストールするまで実機は起動しません。",
+    "stop.partial": "更新が途中で止まりました。新しいファームウェアは一部しか書き込まれていないため、実機が起動しない可能性があります。実機を接続したまま、もう一度インストールしてください。",
+
+    "transfer.noTouch": "「完了」と表示されるまで、実機のUSBを抜いたり、実機に触れたりしないでください。",
+    "transfer.wrist": "先に実機を手首から外して置いてください。動かすとスリープから復帰して、更新が止まることがあります。",
+
+    "log.save": "ログを保存",
+    "log.note": "問題が起きた場合は、このページのログを保存して報告に添付してください。トークンは長さとフィンガープリントだけが記録されます。",
 
     "token.sending": "SDKトークンを実機に送信しています…",
     "token.sent": "完了しました。実機はトークンを反映して再起動します。Museアプリでセットアップしてください。",
@@ -178,13 +234,21 @@ export const STRINGS = Object.freeze({
     "token.rejected": "実機により、有効なSDKトークンではないと判定されました。",
     "token.storeFailed": "実機にトークンを保存できませんでした（{answer}）。",
     "token.writeTimeout": "シリアル書き込みが止まりました。実機のUSBを抜いてポートを解放し、挿し直してからやり直してください。",
+    "version.writeTimeout": "シリアル書き込みが止まりました。実機のUSBを抜いてポートを解放し、挿し直してからやり直してください。",
     "token.noAnswer": "実機から応答がありませんでした。このページのファームウェアが動作していること、またコンソールポートを選択したことを確認してください。それでも応答しない場合は、USBを抜き差ししてやり直してください。",
 
-    "already.summary": "インストール済みの場合：実機にトークンを送信",
+    "already.summary": "インストール済みの場合：実機にトークンを送信、またはバージョンを確認",
     "already.note": "このページのファームウェアが動作している実機向けです。求められたら対象のポートを選択してください。",
     "already.send": "実機にトークンを送信",
+    "already.checkVersion": "バージョンを確認",
     "already.holds": "先に下の「デバイス設定」で切断してください。",
     "already.needToken": "先にステップ1でSDKトークンを入力してください。",
+
+    "version.asking": "実機にバージョンを問い合わせています…",
+    "version.none": "実機からバージョンの応答がありませんでした。このページのファームウェアが動作していること、またコンソールポートを選択したことを確認してください。",
+    "version.current": "この実機は {version} で動作しています。このページが{board}向けにインストールするバージョンと同じです。",
+    "version.other": "この実機は {version} で動作しています。このページが{board}向けにインストールするのは {expected} です。",
+    "version.noBuild": "この実機は {version} で動作しています。このページには{board}向けのビルドがありません。",
 
     "settings.summary": "デバイス設定",
     "settings.intro": "USB経由で実機の画面・音声設定を読み取り、変更します。このページのファームウェアが動作する、Muse画面UI搭載ボード向けです。求められたら対象のポートを選択してください。実機のその他の設定やデータは変更されません。",
@@ -285,8 +349,10 @@ export const message = (key, params = {}) => ({ key, params });
 
 const isMessage = (value) => value !== null && typeof value === "object" && typeof value.key === "string";
 
-// A message, an Error or a plain string, as text in the current language.
+// A message, an Error or a plain string, as text in the current language;
+// a list of them as sentences in a row.
 export function render(value) {
+  if (Array.isArray(value)) return value.map(render).filter(Boolean).join(current === "ja" ? "" : " ");
   if (isMessage(value)) return t(value.key, value.params);
   if (value instanceof Error) return value.message;
   return value == null ? "" : String(value);

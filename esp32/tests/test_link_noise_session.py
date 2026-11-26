@@ -93,9 +93,12 @@ class LinkNoiseSessionTest(unittest.TestCase):
         noise = NOISE_C.read_text()
         app = APP_C.read_text()
 
-        dispatch = noise.index("        // TX: keep exactly one control message")
-        serialize = noise.index("char *json = wrap_result_json(", dispatch)
-        stale_callback = noise[dispatch:serialize]
+        # The control sender's turn, which run_session() and the device
+        # session over BLE both run.
+        session = _function_body(noise, "static session_result_t run_session(")
+        self.assertIn("if (!control_tx_step(tls, session, control_tx, session_generation,", session)
+        dispatch = _function_body(noise, "static bool control_tx_step(")
+        stale_callback = dispatch[:dispatch.index("char *json = wrap_result_json(")]
         self.assertIn("pr.session_generation, session_generation", stale_callback)
         self.assertIn("free(pr.request_id)", stale_callback)
         self.assertIn("cJSON_Delete(pr.result)", stale_callback)
@@ -170,10 +173,18 @@ class LinkNoiseSessionTest(unittest.TestCase):
         session = _function_body(noise, "static session_result_t run_session(")
         complete = session[session.index(
             "if (inbound.frame_status == InboundFrameStatus::Complete) {"):]
-        self.assertIn("process_inbound_body_chunk(frame.response.body,", complete)
-        ended = complete.index("if (control_stream_ended(frame)) {")
-        self.assertLess(complete.index("process_inbound_body_chunk(frame.body_chunk.data,"), ended)
-        self.assertLess(complete.index("process_inbound_body_chunk(frame.response.body,"), ended)
+        # The frame's messages go through dispatch_inbound_frame() (the BLE
+        # device session shares it), a Response's inline body included.
+        dispatch = _function_body(noise, "static bool dispatch_inbound_frame(")
+        self.assertIn("process_inbound_body_chunk(frame.body_chunk.data,", dispatch)
+        self.assertIn("process_inbound_body_chunk(frame.response.body,", dispatch)
+        # A Response that ends the control stream runs its inline messages first (a final node.unpaired among
+        # them), then ends the session.
+        ended_in_response = dispatch[:dispatch.index('"server ended the control stream in its response"')]
+        ended_in_response = ended_in_response[ended_in_response.rindex("frame.response.end_body) {"):]
+        self.assertIn("process_inbound_body_chunk(frame.response.body, session_generation);", ended_in_response)
+        ended = complete.index("if (control_stream_ended(inbound.frame)) {")
+        self.assertLess(complete.index("dispatch_inbound_frame(inbound.frame,"), ended)
         self.assertIn("error = true;", complete[ended:ended + 300])
 
         compiler = shlex.split(os.environ.get("CXX", "c++"))

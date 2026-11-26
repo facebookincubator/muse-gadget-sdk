@@ -867,8 +867,13 @@ static void tick_hatch(void)
     SET(s_hatch_vm, vm[0] ? vm : h.vm_id[0] ? h.vm_id : "Not set");
     /* The device token is a credential, so none of it shows. */
     SET(s_hatch_token, muse_settings_hatch_token_len() ? "Set here" : muse_link_hatch_linked() ? "Set" : "Not set");
-    const char *sdk = muse_link_sdk_token();
-    if (sdk) snprintf(buf, sizeof(buf), "%.12s...", sdk);
+    /* None of the SDK token shows (a screenshot ends up in a transcript):
+     * whether one is set, its length and the start of its SHA-256, as the
+     * firmware logs it (main/token_fp.h; the LVGL Settings do the same). */
+    unsigned sdk_len;
+    char sdk_fp[MUSE_LINK_FP_HEX];
+    bool sdk = muse_link_sdk_token_fp(&sdk_len, sdk_fp);
+    if (sdk) snprintf(buf, sizeof(buf), sdk_fp[0] ? "Set, %u chars, %s" : "Set, %u chars", sdk_len, sdk_fp);
     if (s_sdk_token_bad_us && esp_timer_get_time() - s_sdk_token_bad_us < 5000000) {
         SET(s_hatch_sdk, "Not a token");
     } else {
@@ -1095,8 +1100,12 @@ static void page_ble(Column &c)
     switch_row(c, "Phone setup", s_ble_on, ACT_BLE_SW);
     note(c, s_ble_status);
     button(c, "Forget paired phones", ACT_BLE_FORGET);
+#if CONFIG_MUSE_GADGET_TEST_BUILD
     note(c, "When on, Muse is visible to phones nearby. Open tools/muse/ble_setup.html in Chrome, "
             "connect, and enter the code Muse shows to pair.");
+#else
+    note(c, "When on, Muse is visible to phones nearby. Set up Wi-Fi and your Muse account in the Muse app.");
+#endif
 }
 
 static void page_sound(Column &c)

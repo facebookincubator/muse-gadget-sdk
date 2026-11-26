@@ -161,6 +161,15 @@ else()
     set(MUSE_SIM_AVATAR_SOURCE "${MUSE_COMPONENT_DIR}/../../avatar/muse_pixel.c")
 endif()
 
+# Every board's type set (muse_type.c), and the vendored haptics core takes this
+# repo's protocol header (haptics/VENDORED.md): for the simulator and every test
+# target below that reuses its sources.
+add_compile_definitions(MUSE_TYPE_ALL=1 "MGH_MGCOMMANDS_H=\"mgcommands.h\"")
+# The firmware's sources use POSIX/BSD calls (strdup, strnlen, M_PI) that
+# ESP-IDF's newlib declares by default; with -std=c11 glibc hides them unless
+# asked (macOS shows them anyway).
+add_compile_definitions(_DEFAULT_SOURCE)
+
 add_executable(muse_simulator
     src/main.c
     src/sim_board.c
@@ -180,7 +189,37 @@ target_include_directories(muse_simulator PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${MUSE_COMPONENT_DIR}"
+    "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/include"
+    "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics"
+    "${MUSE_COMPONENT_DIR}/../muse_vstream/include"
+    "${MUSE_COMPONENT_DIR}/../network_proxy/include"
+    "${MUSE_COMPONENT_DIR}/../../../protocols"
 )
+
+# The v1.0 screens (home, Status, Settings, the passcode, haptics tests), with
+# the simulator's stand-ins for the services under them.
+target_sources(muse_simulator PRIVATE
+    src/sim_stubs.c
+    src/sim_haptics.c
+    src/sim_passcode.c
+    "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics/mg_haptics.c"
+    "${MUSE_COMPONENT_DIR}/../muse_gadget_ble/haptics/mg_haptic_test.c"
+    "${MUSE_COMPONENT_DIR}/muse_mic_ring.c"
+    "${MUSE_COMPONENT_DIR}/muse_turn_dot.c"
+    "${MUSE_COMPONENT_DIR}/muse_home.c"
+    "${MUSE_COMPONENT_DIR}/muse_status_conn.c"
+    "${MUSE_COMPONENT_DIR}/muse_icons.c"
+    "${MUSE_COMPONENT_DIR}/muse_type.c"
+    "${MUSE_COMPONENT_DIR}/muse_settings_ui.c"
+    "${MUSE_COMPONENT_DIR}/muse_keypad.c"
+    "${MUSE_COMPONENT_DIR}/muse_passcode_core.c"
+    "${MUSE_COMPONENT_DIR}/muse_passcode.c"
+    "${MUSE_COMPONENT_DIR}/muse_passcode_ui.c"
+)
+
+# Every board's type set (muse_type.c picks by the panel's size).
+file(GLOB MUSE_TYPE_FONTS "${MUSE_COMPONENT_DIR}/fonts/type/*.c")
+target_sources(muse_simulator PRIVATE ${MUSE_TYPE_FONTS})
 
 target_link_libraries(muse_simulator PRIVATE
     ${MUSE_SIM_LVGL_TARGET}
@@ -196,6 +235,9 @@ if(APPLE)
     # that framework in this configuration.
     find_library(MUSE_SIM_IOKIT_FRAMEWORK IOKit REQUIRED)
     target_link_libraries(muse_simulator PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+    # Optional custom-avatar cell accessor: ELF weak references need no flag;
+    # Mach-O executables must allow the unresolved weak import explicitly.
+    target_link_options(muse_simulator PRIVATE "-Wl,-U,_muse_pixel_cell_rgb565")
 endif()
 
 if(MUSE_SIM_EMOJI)
@@ -282,9 +324,29 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
         target_link_options(muse_volume_swipe_test PRIVATE
             -fsanitize=address,undefined -fno-omit-frame-pointer)
     endif()
-    add_test(NAME muse_volume_swipe COMMAND muse_volume_swipe_test)
-    set_tests_properties(muse_volume_swipe PROPERTIES
+    # Swipe volume on the compact faces; none on the v1.0 home.
+    foreach(face compact long home)
+        add_test(NAME muse_volume_swipe_${face} COMMAND muse_volume_swipe_test ${face})
+        set_tests_properties(muse_volume_swipe_${face} PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    endforeach()
+    # The Confirm disc through LVGL's real indev, the BLE gadget's UI (its update state faked): a tap on it confirms
+    # the setup prompt and the update card, a tap elsewhere doesn't.
+    add_executable(muse_confirm_disc_test tests/confirm_disc_harness.c ${caption_sources})
+    target_include_directories(muse_confirm_disc_test BEFORE PRIVATE tests/confirm_fakes)
+    target_include_directories(muse_confirm_disc_test PRIVATE ${caption_includes})
+    target_link_libraries(muse_confirm_disc_test PRIVATE ${caption_libraries})
+    target_compile_options(muse_confirm_disc_test PRIVATE ${caption_compile_options})
+    if(MUSE_SIM_SANITIZERS)
+        target_link_options(muse_confirm_disc_test PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_test(NAME muse_confirm_disc COMMAND muse_confirm_disc_test)
+    add_test(NAME muse_confirm_disc_round_466 COMMAND muse_confirm_disc_test 466 466 1)
+    add_test(NAME muse_confirm_disc_round_412 COMMAND muse_confirm_disc_test 412 412 1)
+    set_tests_properties(muse_confirm_disc muse_confirm_disc_round_466 muse_confirm_disc_round_412 PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+
     add_executable(muse_options_ui_test tests/options_ui_harness.c ${caption_sources})
     target_include_directories(muse_options_ui_test PRIVATE ${caption_includes})
     target_link_libraries(muse_options_ui_test PRIVATE ${caption_libraries})
@@ -313,6 +375,20 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     set_tests_properties(muse_latest_reply PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
     find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    add_executable(muse_ring_clip_test tests/muse_ring_clip_harness.c)
+    target_include_directories(muse_ring_clip_test PRIVATE "${MUSE_COMPONENT_DIR}")
+    target_compile_definitions(muse_ring_clip_test PRIVATE CONFIG_MUSE_BOARD_WAVESHARE_C6_18=1)
+    target_link_libraries(muse_ring_clip_test PRIVATE ${MUSE_SIM_LVGL_TARGET} ${MUSE_SIM_SDL_TARGET} Threads::Threads m)
+    target_compile_options(muse_ring_clip_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME muse_ring_clip_pixels COMMAND muse_ring_clip_test)
+    set_tests_properties(muse_ring_clip_pixels PROPERTIES TIMEOUT 60)
+    if(APPLE)
+        target_link_libraries(muse_ring_clip_test PRIVATE ${MUSE_SIM_IOKIT_FRAMEWORK})
+    endif()
+    if(MUSE_SIM_SANITIZERS)
+        target_compile_options(muse_ring_clip_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(muse_ring_clip_test PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
     add_test(
         NAME muse_simulator_headless
         COMMAND "${Python3_EXECUTABLE}"
@@ -335,11 +411,21 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
             "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
         )
     endif()
-    set_tests_properties(muse_simulator_headless PROPERTIES
+    set_tests_properties(muse_simulator_headless muse_ring_clip_pixels PROPERTIES
         ENVIRONMENT "${MUSE_SIM_TEST_ENVIRONMENT}"
         TIMEOUT 60
     )
+    # Debug/Sanitizer LVGL draws hundreds of full frames; leave CPU contention
+    # headroom when firmware builds are running alongside the test.
+    set_tests_properties(muse_ring_clip_pixels PROPERTIES TIMEOUT 180)
 
+    # main's settings harness (tests/settings_text_harness.c) includes
+    # muse_settings_ui.c with fakes for main's settings pages and checks main's
+    # layouts (TINY_*, wide, narrow, stacked rows). The settings are now a
+    # card list with Passcode, Watch face, Developer and haptics pages, which
+    # its fakes don't cover yet: off by default until it's ported.
+    option(MUSE_SIM_SETTINGS_TEXT_HARNESS "Build main's settings text/layout harness" OFF)
+    if(MUSE_SIM_SETTINGS_TEXT_HARNESS)
     add_executable(muse_settings_text_test
         tests/settings_text_harness.c
         "${MUSE_COMPONENT_DIR}/muse_keypad.c"
@@ -428,16 +514,23 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
     add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
     add_test(NAME muse_settings_round_240_bench COMMAND muse_settings_text_test 240 240 1 1.28 bench)
+    endif()
     # The button menu's layout, in English and in Vietnamese (accented letters
     # in the 16 px caption font), on compact and full-size screens.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/menu_fakes/esp_app_desc.h"
+         "#include \"${CMAKE_CURRENT_SOURCE_DIR}/../tests/link_fakes/esp_app_desc.h\"\n")
     foreach(lang en vi)
         add_executable(muse_menu_layout_${lang}
             tests/menu_layout_harness.c
             "${MUSE_COMPONENT_DIR}/muse_lang.c"
             "${MUSE_COMPONENT_DIR}/muse_text.c"
         )
+        # The harness defines esp_app_get_description() itself, which the
+        # simulator's own compat/esp_app_desc.h has inline: link_fakes'
+        # declaration comes first.
         target_include_directories(muse_menu_layout_${lang} PRIVATE
-            tests/settings_fakes compat ../tests/link_fakes "${MUSE_COMPONENT_DIR}"
+            "${CMAKE_CURRENT_BINARY_DIR}/menu_fakes" tests/settings_fakes compat ../tests/link_fakes
+            "${MUSE_COMPONENT_DIR}"
         )
         target_compile_definitions(muse_menu_layout_${lang} PRIVATE _POSIX_C_SOURCE=200809L)
         if(lang STREQUAL "vi")

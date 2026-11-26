@@ -112,8 +112,9 @@ These commands access hardware; the first enters the ROM loader and resets
 the device. Replace `PORT` and use a private backup path:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT --after no-reset read-flash 0 0x1000000 echoear-original.bin
-python -m esptool --chip esp32s3 -p PORT --before no-reset --after no-reset verify-flash 0 echoear-original.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT --after no-reset read-flash 0 0x1000000 "$BK/echoear-original.bin")
+python -m esptool --chip esp32s3 -p PORT --before no-reset --after no-reset verify-flash 0 "$BK/echoear-original.bin"
 ```
 
 Keep the device in the loader between reading and verifying: do not power-cycle,

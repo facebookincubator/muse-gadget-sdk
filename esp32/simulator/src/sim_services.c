@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
+#include "muse_state.h"
 #include "sim_services.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include "muse_console.h"
-#include "muse_audio.h"
 #include "muse_input.h"
 #include "muse_menu.h"
 #include "muse_settings.h"
 #include "muse_settings_ui.h"
 #include "muse_voice.h"
 
-/* The preview drives modes directly; it has no live call transport. */
+/* The preview drives modes directly; it has no call transport. */
 static bool s_in_call;
 bool muse_voice_in_call(void) { return s_in_call; }
 bool muse_voice_reply_waiting(void) { return false; }
@@ -52,7 +52,6 @@ static muse_hatch_status_t s_chat = {
 };
 static muse_link_state_t s_link = MUSE_LINK_ONLINE;
 static int s_brightness = 75;
-static int s_volume = 70;
 static bool s_speaker = true;
 
 static void copy_text(char *out, size_t cap, const char *text)
@@ -89,7 +88,6 @@ void sim_services_reset(void)
     };
     s_link = MUSE_LINK_ONLINE;
     s_brightness = 75;
-    s_volume = 70;
     s_speaker = true;
     s_in_call = false;
 }
@@ -109,6 +107,11 @@ void sim_services_set_ble(muse_ble_state_t state, const char *name, uint32_t pas
     s_ble.passkey = passkey;
     s_ble.secure = state == MUSE_BLE_CONNECTED;
     copy_text(s_ble.name, sizeof(s_ble.name), name);
+}
+
+bool sim_services_paired(void)
+{
+    return s_chat.state != MUSE_HATCH_NOT_SET;
 }
 
 void sim_services_set_paired(bool paired)
@@ -152,10 +155,6 @@ int muse_settings_brightness(void)
     return s_brightness;
 }
 
-int muse_settings_volume(void) { return s_volume; }
-void muse_settings_set_volume(int pct) { s_volume = pct; }
-void muse_audio_set_volume(int pct) { (void)pct; }
-
 bool muse_settings_speaker_on(void)
 {
     return s_speaker;
@@ -166,15 +165,22 @@ void muse_settings_set_brightness(int pct)
     sim_services_set_brightness(pct);
 }
 
-void muse_settings_set_speaker_on(bool on)
+void muse_settings_set_speaker_on_by(bool on, muse_vol_by_t by)
 {
     sim_services_set_speaker(on);
+    sim_stubs_count_volume(by);
+}
+
+void muse_settings_set_speaker_on(bool on)
+{
+    muse_settings_set_speaker_on_by(on, MUSE_VOL_BY_DEVICE);
 }
 
 /* Text size: the screen's default until someone picks one, as on a board. */
 static int s_text_default = MUSE_TEXT_SMALL;
 int muse_settings_text_size(void) { return s_text_default; }
 void muse_settings_set_text_size_default(int size) { s_text_default = size; }
+void muse_settings_set_text_size(int size) { s_text_default = size; }
 
 void muse_wifi_status(muse_wifi_status_t *out)
 {
@@ -216,23 +222,7 @@ muse_link_state_t muse_link_state(void)
     return s_link;
 }
 
-void muse_settings_ui_build(lv_obj_t *tile)
-{
-    lv_obj_t *label = lv_label_create(tile);
-    lv_label_set_text(label, "Settings unavailable in preview");
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_center(label);
-}
-
-void muse_settings_ui_tick(bool visible)
-{
-    (void)visible;
-}
-
-bool muse_settings_ui_in_subpage(void)
-{
-    return false;
-}
+/* Settings: the production menu (muse_settings_ui.c) over sim_stubs.c. */
 
 void muse_menu_key(muse_menu_key_t key)
 {
@@ -272,6 +262,17 @@ bool muse_console_write(const void *buf, size_t n)
 void muse_input_touch_talk(bool pressed)
 {
     (void)pressed;
+}
+
+/* No voice task here: its answer to a tap on the hold region. */
+void muse_input_note_touch_tap(void)
+{
+    muse_state_make_happy();
+}
+
+bool muse_input_take_touch_tap(void)
+{
+    return false;
 }
 
 void sim_services_set_call(bool on)

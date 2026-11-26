@@ -32,7 +32,8 @@ CONFIG_WAMR_ENABLE_MULTI_MODULE=n
 CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
 
 # The apps' fonts (FONT_ in sdk/gadget.h): 14 to 28 px are the UI's already;
-# 48 px for big numbers.
+# 48 px for big numbers, about 94 KB of flash (it also draws the home's time
+# where the board's own type is off).
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # Images for ui_image_set and ui_image_load: LVGL's PNG (lodepng) and JPEG

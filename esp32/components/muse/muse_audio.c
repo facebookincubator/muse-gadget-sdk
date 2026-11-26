@@ -29,11 +29,13 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "muse_audio_dma.h"
 #include "muse_board.h"
 #include "muse_mem.h"
 #include "muse_mirror_audio.h"
 #include "muse_settings.h"
 #include "muse_motion.h"
+#include "muse_spk_dsp.h"   /* the speech chain, on a board with muse_board_t.speaker_speech_chain */
 
 static const char *TAG = "muse_audio";
 
@@ -43,6 +45,13 @@ static const char *TAG = "muse_audio";
 static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;
+/* The codecs should be open (initialized, not resting) but aren't: their DMA
+ * buffers didn't fit (open_codecs). Reads and writes try again, at most once
+ * a second, and wait out their audio meanwhile. */
+static bool s_want_open;
+static int64_t s_retry_us;
+static bool s_short;   /* the last open was refused for memory */
+static int64_t s_short_logged_us;   /* each refused open logs, at most once in 10 s (a mirror joining late sees it) */
 /* Opening, closing and the volume and gain setters, which other tasks call:
  * with a board-switched codec supply, none may reach a codec mid-switch. */
 static SemaphoreHandle_t s_lock;
@@ -55,18 +64,43 @@ static float s_hpf_a;
 static float s_mic_scale = 1.0f;
 static float s_hpf_x1, s_hpf_y1;
 
+/* Which function holds the lock (its name, NULL: free), for a stuck-task
+ * report (muse_audio_lock_holder). Each lock() caller names itself after. */
+static const char *volatile s_lock_what;
+
 static void lock(void)
 {
     if (s_lock) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
     }
+    s_lock_what = "?";
+}
+#define LOCK() do { lock(); s_lock_what = __func__; } while (0)
+
+/* The read and write paths' take (ensure_open): never unbounded. False after
+ * timeout_ms, logging who holds it (the read or write then fails). */
+static bool lock_within(int timeout_ms, const char *who)
+{
+    if (s_lock && xSemaphoreTake(s_lock, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        const char *holder = s_lock_what;
+        ESP_LOGE(TAG, "%s: the audio lock is still held by %s after %d ms", who, holder ? holder : "?", timeout_ms);
+        return false;
+    }
+    s_lock_what = who;
+    return true;
 }
 
 static void unlock(void)
 {
+    s_lock_what = NULL;
     if (s_lock) {
         xSemaphoreGive(s_lock);
     }
+}
+
+const char *muse_audio_lock_holder(void)
+{
+    return s_lock_what;
 }
 
 static void codec_power(bool on)
@@ -89,6 +123,18 @@ static void apply_volume(int volume)
     }
 }
 
+/* set_mic_gain's per-connection gain (muse_audio_mic_gain_override), dB, or
+ * -1: none, the user's Settings gain. Set from any task without the lock
+ * (the BLE host at a disconnect); the next read applies it (dirty). */
+static volatile int s_mic_gain_override = -1;
+static volatile bool s_mic_gain_dirty;
+
+int muse_audio_mic_gain(void)
+{
+    int o = s_mic_gain_override;
+    return o >= 0 ? o : muse_settings_mic_gain();
+}
+
 static void apply_mic_gain(int db)
 {
     if (muse_board->mic_init || (!s_mic && muse_board->mic_read)) {
@@ -105,6 +151,48 @@ static void apply_mic_gain(int db)
     }
 }
 
+/* Each DMA buffer the I2S channels hold since the codecs last opened (0:
+ * none known yet). Closing (resting) disables the channels but keeps their
+ * buffers, and ESP-IDF reallocates them only for a new size (i2s_std_set_slot),
+ * so reopening in the same format needs no new memory. */
+static size_t s_held_buf;
+
+static muse_audio_dma_t dma_budget(void)
+{
+    return muse_audio_dma_budget(muse_board->i2s_dma_desc, muse_board->i2s_dma_frames, CHANNELS * sizeof(int16_t), 2);
+}
+
+/*
+ * Whether the DMA buffers opening the codecs takes fit in internal memory
+ * (muse_audio_dma.h): if ESP-IDF can't allocate them, esp_codec_dev_open()
+ * enables the I2S channel anyway and it faults. Buffers the channels already
+ * hold in this format need nothing new (on the StopWatch on battery, each
+ * wake from rest asked for 12.5 KB more that a BLE video build doesn't have
+ * free, so the codecs never opened again and every capture read nothing).
+ * Logs a refusal once, until an open succeeds again.
+ */
+static bool dma_fits(void)
+{
+    const muse_audio_dma_t b = dma_budget();
+    if (s_held_buf && b.buf == s_held_buf) {
+        return true;   /* the same buffers again: no reallocation */
+    }
+    const size_t free = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (muse_audio_dma_fits(&b, free, largest)) {
+        return true;
+    }
+    int64_t now = esp_timer_get_time();
+    if (!s_short || now - s_short_logged_us >= 10 * 1000 * 1000) {
+        s_short_logged_us = now;
+        ESP_LOGE(TAG, "audio unavailable: %u B DMA needed (%u B buffers), %u B free, largest %u B; voice stays off",
+                 (unsigned)b.need, (unsigned)b.buf, (unsigned)free, (unsigned)largest);
+    }
+    s_short = true;
+    return false;
+}
+
+/* ESP_ERR_NO_MEM: not opened, their DMA buffers wouldn't fit (try again later). */
 static esp_err_t open_codecs(void)
 {
     esp_codec_dev_sample_info_t fs = {
@@ -112,6 +200,9 @@ static esp_err_t open_codecs(void)
         .channel = CHANNELS,
         .bits_per_sample = 16,
     };
+    if (!dma_fits()) {
+        return ESP_ERR_NO_MEM;
+    }
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_spk, &fs) == ESP_CODEC_DEV_OK, ESP_FAIL, TAG, "open speaker");
     if (s_mic) {
         if (esp_codec_dev_open(s_mic, &fs) != ESP_CODEC_DEV_OK) {
@@ -121,7 +212,35 @@ static esp_err_t open_codecs(void)
         }
     }
     s_open = true;
+    s_held_buf = dma_budget().buf;   /* the channels hold buffers of this size from here on */
+    if (s_short) {
+        ESP_LOGI(TAG, "audio available again");
+    }
+    s_short = false;
     return ESP_OK;
+}
+
+/* The device's own sounds' speech chain (muse_board_t.speaker_speech_chain; muse_audio_write's callers, all on
+ * the voice task), and when the last of them ended: after a gap the speaker played out, it starts afresh. */
+static muse_spk_chain_t *s_chain;
+static int64_t s_chain_us;
+#define CHAIN_IDLE_US 100000   /* longer than the DMA's 30 ms and a 20 ms piece: the speaker ran dry */
+
+static void speech_chain_init(void)
+{
+    if (!muse_board->speaker_speech_chain || s_chain) {
+        return;
+    }
+    /* In PSRAM where there is some; its settings read from NVS now, at boot, not on a playback task's first
+     * chunk. */
+    s_chain = heap_caps_malloc(sizeof(*s_chain), MUSE_BIG_CAPS);
+    if (s_chain) {
+        memset(s_chain, 0, sizeof(*s_chain));
+    }
+    bool on;
+    muse_spk_dsp_config(NULL, &on, NULL);
+    ESP_LOGI(TAG, "speaker speech chain %s%s", on ? "on" : "off (>spk.dsp)",
+             s_chain ? "" : " (no memory: the device's sounds unchained)");
 }
 
 static esp_err_t read_input(size_t frames)
@@ -168,18 +287,29 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
         if (err == ESP_OK && !(s_spk && (s_mic || muse_board->mic_read))) {
             err = ESP_FAIL;
         }
+        if (err == ESP_OK && muse_board->i2s_ready_at_init) {
+            s_held_buf = dma_budget().buf;   /* the board's channels already hold these buffers */
+        }
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "codec init failed");
         } else {
             err = open_codecs();   /* logs its own failure */
         }
-        if (err != ESP_OK) {
+        if (err == ESP_ERR_NO_MEM) {
+            /* No room for the DMA buffers yet: closed and unpowered, voice
+             * off, everything else carries on; reads, writes and the next
+             * wake try again. */
+            codec_power(false);
+            err = ESP_OK;
+        } else if (err != ESP_OK) {
             codec_power(false);
             return err;
         }
+        s_want_open = true;
     }
     muse_audio_set_volume(volume);
     muse_audio_set_mic_gain(mic_gain_db);
+    speech_chain_init();
 
     float rc = 1.0f / (2.0f * (float)M_PI * HPF_HZ);
     float dt = 1.0f / MUSE_AUDIO_RATE;
@@ -189,15 +319,37 @@ esp_err_t muse_audio_init(int volume, int mic_gain_db)
     return ESP_OK;
 }
 
+/* Codecs closed: their supply up, open, the settings applied, the amp on;
+ * or, if they won't open, the supply down again (open_codecs closes the
+ * speaker if the mic fails, and the amp is still off). Call with the lock. */
+static void open_locked(void)
+{
+    codec_power(true);
+    if (open_codecs() == ESP_OK) {
+        apply_volume(muse_settings_volume());
+        apply_mic_gain(muse_audio_mic_gain());
+        if (muse_board->audio_power) {
+            muse_board->audio_power(true);
+        }
+    } else {
+        codec_power(false);
+    }
+}
+
 void muse_audio_power(bool on)
 {
-    lock();
+    LOCK();
     if (muse_board->mic_init) {
         if (on != s_open && muse_board->mic_power(on) == ESP_OK) s_open = on;
         unlock();
         return;
     }
-    if (!s_spk || on == s_open) {
+    if (!s_spk) {
+        unlock();
+        return;
+    }
+    s_want_open = on;   /* resting: no read or write opens them again */
+    if (on == s_open) {
         unlock();
         return;
     }
@@ -207,21 +359,10 @@ void muse_audio_power(bool on)
     esp_log_level_set("i2s_common", ESP_LOG_NONE);
     /* The codecs' supply comes up before they open and goes once both have
      * closed. The amp goes on once they're open and set, and off before they
-     * close, so it never passes on their power-up or power-down. */
+     * close, so it never passes on their power-up or power-down. If they
+     * won't open, the next wake (or read or write) tries again. */
     if (on) {
-        codec_power(true);
-        if (open_codecs() == ESP_OK) {
-            apply_volume(muse_settings_volume());
-            apply_mic_gain(muse_settings_mic_gain());
-            if (muse_board->audio_power) {
-                muse_board->audio_power(true);
-            }
-        } else {
-            /* Still closed (open_codecs closes the speaker if the mic fails)
-             * and the amp still off: take the supply down again too. The
-             * next wake tries again. */
-            codec_power(false);
-        }
+        open_locked();
     } else {
         if (muse_board->audio_power) {
             muse_board->audio_power(false);
@@ -237,17 +378,74 @@ void muse_audio_power(bool on)
     unlock();
 }
 
+/*
+ * Reads and writes: the codecs are open, or open now. While they should be
+ * open but their DMA buffers don't fit (open_codecs), they try again at most
+ * once a second; false meanwhile.
+ */
+static bool ensure_open(void)
+{
+    if (s_open || muse_board->mic_init) {
+        return true;
+    }
+    if (!s_want_open || esp_timer_get_time() < s_retry_us) {
+        return false;
+    }
+    if (!lock_within(5000, __func__)) {
+        return false;
+    }
+    if (!s_open && s_want_open && s_spk) {
+        s_retry_us = esp_timer_get_time() + 1000 * 1000;
+        open_locked();
+    }
+    bool open = s_open;
+    unlock();
+    return open;
+}
+
+/* Closed codecs: no audio, at the audio's own pace, so a caller's loop that
+ * counts on reads and writes blocking doesn't spin. */
+static esp_err_t closed_wait(size_t frames)
+{
+    TickType_t t = pdMS_TO_TICKS((frames * 1000 + MUSE_AUDIO_RATE - 1) / MUSE_AUDIO_RATE);
+    vTaskDelay(t ? t : 1);
+    return ESP_ERR_INVALID_STATE;
+}
+
 void muse_audio_set_volume(int volume)
 {
-    lock();
+    LOCK();
     apply_volume(volume);
     unlock();
 }
 
 void muse_audio_set_mic_gain(int db)
 {
-    lock();
+    LOCK();
     apply_mic_gain(db);
+    unlock();
+}
+
+int muse_audio_mic_gain_override_db(void)
+{
+    return s_mic_gain_override;
+}
+
+void muse_audio_mic_gain_override(int db)
+{
+    s_mic_gain_override = db < 0 ? -1 : (db > MUSE_MIC_GAIN_MAX ? MUSE_MIC_GAIN_MAX : db);
+    s_mic_gain_dirty = true;
+}
+
+/* A gain muse_audio_mic_gain_override changed reaches the codec at the next
+ * read, on the reading task (it may wait for the codec's bus). */
+static void apply_pending_mic_gain(void)
+{
+    if (!s_mic_gain_dirty || !lock_within(1000, __func__)) {
+        return;
+    }
+    s_mic_gain_dirty = false;
+    apply_mic_gain(muse_audio_mic_gain());
     unlock();
 }
 
@@ -263,6 +461,10 @@ void muse_audio_selftest(void)
         if (muse_audio_read(mono, MUSE_AUDIO_CHUNK) == ESP_OK) {
             ESP_LOGI(TAG, "PDM mic capture: %.1f dBFS", muse_audio_dbfs(mono, MUSE_AUDIO_CHUNK));
         }
+        return;
+    }
+    if (!s_open) {
+        ESP_LOGW(TAG, "self-test skipped: the codecs aren't open");
         return;
     }
     enum { FLUSH = MUSE_AUDIO_RATE / 4, MEASURE = MUSE_AUDIO_RATE / 2 };
@@ -335,6 +537,10 @@ void muse_audio_loopback_test(int volume)
         ESP_LOGW(TAG, "no speaker for loopback test");
         return;
     }
+    if (!s_open) {
+        ESP_LOGW(TAG, "loopback test skipped: the codecs aren't open");
+        return;
+    }
     enum { TONE = MUSE_AUDIO_RATE * 3 / 10, SKIP = MUSE_AUDIO_RATE / 10, MEAS = TONE - SKIP };
     static const float freqs[] = { 200, 400, 700, 1000, 2000, 3000, 4000, 6000 };
     static const int gains[] = { 0, 6, 12, 18, 24, 30, 33, 36 };
@@ -389,12 +595,16 @@ void muse_audio_loopback_test(int volume)
         ESP_LOGI(TAG, "%s | peak %.1f dBFS", line, 20.0 * log10((peak + 1) / 32768.0));
     }
     free(cap);
-    muse_audio_set_mic_gain(muse_settings_mic_gain());
+    muse_audio_set_mic_gain(muse_audio_mic_gain());
     muse_audio_set_volume(muse_settings_volume());
 }
 
 esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 {
+    if (!ensure_open()) {
+        return closed_wait(frames);
+    }
+    apply_pending_mic_gain();
     while (frames) {
         size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
         /* A mic without a codec: its gain applies in float, ahead of the
@@ -423,17 +633,52 @@ esp_err_t muse_audio_read(int16_t *mono, size_t frames)
 
 esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
 {
+    if (!s_chain || !frames) {
+        return muse_audio_write_chained(mono, frames);
+    }
+    int64_t now = esp_timer_get_time();
+    if (now - s_chain_us > CHAIN_IDLE_US) {
+        muse_spk_chain_reset(s_chain);   /* (a tail it still held was the end of a sound long gone) */
+    }
+    esp_err_t err = ESP_OK;
+    while (frames && err == ESP_OK) {
+        int16_t piece[MUSE_AUDIO_CHUNK];
+        size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
+        memcpy(piece, mono, n * sizeof(int16_t));
+        muse_spk_chain_run(s_chain, piece, n, MUSE_AUDIO_RATE);
+        err = muse_audio_write_chained(piece, n);
+        mono += n;
+        frames -= n;
+    }
+    s_chain_us = esp_timer_get_time();
+    return err;
+}
+
+void muse_audio_write_end(void)
+{
+    if (s_chain) {
+        static const int16_t zeros[MUSE_SPK_DSP_LOOKAHEAD];
+        muse_audio_write(zeros, MUSE_SPK_DSP_LOOKAHEAD);   /* the look-ahead's last 2 ms out */
+    }
+}
+
+esp_err_t muse_audio_write_chained(const int16_t *mono, size_t frames)
+{
     bool mirror_only = muse_mirror_audio_playback(mono, frames);
     if (muse_board->mic_init) {
         (void)mono;
         vTaskDelay(pdMS_TO_TICKS((frames * 1000 + MUSE_AUDIO_RATE - 1) / MUSE_AUDIO_RATE));
         return ESP_OK;
     }
+    if (!ensure_open()) {
+        return closed_wait(frames);
+    }
     /* Speaker off still plays silence at the same pace, so captions timed to
      * the audio scroll as if it were heard. */
     while (frames) {
         bool mute = mirror_only || !muse_settings_speaker_on() || muse_motion_quiet();
-        size_t n = frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames;
+        /* Pieces that stay in one DMA buffer, so a barge-in's clear knows where each went (muse_audio_tx.h). */
+        size_t n = muse_audio_tx_note_begin(frames > MUSE_AUDIO_CHUNK ? MUSE_AUDIO_CHUNK : frames);
         for (size_t i = 0; i < n; i++) {
             s_out_stereo[2 * i] = mute ? 0 : mono[i];
             s_out_stereo[2 * i + 1] = mute ? 0 : mono[i];
@@ -441,6 +686,7 @@ esp_err_t muse_audio_write(const int16_t *mono, size_t frames)
         if (esp_codec_dev_write(s_spk, s_out_stereo, n * CHANNELS * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
             return ESP_FAIL;
         }
+        muse_audio_tx_note_write(mono, n, mute);   /* in the DMA now: what a clear can hand back */
         mono += n;
         frames -= n;
     }
@@ -484,6 +730,7 @@ void muse_audio_chirp(int rising)
         buf[i] = (int16_t)(s * env * 7000.0f);
     }
     muse_audio_write(buf, N);
+    muse_audio_write_end();
 }
 
 #if CONFIG_MUSE_REPLY_NOTIFY

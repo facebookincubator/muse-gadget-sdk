@@ -329,6 +329,10 @@ static esp_err_t read_power(muse_power_t *out)
     out->battery_mv = mv;
     out->battery_pct = soc;
     out->charging = out->usb && (int16_t)current > 0;
+    /* The gauge's FC (BatteryStatus bit 9), set when it sees the
+     * charger terminate (taper current), never its SOC. */
+    uint16_t status;
+    out->charge_done = out->usb && gauge_read(0x0a, &status) == ESP_OK && (status & (1u << 9));
 #if CONFIG_MUSE_POWER_TEST
     /* The diagnostic suppresses ESP_LOG; keep gauge evidence outside its JSON. */
     char line[96];
@@ -363,6 +367,12 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): the AI button (GPIO4), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(GPIO_NUM_4, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Seeed reTerminal Sticky",
     .width = SCREEN_W,
@@ -382,7 +392,9 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the BQ27220's FC bit; MUSE_CHARGED_PERCENT for the % fallback */
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 const muse_board_t *muse_board_get(void)

@@ -143,6 +143,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (the BSP's PWM, duty 0 = off). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(BSP_LCD_BACKLIGHT, 0);   /* GPIO47 (esp-box-3 3.2.0) */
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): BOOT (GPIO0, the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(BSP_BUTTON_CONFIG_IO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Espressif ESP32-S3-BOX-3",
     .width = BSP_LCD_H_RES,
@@ -158,11 +170,13 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = bsp_display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 const muse_board_t *muse_board_get(void)

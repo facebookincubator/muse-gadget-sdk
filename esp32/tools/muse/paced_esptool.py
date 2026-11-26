@@ -22,6 +22,7 @@ whole packet arrives faster than the UART drains it, so esptool fails with
 uploading its stub, or "0105: The format of the received message is invalid"
 on the first flash block. This sends 64 bytes at a time, at the line rate.
 """
+import os
 import sys
 import time
 
@@ -45,6 +46,10 @@ def paced_write(self, data):
 serial.Serial.write = paced_write
 
 import esptool  # noqa: E402  (after the patch, so esptool's port uses it)
+
+# A read-flash dump holds NVS (identity, tokens): every file this writes is
+# 0600.
+os.umask(0o077)
 
 if __name__ == "__main__":
     sys.exit(esptool._main())

@@ -65,6 +65,12 @@ static int lv_indev_get_state(lv_indev_t *i) { (void)i; return pressed; }
 __attribute__((unused)) static lv_obj_t *lv_indev_get_scroll_obj(lv_indev_t *i) { (void)i; return scrolling ? &tileview : NULL; }
 static bool muse_ui_face_active(void) { return face; }
 __attribute__((unused)) static bool muse_ui_volume_swiping(void) { return volume_swiping; }
+/* The panel's touch or an injected one (muse_touch.c), and whether an injected press may talk (a no-person image). */
+static bool real = true, no_person;
+static int talk_downs, talk_ups;
+__attribute__((unused)) static bool muse_touch_real(void) { return real; }
+__attribute__((unused)) static bool muse_input_talk_ok(bool r) { return no_person || r; }
+__attribute__((unused)) static void muse_input_touch_talk(bool down) { down ? talk_downs++ : talk_ups++; }
 %(poll)s
 static unsigned step(TickType_t ms) { now += ms; return poll_buttons(); }
 static void hold_talks(void) {
@@ -123,6 +129,36 @@ static void pwr_is_power_never_talk(void) {
     pwr_edges = MUSE_BTN_TALK_RELEASE;
     assert(step(10) == MUSE_BTN_POWER_RELEASE);
 }
+/* An injected touch (!IN press=) held on the face: never the gadget's own talk press (the mic gate's, a confirm's). */
+static void injected_hold_never_own(void) {
+    real = false;
+    pressed = true;
+    assert(step(10) == 0);
+    assert(step(600) == 0);      /* past the threshold: nothing of the board's own */
+    assert(talk_downs == 0);     /* a release image: no talk at all */
+    pressed = false;
+    assert(step(10) == 0 && talk_ups == 0);
+    no_person = true;            /* a test or automation image: talks the UI's way, still not own */
+    pressed = true;
+    assert(step(10) == 0);
+    assert(step(600) == 0 && talk_downs == 1);
+    pressed = false;
+    assert(step(10) == 0 && talk_ups == 1);
+    real = true;                 /* a finger's hold is still the gadget's own */
+    hold_talks();
+    assert(talk_downs == 1 && talk_ups == 1);
+}
+/* A touch that turns injected before the threshold (a bench press over a finger) isn't own either. */
+static void mixed_touch_never_own(void) {
+    pressed = true;
+    assert(step(10) == 0);
+    real = false;
+    assert(step(100) == 0);
+    real = true;
+    assert(step(600) == 0);
+    pressed = false;
+    assert(step(10) == 0);
+}
 int main(int argc, char **argv) {
     assert(argc == 2);
     switch (atoi(argv[1])) {
@@ -131,6 +167,8 @@ int main(int argc, char **argv) {
     case 2: off_face_press_never_talks(); break;
     case 3: pwr_is_power_never_talk(); break;
     case 4: volume_drag_never_talks(); break;
+    case 5: injected_hold_never_own(); break;
+    case 6: mixed_touch_never_own(); break;
     default: return 2;
     }
     return 0;
@@ -178,6 +216,10 @@ class WaveshareTouchHold(unittest.TestCase):
 
     def test_volume_drag_cancels_hold_until_next_touch(self):
         self.run_case("4")
+
+    def test_injected_press_stays_injected(self):
+        self.run_case("5")
+        self.run_case("6")
 
     def test_press_starting_off_face_never_talks(self):
         self.run_case("2")

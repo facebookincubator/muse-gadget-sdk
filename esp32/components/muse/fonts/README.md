@@ -36,6 +36,22 @@ built in only with `CONFIG_MUSE_UI_LANG_VI`. `muse_lang_montserrat()` makes
 each the fallback of LVGL's font of its size, for the menu and the pairing
 card. They come from the `Montserrat-Medium.ttf` LVGL generates its own from
 (`scripts/built_in_font/` in the lvgl component), with the same script.
+
+`type/muse_font_<role>_<S>.c` are the home, Settings and passcode screens'
+type at four panel sizes S (368, 412, 466 and 480 px), nine roles each, 4 bpp:
+Montserrat Medium from that same file, and Montserrat SemiBold for the titles.
+The time has its digits, `:` and `-`, the passcode keypad's digits only the
+digits, the titles printable ASCII and the ellipsis, the other roles printable
+ASCII plus the degree sign, middle dot, em dash, right single quote and
+ellipsis. `tools/muse/gen_ui_assets.py --fonts` regenerates them. A board
+builds only its own set, with `CONFIG_MUSE_UI_PANEL_TYPE` (off by default; on
+in the overlays of the Waveshare C6 1.8, StopWatch and ESP-Mosaico and the
+SenseCAP Watcher's gadget profile). A set takes about 105 KB of flash at
+368 px, 107 KB at 412, 120 KB at 466 and 134 KB at 480. Other boards draw the
+home's time in LVGL's Montserrat 28, from the sizes `devices/sdkconfig.muse`
+builds in; a board's own overlay may turn on `CONFIG_LV_FONT_MONTSERRAT_48`
+for a larger time, about 94 KB of flash (the apps overlay does).
+
 Montserrat is by Julieta Ulanovsky and the Montserrat Project Authors, under
 the SIL Open Font License, version 1.1.
 

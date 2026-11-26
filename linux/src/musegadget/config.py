@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -85,8 +86,19 @@ def sdk_token(directory: Path | None = None) -> str | None:
 
 
 def sdk_token_hint(token: str | None) -> str:
-    """The part of an SDK token gadgets.muse.ai shows, or "none" without a token."""
+    """The part of an SDK token gadgets.muse.ai shows, or "none" without a token.
+    Kept in the root-only pairing file to tell which token pairing used; never
+    printed or logged (sdk_token_fingerprint is what output shows)."""
     return token[:12] if token else "none"
+
+
+def sdk_token_fingerprint(token: str | None) -> str:
+    """What output may show of an SDK token: "none", or its length and a SHA-256
+    prefix ("48 chars, sha256 1a2b3c4d"), never any of its characters (as the
+    ESP32 firmware logs it)."""
+    if not token:
+        return "none"
+    return f"{len(token)} chars, sha256 {hashlib.sha256(token.encode()).hexdigest()[:8]}"
 
 
 def load_json(name: str, directory: Path | None = None) -> dict | None:

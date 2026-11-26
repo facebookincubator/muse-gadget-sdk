@@ -27,7 +27,7 @@ class ReplyAudioGap(unittest.TestCase):
     def test_reply_loop(self):
         source = (ROOT / 'components/muse/muse_voice.c').read_text()
         start = source.index('static bool hatch_reply(')
-        reply = source[start:source.index('\nstatic void go_idle(', start)]
+        reply = source[start:source.index('\n}\n', start) + 3]   # hatch_reply() alone
         ui = (ROOT / 'components/muse/muse_ui.c').read_text()
         pose = ui[ui.index('    muse_pose_t pose = {'):]
         pose_mode = pose.split('.mode = ', 1)[1].split(',\n', 1)[0]
@@ -103,6 +103,7 @@ size_t muse_hatch_turn_read(int16_t *buf,size_t frames,int wait_ms) {
     return 0;
 }
 static float muse_audio_level(const int16_t *buf,size_t n) { (void)buf; (void)n; return 0; }
+static void muse_audio_write_end(void) {}   /* the speech chain's tail */
 static void muse_audio_write(const int16_t *buf,size_t n) {
     (void)buf; (void)n;
     if (step!=1 && step!=4) silence_writes++;

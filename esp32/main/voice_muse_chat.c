@@ -112,3 +112,8 @@ const char *muse_voice_call_device_id(void) {
     return identity_node_id();
 }
 #endif
+
+// Every chat turn names Link's node (muse_chat_priv.h; a RAM string set at boot).
+const char *muse_chat_node_id(void) {
+    return identity_node_id();
+}

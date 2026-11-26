@@ -37,7 +37,7 @@
 
 #include "esp_efuse.h"
 #include "esp_log.h"
-#include "esp_random.h"
+#include "secure_random.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
 #if CONFIG_SPIRAM
@@ -75,6 +75,15 @@ static void *lp_calloc(size_t n) {
 #define PAIRING_PROVISIONING_TIMEOUT_US (120LL * 1000000LL)
 #define PAIRING_CLIENT_FINISHED_TIMEOUT_US (60LL * 1000000LL)
 #define PAIRING_CONFIRM_TIMEOUT_US (PAIRING_CONFIRM_TIMEOUT_SECONDS * 1000000LL)
+// A Muse Gadget's setup confirm (protocols/README.md, The press) is one press
+// or tap while the prompt is up, a first setup and a re-setup alike: no timer
+// on the prompt (it stays until the press, a dismiss, or the phone giving up)
+// and no check of when the press began. Home Link keeps its press window.
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+#define CONFIRM_ONE_PRESS 1
+#else
+#define CONFIRM_ONE_PRESS 0
+#endif
 
 #define P256_POINT_BYTES 65
 #define NONCE_BYTES 16
@@ -109,6 +118,8 @@ static const char *s_sdk_token;
 static const char *s_device_id = "";
 static const char *s_mac = "";
 static const char *s_firmware_version = "";
+static link_wifi_mode_t s_wifi_mode = LINK_WIFI_REQUIRED;
+static bool s_mgcommands;
 
 static mbedtls_ecp_group s_group;
 static mbedtls_mpi s_device_priv;
@@ -135,9 +146,18 @@ static int64_t s_deadline_us;
 static uint64_t s_rx_counter;
 static uint64_t s_tx_counter;
 
+// Set when rng_cb() refused a draw (no radio on), so the hello answers
+// error_pairing_unavailable rather than blaming the phone's hello.
+static bool s_rng_refused;
+
+// mbedTLS's f_rng: the ephemeral key and the ECDH's blinding. A security draw:
+// secure_random() or nothing (components/secure_random), never a weaker source.
 static int rng_cb(void *ctx, unsigned char *out, size_t len) {
     (void)ctx;
-    esp_fill_random(out, len);
+    if (!secure_random(out, len)) {
+        s_rng_refused = true;
+        return MBEDTLS_ERR_ECP_RANDOM_FAILED;
+    }
     return 0;
 }
 
@@ -723,6 +743,19 @@ void link_pairing_init(const char *node_id, const char *device_id,
     lock_give();
 }
 
+void link_pairing_set_gadget(link_wifi_mode_t wifi, bool mgcommands) {
+    s_wifi_mode = wifi;
+    s_mgcommands = mgcommands;
+}
+
+link_wifi_mode_t link_pairing_wifi_mode(void) {
+    return s_wifi_mode;
+}
+
+bool link_pairing_mgcommands(void) {
+    return s_mgcommands;
+}
+
 void link_pairing_add_device_info(cJSON *root) {
     if (!root) return;
     cJSON_AddStringToObject(root, "device_id", s_device_id);
@@ -733,6 +766,15 @@ void link_pairing_add_device_info(cJSON *root) {
     cJSON_AddNumberToObject(root, "pairing_auth_epoch",
                             pairing_auth_epoch());
     cJSON_AddStringToObject(root, "pairing_policy", PAIRING_POLICY_BUTTON);
+    // The running image's version, as pairing_ready
+    // and DIS Firmware Revision report it.
+    cJSON_AddStringToObject(root, "firmware_version", s_firmware_version);
+    // Absent means "required": firmware without gadget support sends neither.
+    if (s_wifi_mode != LINK_WIFI_REQUIRED) {
+        cJSON_AddStringToObject(root, "wifi",
+                                s_wifi_mode == LINK_WIFI_NONE ? "none" : "optional");
+    }
+    if (s_mgcommands) cJSON_AddNumberToObject(root, "mgcommands", 1);
 }
 
 bool link_pairing_plaintext_setup_blocked(void) {
@@ -759,36 +801,45 @@ const char *link_pairing_handle_client_hello(cJSON *root, char **response_json) 
 
     // Every v5 caller explicitly selects the advertised authentication mode.
     // Missing credentials or a failed proof never negotiate another mode.
+    // The signer and the hello's own key and nonce are checked before anything
+    // is wiped: a hello that fails them changes nothing (a prompt that is up
+    // stays its session's).
     lock_take();
-    reset_locked();
-
     if (pairing_signer() == PAIRING_SIGNER_UNAVAILABLE) {
         lock_give();
         return "error_pairing_unavailable";
     }
 
+    uint8_t mobile_pub[P256_POINT_BYTES], mobile_nonce[NONCE_BYTES];
     size_t len = 0;
-    if (!base64url_decode(mobile_pub_b64, s_mobile_pub, sizeof(s_mobile_pub), &len)
-        || len != P256_POINT_BYTES || s_mobile_pub[0] != 0x04
-        || !base64url_decode(mobile_nonce_b64, s_mobile_nonce, sizeof(s_mobile_nonce), &len)
-        || len != NONCE_BYTES) {
-        reset_locked();
+    int rc = -1;
+    if (base64url_decode(mobile_pub_b64, mobile_pub, sizeof(mobile_pub), &len)
+        && len == P256_POINT_BYTES && mobile_pub[0] == 0x04
+        && base64url_decode(mobile_nonce_b64, mobile_nonce, sizeof(mobile_nonce), &len)
+        && len == NONCE_BYTES) {
+        mbedtls_ecp_point peer;
+        mbedtls_ecp_point_init(&peer);
+        rc = mbedtls_ecp_point_read_binary(&s_group, &peer, mobile_pub, sizeof(mobile_pub));
+        if (rc == 0) rc = mbedtls_ecp_check_pubkey(&s_group, &peer);
+        mbedtls_ecp_point_free(&peer);
+    }
+    if (rc != 0) {
         lock_give();
         return "error_pairing_invalid_hello";
     }
 
-    mbedtls_ecp_point peer;
-    mbedtls_ecp_point_init(&peer);
-    int rc = mbedtls_ecp_point_read_binary(&s_group, &peer,
-                                           s_mobile_pub, sizeof(s_mobile_pub));
-    if (rc == 0) rc = mbedtls_ecp_check_pubkey(&s_group, &peer);
-    mbedtls_ecp_point_free(&peer);
-    if (rc != 0
-        || mbedtls_ecp_gen_keypair(&s_group, &s_device_priv,
-                                   &s_device_pub_point, rng_cb, NULL) != 0) {
+    reset_locked();
+    memcpy(s_mobile_pub, mobile_pub, sizeof(s_mobile_pub));
+    memcpy(s_mobile_nonce, mobile_nonce, sizeof(s_mobile_nonce));
+    // The ephemeral key and the device nonce are security draws: without a
+    // radio on (secure_random()) the hello is refused, nothing drawn.
+    s_rng_refused = false;
+    if (mbedtls_ecp_gen_keypair(&s_group, &s_device_priv,
+                                &s_device_pub_point, rng_cb, NULL) != 0) {
+        bool refused = s_rng_refused;
         reset_locked();
         lock_give();
-        return "error_pairing_invalid_hello";
+        return refused ? "error_pairing_unavailable" : "error_pairing_invalid_hello";
     }
 
     size_t pub_len = 0;
@@ -801,7 +852,11 @@ const char *link_pairing_handle_client_hello(cJSON *root, char **response_json) 
         lock_give();
         return "error_pairing_invalid_hello";
     }
-    esp_fill_random(s_device_nonce, sizeof(s_device_nonce));
+    if (!secure_random(s_device_nonce, sizeof(s_device_nonce))) {
+        reset_locked();
+        lock_give();
+        return "error_pairing_unavailable";
+    }
 
     if (!base64url_encode(s_mobile_pub, sizeof(s_mobile_pub),
                           s_mobile_pub_b64, sizeof(s_mobile_pub_b64))
@@ -826,9 +881,10 @@ const char *link_pairing_handle_client_hello(cJSON *root, char **response_json) 
         || !derive_session_keys()) {
         free(transcript);
         mbedtls_platform_zeroize(device_sig, sizeof(device_sig));
+        bool refused = s_rng_refused;   // the ECDH's blinding draw (rng_cb)
         reset_locked();
         lock_give();
-        return "error_pairing_invalid_hello";
+        return refused ? "error_pairing_unavailable" : "error_pairing_invalid_hello";
     }
     free(transcript);
 
@@ -952,7 +1008,7 @@ uint32_t link_pairing_handle_client_finished(void) {
     if (ok) {
         advance_generation_locked();
         s_state = PAIRING_CONFIRM_REQUIRED;
-        s_deadline_us = esp_timer_get_time() + PAIRING_CONFIRM_TIMEOUT_US;
+        s_deadline_us = CONFIRM_ONE_PRESS ? 0 : esp_timer_get_time() + PAIRING_CONFIRM_TIMEOUT_US;
     }
     uint32_t generation = ok ? s_generation : 0;
     lock_give();
@@ -973,16 +1029,22 @@ bool link_pairing_arm_confirmation(uint32_t generation) {
     if (ok) {
         s_confirmation_armed = true;
         s_armed_us = esp_timer_get_time();
-        s_deadline_us = s_armed_us + PAIRING_CONFIRM_TIMEOUT_US;
+        s_deadline_us = CONFIRM_ONE_PRESS ? 0 : s_armed_us + PAIRING_CONFIRM_TIMEOUT_US;
     }
     lock_give();
     return ok;
 }
 
+void link_pairing_disarm_confirmation(uint32_t generation) {
+    lock_take();
+    if (generation != 0 && generation == s_generation) s_confirmation_armed = false;
+    lock_give();
+}
+
 uint32_t link_pairing_confirm_active_session(int64_t pressed_after_us) {
     lock_take();
     bool ok = !expired_locked() && s_state == PAIRING_CONFIRM_REQUIRED
-              && s_confirmation_armed && pressed_after_us >= s_armed_us;
+              && s_confirmation_armed && (CONFIRM_ONE_PRESS || pressed_after_us >= s_armed_us);
     if (ok) {
         advance_generation_locked();
         s_state = PAIRING_READY;

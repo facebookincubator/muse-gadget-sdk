@@ -160,9 +160,16 @@ static inline void *h264bsdMalloc(size_t n)
 /* The two small blocks used for every macroblock (the macroblock layer and
  * the slice group map): main SRAM when it has room, which is a little faster
  * than PSRAM, else PSRAM; never LP RAM. */
+#define H264BSD_HOT_FLOOR (32 * 1024)   /* main SRAM kept free for everything else (BLE, tasks) */
 static inline void *h264bsdMallocHot(size_t n)
 {
-    void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    /* Main SRAM only while it stays well stocked: on the S3, with BLE, the UI
+     * and video, a few KB here is the difference between headroom and a
+     * failed BLE or task allocation. */
+    void *p = NULL;
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) >= n + H264BSD_HOT_FLOOR) {   /* main SRAM, as below */
+        p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    }
     return p ? p : heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 #else

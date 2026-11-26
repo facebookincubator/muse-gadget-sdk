@@ -64,9 +64,10 @@ jobs:
           extra_docker_args: -e FREEINK_SOURCE_DIR
           command: |
             set -e
-            # test_noise_core links against the host PSA Crypto library.
+            # test_noise_core links against the host PSA Crypto library;
+            # test_web_flasher runs the web flasher logic in Node.
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl ffmpeg procps lsof
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev libjpeg-dev pkg-config libssl-dev openssl ffmpeg nodejs procps lsof
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
@@ -201,6 +202,14 @@ jobs:
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
+          # The board's Muse Gadget profile (tools/muse/board.sh build s3-gadget).
+          - board: muse-waveshare-s3-175c-gadget
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget"
+          # Lab and CI images: a BLE gadget profile with the bench overlay (MUSE_BENCH=1).
+          - board: muse-waveshare-s3-175c-bench
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-bench"
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
@@ -274,6 +283,10 @@ jobs:
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
+          # The C6's BLE-only gadget (tools/muse/board.sh build c6ble).
+          - board: muse-waveshare-c6-18-ble
+            target: esp32c6
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18;devices/sdkconfig.muse-waveshare-c6-18-ble"
           - board: muse-waveshare-s3-18
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18"
@@ -283,6 +296,10 @@ jobs:
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
+          # The board's Muse Gadget profile (tools/muse/board.sh build watcher-gadget).
+          - board: muse-sensecap-watcher-gadget
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-sensecap-watcher-gadget"
           - board: muse-watcher-power-test
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
@@ -320,6 +337,20 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          # Video and UI streams over BLE (tools/muse/board.sh build stopwatch-video / watcher-video),
+          # HID beside them (MUSE_HID=1), and a BLE gadget without the offline clip queue.
+          - board: muse-m5stack-stopwatch-video-ble
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-m5stack-stopwatch-video-ble"
+          - board: muse-sensecap-watcher-video-ble
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-sensecap-watcher-gadget;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-sensecap-watcher-video-ble"
+          - board: muse-m5stack-stopwatch-video-ble-hid
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-m5stack-stopwatch-video-ble;devices/sdkconfig.muse-hid"
+          - board: muse-waveshare-s3-175c-no-queue
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-ble-no-queue"
           - board: muse-m5stack-triviapod
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod"
@@ -408,8 +439,8 @@ jobs:
         run: |
           NAME=$(python3 -c 'import json, os; print(next((b["name"] for b in json.load(open("../web-flasher/boards.json")) if b["board"] == os.environ["BOARD"]), ""))')
           [ -n "$NAME" ] || exit 0
-          python3 ../web-flasher/make_manifest.py build "out/$BOARD" \
-            "Muse Gadget ($NAME)" "$(cat version.txt)+${GITHUB_SHA::7}"
+          # The manifest's version is the image's own, what the gadget reports.
+          python3 ../web-flasher/make_manifest.py build "out/$BOARD" "Muse Gadget ($NAME)"
           echo "listed=true" >> "$GITHUB_OUTPUT"
 
       - if: steps.package.outputs.listed

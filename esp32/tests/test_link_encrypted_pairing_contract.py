@@ -144,8 +144,8 @@ class LinkEncryptedPairingContractTest(unittest.TestCase):
         self.assertIn('decrypted && strcmp(act, "provision_v2") == 0', dispatch)
         self.assertIn('cJSON_GetObjectItem(root, "token_type")', dispatch)
         self.assertIn("link_pairing_mark_provisioning_active()", dispatch)
-        self.assertIn('strcmp(tt->valuestring, "device") != 0', dispatch)
-        self.assertIn('!cJSON_IsString(rt) || !rt->valuestring || !*rt->valuestring', dispatch)
+        self.assertIn('strcmp(tt->valuestring, "device") == 0', dispatch)
+        self.assertIn('cJSON_IsString(rt) && rt->valuestring && *rt->valuestring', dispatch)
 
         provision_v2_block = _function_body(
             dispatch, 'decrypted && strcmp(act, "provision_v2") == 0'
@@ -255,10 +255,13 @@ class LinkEncryptedPairingContractTest(unittest.TestCase):
         self.assertIn("s_rx_counter == 1", finished)
         self.assertNotIn("verify_client_proof", finished)
         self.assertIn("s_state = PAIRING_CONFIRM_REQUIRED", finished)
+        # Home Link keeps its press window; a Muse Gadget's prompt has no timer (one press, CONFIRM_ONE_PRESS).
         self.assertIn(
-            "s_deadline_us = esp_timer_get_time() + PAIRING_CONFIRM_TIMEOUT_US",
+            "s_deadline_us = CONFIRM_ONE_PRESS ? 0 : esp_timer_get_time() + PAIRING_CONFIRM_TIMEOUT_US",
             finished,
         )
+        self.assertIn("#if CONFIG_MUSE_GADGET_BLE_AUDIO\n#define CONFIRM_ONE_PRESS 1\n#else\n#define CONFIRM_ONE_PRESS 0", pairing)
+        self.assertIn("s_confirmation_armed && (CONFIRM_ONE_PRESS || pressed_after_us >= s_armed_us)", confirm)
         self.assertIn("s_state = PAIRING_READY", confirm)
         self.assertIn("s_deadline_us = esp_timer_get_time() + PAIRING_TIMEOUT_US", confirm)
         self.assertIn("session_keys_available_locked()", encrypt)
@@ -417,7 +420,7 @@ class LinkEncryptedPairingContractTest(unittest.TestCase):
         self.assertIn("a->session_generation);", worker)
         self.assertNotIn("ble_server_send_status(", on_provision)
         completion = _function_body(app, "static bool complete_setup_and_stop_ble(")
-        self.assertIn("link_pairing_commit_provisioning(session_generation, config_mark_setup_complete)", completion)
+        self.assertIn("link_pairing_commit_provisioning(session_generation, commit_setup)", completion)
         failure = _function_body(app, "static void setup_fail_for_session(")
         self.assertIn("!link_pairing_session_is_current(session_generation)", failure)
         self.assertIn("ble_server_disconnect_pairing_session(session_generation)", failure)

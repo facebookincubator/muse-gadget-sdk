@@ -485,6 +485,24 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight rail off on the AXP192. */
+static void safe_display_off(void)
+{
+    if (bsp_i2c_init() != ESP_OK) {
+        return;
+    }
+    if (!s_axp) {
+        const i2c_device_config_t axp_cfg = {
+            .device_address = AXP_ADDR,
+            .scl_speed_hz = 400000,
+        };
+        if (i2c_master_bus_add_device(bsp_i2c_get_handle(), &axp_cfg, &s_axp) != ESP_OK) {
+            return;
+        }
+    }
+    axp_write_masked(0x12, 0x02, 0x00);   /* DCDC3, the backlight rail, off (LCD logic is LDO2) */
+}
+
 static const muse_board_t s_board = {
     .name = "M5Stack Core2",
     .width = BSP_LCD_H_RES,
@@ -502,11 +520,13 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = bsp_display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
     .mic_slot = 0,              /* M5Unified's slot: the ESP32 stores each pair swapped */
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_PERCENT,   /* percent fallback: the AXP192 can't tell charge done from not charging */
     .power_off = power_off,
 };
 

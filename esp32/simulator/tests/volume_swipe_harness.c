@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-/* Drive real LVGL pointer dispatch through the complete production UI. */
+/* Drive real LVGL pointer dispatch through the complete production UI.
+ *
+ * The swipe volume is on the compact faces: argv[1] "compact" (a
+ * 240 px round panel, no speaker button) or "long" (a 172x640 strip, whose
+ * bottom row has the speaker button). The v1.0 home (every simulator board,
+ * "home") keeps its own touch contract (holds and swipes): a vertical
+ * drag there changes nothing. */
 #undef NDEBUG
 #include <assert.h>
 #include "sim_board.h"
@@ -54,18 +60,49 @@ static void touch(int x, int y, bool pressed)
     lv_obj_update_layout(lv_layer_top());
 }
 
-int main(void)
+/* The speaker button's icon, where the layout has one. */
+static void icon_is(const char *symbol)
 {
+    if (s_speaker) {
+        assert(!strcmp(lv_label_get_text(s_speaker_icon), symbol));
+    }
+}
+
+int main(int argc, char **argv)
+{
+    const char *which = argc > 1 ? argv[1] : "compact";
     sim_time_reset();
     sim_services_reset();
     lv_init();
     muse_state_init();
-    muse_board = sim_board_get();
+    muse_board_t *b = (muse_board_t *)sim_board_get();
+    if (!strcmp(which, "compact")) {
+        b->width = b->height = 240;
+    } else if (!strcmp(which, "long")) {
+        b->width = 172;
+        b->height = 640;
+        b->round = false;
+    } else {
+        assert(!strcmp(which, "home"));
+    }
+    muse_board = b;
     assert(muse_ui_start() == ESP_OK);
     muse_state_set_asleep(false);
     lv_indev_set_read_cb(s_indev, read_touch);
     lv_obj_update_layout(lv_screen_active());
-    int x = s_w / 2, y = s_h / 2;
+    int x = s_w / 2, y = s_h / 2, dx = s_w * 3 / 8;
+    if (!strcmp(which, "home")) {
+        assert(s_home && !s_volume_hint);
+        touch(x, y, true);
+        touch(x, y - 80, true);
+        touch(x, y - 100, true);
+        assert(!muse_ui_volume_swiping() && preview_volume == 50);
+        touch(x, y - 100, false);
+        assert(saved_volume == 50 && saves == 0 && preview_volume == 50 && speaker_saves == 0);
+        return 0;
+    }
+    assert(!s_home && s_small && s_volume_hint);
+    assert((strcmp(which, "long") == 0) == (s_speaker != NULL));   /* only the long strip has the speaker button */
 
     touch(x, y, true);
     touch(x, y - 80, true);
@@ -109,10 +146,10 @@ int main(void)
 
     /* A horizontal swipe is still owned by the tileview. */
     touch(x, y, true);
-    touch(x - 90, y, true);
+    touch(x - dx, y, true);
     assert(!muse_ui_volume_swiping());
     assert(lv_indev_get_scroll_obj(s_indev) == s_tv);
-    touch(x - 90, y, false);
+    touch(x - dx, y, false);
     assert(saves == 2);
     lv_tileview_set_tile(s_tv, s_face, LV_ANIM_OFF);
     s_face_active = true;
@@ -175,7 +212,7 @@ int main(void)
     touch(x, y + 80, true);
     assert(muse_ui_volume_swiping() && preview_volume == 0);
     assert(!muse_settings_speaker_on() && speaker_saves == 1);
-    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_MUTE));
+    icon_is(LV_SYMBOL_MUTE);
     touch(x, y + 100, true);
     assert(!muse_settings_speaker_on() && speaker_saves == 1);
     touch(x, y + 100, false);
@@ -185,7 +222,7 @@ int main(void)
     touch(x, y, true);
     touch(x, y - 80, true);
     assert(preview_volume > 0 && muse_settings_speaker_on());
-    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_VOLUME_MAX));
+    icon_is(LV_SYMBOL_VOLUME_MAX);
     assert(speaker_saves == 2);
     touch(x, y - 100, true);
     assert(speaker_saves == 2);
@@ -203,7 +240,7 @@ int main(void)
     /* Reversing away from zero in this same touch also restores the icon. */
     touch(x, y - 80, true);
     assert(preview_volume > 0 && muse_settings_speaker_on() && speaker_saves == 4);
-    assert(!strcmp(lv_label_get_text(s_speaker_icon), LV_SYMBOL_VOLUME_MAX));
+    icon_is(LV_SYMBOL_VOLUME_MAX);
     touch(x, y - 80, false);
     return 0;
 }

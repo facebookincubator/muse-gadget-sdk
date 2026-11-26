@@ -22,11 +22,14 @@
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
-#include "esp_random.h"
+#include "secure_random.h"
 #include "host/ble_hs.h"
 #include "host/ble_store.h"
+#include "mbedtls/platform_util.h"
 #include "nvs.h"
 
+#include "esp_timer.h"
+#include "muse_ble_gate.h"
 #include "muse_chat.h"
 #include "muse_link.h"
 #include "muse_settings.h"
@@ -118,11 +121,47 @@ static bool parse_int(const char *v, int lo, int hi, int *out)
     return true;
 }
 
+/* The user's setup window: opened from Settings, RAM only. */
+static volatile int64_t s_window_until_us;
+
+void muse_ble_open_setup_window(void)
+{
+    s_window_until_us = esp_timer_get_time() + MUSE_BLE_SETUP_WINDOW_US;
+    ESP_LOGI(TAG, "phone setup: Wi-Fi and account writes open for 10 min");
+}
+
+bool muse_ble_setup_window_open(void)
+{
+    int64_t until = s_window_until_us;
+    return until > 0 && esp_timer_get_time() < until;
+}
+
+void muse_ble_phone_setup(bool on)
+{
+    muse_settings_set_ble_on(on);
+    if (on) {
+        muse_ble_open_setup_window();   /* the user's own action */
+    }
+}
+
+static bool set_up(void)
+{
+    return muse_link_token_stored() || muse_settings_hatch_token_len() > 0;
+}
+
+/* A first account token, taken on an unset gadget, arrives in parts (hatch.token, then hatch.token+): the first part
+ * makes the gadget set up, so the gate would refuse the rest (a 181-character token kept only 180). Its parts go
+ * on while they follow each other on this connection; any other command or the disconnect ends them. */
+static bool s_token_parts;
+
 /* Wi-Fi credentials arrive as two writes; they're applied on wifi.connect. */
 static char s_pending_ssid[MUSE_SSID_MAX + 1];
 static char s_pending_pass[MUSE_PASS_MAX + 1];
 
-static void run_command(char *cmd)
+/* origin: where the line came from (muse_line_origin.h). A release build refuses Wi-Fi and account writes from a
+ * wireless origin (the GATT write); a wired console's line runs with no window, in every build (the USB console is
+ * fully open: an automated run never waits on a person). */
+static void run_command(char *cmd, muse_line_origin_t origin)
 {
     char *v = strchr(cmd, '=');
     if (v) {
@@ -133,7 +172,22 @@ static void run_command(char *cmd)
     int n;
     const char *res = "ok";
 
-    if (!strcmp(cmd, "wifi.ssid")) {
+#if CONFIG_MUSE_GADGET_TEST_BUILD
+    const bool test_build = true;
+#else
+    const bool test_build = false;
+#endif
+    bool was_set_up = set_up();
+    bool wireless = origin != MUSE_LINE_WIRED;   /* anything but the physical console port: fail closed */
+    bool part = s_token_parts && !strcmp(cmd, "hatch.token+");
+    s_token_parts = false;   /* any other command ends a token's parts */
+    if (wireless && !muse_ble_gate_in_build(cmd, test_build)) {
+        res = "not in this build";   /* a release build: Wi-Fi and the account are set up in the Muse app */
+    } else if (!part && wireless && !muse_ble_gate_allows(cmd, was_set_up, esp_timer_get_time(), s_window_until_us)) {
+        /* Set up, so Wi-Fi and the account change over the air only from a window the user opens (Settings >
+         * Bluetooth > Phone setup) or after Reset pairing. The wired console skips it. */
+        res = "error: locked: turn on Phone setup, or reset pairing";
+    } else if (!strcmp(cmd, "wifi.ssid")) {
         strlcpy(s_pending_ssid, v, sizeof(s_pending_ssid));
         s_pending_pass[0] = '\0';
     } else if (!strcmp(cmd, "wifi.pass")) {
@@ -160,15 +214,17 @@ static void run_command(char *cmd)
     } else if (!strcmp(cmd, "hatch.token") || !strcmp(cmd, "hatch.token+")) {
         if (muse_settings_set_hatch_token(v, cmd[11] == '+') != ESP_OK) {
             res = "error: token too long";
+        } else if (!was_set_up || part) {
+            s_token_parts = true;   /* the next hatch.token+ is this token's */
         }
     } else if (!strcmp(cmd, "hatch.test")) {
         muse_hatch_test();
     } else if (!strcmp(cmd, "test.loopback")) {
         muse_voice_request_loopback();
     } else if (!strcmp(cmd, "volume") && parse_int(v, 0, 100, &n)) {
-        muse_settings_set_volume(n);
+        muse_settings_set_volume_by(n, MUSE_VOL_BY_PHONE);   /* shown "Set by phone" */
     } else if (!strcmp(cmd, "speaker") && parse_int(v, 0, 1, &n)) {
-        muse_settings_set_speaker_on(n);
+        muse_settings_set_speaker_on_by(n, MUSE_VOL_BY_PHONE);
     } else if (!strcmp(cmd, "mic_gain") && parse_int(v, 0, MUSE_MIC_GAIN_MAX, &n)) {
         muse_settings_set_mic_gain(n);
     } else if (!strcmp(cmd, "brightness") && parse_int(v, 10, 100, &n)) {
@@ -200,9 +256,9 @@ static void run_command(char *cmd)
     }
 }
 
-void muse_ble_command(char *cmd)
+void muse_ble_command(char *cmd, muse_line_origin_t origin)
 {
-    run_command(cmd);
+    run_command(cmd, origin);
 }
 
 int muse_ble_status_json(char *out, size_t len)
@@ -210,9 +266,30 @@ int muse_ble_status_json(char *out, size_t len)
     return build_status(out, len);
 }
 
+/* The bond's own record says how it was made: LE Secure Connections or legacy
+ * pairing (the connection's security state doesn't). */
+static bool bond_is_sc(const ble_addr_t *peer)
+{
+    struct ble_store_key_sec key;
+    memset(&key, 0, sizeof(key));
+    key.peer_addr = *peer;
+    struct ble_store_value_sec v;
+    bool sc = (ble_store_read_peer_sec(&key, &v) == 0 && v.sc) || (ble_store_read_our_sec(&key, &v) == 0 && v.sc);
+    mbedtls_platform_zeroize(&v, sizeof(v));
+    return sc;
+}
+
+static bool link_ok(uint16_t conn)
+{
+    struct ble_gap_conn_desc d;
+    if (ble_gap_conn_find(conn, &d) != 0) {
+        return false;
+    }
+    return muse_ble_gate_link_ok(d.sec_state.encrypted, d.sec_state.authenticated, bond_is_sc(&d.peer_id_addr));
+}
+
 static int on_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    (void)conn;
     (void)attr;
     (void)arg;
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
@@ -222,6 +299,10 @@ static int on_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *
         return os_mbuf_append(ctxt->om, buf, n) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
     }
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        if (!link_ok(conn)) {
+            ESP_LOGW(TAG, "write refused: the link isn't a Secure Connections bond made with the code");
+            return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+        }
         char *cmd = malloc(CMD_MAX + 1);
         if (!cmd) {
             return BLE_ATT_ERR_INSUFFICIENT_RES;
@@ -233,7 +314,7 @@ static int on_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *
             while (len && (cmd[len - 1] == '\n' || cmd[len - 1] == '\r')) {
                 cmd[--len] = '\0';
             }
-            run_command(cmd);
+            run_command(cmd, MUSE_LINE_WIRELESS);   /* the BLE characteristic */
         }
         free(cmd);
         return rc == 0 ? 0 : BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
@@ -313,10 +394,20 @@ int muse_ble_gap_event(struct ble_gap_event *ev)
         s_conn = BLE_HS_CONN_HANDLE_NONE;
         s_passkey = 0;
         s_secure = false;
+        s_token_parts = false;   /* a token's parts never span connections */
         break;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
         if (ev->passkey.params.action == BLE_SM_IOACT_DISP) {
-            struct ble_sm_io io = { .action = BLE_SM_IOACT_DISP, .passkey = 100000 + esp_random() % 900000 };
+            /* The passkey authenticates the bond (LE Secure Connections passkey
+             * entry): a security draw. Without a radio on it's refused and the
+             * pairing with it (components/secure_random). */
+            uint32_t r;
+            if (!secure_random(&r, sizeof(r))) {
+                ESP_LOGW(TAG, "pairing refused: no secure passkey");
+                ble_gap_terminate(ev->passkey.conn_handle, BLE_ERR_AUTH_FAIL);
+                break;
+            }
+            struct ble_sm_io io = { .action = BLE_SM_IOACT_DISP, .passkey = 100000 + r % 900000 };
             s_passkey = io.passkey;
             muse_state_poke();
             ESP_LOGI(TAG, "pairing: showing passkey");

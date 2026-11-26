@@ -20,6 +20,7 @@ set(srcs
     "src/Status.cpp"
     "src/Transport.cpp"
     "src/TransportFrameCodec.cpp"
+    "src/X25519Selftest.cpp"
 )
 set(priv_includes "")
 # X25519 from HACL* (Kconfig NOISE_CORE_X25519_HACL): ESP-IDF's own copy of
@@ -63,8 +64,18 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS ${priv_includes}
-    PRIV_REQUIRES mbedtls
+    PRIV_REQUIRES mbedtls secure_random esp_timer
 )
+
+# The console's `>noise.x25519` (components/muse, Muse builds only) reaches
+# the self-test through a weak reference, which alone wouldn't pull it out of
+# the archive. Only builds that hold a Noise session of their own get it:
+# Link-only builds have no such console, and BLE-standalone builds
+# (MUSE_GADGET_BLE_STANDALONE) link no Noise crypto at all, so forcing the
+# self-test in would add PSA's X25519 and AEAD code (~15 KB on the C6) for it.
+if(CONFIG_MUSE_ENABLED AND NOT CONFIG_MUSE_GADGET_BLE_STANDALONE)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-u noise_core_x25519_selftest")
+endif()
 
 if(use_hacl)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NOISE_CORE_X25519_HACL=1)
@@ -72,6 +83,10 @@ if(use_hacl)
     set_source_files_properties("src/X25519Hacl.c" PROPERTIES COMPILE_OPTIONS
         "-Wno-unused-function;-Wno-unused-variable;-Wno-unused-parameter")
 endif()
+
+# Every random draw (Noise's ephemeral keys, Random()) only with a radio on
+# (components/secure_random). Host builds of the core leave it off.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NOISE_CORE_SECURE_RANDOM=1)
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
 target_compile_options(${COMPONENT_LIB} PRIVATE

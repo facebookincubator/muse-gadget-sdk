@@ -20,8 +20,8 @@ Google's SBC (Bluetooth subband codec) encoder and decoder, the default codec
 of the musegadgets BLE protocol: 16 kHz mono, 16 blocks, 8 subbands, loudness
 allocation. One copy serves both SDKs: the ESP32 component
 [`esp32/components/libsbc`](../../esp32/components/libsbc) compiles these
-sources with the options below, and the Zephyr gadgets use the same ones
-(the BLE gadgets on both come in a later change).
+sources with the options below for the ESP32 BLE gadgets, and the Zephyr
+gadgets (in a later change) use the same ones.
 
 | | |
 |---|---|

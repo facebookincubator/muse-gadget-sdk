@@ -24,6 +24,13 @@
 # in every build's table because an update over the air keeps the table a
 # board has: a board without them keeps installed apps until restart and has
 # no files.
+# mg_queue holds offline clips for musegadgets BLE audio
+# (CONFIG_MUSE_GADGET_BLE_QUEUE) in the rest of the 16 MB, after files, so
+# nothing above moves: 1856 KB, less a 24-byte header and up to 3 bytes of
+# padding per clip (64 clips at most), is about 4.2 minutes of SBC at 60 kb/s
+# or 7.9 of LC3 at 32 kb/s. Builds without the queue leave it unused. OTA
+# doesn't rewrite the table, so a board updated over the air from an older
+# table has no mg_queue and doesn't offer the queue.
 nvs,       data, nvs,     0x11000,  0xC000,
 otadata,   data, ota,     0x1D000,  0x2000,
 phy_init,  data, phy,     0x1F000,  0x1000,
@@ -33,3 +40,4 @@ prod_data, data, 0x40,    0x820000, 0x1000,
 prod_bak,  data, 0x41,    0x821000, 0x1000,
 apps,      data, littlefs, 0x830000, 2M,
 files,     data, littlefs, 0xA30000, 4M,
+mg_queue,  data, 0x4D,    0xE30000, 0x1D0000,

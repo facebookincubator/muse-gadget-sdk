@@ -16,12 +16,14 @@
 
 #include "muse_link.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "sdkconfig.h"
 
 #include "muse_state.h"
 
@@ -69,6 +71,19 @@ bool muse_link_hatch_linked(void)
     return s_ops && s_ops->hatch_linked && s_ops->hatch_linked();
 }
 
+bool muse_link_token_stored(void)
+{
+    /* An NVS read, so not on every UI tick: at most every 2 s. */
+    static int64_t s_read_us = -1;
+    static bool s_stored;
+    int64_t now = esp_timer_get_time();
+    if (s_read_us < 0 || now - s_read_us >= 2000 * 1000) {
+        s_read_us = now;
+        s_stored = s_ops && s_ops->token_stored ? s_ops->token_stored() : muse_link_hatch_linked();
+    }
+    return s_stored;
+}
+
 const char *muse_link_sdk_token(void)
 {
     return s_ops && s_ops->sdk_token ? s_ops->sdk_token() : NULL;
@@ -84,6 +99,17 @@ bool muse_link_sdk_token_changed(void)
     return s_ops && s_ops->sdk_token_changed && s_ops->sdk_token_changed();
 }
 
+bool muse_link_sdk_token_fp(unsigned *len, char hex[MUSE_LINK_FP_HEX])
+{
+    *len = 0;
+    hex[0] = 0;
+    const char *token = muse_link_sdk_token();
+    if (!token || !token[0]) return false;
+    *len = (unsigned)strlen(token);
+    if (s_ops->sdk_token_fp && !s_ops->sdk_token_fp(len, hex)) hex[0] = 0;
+    return true;
+}
+
 bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                         char **vm_token)
 {
@@ -94,18 +120,42 @@ bool muse_link_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *v
  * task's poll), so a press reported now began less than this long ago. */
 #define CONFIRM_SETTLE_US (250 * 1000)
 
-bool muse_link_confirm_press(int64_t released_us)
+static bool press(int64_t released_us, bool talk_key)
 {
     if (!s_ops || !s_ops->talk_press) {
         return false;
     }
     int64_t after = esp_timer_get_time() - CONFIRM_SETTLE_US;
-    return s_ops->talk_press(released_us > after ? released_us : after);
+    return s_ops->talk_press(released_us > after ? released_us : after, talk_key);
+}
+
+bool muse_link_confirm_press(int64_t released_us)
+{
+    return press(released_us, true);
 }
 
 bool muse_link_talk_press(void)
 {
-    return muse_link_confirm_press(0);
+    return press(0, true);
+}
+
+bool muse_link_confirm_key_press(void)
+{
+    return press(0, false);
+}
+
+bool muse_link_confirm_dismiss(void)
+{
+    if (muse_link_state() != MUSE_LINK_CONFIRM || !s_ops || !s_ops->confirm_dismiss) {
+        return false;
+    }
+    s_ops->confirm_dismiss();
+    return true;
+}
+
+bool muse_link_bench_confirm(void)
+{
+    return muse_link_talk_press();
 }
 
 void muse_link_reset_setup(void)
@@ -141,6 +191,67 @@ bool muse_link_ble_started(void)
 bool muse_link_req_ready(void)
 {
     return s_ops && s_ops->req_ready && s_ops->req_ready();
+}
+
+bool muse_link_face_available(void)
+{
+    return s_ops && s_ops->face_label && s_ops->face_avatar_picked && s_ops->face_pick && s_ops->face_size_small &&
+           s_ops->face_size_set;
+}
+
+void muse_link_face_label(char *out, size_t cap)
+{
+    if (muse_link_face_available()) {
+        s_ops->face_label(out, cap);
+    } else if (cap) {
+        out[0] = '\0';
+    }
+}
+
+bool muse_link_face_avatar_picked(void)
+{
+    return muse_link_face_available() && s_ops->face_avatar_picked();
+}
+
+void muse_link_face_pick(bool avatar)
+{
+    if (muse_link_face_available()) {
+        s_ops->face_pick(avatar);
+    }
+}
+
+bool muse_link_face_size_small(void)
+{
+    return muse_link_face_available() && s_ops->face_size_small();
+}
+
+void muse_link_face_size_set(bool small)
+{
+    if (muse_link_face_available()) {
+        s_ops->face_size_set(small);
+    }
+}
+
+bool muse_link_image_test(void)
+{
+    return s_ops && s_ops->image_ask && s_ops->image_status;
+}
+
+bool muse_link_image_ask(char *why, size_t why_cap)
+{
+    if (!muse_link_image_test()) {
+        snprintf(why, why_cap, "not on this gadget");
+        return false;
+    }
+    return s_ops->image_ask(why, why_cap);
+}
+
+bool muse_link_image_status(char *out, size_t cap)
+{
+    if (cap) {
+        out[0] = '\0';
+    }
+    return muse_link_image_test() && s_ops->image_status(out, cap);
 }
 
 int64_t muse_link_req_open(const char *verb, const char *path, const char *const *headers, bool end_body,
@@ -238,6 +349,16 @@ void muse_wifi_power(muse_wifi_power_t level)
     if (s_ops && s_ops->power_save) {
         s_ops->power_save(level == MUSE_WIFI_REST);
     }
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+    /* BLE only: Wi-Fi never starts (esp_wifi_get_ps / set_ps would only fail),
+     * and leaving them out keeps the Wi-Fi stack out of the image. */
+    if (s_power_level == MUSE_WIFI_FULL && s_awake_holds == 0) {
+        s_power_before = WIFI_PS_NONE;   /* what the failed esp_wifi_get_ps() left */
+    }
+    portENTER_CRITICAL(&s_power_lock);
+    s_power_level = level;
+    portEXIT_CRITICAL(&s_power_lock);
+#else
     if (s_power_level == MUSE_WIFI_FULL && s_awake_holds == 0 && esp_wifi_get_ps(&s_power_before) != ESP_OK) {
         s_power_before = WIFI_PS_NONE;   /* as wifi_mgr starts it */
     }
@@ -245,6 +366,7 @@ void muse_wifi_power(muse_wifi_power_t level)
     s_power_level = level;
     portEXIT_CRITICAL(&s_power_lock);
     esp_wifi_set_ps(power_ps());
+#endif
 }
 
 void muse_link_ble_quiet(bool quiet)

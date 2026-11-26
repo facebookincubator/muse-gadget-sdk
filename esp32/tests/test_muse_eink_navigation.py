@@ -148,8 +148,8 @@ class MuseEinkNavigationTest(unittest.TestCase):
         block = config[config.index("    config MUSE_VIDEO\n"):config.index("    config MUSE_VIDEO_WIFI\n")]
         dependency = re.search(r"depends on (.+)", block).group(1)
         self.assertIn("!MUSE_UI_FREEINK", dependency)
-        self.assertIn("MUSE_ENABLED && SPIRAM", dependency)
-        self.assertIn("IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31", dependency)
+        # PSRAM S3/S31 boards.
+        self.assertIn("MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31)", dependency)
 
     def test_ci_freeink_source_matches_dependency_pin_and_read_only_checkout(self):
         manifest = (ROOT / "components/muse/idf_component.yml").read_text()

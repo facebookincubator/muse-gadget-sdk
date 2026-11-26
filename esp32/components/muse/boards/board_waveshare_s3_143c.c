@@ -56,9 +56,12 @@
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_lvgl_hold.h"   /* every pause bounded (muse_lvgl_hold.h) */
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "muse_ui.h"
+#include "muse_input.h"
+#include "muse_touch.h"
 
 static const char *TAG = "board";
 
@@ -364,9 +367,9 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);
     } else {
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 
@@ -450,6 +453,8 @@ static unsigned poll_buttons(void)
     static bool tp_talking = false;
     static TickType_t tp_press_tick = 0;
     static bool tp_on_face = false;
+    static bool tp_real = false;          /* every read of this touch so far was the panel's (muse_touch_real) */
+    static bool tp_own = false;           /* the talk it started is the gadget's own (a finger), not injected */
 
     bool pressed = false;
     if (s_touch_indev) {
@@ -461,18 +466,33 @@ static unsigned poll_buttons(void)
         tp_on_face = muse_ui_face_active();
         tp_press_tick = xTaskGetTickCount();
         tp_talking = false;
+        tp_real = muse_touch_real();
     } else if (!pressed && tp_down) {
-        if (tp_talking) {
+        if (tp_talking && tp_own) {
             ev |= MUSE_BTN_TALK_RELEASE;
+        } else if (tp_talking) {
+            muse_input_touch_talk(false);   /* the injected hold's release, the way it went in */
         }
         tp_down = false;
         tp_talking = false;
     } else if (pressed && tp_down && tp_on_face && !tp_talking) {
+        tp_real = tp_real && muse_touch_real();
         if (lv_indev_get_scroll_obj(s_touch_indev) || muse_ui_volume_swiping() || !muse_ui_face_active()) {
             tp_on_face = false;
         } else if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
-            tp_talking = true;
-            ev |= MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;   /* a hold, not an edge: never confirms pairing */
+            /* An injected touch (the console's or the Nordic UART's !IN press=) stays injected: never the gadget's
+             * own talk press, which opens a client's start_mic and confirms. It talks through the UI's path, where
+             * an injected press may talk at all (muse_input_talk_ok: test, bench and automation images). */
+            tp_own = tp_real && muse_touch_real();
+            if (tp_own) {
+                tp_talking = true;
+                ev |= MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;   /* a hold, not an edge: never confirms pairing */
+            } else if (muse_input_talk_ok(false)) {
+                tp_talking = true;
+                muse_input_touch_talk(true);
+            } else {
+                tp_on_face = false;   /* a release image: an injected hold never talks */
+            }
         }
     }
     return ev;

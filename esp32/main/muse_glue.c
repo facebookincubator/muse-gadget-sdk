@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+#include "muse_restart.h"
+#include "muse_bootguard.h"
+#include "muse_stack.h"
 #include "muse_glue.h"
 #include "sdkconfig.h"
 #if CONFIG_MUSE_AVATAR_SYNC
@@ -21,6 +24,7 @@
 #include "muse_avatar.h"
 #endif
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,6 +46,10 @@
 #if CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #include "sdk_token_console.h"
 #endif
+#include "session_image.h"
+#include "mg_face.h"
+#include "muse_clock.h"
+#include "token_fp.h"
 #if CONFIG_MUSE_WASM_APPS
 #include "muse_apps.h"
 #endif
@@ -57,12 +65,26 @@
 #include "muse_ble.h"
 #include "muse_board.h"
 #include "muse_input.h"
+#include "muse_ui.h"
+#include "muse_local_press.h"
+#include "muse_passcode.h"
 #include "muse_link.h"
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
 #if CONFIG_MUSE_REALTIME_VOICE
 #include "muse_voice_call.h"
+#endif
+#if CONFIG_MUSE_GATT_DBHASH
+#include "gatt_dbhash.h"
+#endif
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+#include "mg_ble.h"
+
+// A talk press the gadget itself detected, as mg's source (start_mic's press rule).
+static void glue_press(muse_press_t src) {
+    mg_ble_press(src == MUSE_PRESS_PANEL ? MG_PRESS_SRC_PANEL : MG_PRESS_SRC_KEY);
+}
 #endif
 
 static const char *TAG = "link.muse";
@@ -94,8 +116,11 @@ _Static_assert(MUSE_WIFI_SAVED_MAX >= WIFI_KNOWN_MAX, "room for every saved netw
 
 static EventGroupHandle_t s_ready;
 static TaskHandle_t s_keeper;
+/* muse_stack.h: the boot task (once; its worker then stays parked). */
+static muse_task_slot_t s_boot_slot;
 
-// Link config lives in NVS, which tasks with PSRAM stacks must not touch, so
+// Link config lives in NVS, which tasks with PSRAM stacks must not touch
+// (unless flash writes leave the cache on: CONFIG_MUSE_STACKS_IN_PSRAM), so
 // Muse reads these copies and the keeper task does the flash I/O.
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_ssid[MUSE_SSID_MAX + 1];      // the first saved network
@@ -198,6 +223,12 @@ static void set_fail(const char *why) {
 // ---- Wi-Fi ------------------------------------------------------------------
 
 static void op_wifi_status(muse_wifi_status_t *out) {
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // A BLE-only gadget never brings Wi-Fi up.
+    memset(out, 0, sizeof(*out));
+    out->state = MUSE_WIFI_OFF;
+    return;
+#endif
     memset(out, 0, sizeof(*out));
     portENTER_CRITICAL(&s_lock);
     first_ssid_locked(out->ssid, sizeof(out->ssid));
@@ -362,6 +393,7 @@ static void op_wifi_forget(const char *ssid) {
     if (found) keeper_kick(KEEP_FORGET);
 }
 
+#if !CONFIG_MUSE_GADGET_BLE_STANDALONE   // the Wi-Fi scan (BLE-only builds refuse it: op_wifi_scan)
 // Whether ssid is a saved network. Call with s_lock held.
 static bool saved_locked(const char *ssid) {
     for (int i = 0; i < s_saved_count; i++) {
@@ -369,6 +401,9 @@ static bool saved_locked(const char *ssid) {
     }
     return false;
 }
+
+/* muse_stack.h: the Wi-Fi scan's task, started again for each scan. */
+static muse_task_slot_t s_scan_slot;
 
 static void scan_task(void *arg) {
     (void)arg;
@@ -393,18 +428,25 @@ static void scan_task(void *arg) {
     }
     s_scanning = false;
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    MUSE_TASK_END();
 }
+#endif
 
 static esp_err_t op_wifi_scan(void) {
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // BLE only: Link's session never starts, so BIT_LINK never comes and the
+    // scan is refused, as below; this keeps the Wi-Fi scan out of the image.
+    return ESP_ERR_INVALID_STATE;
+#else
     if (!(xEventGroupGetBits(s_ready) & BIT_LINK) || s_joining) return ESP_ERR_INVALID_STATE;
     if (s_scanning) return ESP_OK;
     s_scanning = true;
-    if (xTaskCreate(scan_task, "muse_scan", 4096, NULL, 4, NULL) != pdPASS) {
+    if (muse_task_slot_run(&s_scan_slot, scan_task, "muse_scan", 4096, NULL, 4, NULL, tskNO_AFFINITY) != pdPASS) {
         s_scanning = false;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+#endif
 }
 
 static bool op_wifi_scanning(void) {
@@ -436,7 +478,14 @@ static bool op_hatch_linked(void) {
 
 static bool op_hatch_vm(const char *want_vm, char *vm_id, size_t id_cap, char *vm_name, size_t name_cap,
                         char **vm_token) {
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // BLE only: its one caller, the Muse session's VM lookup, never runs (no
+    // Wi-Fi), and the account API it would reach needs the network.
+    (void)want_vm; (void)vm_id; (void)id_cap; (void)vm_name; (void)name_cap; (void)vm_token;
+    return false;
+#else
     return s_linked && app_hatch_vm_credentials(want_vm, vm_id, id_cap, vm_name, name_cap, vm_token);
+#endif
 }
 
 // Pairing and the API client take the SDK token at boot, so a new one
@@ -445,7 +494,7 @@ static bool op_sdk_token_set(const char *token) {
     if (!identity_set_sdk_token(token)) return false;
     char fp[TOKEN_FP_TEXT_LEN];
     ESP_LOGI(TAG, "SDK token (%s) set in settings, restarting to use it", token_fp_text(token, fp));
-    esp_restart();
+    muse_restart(MUSE_RESTART_SETUP);
     return true;
 }
 
@@ -453,8 +502,20 @@ static bool op_sdk_token_changed(void) {
     return identity_sdk_token_changed_since_pairing(NULL, 0);
 }
 
-static bool op_talk_press(int64_t pressed_after_us) {
-    return app_confirm_pairing_press(pressed_after_us);
+// What Settings shows of it: its length and SHA-256 prefix, never any of it.
+static bool op_sdk_token_fp(unsigned *len, char hex[TOKEN_FP_HEX_LEN]) {
+    return token_fp_parts(identity_sdk_token(), len, hex);
+}
+
+static bool op_talk_press(int64_t pressed_after_us, bool talk_key) {
+    return app_confirm_pairing_press(pressed_after_us, talk_key);
+}
+
+bool muse_glue_talk_key_only(void) {
+    // No touch screen (its Confirm), no menu keys (Enter) and no second key (aux): only the talk key, which never
+    // confirms a re-setup, so the board takes one only in setup mode (app_resetup_open).
+    const muse_board_t *b = muse_board_get();
+    return !b || (!b->touch && !b->keyboard && !b->aux_button);
 }
 
 static void op_reset_setup(void) {
@@ -473,11 +534,14 @@ static const muse_link_ops_t s_ops = {
     .ble_apply = op_ble_apply,
     .ble_started = op_ble_started,
     .hatch_linked = op_hatch_linked,
+    .token_stored = config_is_provisioned,   // the device token Link setup stored (else "Not set up")
     .sdk_token = identity_sdk_token,
     .sdk_token_set = op_sdk_token_set,
     .sdk_token_changed = op_sdk_token_changed,
+    .sdk_token_fp = op_sdk_token_fp,
     .hatch_vm = op_hatch_vm,
     .talk_press = op_talk_press,
+    .confirm_dismiss = app_dismiss_pairing_prompt,
     .reset_setup = op_reset_setup,
     .req_ready = noise_ctrl_is_connected,
     .req_open = noise_ctrl_req_open,
@@ -493,9 +557,21 @@ static const muse_link_ops_t s_ops = {
     .wifi_forget = op_wifi_forget,
     .wifi_proxy_get = op_wifi_proxy_get,
     .wifi_proxy_set = op_wifi_proxy_set,
+#if CONFIG_MUSE_SESSION_IMAGE
+    .image_ask = session_image_ask,
+    .image_status = session_image_status,
+#endif
+#if CONFIG_MUSE_AVATAR_FACE
+    .face_label = mg_face_label,
+    .face_avatar_picked = mg_face_avatar_picked,
+    .face_pick = mg_face_pick,
+    .face_size_small = mg_face_size_small,
+    .face_size_set = mg_face_size_set,
+#endif
 };
 
 // ---- Keeper: joins a saved network and applies BLE, on an internal stack ----
+// (in PSRAM with CONFIG_MUSE_STACKS_IN_PSRAM, where flash writes keep the cache on)
 
 // Refreshes the copies after a change that needs no rejoin (Link saving the
 // network it's on, or a network moving up or being forgotten): if joined_gen
@@ -742,6 +818,37 @@ static void keeper_task(void *arg) {
 static void boot_task(void *arg) {
     (void)arg;
     xEventGroupWaitBits(s_ready, BIT_STORAGE, pdFALSE, pdTRUE, portMAX_DELAY);
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) {
+        // SAFE mode (muse_bootguard.h): no display, audio or input, only
+        // the state the link and BLE code touch.
+        muse_state_init();
+        const muse_board_t *b = muse_board_get();
+        if (b && b->safe_init && b->safe_init() != ESP_OK) {
+            ESP_LOGE(TAG, "SAFE mode: the board's minimum setup failed");
+        }
+        // The panel dark (the C6: an AMOLED keeps the last frame
+        // across the reset, so SAFE looked like a working home), without its
+        // display init or LVGL: a reset held or a backlight off.
+        if (b && b->safe_display_off) {
+            b->safe_display_off();
+            ESP_LOGW(TAG, "SAFE mode: the panel is off");
+        } else {
+            ESP_LOGW(TAG, "SAFE mode: this board's panel can't be turned off without its display");
+        }
+        ESP_LOGW(TAG, "SAFE mode: the Muse UI, audio and input stay off");
+        // The way out without a phone: the USB
+        // console's recovery words, and a 5 s hold of the talk key where the
+        // board reads it without Muse (muse_board_t.safe_key). No UI in SAFE.
+        if (muse_input_safe_console_start() != ESP_OK) {
+            ESP_LOGE(TAG, "SAFE mode: no USB console");
+        }
+        if (b && b->safe_key) {
+            muse_bootguard_safe_watch(b->safe_key, NULL);
+        } else {
+            ESP_LOGW(TAG, "SAFE mode: no key hold on this board (safe.off or >safe=0 leaves SAFE)");
+        }
+        MUSE_TASK_END();
+    }
     load_creds();
     muse_app_run(muse_board_get());
 #if CONFIG_CAPABILITIES_REGISTRY
@@ -751,15 +858,56 @@ static void boot_task(void *arg) {
 #endif
     xEventGroupSetBits(s_ready, BIT_MUSE);
     stack_monitor_record(NULL);
-    vTaskDelete(NULL);
+    MUSE_TASK_END();
 }
 
-#if CONFIG_MUSE_WASM_APPS || CONFIG_MUSE_AVATAR_SYNC
-// The console's setup lines: the SDK token, then the app loader (muse_apps.h).
-static bool console_line(const char *line) {
-#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
-    if (sdk_token_console_command(line)) return true;
+static bool glue_console_command(const char *line);
+static bool glue_link_console(const char *line);
+
+#if !CONFIG_MUSE_GADGET_BLE_STANDALONE && !CONFIG_MUSE_GADGET_BLE_AUDIO
+// SAFE mode on a Wi-Fi Muse build without musegadgets: Link's boot
+// connect joined Wi-Fi once; with no keeper (it needs Muse), this rejoins the
+// saved networks whenever Wi-Fi drops, so the Link session stays
+// reachable. muse_keep_vm_session (app.c) brings the session back after.
+static void safe_wifi_task(void *arg) {
+    (void)arg;
+    xEventGroupWaitBits(s_ready, BIT_LINK, pdFALSE, pdTRUE, portMAX_DELAY);   // Link's boot connect is done
+    if (WIFI_OVERRIDE) {
+        ESP_LOGI(TAG, "SAFE mode: Wi-Fi override, no rejoin loop");
+        vTaskDelete(NULL);
+    }
+    int64_t backoff = RETRY_MIN_US;
+    int64_t next_try = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (wifi_mgr_is_connected()) {
+            backoff = RETRY_MIN_US;
+            continue;
+        }
+        if (esp_timer_get_time() < next_try) {
+            continue;
+        }
+        app_wifi_join_t r = app_wifi_join_saved(CONNECT_TIMEOUT_MS, false);
+        if (r == APP_WIFI_JOINED) {
+            ESP_LOGI(TAG, "SAFE mode: Wi-Fi back");
+            backoff = RETRY_MIN_US;
+            continue;
+        }
+        int64_t wait = r == APP_WIFI_BUSY ? 1000 * 1000 : backoff;
+        next_try = esp_timer_get_time() + wait;
+        if (r != APP_WIFI_BUSY) {
+            backoff = backoff * 2 > RETRY_MAX_US ? RETRY_MAX_US : backoff * 2;
+            ESP_LOGI(TAG, "SAFE mode: no Wi-Fi; looking again in %d s", (int)(wait / 1000000));
+        }
+    }
+}
 #endif
+
+#if CONFIG_MUSE_WASM_APPS || CONFIG_MUSE_AVATAR_SYNC
+// The console's lines: the gadget's own (glue_console_command, which ends
+// with the SDK token's), then avatar sync's and the app loader (muse_apps.h).
+static bool console_line(const char *line) {
+    if (glue_console_command(line)) return true;
 #if CONFIG_MUSE_AVATAR_SYNC
     if (avatar_sync_console(line)) return true;
 #endif
@@ -771,6 +919,19 @@ static bool console_line(const char *line) {
 #endif
 
 void muse_glue_start(void) {
+    // The user's way into SAFE (muse_bootguard.h): the board's SAFE key
+    // pressed in the first 3 s and held 10 s. Watched from here, the boot's
+    // start, so the window is still open; the key is read raw as in SAFE.
+    const muse_board_t *board = muse_board_get();
+    if (board && board->safe_key) {
+        muse_bootguard_entry_watch(board->safe_key);
+    }
+    // An update's ask wakes the screen; a passcode lock asks for the passcode before the confirm press
+    // (muse_local_press.h).
+    muse_local_press_set_ui(muse_passcode_locked, muse_input_update_wake);
+#if !CONFIG_MUSE_UI_FREEINK   // the e-paper UI draws no update card: every prompted press counts
+    muse_local_press_set_shown(muse_ui_update_prompt_shown);   // a press counts only while the card is on show
+#endif
     // First, before Link's Wi-Fi, BLE and tunnel and Muse's display take and
     // fragment internal RAM: the CPU's light-sleep retention memory.
     muse_input_power_init();
@@ -781,10 +942,42 @@ void muse_glue_start(void) {
 #if CONFIG_MUSE_WASM_APPS
     muse_apps_start(noise_ctrl_send_command_result);
 #endif
-#elif CONFIG_GADGET_SDK_TOKEN_CONSOLE
-    muse_input_set_console_hook(sdk_token_console_command);
+#else
+    muse_input_set_console_hook(glue_console_command);
+#endif
+    muse_input_set_safe_console_hook(glue_link_console);
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    muse_input_set_press_hook(glue_press);   // a press the gadget itself detected opens start_mic
 #endif
     muse_ble_set_name(identity_ble_name());
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // A BLE-only gadget: no phone setup service (it configures Wi-Fi and the
+    // Muse session) and no keeper (it joins Wi-Fi).
+    (void)keeper_task;
+    // Pinned to the UI core as below: the display's SPI interrupt is set up
+    // in it, and must land beside the panel's send task, not on the core
+    // that decodes video (muse_lcd_bands.h).
+    if (muse_task_slot_run(&s_boot_slot, boot_task, "muse_boot", 8192, NULL, 5, NULL, MUSE_UI_CORE) != pdPASS) {
+        ESP_LOGE(TAG, "failed to start Muse");
+    }
+#else
+    if (muse_bootguard_mode() == MUSE_BOOT_SAFE) {
+        // SAFE mode: no phone setup service (it configures Wi-Fi and the
+        // Muse session) and no keeper (it serves Muse's Wi-Fi settings);
+        // boot_task leaves the Muse UI off. With musegadgets it's Bluetooth
+        // only (app.c run_safe_bluetooth_only); without, Link stays up for
+        // recovery (device.health, the VM management commands), so a small loop rejoins Wi-Fi in the keeper's
+        // place.
+        if (muse_task_slot_run(&s_boot_slot, boot_task, "muse_boot", 8192, NULL, 5, NULL, MUSE_UI_CORE) != pdPASS) {
+            ESP_LOGE(TAG, "failed to start Muse");
+        }
+#if !CONFIG_MUSE_GADGET_BLE_AUDIO
+        if (muse_task_create(safe_wifi_task, "safe_wifi", 6144, NULL, 4, NULL, tskNO_AFFINITY) != pdPASS) {
+            ESP_LOGE(TAG, "SAFE mode: no Wi-Fi rejoin");
+        }
+#endif
+        return;
+    }
     ble_companion_t companion = {
         .svcs = muse_ble_services(),
         .configure_host = muse_ble_configure_host,
@@ -793,15 +986,132 @@ void muse_glue_start(void) {
     ble_server_set_companion(&companion);
     // Pinned to the UI core, so the display's SPI interrupt, set up in it,
     // lands beside the task that sends to the display (muse_lcd_bands.h).
-    if (xTaskCreatePinnedToCore(boot_task, "muse_boot", 8192, NULL, 5, NULL, MUSE_UI_CORE) != pdPASS
-        || xTaskCreate(keeper_task, "muse_keep", 6144, NULL, 4, &s_keeper) != pdPASS) {
+    if (muse_task_slot_run(&s_boot_slot, boot_task, "muse_boot", 8192, NULL, 5, NULL, MUSE_UI_CORE) != pdPASS
+        || muse_task_create(keeper_task, "muse_keep", 6144, NULL, 4, &s_keeper, tskNO_AFFINITY) != pdPASS) {
         ESP_LOGE(TAG, "failed to start Muse tasks");
     }
+#endif
 }
 
 void muse_glue_storage_ready(void) {
     muse_ble_set_name(identity_ble_name());
     xEventGroupSetBits(s_ready, BIT_STORAGE);
+}
+
+/* Link's own console lines on the Muse console: the device session's ping,
+ * session images, the avatar face and the clock (these reach Muse), then
+ * glue_link_console's. */
+static bool glue_console_command(const char *line) {
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+    // One link.heartbeat on the device session; the answer is on mg.session.
+    if (!strcmp(line, "session.ping")) {
+        noise_ctrl_ble_ping();
+        return true;
+    }
+#endif
+#if CONFIG_MUSE_SESSION_IMAGE
+    // img.ask, img.show=PATH[,MS], img? (session_image.h).
+    if (session_image_console(line)) {
+        return true;
+    }
+#endif
+#if CONFIG_MUSE_AVATAR_FACE
+    // face?, face.check, face.pick=avatar|pixel, face.size=, face.erase (mg_face.h).
+    if (mg_face_console(line)) {
+        return true;
+    }
+#endif
+    // clock=UNIX_SECONDS[,OFFSET_MINUTES]: the time as a phone sets it
+    // (device action set_unix_time, muse_clock.h), for a bench gadget with no
+    // phone to set it (a Wi-Fi build's home shows no clock until then).
+    if (!strncmp(line, "clock=", 6)) {
+        char *end = NULL;
+        long long s = strtoll(line + 6, &end, 10);
+        bool off = end && *end == ',';
+        long m = off ? strtol(end + 1, &end, 10) : 0;
+        bool ok = s > 1600000000LL && end && *end == '\0' && m >= -840 && m <= 840;
+        if (ok) {
+            muse_clock_set((int64_t)s * 1000, off, (int16_t)m, false, 0, true);
+        }
+        printf("@clock %s\n", ok ? "set" : "usage: clock=UNIX_SECONDS[,OFFSET_MINUTES]");
+        fflush(stdout);
+        return true;
+    }
+    return glue_link_console(line);
+}
+
+/* The console words that reach no Muse feature: the GATT table walk behind the
+ * Database Hash, musegadgets BLE's bench words, and Link's (sdk_token_console:
+ * version, the SDK token, hang=). The normal console takes them through
+ * glue_console_command, and SAFE mode's USB console too (muse_input.c,
+ * safe_console_line), since SAFE runs musegadgets BLE and Link. */
+static bool glue_link_console(const char *line) {
+#if CONFIG_MUSE_GATT_DBHASH
+    if (!strcmp(line, "gatt.dump")) {
+        gatt_dbhash_dump();
+        return true;
+    }
+#endif
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    // ble.pause=SECS[,AA:BB:CC:DD:EE:FF] (1-600 s): off the phone for a while,
+    // for A/B tests: the link dropped and no advertising, or with an address
+    // only that central may connect (a phone's app that can't let a gadget
+    // go), then as before (mg_ble_bench_pause; logged on mg.ble). No unpair,
+    // nothing stored, a restart ends it. The ESP-Mosaico's console (ESP-Iris
+    // over USB) reaches it here too.
+    if (!strncmp(line, "ble.pause=", 10)) {
+        mg_ble_bench_pause_text(line + 10);
+        return true;
+    }
+    // bench.out=0|1 / bench.out?: the bench switch (mg_ble_bench_out_word):
+    // mic output to a Mac bench client without this connection's token proof.
+    // Off at every boot, RAM only, kept across connections (the Nordic UART's
+    // own bench.out is for its connection only: mg_ble.c's nus_bench_out).
+    if (!strncmp(line, "bench.out", 9)) {
+        char out[96];
+        if (mg_ble_bench_out_word(line, out, sizeof(out))) {
+            printf("@%s\n", out);
+            fflush(stdout);
+            return true;
+        }
+    }
+    // link.wake=0|1 / link.wake?: listening at every connection event during
+    // a link-mode switch (mg_ble_link_wake_word, on by default, RAM only).
+    if (!strncmp(line, "link.wake", 9)) {
+        char out[160];
+        if (mg_ble_link_wake_word(line, out, sizeof(out))) {
+            printf("@%s\n", out);
+            fflush(stdout);
+            return true;
+        }
+    }
+    // link.sleep=ITVL_MIN,ITVL_MAX,LAT / link.sleep=0 / link.sleep?: the sleep
+    // mode's request for the link policy's sleep-parameter A/B (mg_ble_link_sleep_word,
+    // RAM only, kept across connections).
+    if (!strncmp(line, "link.sleep", 10)) {
+        char out[288];
+        if (mg_ble_link_sleep_word(line, out, sizeof(out))) {
+            printf("@%s\n", out);
+            fflush(stdout);
+            return true;
+        }
+    }
+    // pair.auto / pair.auto=0: the bench pairing auto-confirm, one pairing
+    // within 10 min, as the Nordic UART's !PAIR AUTO (for a bench on the USB
+    // console, the ESP-Mosaico's ESP-Iris included).
+    if (!strcmp(line, "pair.auto") || !strcmp(line, "pair.auto=0")) {
+        bool on = line[9] == 0;
+        bool ok = mg_ble_pair_auto_arm(on);
+        printf("@pair.auto %s\n", !ok ? "unavailable" : on ? "on" : "off");
+        fflush(stdout);
+        return true;
+    }
+#endif
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
+    return sdk_token_console_command(line);
+#else
+    return false;
+#endif
 }
 
 void muse_glue_link_ready(void) {
@@ -858,3 +1168,8 @@ const char *muse_voice_call_device_id(void) {
     return identity_node_id();
 }
 #endif
+
+// Every chat turn names Link's node (muse_chat_priv.h; a RAM string set at boot).
+const char *muse_chat_node_id(void) {
+    return identity_node_id();
+}

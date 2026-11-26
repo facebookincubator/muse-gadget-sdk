@@ -178,12 +178,25 @@ class LinkPairingStateContractTest(unittest.TestCase):
         # Legacy provisioned->setup_complete migration only fires when Wi-Fi
         # creds are also present. A token without Wi-Fi is a partial pair, and
         # only its pairing is cleared; saved Wi-Fi alone (an unpaired device)
-        # is never wiped at boot.
-        kept = _function_body(body, "if (!setup_complete && provisioned && have_wifi)")
+        # is never wiped at boot. A gadget's token-only setup (Wi-Fi skipped)
+        # is never taken for a legacy pair, nor is a gadget's pair without the
+        # marker (GADGET_PROOF: the marker goes last there, with the key).
+        legacy = "if (!setup_complete && provisioned && have_wifi && !wifi_skipped && !GADGET_PROOF)"
+        self.assertIn(legacy, body)
+        kept = _function_body(body, legacy)
         self.assertIn("config_mark_setup_complete()", kept)
-        partial = _function_body(body, "} else if (!setup_complete && provisioned)")
+        start = body.index("} else if (!setup_complete && ", body.index(legacy))
+        self.assertIn("provisioned", body[start:body.index("{", start)])
+        partial = _function_body(body[start:], "} else if (!setup_complete && ")
         self.assertIn("config_clear_pairing()", partial)
-        self.assertNotIn("config_clear_setup()", body)
+        # Only a token-only setup (no Wi-Fi to keep) goes whole.
+        self.assertIn("wifi_skipped ? config_clear_setup() : config_clear_pairing()", partial)
+        # Besides it, only a gadget set up with no token proof key (nobody could prove it) clears the whole setup.
+        nokey = _function_body(body, "if (GADGET_PROOF && setup_complete && config_key_lookup(\"mg_proof_k\") == CONFIG_KEY_NOT_FOUND)")
+        self.assertIn("config_clear_setup()", nokey)
+        self.assertNotIn("config_clear_setup()",
+                         body.replace("wifi_skipped ? config_clear_setup() : config_clear_pairing()", "")
+                         .replace(nokey, ""))
 
     def test_wifi_connect_polls_past_wifi_state(self) -> None:
         body = _function_body(WIFI_MGR_C.read_text(), "bool wifi_mgr_connect(")

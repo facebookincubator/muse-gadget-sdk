@@ -90,8 +90,7 @@ and the standard bitstream: it decodes liblc3's frames and liblc3 decodes its
 own (`xplat/tests/run_tests.py` checks both ways). Apache-2.0, a derivative
 of liblc3 (`LICENSE`, and `README.md` for its numbers and porting notes).
 
-How the ESP32 SDK builds it (for the BLE gadgets, which come in a later
-change): `esp32/components/liblc3`, on chips without an FPU, 10 ms at 16 and 24 kHz (`LC3_SR_MASK=6 LC3_DT_MASK=8`, the rates the
+How the ESP32 SDK builds it (for the BLE gadgets): `esp32/components/liblc3`, on chips without an FPU, 10 ms at 16 and 24 kHz (`LC3_SR_MASK=6 LC3_DT_MASK=8`, the rates the
 SDKs use; the tables carry every rate, and the mask leaves the others' FFT
 stages out), no decoder LTPF, and `linker.lf` for where its code and tables
 live.

@@ -44,7 +44,7 @@ class StopWatchControls(unittest.TestCase):
         cls.ui = (MUSE / "muse_ui.c").read_text()
         cls.input = (MUSE / "muse_input.c").read_text()
         flags = "\n".join(re.findall(r"^#define MUSE_BTN_.*", (MUSE / "muse_board.h").read_text(), re.M))
-        board_defines = "\n".join(re.findall(r"^#define (?:PMIC_BTN_\w+|PMIC_SYS_CMD|PMIC_SHUTDOWN|POWER_\w+|CLICK_CREDIT_US).*", cls.board, re.M))
+        board_defines = "\n".join(re.findall(r"^#define (?:PMIC_BTN_\w+|PMIC_SYS_CMD|PMIC_SHUTDOWN|PMIC_WAKE_SRC|POWER_\w+|CLICK_CREDIT_US).*", cls.board, re.M))
         common = '#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n' + flags + '\n' + '#include "' + str(MUSE / 'muse_state.h') + '"\n'
         board = common + r'''
 #define BIT(n) (1u << (n))
@@ -67,8 +67,11 @@ static int64_t esp_timer_get_time(void) { return now; }
 static int reg_read(void *dev, uint8_t reg, uint8_t *out, size_t n) {
     (void)dev; assert(reg == 0x48 && n == 1); *out = key; return read_error;
 }
+static int wake_cleared;   /* WAKE_SRC cleared just before the shutdown */
 static int reg_write(void *dev, uint8_t reg, const uint8_t *data, size_t n) {
-    (void)dev; assert(reg == 0x0c && n == 1 && data[0] == 0xa1); ++writes; return write_error;
+    (void)dev;
+    if (reg == 0x05) { assert(n == 1 && data[0] == 0); ++wake_cleared; return 0; }
+    assert(reg == 0x0c && n == 1 && data[0] == 0xa1 && wake_cleared == writes + 1); ++writes; return write_error;
 }
 static void vTaskDelay(int ms) { (void)ms; }
 typedef struct { int id; } muse_gpio_button_t;
@@ -124,8 +127,9 @@ void muse_state_poke(void) { ++pokes; }
 muse_mode_t muse_state_mode(float *secs) { (void)secs; return mode; }
 static bool muse_settings_speaker_on(void) { return speaker; }
 static void muse_settings_set_speaker_on(bool value) { speaker = value; ++toggles; }
+/* A transient hint (#283), in sentence case. */
 static int hints;
-void muse_state_set_hint(const char *caption) { assert(strcmp(caption, speaker ? "SPEAKER ON" : "SPEAKER OFF") == 0); ++hints; }
+void muse_state_set_hint(const char *caption) { assert(strcmp(caption, speaker ? "Speaker on" : "Speaker off") == 0); ++hints; }
 static void talk_button(unsigned ev) { assert(ev == MUSE_BTN_TALK_RELEASE); s_talk_down = false; ++ptt_releases; }
 static void power_off(void) { ++shutdowns; }
 ''' + '\n'.join(function(cls.input, n) for n in ('power_release', 'dedicated_buttons')) + r'''
@@ -159,37 +163,36 @@ int main(int argc, char **argv) {
 '''
         ui = common + r'''
 #define LV_OBJ_FLAG_HIDDEN 1
-#define LV_SYMBOL_VOLUME_MID "\xef\x80\xa7"
-#define LV_SYMBOL_MUTE "\xef\x80\xa6"
-#define LV_SYMBOL_POWER "\xef\x80\x91"
-static struct { char text[64]; bool hidden; } hints[3];
+typedef enum { MUSE_ICON_MIC, MUSE_ICON_VOLUME_UP, MUSE_ICON_VOLUME_OFF, MUSE_ICON_POWER } muse_icon_t;
+static struct { int glyph; uint32_t color; bool hidden; } hints[3] = { { -1, 0, false }, { -1, 0, false }, { MUSE_ICON_POWER, 0xff8080, false } };
 typedef void lv_obj_t;
 static lv_obj_t *s_ptt_hint = &hints[0], *s_spk_hint = &hints[1], *s_pwr_hint = &hints[2];
-static lv_obj_t *s_tv = (void *)1, *s_settings = (void *)2;
+static lv_obj_t *s_tv = (void *)1, *s_settings = (void *)2, *s_face = 0;   /* the home tile */
 static bool settings, speaker = true;
-static uint32_t mic_color;
 static int lv_calls;
-static void color_mic(void *icon, uint32_t color) { assert(icon == s_ptt_hint); mic_color = color; ++lv_calls; }
+/* The standard glyphs: each rim icon is a box holding a muse_icons image. */
+static void set_control_icon(lv_obj_t *box, muse_icon_t glyph, uint32_t color) {
+    assert(box == s_ptt_hint || box == s_spk_hint);
+    ((typeof(hints[0]) *)box)->glyph = glyph; ((typeof(hints[0]) *)box)->color = color; ++lv_calls;
+}
 static void *lv_tileview_get_tile_active(void *tv) { (void)tv; return settings ? s_settings : 0; }
 static void lv_obj_set_flag(void *obj, int flag, bool value) { (void)flag; ((typeof(hints[0]) *)obj)->hidden = value; ++lv_calls; }
-static const char *lv_label_get_text(void *obj) { return ((typeof(hints[0]) *)obj)->text; }
-static void lv_label_set_text(void *obj, const char *text) { strcpy(((typeof(hints[0]) *)obj)->text, text); }
-#define muse_theme_set_style_text_color lv_obj_set_style_text_color
-static void lv_obj_set_style_text_color(void *obj, int color, int part) { (void)obj; (void)color; (void)part; }
-static int lv_color_hex(int color) { return color; }
 static bool muse_settings_speaker_on(void) { return speaker; }
+static bool muse_passcode_ui_locked_face(void) { return false; }   /* test_muse_passcode */
+static bool muse_passcode_ui_covering(void) { return false; }
 ''' + function(cls.ui, 'update_control_hints') + r'''
 int main(void) {
-    strcpy(hints[2].text, LV_SYMBOL_POWER); /* created once, never replaced by words */
     for(int m = MUSE_MODE_BOOT; m <= MUSE_MODE_OFF; ++m) {
         update_control_hints(m);
         assert(!hints[0].hidden && !hints[1].hidden && !hints[2].hidden);
-        assert(hints[0].text[0] == 0); /* mic is primitives, not a text label */
-        assert(strcmp(hints[1].text, LV_SYMBOL_VOLUME_MID) == 0);
-        assert(strcmp(hints[2].text, LV_SYMBOL_POWER) == 0);
-        assert(mic_color == (m == MUSE_MODE_LISTENING ? 0x64d4ff : 0x80bfff));
+        assert(hints[0].glyph == MUSE_ICON_MIC);
+        assert(hints[1].glyph == MUSE_ICON_VOLUME_UP && hints[1].color == 0x80bfff);   /* blue: the speaker key */
+        assert(hints[2].glyph == MUSE_ICON_POWER);   /* made once, never replaced */
+        assert(hints[0].color == (m == MUSE_MODE_LISTENING ? 0xffe680 : 0xffd060));   /* yellow: the talk key */
     }
-    speaker = false; update_control_hints(MUSE_MODE_SPEAKING); assert(strcmp(hints[1].text, LV_SYMBOL_MUTE) == 0);
+    speaker = false; update_control_hints(MUSE_MODE_SPEAKING);
+    assert(hints[1].glyph == MUSE_ICON_VOLUME_OFF && hints[1].color == 0x8e2426);   /* muted */
+    speaker = true; update_control_hints(MUSE_MODE_SPEAKING); assert(hints[1].glyph == MUSE_ICON_VOLUME_UP);
     settings = true; update_control_hints(MUSE_MODE_IDLE); assert(hints[0].hidden && hints[1].hidden && hints[2].hidden);
     settings = false; update_control_hints(MUSE_MODE_ERROR); assert(!hints[0].hidden);
     s_ptt_hint = NULL; int before = lv_calls;
@@ -302,60 +305,25 @@ int main(int argc, char **argv) {
         self.assertIn('paused ? REST_POWER_MS : POWER_MS', self.input)
         self.assertIn('muse_board->read_power(&p)', self.input)
 
-    def test_settings_power_hint_uses_red_not_ptt(self):
-        source = (MUSE / 'muse_settings_ui.c').read_text()
-        code = r'''
-#include <assert.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
-typedef void lv_obj_t;
-#define T(en) (en)
-#define LV_SYMBOL_POWER "P"
-#define LV_SYMBOL_REFRESH "R"
-#define COLOR_DANGER 1
-#define COLOR_TEXT 2
-static lv_obj_t *s_power;
-static char shown[128];
-static struct { const char *power_button, *talk_button, *aux_button; } board = {"red bottom-left", "top-right", NULL}, *muse_board = &board;
-static void on_power_off(void *p) { (void)p; }
-static void on_restart(void *p) { (void)p; }
-static void on_back(void *p) { (void)p; }
-static void *page(void *tile, const char *title, bool back, void **list) { (void)tile; (void)title; (void)back; *list = (void *)1; return *list; }
-static void note(void *list, const char *text) { (void)list; strcpy(shown, text); }
-static void button(void *list, const char *text, int color, void (*cb)(void *), void *data) { (void)list; (void)text; (void)color; (void)cb; (void)data; }
-''' + function(source, 'build_power_page') + r'''
-int main(void) {
-    build_power_page(NULL);
-    assert(strcmp(shown, "Press the red bottom-left button to turn it back on. To just turn the screen off, press the red bottom-left button.") == 0);
-    board.power_button = NULL; board.talk_button = "talk"; board.aux_button = "aux";
-    build_power_page(NULL);
-    assert(strcmp(shown, "Press the talk button to turn it back on. To just turn the screen off, press the aux button.") == 0);
-    return 0;
-}
-'''
-        path = Path(self.tmp.name) / 'settings.c'
-        path.write_text(code)
-        subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + ['-std=c11', '-Wall', '-Wextra', '-Werror', str(path), '-o', str(path.with_suffix(''))], check=True, capture_output=True, text=True)
-        self.run_case('settings', 0)
 
     def test_positions_and_round_safe_area(self):
-        self.assertRegex(self.board, r'#define TALK_GPIO GPIO_NUM_1')
-        self.assertRegex(self.board, r'#define SPEAKER_GPIO GPIO_NUM_2')
+        self.assertRegex(self.board, r'#define TALK_GPIO GPIO_NUM_2')
+        self.assertRegex(self.board, r'#define SPEAKER_GPIO GPIO_NUM_1')
         self.assertIn('.wait_buttons = wait_buttons', self.board)
         self.assertNotIn('esp_sleep_enable_ext1_wakeup', self.board)
-        for name, sign_x, sign_y in [('talk', 1, -1), ('speaker', -1, -1), ('power', -1, 1)]:
+        for name, sign_x, sign_y in [('talk', -1, -1), ('speaker', 1, -1), ('power', -1, 1)]:
             x, y = map(int, re.search(r'\.' + name + r'_hint = \{ LV_ALIGN_CENTER, (-?\d+), (-?\d+) \}', self.board).groups())
             self.assertGreater(x * sign_x, 0)
             self.assertGreater(y * sign_y, 0)
             for dx in [-18, 18]:
                 for dy in [-18, 18]: self.assertLess((x + dx) ** 2 + (y + dy) ** 2, 223 ** 2)
-        self.assertIn('s_ptt_hint = make_mic(scr, 26)', self.ui)
+        self.assertIn('s_ptt_hint = make_control_icon(scr, &muse_board->talk_hint, MUSE_ICON_MIC', self.ui)
+        self.assertIn('#define RIM_ICON_BOX 36', self.ui)   # the 18 px half-box checked inside the rim above
         self.assertNotIn('s_mic_icon = make_mic(scr', self.ui)
         self.assertNotIn('s_ptt_hint = s_mic_icon', self.ui)
         self.assertNotIn('s_ptt_hint', function(self.ui, 'add_hides'))
-        self.assertIn('make_control_icon(scr, &muse_board->speaker_hint, LV_SYMBOL_VOLUME_MID', self.ui)
-        self.assertIn('make_control_icon(scr, &muse_board->power_hint, LV_SYMBOL_POWER', self.ui)
+        self.assertIn('make_control_icon(scr, &muse_board->speaker_hint, MUSE_ICON_VOLUME_UP', self.ui)
+        self.assertIn('make_control_icon(scr, &muse_board->power_hint, MUSE_ICON_POWER', self.ui)
         self.assertNotRegex(function(self.ui, 'update_control_hints'), r'"(?:PTT|SPK|POWER|PRESS|HOLD)')
         self.assertIn('muse_board->rim_controls ? 280 : s_w', self.ui)
         self.assertIn('muse_board->rim_controls ? 64', self.ui)

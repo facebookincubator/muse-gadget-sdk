@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "muse_line_origin.h"
 
 /*
  * BLE "phone setup" service. Home Link owns the NimBLE stack and advertises as
@@ -68,7 +69,19 @@ void muse_ble_apply(void);
 void muse_ble_status(muse_ble_status_t *out);
 void muse_ble_forget_all(void);
 /* Runs one CMD line ("key=value", no newline) as if written over BLE; the
- * serial console uses it for USB setup. */
-void muse_ble_command(char *cmd);
+ * serial console uses it for USB setup. origin says where the line came from
+ * (muse_line_origin.h): a release build refuses Wi-Fi and account writes from
+ * a wireless origin ("not in this build"); a wired console's line, like every
+ * line on a test build, goes on to the phone setup gate (muse_ble_gate.h:
+ * once set up, only in the user's window). */
+void muse_ble_command(char *cmd, muse_line_origin_t origin);
+/* Settings > Bluetooth > Phone setup turned on: Wi-Fi and account writes over the air are taken for 10 minutes,
+ * set up or not (muse_ble_gate.h). The wired console's are taken any time. */
+void muse_ble_open_setup_window(void);
+/* Whether that window is open now. */
+bool muse_ble_setup_window_open(void);
+/* The user turns Phone setup on or off (the Settings switch, the key-only
+ * menu's Phone item, the aux double press): on also opens the setup window. */
+void muse_ble_phone_setup(bool on);
 /* The STATUS characteristic's JSON; returns its length, as snprintf does. */
 int muse_ble_status_json(char *out, size_t len);
