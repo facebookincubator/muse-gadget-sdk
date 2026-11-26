@@ -68,7 +68,7 @@ class OwnerReads(unittest.TestCase):
         # before the proof, and a new link starts with an empty ring.
         self.assertIn("if (s_nus_sub && s_nus_ring && (s_nus_owner || (reply && reply == xTaskGetCurrentTaskHandle()))) {",
                       body("static int nus_vprintf("))
-        self.assertIn("s_nus_len = 0;   /* nothing queued for an earlier link goes to this one */", ble)
+        self.assertIn("nus_ring_reset();   /* nothing queued for an earlier link goes to this one */", ble)
 
 
 if __name__ == "__main__":
