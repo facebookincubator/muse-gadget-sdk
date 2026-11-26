@@ -17,7 +17,9 @@ randomization than the sanitizer's runtime expects (Ubuntu 24.04's default
 vm.mmap_rnd_bits), it stops at start with "unexpected memory mapping": run it
 again with randomization off for that process (setarch -R), and skip the test,
 with the reason, if that isn't possible or isn't permitted here (a container
-refusing personality(2)). Before the first run, a probe binary (two threads, built
+refusing personality(2)). With vm.mmap_rnd_bits at 28 or less (CI sets it on the
+runner before the container starts) the first run maps fine and setarch is never
+used. Before the first run, a probe binary (two threads, built
 with the same compiler) checks that the ThreadSanitizer runtime runs here at all; if
 it doesn't (it crashes, or the compiler can't build it), every TSan test skips with
 the reason instead of failing on a crash that isn't the code's."""
@@ -42,6 +44,18 @@ int main(void) {
 }
 """
 _probe_reason = None   # None: not probed yet; "": TSan runs here; else why it doesn't
+
+
+def _rnd_bits() -> str:
+    """The kernel's vm.mmap_rnd_bits, for a skip's reason ('?' where it can't be read)."""
+    try:
+        return Path("/proc/sys/vm/mmap_rnd_bits").read_text().strip()
+    except OSError:
+        return "?"
+
+
+def _mapping_hint() -> str:
+    return f" (vm.mmap_rnd_bits={_rnd_bits()}; sysctl -w vm.mmap_rnd_bits=28 on the host lets it run)"
 
 
 def _first_line(out: str) -> str:
@@ -83,8 +97,10 @@ def probe() -> str:
             return _probe_reason
         if r.returncode != 0:
             how = f"signal {-r.returncode}" if r.returncode < 0 else f"exit {r.returncode}"
+            out = (r.stderr or "") + (r.stdout or "")
+            hint = _mapping_hint() if MAPPING in out or "failed to set personality" in out else ""
             _probe_reason = (f"the ThreadSanitizer runtime doesn't run here (a two-thread probe ended with {how}: "
-                             f"{_first_line(r.stderr + r.stdout)})")
+                             f"{_first_line(out)}){hint}")
             return _probe_reason
     _probe_reason = ""
     return _probe_reason
@@ -106,7 +122,8 @@ def run(test: unittest.TestCase, argv, **kw) -> subprocess.CompletedProcess:
         if "failed to set personality" in out:
             # A container that refuses personality(2) (EPERM): TSan already failed without it.
             test.skipTest("ThreadSanitizer can't map its memory on this kernel, and setarch -R isn't "
-                          "permitted here: " + out.strip().splitlines()[0])
+                          "permitted here: " + out.strip().splitlines()[0] + _mapping_hint())
         if MAPPING not in out:
             return r2
-    test.skipTest("ThreadSanitizer can't map its memory on this kernel (setarch -R unavailable or not enough)")
+    test.skipTest("ThreadSanitizer can't map its memory on this kernel (setarch -R unavailable or not enough)"
+                  + _mapping_hint())

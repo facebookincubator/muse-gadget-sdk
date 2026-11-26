@@ -44,6 +44,13 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           df -h /
 
+      # ThreadSanitizer stops at start ("unexpected memory mapping") under the
+      # runner's default address-space randomization, and the container refuses
+      # setarch -R, so every TSan test would skip (tests/tsan_run.py). The
+      # container shares the runner's kernel: 28 bits is what it expects.
+      - name: Let ThreadSanitizer run (vm.mmap_rnd_bits=28)
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
       # Exercise the actual FreeInk router without a board or Arduino runtime.
       - name: Check out pinned FreeInk host-test source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
