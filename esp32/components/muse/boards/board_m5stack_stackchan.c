@@ -42,6 +42,7 @@
 #include "muse_audio.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#include "muse_settings.h"
 #include "muse_state.h"
 
 #define TAG "stackchan"
@@ -252,6 +253,99 @@ static void stackchan_set_leds_rgb(uint8_t r, uint8_t g, uint8_t b)
 }
 
 /* -------------------------------------------------------------------------
+ * R2-D2 Interactive Sound Synthesizer
+ * ------------------------------------------------------------------------- */
+
+typedef enum {
+    SOUND_WAKE,
+    SOUND_THINK,
+    SOUND_CHATTER,
+    SOUND_SLEEP,
+} stackchan_sound_t;
+
+static void stackchan_play_tone(float freq_start, float freq_end, int duration_ms, float volume)
+{
+    if (!s_spk || !muse_settings_speaker_on()) {
+        return;
+    }
+    int total_samples = MUSE_AUDIO_RATE * duration_ms / 1000;
+    if (total_samples <= 0) {
+        return;
+    }
+
+    int16_t buf[128];
+    float phase = 0.0f;
+    int remaining = total_samples;
+    int sample_idx = 0;
+
+    while (remaining > 0) {
+        if (!muse_settings_speaker_on()) {
+            break;
+        }
+        int chunk = remaining > 128 ? 128 : remaining;
+        for (int i = 0; i < chunk; i++) {
+            float progress = (float)sample_idx / (float)total_samples;
+            float f = freq_start + (freq_end - freq_start) * progress;
+            phase += 2.0f * (float)M_PI * f / MUSE_AUDIO_RATE;
+            float env = 1.0f;
+            if (progress < 0.12f) {
+                env = progress / 0.12f;
+            } else if (progress > 0.85f) {
+                env = (1.0f - progress) / 0.15f;
+            }
+            /* Add subtle 2nd and 3rd harmonics for an expressive R2-D2 synth tone */
+            float s = sinf(phase) + 0.22f * sinf(2.0f * phase) + 0.10f * sinf(3.0f * phase);
+            buf[i] = (int16_t)(s * env * volume * 9500.0f);
+            sample_idx++;
+        }
+        muse_audio_write(buf, chunk);
+        remaining -= chunk;
+    }
+}
+
+static void stackchan_play_sound(stackchan_sound_t sound)
+{
+    if (!s_spk || !muse_settings_speaker_on()) {
+        return;
+    }
+
+    switch (sound) {
+    case SOUND_WAKE:
+        /* Cheerful rising double-chirp */
+        stackchan_play_tone(950.0f, 1750.0f, 65, 0.7f);
+        vTaskDelay(pdMS_TO_TICKS(15));
+        stackchan_play_tone(1750.0f, 2600.0f, 85, 0.85f);
+        break;
+
+    case SOUND_THINK:
+        /* Curious robotic warble / sweep */
+        stackchan_play_tone(1400.0f, 2100.0f, 50, 0.65f);
+        stackchan_play_tone(2100.0f, 1600.0f, 55, 0.65f);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        stackchan_play_tone(2400.0f, 2400.0f, 40, 0.75f);
+        break;
+
+    case SOUND_CHATTER:
+        /* Playful conversational droid phrase */
+        stackchan_play_tone(1250.0f, 1850.0f, 40, 0.7f);
+        vTaskDelay(pdMS_TO_TICKS(12));
+        stackchan_play_tone(2300.0f, 1950.0f, 50, 0.75f);
+        vTaskDelay(pdMS_TO_TICKS(12));
+        stackchan_play_tone(1700.0f, 2750.0f, 60, 0.8f);
+        vTaskDelay(pdMS_TO_TICKS(15));
+        stackchan_play_tone(2100.0f, 1450.0f, 50, 0.65f);
+        break;
+
+    case SOUND_SLEEP:
+        /* Gentle descending droid sigh */
+        stackchan_play_tone(1800.0f, 1200.0f, 75, 0.55f);
+        vTaskDelay(pdMS_TO_TICKS(15));
+        stackchan_play_tone(1100.0f, 650.0f, 95, 0.45f);
+        break;
+    }
+}
+
+/* -------------------------------------------------------------------------
  * Background Motion & Expressive State Animation Task
  * ------------------------------------------------------------------------- */
 
@@ -287,6 +381,18 @@ static void stackchan_motion_task(void *arg)
 
         if (mode != prev_mode) {
             ESP_LOGD(TAG, "Mode changed: %d -> %d", prev_mode, mode);
+
+            /* Interactive R2-D2 sound effects (respecting Speaker On/Off switch) */
+            if (mode == MUSE_MODE_LISTENING && prev_mode == MUSE_MODE_IDLE) {
+                stackchan_play_sound(SOUND_WAKE);
+            } else if (mode == MUSE_MODE_THINKING) {
+                stackchan_play_sound(SOUND_THINK);
+            } else if (mode == MUSE_MODE_SPEAKING) {
+                stackchan_play_sound(SOUND_CHATTER);
+            } else if (mode == MUSE_MODE_IDLE && prev_mode != MUSE_MODE_BOOT) {
+                stackchan_play_sound(SOUND_SLEEP);
+            }
+
             prev_mode = mode;
         }
 
@@ -527,6 +633,7 @@ static const muse_board_t s_board = {
     .diagonal_in = 2.0f,
     .talk_button = "power",
     .talk_hint = { LV_ALIGN_TOP_LEFT, 8, 8 },
+    .touch_talk = true,
     .frame_ms = 40,
     .init = init,
     .display_start = display_start,

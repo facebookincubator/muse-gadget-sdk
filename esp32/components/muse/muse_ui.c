@@ -2871,12 +2871,7 @@ void muse_ui_app_brightness(int pct)
 
 bool muse_ui_text_size_applies(void)
 {
-#if CONFIG_MUSE_SMALL_FULL_REPLY
-    if (s_small && !s_long) {
-        return true;
-    }
-#endif
-    return !s_small;
+    return true;
 }
 
 void muse_ui_preview_brightness(int pct)

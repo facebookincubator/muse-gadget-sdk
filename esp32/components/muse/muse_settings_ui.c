@@ -100,7 +100,7 @@ static bool s_proxy_saving;
 #if CONFIG_MUSE_UI_THEME
 static lv_obj_t *s_appearance,*s_appearance_mode,*s_home_appearance,*s_appearance_status;
 #endif
-static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text;
+static lv_obj_t *s_home, *s_wifi, *s_hatch, *s_ble, *s_sound, *s_sleep, *s_battery, *s_power, *s_text, *s_about_page;
 #if CONFIG_MUSE_AVATAR_SYNC
 static lv_obj_t *s_avatar, *s_avatar_source, *s_avatar_status, *s_home_avatar, *s_avatar_refresh;
 #endif
@@ -116,7 +116,8 @@ typedef struct {
 } page_t;
 
 /* Home values. */
-static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_about;
+static lv_obj_t *s_home_wifi, *s_home_hatch, *s_home_ble, *s_home_sound, *s_home_sleep, *s_home_battery, *s_home_about, *s_about;
+static lv_obj_t *s_about_ver, *s_about_author, *s_about_device, *s_about_port;
 #if CONFIG_MUSE_VIDEO
 static lv_obj_t *s_home_camera;
 #endif
@@ -561,6 +562,7 @@ static void drop(lv_obj_t *p)
 #if CONFIG_MUSE_AVATAR_SYNC
         &s_avatar,
 #endif
+        &s_about_page,
     };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         if (*pages[i] == p) {
@@ -1489,6 +1491,9 @@ static void build_sound_page(lv_obj_t *tile)
         s_spk_sw = switch_row(list, "Speaker", muse_settings_speaker_on(), on_speaker_sw);
         s_vol_sl = slider(list, "Volume", 0, 100, muse_settings_volume(), &s_vol_val, on_volume);
     }
+    if (!muse_board->epaper) {
+        text_size_row(list);
+    }
     s_gain_sl = slider(list, "Mic gain", 0, MUSE_MIC_GAIN_MAX / 3, muse_settings_mic_gain() / 3, &s_gain_val, on_gain);
 
     lv_obj_t *meter = lv_obj_create(list);
@@ -1524,9 +1529,6 @@ static void build_sound_page(lv_obj_t *tile)
     if (!muse_board->epaper) {
         s_bright_sl = slider(list, "Brightness", 10, 100, muse_settings_brightness(), &s_bright_val, on_bright);
         set_val(s_bright_val, "%d%%", muse_settings_brightness());
-    }
-    if (!muse_board->epaper) {
-        text_size_row(list);
     }
     if (s_vol_val) set_val(s_vol_val, "%d%%", muse_settings_volume());
     set_val(s_gain_val, "%d dB", muse_settings_mic_gain() / 3 * 3);
@@ -1836,6 +1838,26 @@ static void build_avatar_page(lv_obj_t *tile) {
 static const page_t AVATAR = { &s_avatar, build_avatar_page };
 #endif
 
+static void build_about_page(lv_obj_t *tile)
+{
+    lv_obj_t *list;
+    s_about_page = page(tile, "ABOUT", true, &list);
+
+    note(list, "Stack-Chan CoreS3 Port");
+    s_about_ver = info_row(list, "Port Version");
+    s_about_author = info_row(list, "Port Author");
+    s_about_device = info_row(list, "Target Device");
+    s_about_port = info_row(list, "Base Firmware");
+
+    set_text(s_about_ver, "1.0.0");
+    set_text(s_about_author, "Fernando Leitao");
+    set_text(s_about_device, muse_board->name);
+    set_text(s_about_port, esp_app_get_description()->version);
+
+    note(list, "Port features: Dual Feetech SCS0009 bus servos (Yaw/Pitch), AW9523 power & 5V boost, AXP2101 PMU, ES7210 dual mics & AW88298 amp.");
+}
+static const page_t ABOUT = { &s_about_page, build_about_page };
+
 static const page_t WIFI = { &s_wifi, build_wifi_page };
 static const page_t HATCH = { &s_hatch, build_hatch_page };
 static const page_t BLE = { &s_ble, build_ble_page };
@@ -1889,7 +1911,7 @@ static void build_home(lv_obj_t *tile)
     if (screen_only()) {
         row(list, LV_SYMBOL_IMAGE, "Screen", &s_home_sound, on_nav, (void *)&SOUND);
     } else {
-        row(list, LV_SYMBOL_VOLUME_MAX, "Sound", &s_home_sound, on_nav, (void *)&SOUND);
+        row(list, LV_SYMBOL_VOLUME_MAX, "Sound & Display", &s_home_sound, on_nav, (void *)&SOUND);
     }
     row(list, LV_SYMBOL_EYE_CLOSE, "Sleep", &s_home_sleep, on_nav, (void *)&SLEEP);
     row(list, LV_SYMBOL_BATTERY_FULL, "Battery", &s_home_battery, on_nav, (void *)&BATTERY);
@@ -1901,6 +1923,7 @@ static void build_home(lv_obj_t *tile)
     if (muse_board->power_off) {
         row(list, LV_SYMBOL_POWER, "Power off", NULL, on_nav, (void *)&POWER);
     }
+    row(list, LV_SYMBOL_SETTINGS, "About", &s_home_about, on_nav, (void *)&ABOUT);
     s_about = note(list, "");
 }
 
@@ -1937,7 +1960,7 @@ static void tick_home(void)
     set_text(s_home_sleep, sleep_name(muse_settings_sleep_s()));
 
     muse_power_t p = muse_state_power();
-    char buf[96];
+    char buf[128];
     if (p.battery_pct < 0) {
         strlcpy(buf, "USB", sizeof(buf));
     } else {
@@ -1949,8 +1972,10 @@ static void tick_home(void)
         set_text(s_home_camera, muse_video_has_client() ? "Ready" : "No phone");
     }
 #endif
+    set_text(s_home_about, "v1.0.0");
 
-    snprintf(buf, sizeof(buf), narrow_panel() ? "Muse %s\n%s" : "Muse %s  -  %s", esp_app_get_description()->version,
+    snprintf(buf, sizeof(buf), narrow_panel() ? "Muse %s\nPort v1.0.0 by Fernando Leitao\n%s" : "Muse %s (Port v1.0.0 - Fernando Leitao)  -  %s",
+             esp_app_get_description()->version,
              w.state == MUSE_WIFI_CONNECTED ? w.ip : "offline");
     set_text(s_about, buf);
 }
@@ -1980,6 +2005,7 @@ bool muse_settings_ui_bench_open(const char *name)
 #if CONFIG_MUSE_AVATAR_SYNC
         , "avatar"
 #endif
+        , "about"
     };
     for (int i = 0; i < (int)(sizeof(NAMES) / sizeof(NAMES[0])); i++) {
         if (!strcmp(name, NAMES[i])) {
@@ -1999,6 +2025,7 @@ static void bench_open_pending(void)
 #if CONFIG_MUSE_AVATAR_SYNC
         , &AVATAR
 #endif
+        , &ABOUT
     };
     int i = s_bench_open;
     if (i < 0) {

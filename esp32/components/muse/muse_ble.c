@@ -173,6 +173,10 @@ static void run_command(char *cmd)
         muse_settings_set_mic_gain(n);
     } else if (!strcmp(cmd, "brightness") && parse_int(v, 10, 100, &n)) {
         muse_settings_set_brightness(n);
+    } else if (!strcmp(cmd, "text_size") && parse_int(v, 0, MUSE_TEXT_SIZES - 1, &n)) {
+        muse_settings_set_text_size(n);
+    } else if (!strcmp(cmd, "about")) {
+        res = "M5Stack CoreS3 Stack-Chan Port v1.0.0 by Fernando Leitao";
     } else if (!strcmp(cmd, "sleep") && parse_int(v, 0, 3600, &n)) {
         muse_settings_set_sleep_s(n);
 #if CONFIG_MUSE_MOTION_GESTURES
