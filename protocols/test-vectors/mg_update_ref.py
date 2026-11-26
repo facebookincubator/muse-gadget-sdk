@@ -15,9 +15,10 @@
 
 """Reference update gate for Bluetooth firmware updates over SMP (mgcommands.h, Token proof), and its test vectors.
 
-Python standard library only. On a release build, an update change (image upload, image state write, erase, reset)
-from a link whose token proof hasn't matched needs one physical press on the gadget, set up or not (any key, the talk key included; injected input never counts): the first such write
-gets rc 10 (EBUSY) while the gadget prompts, the client retries, and the first write after the press gets rc 0. The
+Python standard library only. On a release build, set up or not, an update change (image upload, image state write,
+erase, reset) from a link whose token proof hasn't matched needs one physical press on the gadget (any key, the talk key
+included; injected input never counts): the first such write
+gets rc 10 (EBUSY) while the gadget prompts, the client retries, and the first write after the press gets rc 0. Such an
 upload's first chunk must name its length and whole-image SHA-256 (one that names no SHA-256 gets rc 11, no prompt),
 and a chunk with no upload started on its link gets rc 11. The press confirms the upload whose write started the prompt
 and binds to its length and SHA-256 for 600 s, across link drops, not to the link: on any link within the window that
@@ -30,9 +31,9 @@ state write started covers only that change (the same request body) on its link,
 proof and any binding, so after it every unproven change asks again. The prompt times out after 30 s and shows at most
 once per 10 s per connection (a sooner write gets rc 10 with no new prompt); a cancel or a timeout answers the next write
 rc 11 once and ends that prompt, binding nothing: the same upload then asks again. A matched proof, the wired console's
-arm, a recovery the user's button entered and bench or automation builds need no press; a gadget that holds no device
-token (not set up, or after Forget) asks for the press like a set-up one, and a recovery the gadget entered itself
-refuses with rc 11. Check the vectors next to this file:
+arm, a recovery the user's button entered and bench or automation builds need no press; a release gadget that holds no
+device token (not set up, or after Forget) asks for the same press, and a recovery the gadget entered itself refuses
+with rc 11. Check the vectors next to this file:
 
     python3 protocols/test-vectors/mg_update_ref.py
 
@@ -286,6 +287,8 @@ class Device:
             self.holds_token = self.proof = False
             self.prompt, self.prompt_at, self.armed = "none", None, None
             self.bound, self.here, self.covered = None, False, None
+        elif what == "set_up":
+            self.holds_token = True   # set up again (a new device token): unproven changes still ask
         elif what == "cancel":
             if self.prompt != "none":
                 self.prompt, self.prompt_at, self.refuse_next = "none", None, True   # rc 11 once, binds nothing
@@ -350,10 +353,11 @@ def forget_exchange() -> dict:
 
 
 def forget_ends_binding_exchange() -> dict:
-    r = Recorder("Forget ends the binding", "Forget ends the press's binding, on the link that carries the upload "
-                 "and on any other: the same upload asks again.")
+    r = Recorder("Forget ends the binding", "Forget ends the press's binding, on the link that carries the upload and "
+                 "on any other: set up again, the gadget asks again for the same upload.")
     confirmed(r)
-    r.event("forget", "the owner forgets the gadget")
+    r.event("forget", "the owner forgets the gadget: the binding ends")
+    r.event("set_up", "the gadget is set up again (a new device token)")
     r.event("time", "10 s later", ms=PROMPT_REARM_MS)
     r.smp(UPLOAD_0, "the same upload on the same link: rc 10, the prompt again")
     r.event("cancel", "the user cancels it")
@@ -364,23 +368,12 @@ def forget_ends_binding_exchange() -> dict:
 
 
 def forget_ends_proof_exchange() -> dict:
-    r = Recorder("Forget ends the link's proof", "A link whose proof matched updates with no press until Forget; "
-                 "after it, the same link asks for the press.", proof=True)
+    r = Recorder("Forget ends the link's proof", "A link whose proof matched updates with no press until Forget, which "
+                 "ends that proof: set up again, the same link asks for the press.", proof=True)
     r.smp(UPLOAD_0, "a proven link: rc 0, no prompt")
     r.event("forget", "the owner forgets the gadget: the proof is gone with the token")
+    r.event("set_up", "the gadget is set up again (a new device token)")
     r.smp(UPLOAD_0, "the same upload: rc 10, the prompt shows")
-    return r.ex
-
-
-def unset_press_exchange() -> dict:
-    r = Recorder("a release build that isn't set up", "A release gadget that holds no device token asks for the same "
-                 "one physical press; an injected press doesn't confirm.", holds_token=False)
-    r.smp(UPLOAD_0, "image upload: rc 10, the prompt shows")
-    r.event("injected_press", "a console or Nordic UART press word, or a scripted touch: not a confirm")
-    r.smp(UPLOAD_0, "a retry: rc 10")
-    r.event("press", "a physical press confirms it")
-    r.smp(UPLOAD_0, "the retry: rc 0")
-    transfer(r, "the rest, the state write and the reset: rc 0")
     return r.ex
 
 
@@ -408,6 +401,18 @@ def cancel_exchange() -> dict:
 def no_press_exchange(name: str, note: str, **device) -> dict:
     r = Recorder(name, note, **device)
     r.smp(UPLOAD_0, "image upload: rc 0, no prompt")
+    transfer(r, "the rest, the state write and the reset: rc 0")
+    return r.ex
+
+
+def unset_press_exchange() -> dict:
+    r = Recorder("a release build that isn't set up", "A release gadget that holds no device token asks for the same "
+                 "one physical press; an injected press doesn't confirm.", holds_token=False)
+    r.smp(UPLOAD_0, "image upload: rc 10, the prompt shows")
+    r.event("injected_press", "a console or Nordic UART press word, or a scripted touch: not a confirm")
+    r.smp(UPLOAD_0, "a retry: rc 10")
+    r.event("press", "a physical press confirms it")
+    r.smp(UPLOAD_0, "the retry: rc 0")
     transfer(r, "the rest, the state write and the reset: rc 0")
     return r.ex
 
@@ -598,14 +603,15 @@ def build() -> dict:
                        "request (smp: 8-byte header, CBOR body) with the rc the device answers (0, 10 = EBUSY: "
                        "confirm on the gadget, 11 = EACCESSDENIED), or an event on the device (press: a physical "
                        "press, any key, the talk key included; injected_press: a console or Nordic UART word or a "
-                       "scripted touch, never a confirm; forget: the device token erased, with the link's proof and any binding; unlock, cancel, time with "
+                       "scripted touch, never a confirm; forget: the device token erased, with the link's proof and "
+                       "any binding; set_up: set up again, a new device token; unlock, cancel, time with "
                        "ms, reconnect), each with prompt, what the gadget shows after it (none, "
                        "keypad, confirm). Every exchange starts on a new link without a matched proof to a release "
                        "build that holds a token unless its device flags say otherwise (release false: a bench or "
                        "automation build; holds_token false: not set up, the same press; proof; console_arm: the wired console's arm; "
                        "button_recovery: a recovery the user's button entered; self_recovery_unprompted: a recovery "
-                       "the gadget entered itself with no way to prompt; locked: a passcode lock is up). Without a "
-                       "press-free route an upload's first chunk must carry its sha (else rc 11, no prompt), and a "
+                       "the gadget entered itself with no way to prompt; locked: a passcode lock is up). Where a "
+                       "press is needed an upload's first chunk must carry its sha (else rc 11, no prompt), and a "
                        "chunk with no upload started on its link gets rc 11. A press binds to the upload whose write "
                        "started the prompt (its len and sha) for confirm_window_ms, across reconnects (a transfer "
                        "under way at the end finishes on its link; starting it again asks again); a write past the "
@@ -689,71 +695,6 @@ class UnsetDeviceNoPress(Device):
 
     def needs_press(self) -> bool:
         return self.release and self.holds_token and not (self.proof or self.console_arm or self.button_recovery)
-
-
-class TakesInjectedPress(Device):
-    """Takes an injected press as the confirm: must fail."""
-
-    def event(self, what: str, ms: int = 0):
-        super().event("press" if what == "injected_press" else what, ms)
-
-
-class PromptsAnyTime(Device):
-    """Shows a new prompt as often as writes come: must fail."""
-
-    def smp(self, request: bytes) -> int:
-        self.shown_at = None
-        return super().smp(request)
-
-
-class StateHashIsTheFileSha(Device):
-    """Takes a state write only if its hash is the bound whole-image SHA-256 (which an MCUboot hash never is)."""
-
-    def smp(self, request: bytes) -> int:
-        if request[0] & 7 == SMP_WRITE and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 0) \
-                and self.needs_press() and self.bound and cbor_map(request[8:]).get("hash") != self.bound[1]:
-            return RC_EACCESSDENIED
-        return super().smp(request)
-
-
-class StagesAnyBytes(Device):
-    """Stages whatever the slot holds."""
-
-    def slot_matches(self) -> bool:
-        return True
-
-
-class CancelRefusesTheUpload(Device):
-    """Keeps refusing the cancelled upload instead of asking again: must fail."""
-
-    cancelled = None
-
-    def event(self, what: str, ms: int = 0):
-        if what == "cancel" and self.prompt != "none" and self.armed[0] == "upload":
-            self.cancelled = self.armed[1:]
-        super().event(what, ms)
-
-    def smp(self, request: bytes) -> int:
-        if self.cancelled and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 1) \
-                and self.upload_identity(request) == self.cancelled:
-            return RC_EACCESSDENIED
-        return super().smp(request)
-
-
-class BindsTheNextUpload(Device):
-    """Binds the press to whichever upload comes next, not the one that started the prompt."""
-
-    def event(self, what: str, ms: int = 0):
-        if what == "press" and self.prompt == "confirm" and self.armed[0] == "upload":
-            self.prompt, self.prompt_at, self.here, self.bound = "none", None, True, None
-            return
-        super().event(what, ms)
-
-    def fits(self, kind: str, ident) -> bool:
-        if kind == "upload0" and self.bound is None and ident:
-            self.bound = ident + (self.now,)
-            return True
-        return super().fits(kind, ident)
 
 
 class ForgetKeepsBinding(Device):
@@ -857,6 +798,71 @@ class LoneChunkAsks(Device):
                 self.prompt = "keypad" if self.locked else "confirm"
             return RC_EBUSY
         return super().smp(request)
+
+
+class TakesInjectedPress(Device):
+    """Takes an injected press as the confirm: must fail."""
+
+    def event(self, what: str, ms: int = 0):
+        super().event("press" if what == "injected_press" else what, ms)
+
+
+class PromptsAnyTime(Device):
+    """Shows a new prompt as often as writes come: must fail."""
+
+    def smp(self, request: bytes) -> int:
+        self.shown_at = None
+        return super().smp(request)
+
+
+class StateHashIsTheFileSha(Device):
+    """Takes a state write only if its hash is the bound whole-image SHA-256 (which an MCUboot hash never is)."""
+
+    def smp(self, request: bytes) -> int:
+        if request[0] & 7 == SMP_WRITE and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 0) \
+                and self.needs_press() and self.bound and cbor_map(request[8:]).get("hash") != self.bound[1]:
+            return RC_EACCESSDENIED
+        return super().smp(request)
+
+
+class StagesAnyBytes(Device):
+    """Stages whatever the slot holds."""
+
+    def slot_matches(self) -> bool:
+        return True
+
+
+class CancelRefusesTheUpload(Device):
+    """Keeps refusing the cancelled upload instead of asking again: must fail."""
+
+    cancelled = None
+
+    def event(self, what: str, ms: int = 0):
+        if what == "cancel" and self.prompt != "none" and self.armed[0] == "upload":
+            self.cancelled = self.armed[1:]
+        super().event(what, ms)
+
+    def smp(self, request: bytes) -> int:
+        if self.cancelled and (int.from_bytes(request[4:6], "big"), request[7]) == (SMP_GROUP_IMAGE, 1) \
+                and self.upload_identity(request) == self.cancelled:
+            return RC_EACCESSDENIED
+        return super().smp(request)
+
+
+class BindsTheNextUpload(Device):
+    """Binds the press to whichever upload comes next, not the one that started the prompt."""
+
+    def event(self, what: str, ms: int = 0):
+        if what == "press" and self.prompt == "confirm" and self.armed[0] == "upload":
+            self.prompt, self.prompt_at, self.here, self.bound = "none", None, True, None
+            return
+        super().event(what, ms)
+
+    def fits(self, kind: str, ident) -> bool:
+        if kind == "upload0" and self.bound is None and ident:
+            self.bound = ident + (self.now,)
+            return True
+        return super().fits(kind, ident)
 
 
 MUTANTS = (ProofDemandingDevice, UnpromptedDevice, RepromptsSameUpload, StateHashIsTheFileSha, StagesAnyBytes,

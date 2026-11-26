@@ -33,7 +33,7 @@ place.
 | [`test-vectors/mg-skills-v2.json`](test-vectors/mg-skills-v2.json) | Legacy skills exchanges byte for byte, from [`test-vectors/mg_skills_ref.py`](test-vectors/mg_skills_ref.py). |
 | [`test-vectors/mg-haptic-v1.json`](test-vectors/mg-haptic-v1.json) | Haptics scenarios: device_action packets and local events against the device's answers and its motor (mgcommands.h, Haptics). |
 | [`test-vectors/mg-framed-v1.json`](test-vectors/mg-framed-v1.json) | Framed Data exchanges (a video stream and audio playback sharing the Data characteristic), from [`test-vectors/mg_framed_ref.py`](test-vectors/mg_framed_ref.py). |
-| [`test-vectors/mg-update-v2.json`](test-vectors/mg-update-v2.json) | Bluetooth firmware update exchanges over SMP (the confirm press on a release build), from [`test-vectors/mg_update_ref.py`](test-vectors/mg_update_ref.py). |
+| [`test-vectors/mg-update-v2.json`](test-vectors/mg-update-v2.json) | Bluetooth firmware updates over SMP: the one confirm press a link without the token proof needs on a release gadget, set up or not (rc 10 while the gadget asks, rc 0 after the press, rc 11 on a timeout or cancel) and the cases that need no press, from [`test-vectors/mg_update_ref.py`](test-vectors/mg_update_ref.py) (standard library only; run it to check the file). |
 
 Each reference checks its vectors when run with no argument
 (`python3 protocols/test-vectors/mg_session_ref.py`) and regenerates them

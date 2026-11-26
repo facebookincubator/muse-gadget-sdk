@@ -747,43 +747,41 @@
  *   to confirm update" (on its screen, or by LED on a screenless board), the
  *   client retries about once a second, and the first write after the press
  *   gets rc 0. Such an upload's first chunk must name its length and
- *   whole-image SHA-256: one that names no SHA-256 gets rc 11 and no prompt,
- *   and so does a later chunk with no upload started on its link. The press
- *   confirms the upload whose write started the prompt and binds to that
- *   upload's length and SHA-256 for 600 s, across link drops; it isn't bound
- *   to the link. What it allows, on any link within the 600 s, is that
+ *   whole-image SHA-256: one that names none gets rc 11 with no prompt, and a
+ *   chunk with no upload started on its link gets rc 11. The press confirms
+ *   the upload whose write started the prompt and binds to that upload's
+ *   length and whole-image SHA-256 for 600 s, across link drops; it isn't
+ *   bound to the link. What it allows, on any link within the 600 s, is that
  *   upload: its first chunk (the same length and SHA-256), started again or
  *   resumed on a new link with no new prompt, its later chunks, the state
  *   write that stages it, and an erase or the reset on the link that carries
- *   it. A write past the bound length gets rc 11 and ends the binding. When
- *   the last chunk arrives the device hashes the slot's bytes, the bound
- *   length of them: if they don't match the bound SHA-256 that chunk gets
- *   rc 11 and the binding ends. The state write carries the image's own
- *   hash, not the whole-image SHA-256 (MCUboot's covers the image's header
- *   and body, not its trailing TLVs), so the device stages the slot only if
- *   its bytes hash to the bound SHA-256; else rc 11, and the binding ends. A
- *   transfer under way when the 600 s end finishes on its link; any other
- *   upload, or the same upload started again after the 600 s, on its link or
- *   another, asks again. A press on a prompt that an erase, a reset or a
- *   state write started covers only that change (the same request body) on
- *   its link, for 600 s; any other change asks again. Forget ends the link's
- *   proof and any binding, so after it an update from any link asks again
- *   until a new proof matches. The console, Link setup and device actions never see this
- *   window. The prompt times out after 30 s, and on a release build a new one
- *   shows at most once per 10 s per connection (a sooner write that would
- *   show one gets rc 10 with no new prompt); a cancel or a timeout answers
- *   the next write rc 11 (EACCESSDENIED) once and ends that prompt; it binds
- *   nothing, so the next write of the same upload is a new request (rc 10 and
- *   a new prompt, at that rate). A matched proof, the wired console's arm, a
- *   recovery the user's button entered and bench or automation builds need no
- *   press; a release gadget that holds no device token (not set up, or after
- *   Forget) asks for the same one press. A recovery the gadget entered by
- *   itself refuses update writes with rc 11 (see Recovery mode). A gadget locked with a passcode asks for it first,
- *   then for the press. Reads stay open. Test vectors:
- *   test-vectors/mg-update-v2.json.
+ *   it. A transfer under way when the 600 s end finishes on its link, but
+ *   starting it again, on that link or another, asks again, as does any other
+ *   upload. The state write carries the image's own hash, not the whole-image
+ *   SHA-256 (MCUboot's covers the image's header and body, not its trailing
+ *   TLVs), so the device checks the bytes it holds instead: a write past the
+ *   bound length, a last chunk after which the slot's bytes don't hash to the
+ *   bound SHA-256, and a state write while they don't get rc 11 and end the
+ *   binding. A press on a prompt that an erase, a reset or a state write
+ *   started covers only that change (the same request body) on its link, for
+ *   600 s. Forget ends the link's proof and any binding. The console, Link
+ *   setup and device actions never see this window. The prompt times out
+ *   after 30 s, and on a release build a new one shows at most once per 10 s
+ *   per connection (a sooner write that would show one gets rc 10 with no new
+ *   prompt); a cancel or a timeout answers the next write rc 11
+ *   (EACCESSDENIED) once and ends that prompt; it binds nothing, so the next
+ *   write of the same upload is a new request (rc 10 and a new prompt, at
+ *   that rate). A matched proof, the wired console's arm, a recovery the
+ *   user's button entered and bench or automation builds need no press; a
+ *   release gadget that holds no device token (not set up, or after Forget)
+ *   asks for the same one press. A recovery the gadget entered by itself
+ *   refuses update writes with rc 11 (see Recovery mode). A gadget locked
+ *   with a passcode asks for it first, then for the press. Reads stay open.
+ *   Test vectors: test-vectors/mg-update-v2.json.
  *   A match tells the app that the gadget holds the token
  *   this phone set up, not that the link is secure (sealing does that).
- *   A matched token proof lasts for the BLE connection it was made on, and
+ *   A matched token proof lasts for the BLE connection it was made on (Forget
+ *   ends it sooner), and
  *   the link is neither bonded nor encrypted. A relay in radio range that
  *   forwards the proof exchange between the owner's phone and the gadget can
  *   use that connection's proof-gated commands until it ends: read or erase
