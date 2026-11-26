@@ -260,9 +260,11 @@ typedef enum { MUSE_LINK_ONLINE, MUSE_LINK_CONFIRM } muse_link_state_t;
 static muse_link_state_t link_state;
 static muse_link_state_t muse_link_state(void) { return link_state; }
 static struct { const char *aux_button, *power_button, *speaker_button; } board = { "aux", "power", "speaker" }, *muse_board = &board;
-static atomic_uint s_bench_keys;
+static atomic_uint s_bench_keys, s_bench_keys_wireless;
 static bool s_line_wireless;
 bool muse_input_talk_ok(bool real);
+/* Pressed: the wired and the wireless presses. */
+static unsigned taken(void) { return atomic_exchange(&s_bench_keys, 0) | atomic_exchange(&s_bench_keys_wireless, 0); }
 """
         main = r"""
 int main(void) {
@@ -270,17 +272,19 @@ int main(void) {
     const char *keys[] = { "aux", "power", "speaker" };
     for (int i = 0; i < 3; i++) {
         s_line_wireless = true; link_state = MUSE_LINK_CONFIRM; bench_key(keys[i]);
-        printf("%u ", atomic_exchange(&s_bench_keys, 0));
+        printf("%u ", taken());
     }
     s_line_wireless = true; link_state = MUSE_LINK_ONLINE; bench_key("aux");
-    printf("%u ", atomic_exchange(&s_bench_keys, 0));
+    unsigned wireless = atomic_load(&s_bench_keys_wireless);   /* marked as the Nordic UART's (aux_key) */
+    printf("%u ", taken());
     s_line_wireless = false; link_state = MUSE_LINK_CONFIRM; bench_key("aux");
-    printf("%u\n", atomic_exchange(&s_bench_keys, 0));
+    unsigned wired = atomic_load(&s_bench_keys_wireless);
+    printf("%u %u %u\n", taken(), wireless, wired);
     return 0;
 }
 """
-        for defs, want in (("", "0 0 0 4 4"), ("#define CONFIG_MUSE_GADGET_TEST_BUILD 1\n", "4 16 64 4 4"),
-                           ("#define CONFIG_MUSE_GADGET_AUTOMATION 1\n", "4 16 64 4 4")):
+        for defs, want in (("", "0 0 0 4 4 4 0"), ("#define CONFIG_MUSE_GADGET_TEST_BUILD 1\n", "4 16 64 4 4 4 0"),
+                           ("#define CONFIG_MUSE_GADGET_AUTOMATION 1\n", "4 16 64 4 4 4 0")):
             src = (fakes + defs + macro + "#define printf(...) ((void)0)\n#define fflush(f) ((void)(f))\n" + code
                    + "#undef printf\n#undef fflush\n" + main)
             with tempfile.TemporaryDirectory(prefix="mg-key-") as tmp:

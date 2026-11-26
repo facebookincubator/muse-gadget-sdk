@@ -1181,7 +1181,8 @@ its constants.
   scripted or bench key press confirms as a real one does (on release builds
   the console words that change state stay refused over Bluetooth); on a
   release build a scripted or bench touch on the Confirm control never does,
-  over any link (`touch_confirms()`). **The talk key never confirms a
+  over any link (`touch_confirms()`), and neither does a Nordic UART line's
+  `key=`: during a setup or re-setup prompt it answers `real press needed`. **The talk key never confirms a
   re-setup** on a set-up gadget's release build: its press while the prompt is up only
   dismisses it ("Not now", no talk turn; `app_confirm_pairing_press()`'s
   `talk_key`, `muse_link_confirm_press()` vs `muse_link_confirm_key_press()`).
@@ -2294,7 +2295,9 @@ its constants.
   (`mg_unlock_automation_word()`) runs only on a connection whose token
   proof matched and answers `locked` on `mg.ble` otherwise
   (`mg_unlock_remote_ok()`, at `nus_command()`); in SAFE, `safe.off` /
-  `safe=0` stay open (the way out of SAFE). Identity and status reads
+  `safe=0` stay open (the way out of SAFE). Arming the bench auto-confirm
+  (`!PAIR AUTO`, `!PAIR AUTO 1`) is refused there on every connection, proven
+  or not (the USB console's `>pair.auto` arms it). Identity and status reads
   (`status`, `version`, `guard?`, `ota?`) and the other `?` words stay open;
   the owner's content (`!IN voice?`, `!IN img?`) answers only a proven
   connection on a set-up gadget (`mg_unlock_owner_word()`; refused, it's
@@ -2540,7 +2543,10 @@ its constants.
   automatable: there an armed `!PAIR AUTO` or an injected press (`press=`,
   `tap=`, `key=`) can complete a Link setup with no one at the gadget. In a
   release build the words that change state run only on a connection whose
-  token proof matched (`locked` otherwise); identity and status reads and
+  token proof matched (`locked` otherwise), arming `!PAIR AUTO` never runs,
+  and a `key=` while a setup or re-setup prompt is up answers `real press
+  needed` and presses nothing (an aux press it made never confirms a prompt
+  that arms after the line, either: `aux_key()`); identity and status reads and
   the other `?` words (`wake?`, `vib?`, ...) and, in SAFE, `safe.off` /
   `safe=0` stay open, the owner's content (`voice?`, `img?`) answers only a
   proven connection on a set-up gadget, and the USB console stays open with

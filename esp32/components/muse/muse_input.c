@@ -136,6 +136,9 @@ static uint32_t s_down_seq;
  * (its release comes a poll later). Never a hold: a power key's long press
  * (power off) can't come from here. */
 static atomic_uint s_bench_keys;
+/* ...and a Nordic UART line's key= (wireless): its aux press never confirms a setup prompt on a release image, even
+ * one that arms between the line and the press (aux_key). */
+static atomic_uint s_bench_keys_wireless;
 /* The console's key=talk,MS: a held press of the board's talk key, through
  * the key's own path (talk_key_filter, talk_button) from a dark panel or a lit
  * one, released MS later. Never a pairing's confirming press: the
@@ -571,15 +574,25 @@ static void menu_button(bool pressed, bool edge)
     }
 }
 
-static void aux_key(bool pressed, bool edge)
+/* injected: the press is only a Nordic UART line's key=aux on a release image (input_task). */
+static void aux_key(bool pressed, bool edge, bool injected)
 {
-    static bool confirmed;   /* this press confirmed the pairing prompt: its hold and release are nothing else */
-    if (edge && pressed && muse_link_state() == MUSE_LINK_CONFIRM && muse_link_confirm_key_press()) {
-        /* The pairing prompt: the second key confirms it, a first setup or a re-setup (the talk key never confirms
-         * a re-setup). */
-        confirmed = true;
-        muse_state_poke();
-        return;
+    static bool confirmed;   /* this press was the pairing prompt's: its hold and release are nothing else */
+    if (edge && pressed && muse_link_state() == MUSE_LINK_CONFIRM) {
+        if (injected) {
+            /* The prompt takes the gadget's own key, as its Confirm takes a finger (touch_confirms): checked here,
+             * where the press is used, so a prompt that armed after the line ran is covered too. */
+            ESP_LOGW("mg.bench", "key aux: the Nordic UART on the setup prompt: real press needed");
+            confirmed = true;   /* swallowed, its release too */
+            return;
+        }
+        if (muse_link_confirm_key_press()) {
+            /* The pairing prompt: the second key confirms it, a first setup or a re-setup (the talk key never
+             * confirms a re-setup). */
+            confirmed = true;
+            muse_state_poke();
+            return;
+        }
     }
     if (confirmed) {
         if (!pressed) {
@@ -1285,9 +1298,11 @@ static unsigned bench_hold_take_due(void)
 }
 
 /* key=speaker|power|aux: a press of that button, its release on the next poll. While a setup or re-setup prompt is
- * up, a wireless line's (the Nordic UART's) never presses on a release image: the press would confirm the prompt,
- * which takes the gadget's own key, as a touch on its Confirm takes a finger (touch_confirms). The wired console's
- * presses in every build, and test, bench and automation builds take both (line_talk_ok). */
+ * up, a wireless line's (the Nordic UART's) presses nothing on a release image and answers "real press needed":
+ * the prompt takes the gadget's own key, and aux is its confirm key (as a touch on its Confirm takes a finger:
+ * touch_confirms). A wireless aux press is marked as such (s_bench_keys_wireless) and aux_key refuses it there too,
+ * for a prompt that arms after this line ran. The wired console's presses in every build, and test, bench and
+ * automation builds take both (line_talk_ok). */
 static void bench_key(const char *k)
 {
     unsigned bit = !strcmp(k, "speaker") && muse_board->speaker_button ? MUSE_BTN_SPEAKER_PRESS
@@ -1304,7 +1319,7 @@ static void bench_key(const char *k)
         fflush(stdout);
         return;
     }
-    atomic_fetch_or(&s_bench_keys, bit);
+    atomic_fetch_or(s_line_wireless ? &s_bench_keys_wireless : &s_bench_keys, bit);
     ESP_LOGI("mg.bench", "key %s pressed", k);
 }
 
@@ -1491,6 +1506,7 @@ static void input_task(void *arg)
         }
 #endif
         unsigned own = muse_board->poll_buttons();
+        bool injected_aux = false;
         update_wake_take();               /* an update asks: the screen up (the keypad first if locked) */
         own = update_prompt_press(own);   /* a press on the update's prompt confirms the update, only that */
         if (own & MUSE_BTN_TALK_PRESS) {
@@ -1509,7 +1525,12 @@ static void input_task(void *arg)
         {
             /* The console's key=: the press now, its release on the next poll. */
             static unsigned bench_release;
-            unsigned bench = atomic_exchange(&s_bench_keys, 0);
+            unsigned wireless = atomic_exchange(&s_bench_keys_wireless, 0);
+            unsigned bench = atomic_exchange(&s_bench_keys, 0) | wireless;
+            /* An aux press only a Nordic UART line made, on a release image: never a setup prompt's confirm
+             * (aux_key). Speaker and power confirm no prompt. */
+            injected_aux = (wireless & MUSE_BTN_AUX_PRESS) && !(own & MUSE_BTN_AUX_PRESS) &&
+                           !(bench & ~wireless & MUSE_BTN_AUX_PRESS) && !muse_input_talk_ok(false);
             ev |= bench_release;
             bench_release = (bench & MUSE_BTN_SPEAKER_PRESS ? MUSE_BTN_SPEAKER_RELEASE : 0) |
                             (bench & MUSE_BTN_POWER_PRESS ? MUSE_BTN_POWER_RELEASE : 0) |
@@ -1607,18 +1628,18 @@ static void input_task(void *arg)
             aux_down = false;
             aux_release = false;
             aux_edge = true;
-            aux_key(false, true);
+            aux_key(false, true, false);
         }
         if (!aux_down && aux_press) {
             aux_down = aux_edge = true;
-            aux_key(true, true);
+            aux_key(true, true, injected_aux);
             if (aux_release) {
                 aux_down = false;
-                aux_key(false, true);
+                aux_key(false, true, false);
             }
         }
         if (!aux_edge) {
-            aux_key(aux_down, false);
+            aux_key(aux_down, false, false);
         }
 
         muse_wdt_feed(MUSE_WDT_MUSE_INPUT);   /* the gadget watchdog (muse_wdt.h) */

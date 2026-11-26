@@ -99,7 +99,14 @@ typedef enum { MUSE_WDT_BLE_HOST, MUSE_WDT_MG_WORKER, MUSE_WDT_MUSE_INPUT, MUSE_
                MUSE_WDT_MUSE_VOICE, MUSE_WDT_COUNT } muse_wdt_user_t;
 /* Counted, so a test sees the voice task's feeds. */
 static int test_wdt_feeds[MUSE_WDT_COUNT] __attribute__((unused));
-static inline void muse_wdt_feed(muse_wdt_user_t u) { test_wdt_feeds[u]++; }
+/* test_wdt_jump set: the next feed ends the input task's loop there (one poll of input_task). */
+#include <setjmp.h>
+static jmp_buf *test_wdt_jump __attribute__((unused));
+static inline void muse_wdt_feed(muse_wdt_user_t u)
+{
+    test_wdt_feeds[u]++;
+    if (test_wdt_jump) longjmp(*test_wdt_jump, 1);
+}
 /* muse_local_press.h: the update's confirm press, its prompt off unless a test turns it on; presses counted. */
 static int test_local_presses __attribute__((unused));
 static bool test_update_prompt __attribute__((unused));

@@ -79,6 +79,9 @@ bool mg_unlock_owner_ok_in(const char *line, bool proven, bool set_up, bool rele
 
 bool mg_unlock_remote_ok(const char *line, bool proven, bool safe_mode)
 {
+    if (!strcmp(line, "!PAIR AUTO") || !strcmp(line, "!PAIR AUTO 1")) {
+        return false;   /* the bench auto-confirm: never armed over the air on a release build, proven or not */
+    }
     if (proven || !mg_unlock_automation_word(line)) {
         return true;
     }
