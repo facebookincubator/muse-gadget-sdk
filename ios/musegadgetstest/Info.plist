@@ -68,6 +68,8 @@ limitations under the License.
         <key>UIApplicationSupportsMultipleScenes</key>
         <false/>
     </dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Connects to Muse gadgets over Bluetooth to stream video to them.</string>
     <key>NSCameraUsageDescription</key>
     <string>Streams the camera to your Muse gadget's display.</string>
     <key>NSLocalNetworkUsageDescription</key>

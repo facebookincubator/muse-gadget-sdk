@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!-- Muse Gadgets Test UI demo: a dashboard. Small text and numbers that
+     change every few seconds (one tile at a time), to see text legibility and
+     small-change frames. Tap a tile to highlight it. -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #05070a; color: #e8eef4; overflow: hidden;
+    font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; }
+  #grid { position: absolute; left: 13%; top: 13%; width: 74%; height: 74%;
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr 1fr; gap: 2.4vmin; }
+  h1 { grid-column: 1 / 3; margin: 0; font-size: 5.6vmin; font-weight: 600; text-align: center; color: #9fb3c8; }
+  .t { border-radius: 3vmin; padding: 2.4vmin; background: #121a24; display: flex; flex-direction: column;
+    justify-content: space-between; transition: background 0.2s; }
+  .t.sel { background: #1f3b5a; }
+  .k { font-size: 4.2vmin; color: #8aa0b6; }
+  .v { font-size: 9.5vmin; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .u { font-size: 4vmin; color: #8aa0b6; font-weight: 400; }
+  .bar { height: 1.6vmin; border-radius: 1vmin; background: #223; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #3ac; }
+  #a .bar i { background: #f80; } #c .bar i { background: #6c4; } #d .bar i { background: #c6f; }
+</style></head>
+<body>
+<div id="grid">
+  <h1>Home dashboard</h1>
+  <div class="t" id="a"><div class="k">Living room</div><div class="v"><span>21.4</span><span class="u">°C</span></div><div class="bar"><i></i></div></div>
+  <div class="t" id="b"><div class="k">Humidity</div><div class="v"><span>48</span><span class="u">%</span></div><div class="bar"><i></i></div></div>
+  <div class="t" id="c"><div class="k">Solar now</div><div class="v"><span>3.2</span><span class="u">kW</span></div><div class="bar"><i></i></div></div>
+  <div class="t" id="d"><div class="k">Steps today</div><div class="v"><span>6,240</span></div><div class="bar"><i></i></div></div>
+</div>
+<script>
+  const tiles = {
+    a: { v: 21.4, min: 18, max: 26, step: 0.3, fmt: x => x.toFixed(1) },
+    b: { v: 48, min: 30, max: 70, step: 2, fmt: x => Math.round(x) },
+    c: { v: 3.2, min: 0, max: 6, step: 0.4, fmt: x => x.toFixed(1) },
+    d: { v: 6240, min: 0, max: 12000, step: 180, fmt: x => Math.round(x).toLocaleString('en-US'), up: true },
+  };
+  function show(id) {
+    const t = tiles[id], el = document.getElementById(id);
+    el.querySelector('.v span').textContent = t.fmt(t.v);
+    el.querySelector('.bar i').style.width = (100 * (t.v - t.min) / (t.max - t.min)) + '%';
+  }
+  Object.keys(tiles).forEach(show);
+  const ids = Object.keys(tiles);
+  let n = 0;
+  setInterval(() => {
+    const id = ids[n++ % ids.length], t = tiles[id];
+    t.v += t.up ? t.step * Math.random() : (Math.random() - 0.5) * 2 * t.step;
+    t.v = Math.min(t.max, Math.max(t.min, t.v));
+    show(id);
+  }, 2500);
+  document.querySelectorAll('.t').forEach(el => el.addEventListener('click', () => el.classList.toggle('sel')));
+</script>
+</body></html>

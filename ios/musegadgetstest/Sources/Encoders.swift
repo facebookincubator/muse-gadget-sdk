@@ -50,6 +50,15 @@ final class X264: SwEncoder {
         mgx264_set_bitrate(h, Int32(kbps))
     }
 
+    /* One frame at a forced QP (a keyframe over a small gadget's ring, again coarser). */
+    func encodeQp(_ i420: UnsafePointer<UInt8>, pts: Int64, key: Bool, qp: Int) -> (data: Data, key: Bool, qp: Int)? {
+        var out: UnsafePointer<UInt8>?
+        var info: [Int32] = [0, 0]
+        let n = mgx264_encode_qp(h, i420, pts, key ? 1 : 0, Int32(qp), &out, &info, nil)
+        guard n > 0, let o = out else { return nil }
+        return (Data(bytes: o, count: Int(n)), info[0] != 0, Int(info[1]))
+    }
+
     func close() {
         mgx264_close(h)
         h = nil
@@ -149,6 +158,12 @@ final class VTH264 {
             set(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_H264_Baseline_AutoLevel)
         }
         set(kVTCompressionPropertyKey_AllowFrameReordering, false)
+        /* One reference frame, as x264 here: VideoToolbox otherwise declares ten (num_ref_frames
+         * and max_dec_frame_buffering), and a small gadget's decoder (a tinyh264 without the one-reference rule)
+         * then can't allocate the eleven pictures that asks for and drops every frame. */
+        if #available(iOS 16.0, *) {
+            set(kVTCompressionPropertyKey_ReferenceBufferCount, 1)
+        }
         set(kVTCompressionPropertyKey_ExpectedFrameRate, fps)
         set(kVTCompressionPropertyKey_MaxKeyFrameInterval, 100_000)
         set(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, 100_000)

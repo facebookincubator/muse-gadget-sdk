@@ -29,6 +29,9 @@ final class AppScreen: UIView, UITabBarDelegate {
     private weak var app: MainViewController?
     private(set) var tabs: [Tab] = []
     private let title = UILabel(), chip = UIButton(type: .system), chipDot = UIView()
+    /* Disconnect / Connect: always in view, on every tab. */
+    private let linkButton = UIButton(type: .system)
+    private var linkAction: (() -> Void)?
     private let box = UIView(), placeholder = UILabel(), nowBar = UIView(), nowDot = UIView()
     private let nowTitle = UILabel(), nowSub = UILabel(), nowButton = UIButton(type: .system)
     private let scrim = CAGradientLayer()
@@ -42,7 +45,7 @@ final class AppScreen: UIView, UITabBarDelegate {
         super.init(frame: .zero)
         backgroundColor = Theme.bg
         tabs = Tabs.create(app)
-        for v in [title, chip, box, content, tabBar] as [UIView] {
+        for v in [title, chip, linkButton, box, content, tabBar] as [UIView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -64,6 +67,24 @@ final class AppScreen: UIView, UITabBarDelegate {
         }
         chip.configuration = cc
         chip.addAction(UIAction { [weak self] _ in self?.select(self?.tabIndex("Gadget") ?? 0) }, for: .touchUpInside)
+        var lc = UIButton.Configuration.filled()
+        lc.baseBackgroundColor = Theme.surfaceHi
+        lc.baseForegroundColor = Theme.bad
+        lc.cornerStyle = .capsule
+        lc.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
+        lc.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
+            var a = a
+            a.font = .systemFont(ofSize: 14, weight: .semibold)
+            return a
+        }
+        lc.title = "Disconnect"
+        linkButton.configuration = lc
+        linkButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        chip.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        linkButton.addAction(UIAction { [weak self] _ in
+            self?.linkAction?()
+            self?.refresh()
+        }, for: .touchUpInside)
         chipDot.layer.cornerRadius = 4
         chipDot.isUserInteractionEnabled = false
         chipDot.translatesAutoresizingMaskIntoConstraints = false
@@ -151,7 +172,9 @@ final class AppScreen: UIView, UITabBarDelegate {
             title.leadingAnchor.constraint(equalTo: g.leadingAnchor, constant: 20),
             title.topAnchor.constraint(equalTo: g.topAnchor, constant: 6),
             chip.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 8),
-            chip.trailingAnchor.constraint(equalTo: g.trailingAnchor, constant: -14),
+            chip.trailingAnchor.constraint(equalTo: linkButton.leadingAnchor, constant: -8),
+            linkButton.trailingAnchor.constraint(equalTo: g.trailingAnchor, constant: -14),
+            linkButton.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             chip.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             chipDot.widthAnchor.constraint(equalToConstant: 8),
             chipDot.heightAnchor.constraint(equalToConstant: 8),
@@ -213,7 +236,7 @@ final class AppScreen: UIView, UITabBarDelegate {
     }
 
     func tabIndex(_ title: String) -> Int {
-        tabs.firstIndex { $0.title == title } ?? 0
+        tabs.firstIndex { $0.title.caseInsensitiveCompare(title) == .orderedSame } ?? 0
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
@@ -244,6 +267,15 @@ final class AppScreen: UIView, UITabBarDelegate {
         }
     }
 
+    private func setLinkButton(_ label: String, _ fg: UIColor, _ description: String, _ act: @escaping () -> Void) {
+        if linkButton.configuration?.title != label {
+            linkButton.configuration?.title = label
+            linkButton.configuration?.baseForegroundColor = fg
+        }
+        linkButton.accessibilityLabel = description
+        linkAction = act
+    }
+
     private func setButton(_ label: String, _ fg: UIColor, _ bg: UIColor, _ act: @escaping () -> Void) {
         if nowButton.configuration?.title != label {
             nowButton.configuration?.title = label
@@ -259,11 +291,72 @@ final class AppScreen: UIView, UITabBarDelegate {
         let connected = app.connected()
         let name = app.gadgetName()
         let short = name.map { $0.hasPrefix("MuseGadget-") ? String($0.dropFirst(11)) : $0 }
-        chipDot.backgroundColor = connected ? Theme.good : Theme.warn
-        chip.configuration?.title = connected ? short : name != nil ? "Connecting…" : "No gadget"
+        let off = app.gadgetOff
+        chipDot.backgroundColor = off ? Theme.text3 : connected ? Theme.good : Theme.warn
+        chip.configuration?.title = off ? "Not connected" : connected ? short : name != nil ? "Connecting…" : "No gadget"
+        if off {
+            let last = app.lastGadget()
+            setLinkButton("Connect", Theme.accent, last.map { "Connect \($0)" } ?? "Choose a gadget") { [weak app] in
+                if app?.lastGadget() != nil { app?.connectLast() } else { app?.pick("device") }
+            }
+        } else {
+            setLinkButton("Disconnect", Theme.bad, name.map { "Disconnect \($0)" } ?? "Stop looking for a gadget") { [weak app] in
+                app?.disconnectGadget()
+            }
+        }
 
         let playing = app.streamingOrPreparing()
-        if !connected {
+        let uiOn = app.ui.active || app.ui.source == .broadcast
+        if app.ui.source == .broadcast || app.ui.broadcasting {
+            let on = app.ui.broadcasting
+            nowDot.backgroundColor = on ? Theme.good : Theme.accent
+            nowTitle.text = on ? "Broadcasting the screen" : "Screen broadcast"
+            nowSub.text = app.ui.extensionLine()
+            if on {
+                setButton("Stop", UIColor(red: 0.1, green: 0.05, blue: 0.05, alpha: 1), Theme.bad) { [weak app] in app?.ui.startOrStopBroadcast() }
+            } else {
+                setButton("Start", UIColor(red: 0.04, green: 0.1, blue: 0.2, alpha: 1), Theme.accent) { [weak app] in app?.ui.startOrStopBroadcast() }
+            }
+            previewHost.isHidden = true
+            still.isHidden = true
+            placeholder.isHidden = false
+            placeholder.text = on ? "On the gadget from the broadcast" : "Start, then Start Broadcast"
+            overlay.isHidden = true
+            for (i, t) in tabs.enumerated() {
+                tabBar.items?[i].badgeValue = t.live() ? "" : nil
+            }
+            if selected >= 0 {
+                tabs[selected].list.refresh()
+            }
+            return
+        }
+        if uiOn && connected {
+            nowDot.backgroundColor = app.ui.streamer != nil ? Theme.good : Theme.warn
+            nowTitle.text = "UI: " + app.ui.label()
+            nowSub.text = app.ui.source == .broadcast ? app.ui.extensionLine() : app.ui.statsLine()
+            setButton("Stop", UIColor(red: 0.1, green: 0.05, blue: 0.05, alpha: 1), Theme.bad) { [weak app] in app?.ui.setSource(.off) }
+            previewHost.isHidden = true
+            still.image = app.ui.preview
+            still.contentMode = .scaleAspectFit
+            still.isHidden = app.ui.preview == nil
+            placeholder.isHidden = app.ui.preview != nil
+            placeholder.text = app.ui.source == .broadcast ? "Broadcasting from the extension" : "Waiting for the first picture"
+            overlay.isHidden = true
+            for (i, t) in tabs.enumerated() {
+                tabBar.items?[i].badgeValue = t.live() ? "" : nil
+            }
+            if selected >= 0 {
+                tabs[selected].list.refresh()
+            }
+            return
+        }
+        still.contentMode = .scaleAspectFill
+        if off {
+            nowDot.backgroundColor = Theme.text3
+            nowTitle.text = "Not connected"
+            nowSub.text = app.lastGadget().map { "Disconnected from \($0)" } ?? "Choose a gadget to connect"
+            setButton("Choose", Theme.text, Theme.surfaceHi) { [weak app] in app?.pick("device") }
+        } else if !connected {
             nowDot.backgroundColor = Theme.text3
             nowTitle.text = name != nil ? "Connecting to \(name!)" : "Looking for a gadget"
             nowSub.text = app.connectionLine()
@@ -294,7 +387,7 @@ final class AppScreen: UIView, UITabBarDelegate {
         still.image = img
         still.isHidden = img == nil
         placeholder.isHidden = camera || img != nil
-        placeholder.text = !connected ? "No gadget yet" : playing ? (app.preparing() ? "Preparing the clip…" : "Sending " + app.sourceLabel())
+        placeholder.text = off ? "Not connected" : !connected ? "No gadget yet" : playing ? (app.preparing() ? "Preparing the clip…" : "Sending " + app.sourceLabel())
             : "Not streaming"
         overlay.isHidden = overlay.mode == .off || !playing
         let h = max(side, overlay.mode == .detailed ? overlay.neededHeight + nowBar.bounds.height - 24 : 0)

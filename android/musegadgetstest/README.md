@@ -33,7 +33,7 @@ with the measurements behind them. The gadget side is
 `../../esp32/components/muse/muse_video*.c` (`MUSE_VIDEO=1
 tools/muse/board.sh build <board>`).
 
-Plain Java on framework APIs, no libraries. **Android Studio:** open this
+Plain Java on framework APIs, with no dependencies. **Android Studio:** open this
 directory (`android/musegadgetstest`) and run it; Gradle downloads what it needs
 the first time. From the command line, either the Gradle wrapper or
 `build.sh`, which needs only the Android SDK (no Gradle):
@@ -46,19 +46,48 @@ adb shell am start -n com.musegadgets.test/.MainActivity
 Both make a debug build signed with your debug key. The intent extras below
 (`--es host`, `--ez auto`, ...) work in debug builds only: the activity is
 exported, so in a release build any app could otherwise send the camera to
-a server of its choosing. An iPhone version of the same app is in
+a server of its choosing. Even in a debug build, the hooks that record or
+write files (`--ei rec_secs`, `--es mic`, `--ei dump`, `--ez saveclips`,
+`--ez benchdump`, `--ez latlog`), read a file (`--es
+proofkeyfile`), load a page (`--es uiurl`), pick the gadget or link (`--es
+target`, `--es host`, `--es device`, `--es link`) or change what streams,
+plays or starts on its own (`--es source`, `--es clip`, `--ez auto`, `--ez
+tone`, `--ei volume`, `--ei spkvol`, `--es play_wav`, `--es pick`, `--es
+swparams` and the other encoder and UI bench switches; see `MARKED_HOOKS` in
+`MainActivity.java`) act only while the app's private `files/bench` exists.
+Tuning extras that only shape a stream the user starts (`--ei vbuf`, `--ei
+air`, ...) stay open. A bench creates the marker once (other apps can't):
+
+```sh
+adb shell run-as com.musegadgets.test touch files/bench   # rm files/bench turns them off again
+```
+
+An iPhone version of the same app is in
 [`../../ios/musegadgetstest`](../../ios/musegadgetstest).
+
+`./tests/run.sh` runs the host tests for the protocol code (capability
+reports, the token proof against `../../protocols/test-vectors`) on the
+desktop JVM with the SDK's `android.jar`; CI runs it on macOS.
 
 The phone and the gadget must be on the same Wi-Fi network. The app finds
 gadgets over mDNS (`_musevideo._tcp`) and connects to the first one, the
 one whose name contains `--es target`, the address given with `--es host`
 (no mDNS: `192.168.1.20` or `192.168.1.20:7766`), or the one picked with
-the Gadget tab (the choice is remembered). Then it waits: picking Phone
-camera on the gadget (Settings on the touch boards, the menu on the others)
-starts the stream, leaving it stops it. The gadget takes a stream only
+the Gadget tab (the choice is remembered). Then pick a source in the app;
+opening Phone camera on the gadget (Settings on the touch boards, the menu
+on the others) starts the stream, leaving it stops it. The gadget takes a stream only
 while that view is open (`../../protocols/VIDEO.md`, Trust); with `--ez auto
 true` (or Start automatically, on the Gadget tab) the app starts as soon as
-it is, without waiting for the gadget.
+it is, without waiting for the gadget (over BLE, after a reconnect, once the
+gadget has proved this phone's key on that connection; for the camera the
+app then asks first, once per connection, and starts it only on a yes, a no
+answering the gadget with stop_streaming; with `files/bench`, above, Start
+automatically and `--ez auto true` skip the ask). Over Wi-Fi nothing
+proves the gadget, so the stream starts only on a source picked, Start
+automatically turned on, or `--ez auto true` at launch, each for the
+connection it was made for (the first gadget that answers, or the one
+using the name or address given); the gadget's Phone camera view then
+starts and stops it.
 
 ### x264 (better live quality; not in this repository)
 
@@ -123,9 +152,24 @@ per system, each a scrolling list of settings:
   picture size, the camera's and the clips' bitrates, two bands) and
   advanced options (the H.264 encoder, intra refresh, the panel filter,
   the stats overlay).
-- **Gadget**: which gadget (the device picker), Start automatically, and
-  what the gadget reports: its display, the pictures it takes, its
-  suggestion, its codecs and buffer, and how it's decoding.
+- **Gadget**: which gadget (the device picker), Disconnect and Forget,
+  Start automatically, and what the gadget reports: its display, the
+  pictures it takes, its suggestion, its codecs and buffer, and how it's
+  decoding.
+
+**Disconnect** is at the top right on every tab, beside the gadget's name.
+It ends what's running on the gadget first (a UI or video stream, the
+mic), then drops the link and stays disconnected: nothing scans
+or reconnects, not after going to the background and back, nor after a
+restart, until you press **Connect** (the same gadget again) or choose one
+(Choose, or the Gadget tab). It doesn't unpair or forget the gadget. The
+Gadget tab has the same Disconnect, and **Forget** (asks first): Disconnect,
+remove the phone's pairing with it (the one HID needs) and forget it here.
+A gadget the phone holds a HID pairing with can still be reconnected by
+Android's own HID host; Forget removes that pairing. Launching with
+`--es target`, `--es host` or `--es device` connects as before. From adb:
+`--es pick disconnect` and `--es pick connect`. The picker lists gadgets by
+name, so a row doesn't move under your finger as signals change.
 
 What's playing, and its **Stop**, are at the bottom of the preview. Tap the
 preview to switch the stats between compact (four numbers) and detailed
@@ -198,6 +242,43 @@ comes from the gadget's echo of the last frame it drew (`LatencyMeter.java`;
 logcat `latency capture->shown ...` each second). The screen shows the link
 and both sides' rates; logcat tag `MuseCam` has the same each second.
 
+### Over musegadgets BLE
+
+The same app streams over BLE to gadgets without Wi-Fi, or with BLE video
+builds (`tools/muse/board.sh build stopwatch-video` or `mosaico-video`): `--es link ble`, or the Link button, which switches
+between BLE and Wi-Fi and keeps the choice. `GadgetLink` is that link
+(`protocols/mgcommands.h`, `mg_command_stream_video`; `protocols/VIDEO.md`,
+BLE): 2M PHY, a 517-byte MTU asked for (the gadgets' 247 caps it, so writes
+are 244 bytes; up to 495 on a link with a larger MTU) inside the gadget's
+buffer_update credits, and on the gadget's log mirror its decode stats.
+Over BLE the gadget's own ask (Phone camera opened on it) starts a stream
+only once it has proved this phone's proof key on that connection (the
+token proof, UI streams below), and so does Start automatically on a new
+connection; with no key saved for it, as over Wi-Fi, only picking a source
+starts one, for that connection.
+BLE-only bench options: `--es device <address>`, `--ez tone true` (an SBC
+loop played beside the video, `--es tonecodec lc3`; the Tone button),
+`--es mic sbc|lc3` (the gadget's mic captured to `files/mic.<codec>`),
+`--ei bench SECS` (raw throughput), `--ez l2cap true`, `--ei air BYTES`,
+`--ei wmax BYTES`, `--ei vbuf BYTES` (treat the gadget's receive buffer as
+this small, to try a tiny gadget's limits on a big one).
+The tone loops (`assets/tone.sbc`, `assets/tone.lc3`) hold a synthetic
+C major arpeggio of sine tones (C5, E5, G5, C6, half a second each, four
+times over, about -12 dBFS; no recorded audio), 16 kHz mono, as SBC (16
+blocks, 8 subbands, loudness, bitpool 26: 60-byte frames) and LC3 (10 ms,
+40-byte frames). Apache-2.0, like the rest of the app.
+
+Small gadgets over BLE: every camera or clip frame stays within half the gadget's
+receive buffer (2 KB and up are taken as reported). Under 16 KB the camera
+uses x264, whose VBV holds every frame under the cap (a keyframe that still
+overshoots is encoded again coarser; a delta frame is dropped and a keyframe
+follows); with the phone's encoder (`--es sw hw`) a frame over the cap is
+dropped and a keyframe over it lowers the bitrate. Clips are encoded with
+x264 under the cap (again at 70% of the rate until the keyframe fits) and at
+the gadget's frame rate when it shows fewer frames a second than the source
+(the source frame nearest each of its frame times). A gadget suggesting under 450 kb/s gets clips at its suggestion and
+an adaptive-bitrate floor of half of it.
+
 ### Live call
 
 Live call (a video call with your Muse, started from a gadget) is in the
@@ -205,3 +286,81 @@ Muse app only, on the app's own sign-in. This app doesn't implement it. A
 gadget's side of it (`mg_command_live_call`, video and subtitles in
 [`../../protocols/mgcommands.h`](../../protocols/mgcommands.h)) is tested
 with the Muse app.
+
+### UI streams: a web page or the screen, and touch back
+
+The **UI** tab streams a mostly static picture at the gadget's own panel
+size (466 px on the StopWatch, 480 px on the ESP-Mosaico) instead of camera
+video, to gadgets that list UI streaming
+([`../../protocols/UI.md`](../../protocols/UI.md); needs x264 in the APK,
+`jni/build.sh`, and the BLE link):
+
+- **Web page** renders a page offscreen (a WebView in a Presentation on a
+  private VirtualDisplay, `UiWebSource`) at the gadget's pixels, or a chosen
+  CSS width scaled to them. Address, and four demo pages in `assets/ui/`:
+  a clock, a dashboard, a scrolling list and a text page.
+- **Screen mirror** streams a square of the phone's screen
+  (MediaProjection in a foreground service, `UiCaptureService`; Android asks
+  which screen to share each time). Mirror window: its left, top and size.
+  It sends no pixel, and takes no touch back, until the gadget proves on
+  that connection that it holds the phone's proof key for it (the token
+  proof, `protocols/mgcommands.h`; `TokenProof.java`): a nearby device that
+  only copies the gadget's name gets nothing. The key comes from a bench
+  setup: `esp32/tools/mg_ble_client.py setup` on a Mac keeps it as
+  `proof_key` in `~/.mg_ble_client/proof-<address>.json`; with the gadget
+  connected over BLE, paste it in UI tab > Mirror window > Proof key, or
+  put a file holding only the key's hex
+  (`jq -r .proof_key ~/.mg_ble_client/proof-<address>.json`) into the app's
+  `files/` (`adb shell run-as com.musegadgets.test`, with `files/bench`
+  there, above) and launch with `--es proofkeyfile <name>` (read once, then deleted;
+  `--es proofgadget <name>` names the gadget when none is connected). Keys
+  are kept in this phone's Keystore only (`ProofKeys.java`), by the gadget's
+  advertised name, until removed there (an empty key); Forget removes it too.
+  Without a key, or when the proof fails, the UI tab's Token proof row says
+  why. The proof says the gadget holds the key, not that the link is
+  secure: a relay to the real gadget isn't stopped, and nor is a device in
+  range that injects into the unencrypted link. Either can see the mirror
+  and, with the touch service on, send touches and Back/Home/Recents to the
+  phone while it runs. So the camera needs the user's start on each
+  connection: a gadget's ask to start it shows a prompt once per connection,
+  and only a yes starts it.
+
+  **Mirror only in a trusted environment.** The token proof shows the
+  gadget is the owner's, but the frames are not sealed: they cross a BLE
+  link that isn't encrypted, so anyone in radio range can watch them.
+  Until the frames are sealed, mirror only where you trust everyone
+  within range.
+- **Fisheye** fits the whole square onto the round panel, in a GPU shader
+  (`UiRenderer`). Frames go only when the picture changes, and sharpen while
+  it holds still (`UiStreamer`: the change at the finest QP of 20-32 that
+  fits 0.3 s of the link, then QP 24 at 0.3 s and 18 at 1 s).
+- **Touch back:** the gadget's touches come back over BLE and go through the
+  inverse warp into the page (as touch events) or, with **Touch service**
+  on (an accessibility service, `UiTouchService`: UI tab > Touch service,
+  then turn on "Muse Gadgets Test touch" in Settings > Accessibility > Installed
+  apps; once), onto the mirrored screen.
+- **The gadget's menu:** its menu button (StopWatch: blue; ESP-Mosaico:
+  BOOT) opens a menu in the picture: Back, Home and Recents (the touch
+  service's global actions, or HID keys in HID mode), Fisheye, Pan (every
+  drag pans), Recenter, Quality, Stop, Close. A drag that starts at the
+  panel's edge pans the mirror window (a tap there is an ordinary tap), up
+  to half the window past the screen's top and bottom, so the status or
+  nav bar can sit at the panel's centre (black beyond: taps there are
+  ignored). **Overscroll** (UI tab, or the gadget's menu, which cycles):
+  None keeps the window inside the screen, Vertical (the default) lets it
+  past the top and bottom, All past every edge.
+- **HID:** the gadget can also be a Bluetooth touchscreen or pointer: pick
+  the mode, **Pair** (the HID reports need a bond), and the app tells the
+  gadget where the mirrored square is. When the mirror stops (Stop, another
+  source, Disconnect, a new proof key) the app turns the gadget's pointer
+  off, since the gadget keeps that setting.
+
+The build is a debug APK like the others. It has everything (video, UI
+streams, HID): one copy, `com.musegadgets.test`, is enough.
+`APP_ID=... ./build.sh install` installs another beside it. Bench extras: `--es
+source ui:web|ui:mirror --ez auto true`, `--es uiurl`, `--ez fisheye`, `--ez
+refine`, `--ei uicss`, `--ei hid 0-3`, `--ef wx|wy|ws` (the mirror window),
+`--ei qp|qr1|qr2` (force the QP ladder), `--ez uibands2` (two bands), and
+`--ez uidry true --ei uisize 360` (no gadget: the frames go to
+`files/ui_dump.264`). The log's `ui:` lines give each frame's kind, QP and
+size, and the time from the picture changing to the gadget showing it.

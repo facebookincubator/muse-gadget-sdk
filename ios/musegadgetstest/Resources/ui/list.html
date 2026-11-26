@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!-- Muse Gadgets Test UI demo: a scrolling list. It scrolls itself a row at a
+     time every 3 s (a burst of motion, then stillness), drags with a finger
+     (the gadget's touch), and a tap picks a row. -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #eee; overflow: hidden;
+    font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; }
+  #list { position: absolute; left: 12%; right: 12%; top: 0; bottom: 0; overflow-y: scroll;
+    scrollbar-width: none; padding: 30vmin 0; box-sizing: border-box; }
+  #list::-webkit-scrollbar { display: none; }
+  .row { height: 14vmin; display: flex; align-items: center; gap: 3vmin; border-bottom: 1px solid #222;
+    font-size: 5.6vmin; padding: 0 2vmin; }
+  .row.sel { background: #1d3b2a; }
+  .dot { width: 6vmin; height: 6vmin; border-radius: 50%; flex: none; }
+  .sub { font-size: 3.8vmin; color: #889; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 8vmin; text-align: center; font-size: 4vmin; color: #667; }
+</style></head>
+<body>
+<div id="list"></div>
+<div id="hint">auto-scrolls · drag · tap a row</div>
+<script>
+  const names = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres',
+    'Eris', 'Makemake', 'Haumea', 'Io', 'Europa', 'Ganymede', 'Callisto', 'Titan', 'Enceladus', 'Triton'];
+  const colors = ['#c96', '#eb8', '#4af', '#e64', '#da8', '#ec9', '#8de', '#46f', '#ba9', '#999'];
+  const list = document.getElementById('list');
+  names.forEach((n, i) => {
+    const r = document.createElement('div');
+    r.className = 'row';
+    r.innerHTML = '<div class="dot" style="background:' + colors[i % colors.length] + '"></div><div><div>' + n +
+      '</div><div class="sub">No. ' + (i + 1) + '</div></div>';
+    r.addEventListener('click', () => r.classList.toggle('sel'));
+    list.appendChild(r);
+  });
+  let lastTouch = 0, dir = 1;
+  list.addEventListener('touchstart', () => lastTouch = Date.now(), { passive: true });
+  list.addEventListener('scroll', () => { if (Date.now() - lastTouch < 500) lastTouch = Date.now(); });
+  setInterval(() => {
+    if (Date.now() - lastTouch < 6000) return;   // the user is driving
+    const row = list.querySelector('.row').offsetHeight;
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 2) dir = -1;
+    if (list.scrollTop <= 0) dir = 1;
+    list.scrollBy({ top: dir * row, behavior: 'smooth' });
+  }, 3000);
+</script>
+</body></html>

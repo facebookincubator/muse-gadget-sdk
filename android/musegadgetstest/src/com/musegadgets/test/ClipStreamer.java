@@ -92,6 +92,11 @@ final class ClipStreamer {
             }
         }
 
+        /** The gadget takes it: no frame over maxFrameBytes, no more than maxFps (0: no limit). */
+        boolean fits() {
+            return (maxFrameBytes <= 0 || maxFrame <= maxFrameBytes) && (maxFps <= 0 || fps <= maxFps);
+        }
+
         long loopBytes() {
             long n = 0;
             for (byte[] au : steady) {
@@ -142,6 +147,18 @@ final class ClipStreamer {
             boolean vp8) throws Exception {
         long t0 = SystemClock.elapsedRealtime();
         List<byte[]> frames = decodeScaled(src, size, round, startUs, maxFrames);
+        /* A gadget that shows fewer frames a second (e.g. 15) gets the clip at its rate:
+         * the source frame nearest each of its frame times (24 -> 15 fps keeps 5 of every 8). */
+        int top = maxFps;
+        if (top > 0 && fps > top) {
+            int n = Math.max(1, (int) ((long) frames.size() * top / fps));
+            List<byte[]> kept = new ArrayList<>(n);
+            for (int k = 0; k < n; k++) {
+                kept.add(frames.get((int) ((long) k * fps / top)));
+            }
+            frames = kept;
+            fps = top;
+        }
         long t1 = SystemClock.elapsedRealtime();
         Clip c = new Clip(name, size, fps, kbps);
         c.vp8 = vp8;
@@ -151,6 +168,9 @@ final class ClipStreamer {
             encodeLoops(frames, c);
         }
         c.measure();
+        if (!c.fits()) {
+            throw new IllegalStateException("a " + c.maxFrame + " B frame is over the gadget's " + maxFrameBytes + " B");
+        }
         long keyBytes = c.keyed.get(0).length;
         c.info = String.format(java.util.Locale.US,
                 "%s: %d frames @%d fps (%.1f s), keyframe %d B, loop %.0f kb/s; decode+scale %d ms, encode %d ms (%s)",
@@ -449,9 +469,15 @@ final class ClipStreamer {
 
     /* ---- encoding ------------------------------------------------------- */
 
-    /* Frames 0..N-1 twice through one encoder: the keyed loop, then the steady loop. */
+    /* The largest access unit the gadget's ring takes (VideoLink.Caps.maxFrame less the header); 0: no cap. */
+    static volatile int maxFrameBytes;
+    /* The gadget's most frames a second (VideoLink.Caps.maxFps); 0: any. */
+    static volatile int maxFps;
+
+    /* Frames 0..N-1 twice through one encoder: the keyed loop, then the steady loop. A small
+     * gadget ring takes x264 (its VBV holds every frame, the keyframe too, under the cap). */
     private static void encodeLoops(List<byte[]> frames, Clip c) throws Exception {
-        if (c.size > 240 && X264.available()) {
+        if ((c.size > 240 || (maxFrameBytes > 0 && maxFrameBytes < 16384)) && X264.available()) {
             encodeLoopsX264(frames, c);
             return;
         }
@@ -521,6 +547,15 @@ final class ClipStreamer {
         if (aus.size() != total) {
             throw new IllegalStateException("encoder gave " + aus.size() + " frames for " + total);
         }
+        int big = 0;
+        for (byte[] au : aus) {
+            big = Math.max(big, au.length);
+        }
+        if (maxFrameBytes > 0 && big > maxFrameBytes && X264.available()) {
+            Log.i(TAG, c.name + ": a " + big + " B frame is over the gadget's " + maxFrameBytes + " B: x264 under the cap");
+            encodeLoopsX264(frames, c);
+            return;
+        }
         c.keyed.addAll(aus.subList(0, n));
         c.steady.addAll(aus.subList(n, total));
         for (byte[] au : c.steady) {
@@ -551,11 +586,47 @@ final class ClipStreamer {
      * steady loop start with a keyframe.
      */
     private static void encodeLoopsX264(List<byte[]> frames, Clip c) throws Exception {
+        int cap = maxFrameBytes, kbps = c.kbps;
+        List<byte[]> aus = null;
+        /* Under a small gadget's cap: again at a lower rate if a frame (the keyframe, mostly) didn't fit; a clip
+         * that still doesn't fit isn't played (the gadget can't take the frame). */
+        for (int attempt = 0; attempt < 4; attempt++) {
+            aus = encodeLoopsX264(frames, c, kbps, cap);
+            int big = 0;
+            for (byte[] au : aus) {
+                big = Math.max(big, au.length);
+            }
+            if (cap <= 0 || big <= cap) {
+                break;
+            }
+            if (attempt == 3) {
+                throw new IllegalStateException("a " + big + " B frame at " + kbps + " kb/s is still over the gadget's "
+                        + cap + " B");
+            }
+            Log.i(TAG, c.name + ": a " + big + " B frame at " + kbps + " kb/s is over the gadget's " + cap + " B: "
+                    + kbps * 7 / 10 + " kb/s");
+            kbps = Math.max(16, kbps * 7 / 10);
+        }
         int n = frames.size();
-        int maxKbps = c.kbps * 102 / 100, bufKbit = maxKbps * 300 / 1000;
-        long h = X264.open(c.size, c.size, c.fps, c.kbps, "fast", CameraStreamer.withMvCheap(
+        c.keyed.addAll(aus.subList(0, n));
+        c.steady.addAll(aus.subList(n, 2 * n));
+        for (byte[] au : c.steady) {
+            if (isIdr(au)) {
+                throw new IllegalStateException("encoder put a keyframe in the steady loop");
+            }
+        }
+    }
+
+    private static List<byte[]> encodeLoopsX264(List<byte[]> frames, Clip c, int kbps, int cap) throws Exception {
+        int n = frames.size();
+        int maxKbps = kbps * 102 / 100, bufKbit = maxKbps * 300 / 1000;
+        if (cap > 0) {
+            bufKbit = Math.min(bufKbit, cap * 8 / 1000);
+        }
+        bufKbit = Math.max(1, bufKbit);
+        long h = X264.open(c.size, c.size, c.fps, kbps, "fast", CameraStreamer.withSmallMvRange(CameraStreamer.withMvCheap(
                 "no-deblock=1:intra-refresh=0:keyint=infinite:scenecut=0:rc-lookahead=40:mbtree=1:vbv-maxrate=" + maxKbps
-                        + ":vbv-bufsize=" + bufKbit, c.size));
+                        + ":vbv-bufsize=" + bufKbit, c.size), cap));
         if (h == 0) {
             throw new IllegalStateException("x264 open failed");
         }
@@ -581,13 +652,7 @@ final class ClipStreamer {
         if (aus.size() != 2 * n) {
             throw new IllegalStateException("x264 gave " + aus.size() + " frames for " + 2 * n);
         }
-        c.keyed.addAll(aus.subList(0, n));
-        c.steady.addAll(aus.subList(n, 2 * n));
-        for (byte[] au : c.steady) {
-            if (isIdr(au)) {
-                throw new IllegalStateException("encoder put a keyframe in the steady loop");
-            }
-        }
+        return aus;
     }
 
     /*

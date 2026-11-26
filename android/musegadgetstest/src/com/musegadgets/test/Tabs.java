@@ -32,7 +32,18 @@ final class Tabs {
                 .add(VideoTab::camera)
                 .add(VideoTab::encoding)
                 .add(VideoTab::advanced));
+        tabs.add(new Tab("UI", UiTab.ICON).live(() -> app.ui() != null && app.ui().active())   /* protocols/UI.md */
+                .add(UiTab::sources)
+                .add(UiTab::picture)
+                .add(UiTab::web)
+                .add(UiTab::mirror)
+                .add(UiTab::touch)
+                .add(UiTab::hid));
+        tabs.add(new Tab("Audio", BleTab.AUDIO).live(app::toneOn)   /* musegadgets BLE */
+                .add(BleTab::playback)
+                .add(BleTab::mic));
         tabs.add(new Tab("Gadget", Icons.GADGET)
+                .add(BleTab::link)            /* Wi-Fi or Bluetooth LE */
                 .add(GadgetTab::connection)
                 .add(GadgetTab::reports)
                 .add(GadgetTab::about));

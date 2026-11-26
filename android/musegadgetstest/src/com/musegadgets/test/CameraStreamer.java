@@ -149,6 +149,14 @@ final class CameraStreamer {
     private byte[] smY, smU, smV;
     private int cropX, cropY, cropSide, srcCs, srcCp;
     volatile boolean intraRefresh = true;
+    /* The largest access unit the gadget's ring takes (half its buffer, less
+     * the frame header); 0: no cap. x264 holds frames under it with its VBV
+     * (sized for vbvCeilKbps, the adaptive bitrate's ceiling) and re-encodes
+     * a keyframe coarser if it still overshoots; a delta frame that does is
+     * dropped and the next is a keyframe. The phone's encoder can't re-encode:
+     * a frame over the cap is dropped, a keyframe there lowers the bitrate. */
+    volatile int maxFrameBytes, vbvCeilKbps;
+    volatile int statOversize;
 
     CameraStreamer(Context ctx, boolean front, Sink sink) {
         this.ctx = ctx;
@@ -330,6 +338,36 @@ final class CameraStreamer {
         return p;
     }
 
+    /*
+     * x264's VBV for a gadget whose ring takes at most maxFrame bytes a frame:
+     * a buffer of maxFrame at the highest bitrate it will run at (the buffer
+     * keeps its length in ms when the bitrate changes), up to the usual 200 ms.
+     */
+    static String withVbvCap(String params, int maxFrame, int ceilKbps) {
+        params = withSmallMvRange(params, maxFrame);
+        if (maxFrame <= 0 || ceilKbps <= 0 || (params != null && params.contains("vbv-"))) {
+            return params;
+        }
+        int ms = Math.max(20, Math.min(200, (int) (maxFrame * 8L / ceilKbps)));
+        if (ms >= 200) {
+            return params;
+        }
+        return (params == null || params.isEmpty() ? "" : params + ":") + "vbv-ms=" + ms;
+    }
+
+    /*
+     * Tiny-RAM gadgets decode in place with a few spare rows (e.g. 64 at 112 px), so a
+     * motion vector reaching far up is refused: up to 44 px vertically for a ring under 16 KB.
+     */
+    static final int SMALL_MV_RANGE = 44;
+
+    static String withSmallMvRange(String params, int maxFrame) {
+        if (maxFrame <= 0 || maxFrame >= 16384 || (params != null && params.contains("mvrange"))) {
+            return params;
+        }
+        return (params == null || params.isEmpty() ? "" : params + ":") + "mvrange=" + SMALL_MV_RANGE;
+    }
+
     /* The software encoder in use: x264 or VP8, the same calls. */
     private long encOpen(int w, int h, int k, String params) {
         return swVp8 ? Vpx.open(w, h, fps, k, swPreset, params) : X264.open(w, h, fps, k, swPreset, params);
@@ -386,7 +424,8 @@ final class CameraStreamer {
             int h0 = two ? Math.max(16, Math.min(outH - 16, (outH * bandSplitPct / 100 + 8) / 16 * 16)) : outH;
             band0Rows = h0;
             int k0 = two ? kbps * h0 / outH : kbps;
-            String params = swVp8 ? vp8Params(swParams, outW) : withMvCheap(swParams, outW);
+            String params = swVp8 ? vp8Params(swParams, outW) : withVbvCap(withMvCheap(swParams, outW), maxFrameBytes,
+                    Math.max(kbps, vbvCeilKbps));
             sw = encOpen(outW, h0, k0, params);
             sw1 = two ? encOpen(outW, outH - h0, kbps - k0, params) : 0;
             if (sw == 0 || (two && sw1 == 0)) {
@@ -477,6 +516,22 @@ final class CameraStreamer {
             }
             boolean key = (bi.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
             long[] ts = inflight.remove(bi.presentationTimeUs);
+            int cap = maxFrameBytes;
+            if (cap > 0 && au.length + (key && config != null ? config.length : 0) > cap) {
+                /* Over the gadget's ring: the phone's encoder can't redo it. Drop it, ask
+                 * for a keyframe, and after a keyframe that didn't fit, a lower bitrate. */
+                statOversize++;
+                if (key) {
+                    int k = Math.max(16, kbps * 3 / 4);
+                    Log.w(TAG, "keyframe " + au.length + " B over the gadget's " + cap + " B: dropped, " + kbps + " -> " + k
+                            + " kb/s");
+                    setBitrate(k);
+                } else {
+                    Log.w(TAG, "frame " + au.length + " B over the gadget's " + cap + " B: dropped");
+                }
+                requestKeyframe();
+                continue;
+            }
             if (key && config != null && !startsWithSps(au)) {
                 byte[] t = new byte[config.length + au.length];
                 System.arraycopy(config, 0, t, 0, config.length);
@@ -849,7 +904,7 @@ final class CameraStreamer {
             }
         }
         int cw = outW / 2, chh = outH / 2;
-        if (panelFilter && svr == sur && svp == sup) {
+        if (panelFilter && panelPx >= 2 && svr == sur && svp == sup) {   /* a 1-pixel panel: the 2x2 box */
             buildPanel(x0, y0, side, rot, sur, sup);
         } else {
             scY = null;
@@ -1156,6 +1211,29 @@ final class CameraStreamer {
                 System.arraycopy(outU, 0, swIn, ys, cs);
                 System.arraycopy(outV, 0, swIn, ys + cs, cs);
                 au = encEncode(sw, swIn, idr, swInfo);
+                int cap = maxFrameBytes;
+                if (cap > 0 && au != null && au.length > cap && !swVp8) {
+                    statOversize++;
+                    if (swInfo[0] != 0) {
+                        /* A keyframe over the gadget's ring: again, coarser, until it fits. */
+                        int qp = Math.max(swInfo[1], 20);
+                        while (au != null && au.length > cap && qp < 51) {
+                            qp = Math.min(51, qp + 6);
+                            au = X264.encodeQp(sw, swIn, statFed, true, qp, swInfo);
+                        }
+                        Log.i(TAG, "keyframe over " + cap + " B: QP " + qp + ", " + (au != null ? au.length : 0) + " B");
+                    }
+                }
+            }
+            /* Every codec and band layout: a frame over the gadget's ring never goes out. */
+            int cap = maxFrameBytes;
+            if (cap > 0 && au != null && au.length > cap) {
+                if (sw1 != 0 || swVp8) {
+                    statOversize++;
+                }
+                Log.w(TAG, "frame " + au.length + " B over the gadget's " + cap + " B: dropped, a keyframe next");
+                au = null;
+                swKey = true;
             }
         }
         statFed++;

@@ -25,6 +25,7 @@ final class VideoFrame {
     static final int MAGIC = 0x56;   /* 'V' */
     static final int HEADER_LEN = 8;
     static final int KEYFRAME = 1;
+    static final int STILL = 2;   /* a UI stream's lossless still patch (mg_video_frame_still) */
 
     /** The header and the access unit, as one frame to send. */
     static byte[] make(byte[] au, int len, int number, boolean key) {

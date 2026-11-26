@@ -9,6 +9,20 @@
 /* Begin PBXBuildFile section */
 		9420BC26543DA5A485107A4B /* mgscale.c in Sources */ = {isa = PBXBuildFile; fileRef = 479436D6E327F2C6940114B1 /* mgscale.c */; };
 		942A5765EC5EC8E79CCCDD42 /* stubs.c in Sources */ = {isa = PBXBuildFile; fileRef = 7AC3416DF185FE3EF2447E66 /* stubs.c */; };
+		99AF0B6CF9410AEE7E59F663 /* GadgetLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6444E619183C811CDF2D7AEF /* GadgetLink.swift */; };
+		5E1B7C0A2F4D9A6B3C8E1F02 /* TokenProof.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1B7C0A2F4D9A6B3C8E1F01 /* TokenProof.swift */; };
+		C89C36B65431D3CBD657E20A /* VideoLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C49F6B2BE5B73F4F433587 /* VideoLink.swift */; };
+		E8A1E61DE018123860A6C90D /* VideoFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C2B378416B8D5555C985BB2 /* VideoFrame.swift */; };
+		DFB031C1F231D39613FCEF93 /* LatencyMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483895A6EC933D09B178A935 /* LatencyMeter.swift */; };
+		4F60952C8DF32DC0829EA462 /* Util.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F383C9C6288528654E6B19 /* Util.swift */; };
+		E971614253C86F3B5EB7BBCB /* Encoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6BB9080FE983578DF8B332 /* Encoders.swift */; };
+		2801A5D32919D3632D7A08C8 /* UiWarp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2FC8FECD060D4DB9967B4F1 /* UiWarp.swift */; };
+		4A1867FD99439DE7D4E8E08F /* UiCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38259055DE5C05B9D0750FB3 /* UiCodec.swift */; };
+		FE5C241765D9F5DF4DEC8FB0 /* UiStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9604A8D58A1A298131C9C072 /* UiStreamer.swift */; };
+		790220B807A2CE9DD42BFCFB /* UiShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA226C64EBDDEDD33CFD2AB /* UiShared.swift */; };
+		5A076B3F5B46D42A43CDC818 /* UiMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15D3C375418F0A4354EC53C /* UiMenu.swift */; };
+		2ACB8EF0B78EBB76E4BA217D /* stubs.c in Sources */ = {isa = PBXBuildFile; fileRef = 7AC3416DF185FE3EF2447E66 /* stubs.c */; };
+		F78B9E233D4EB2E560EC45D5 /* MuseGadgetsBroadcast.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 944710A473C2967517BE4256 /* MuseGadgetsBroadcast.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,14 +34,69 @@
 		3346BE777CF86D92709C8061 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C235DE1D81249A75C3622C00 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 		163D89A998CE1593F628AF1C /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		6444E619183C811CDF2D7AEF /* GadgetLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GadgetLink.swift; sourceTree = "<group>"; };
+		5E1B7C0A2F4D9A6B3C8E1F01 /* TokenProof.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenProof.swift; sourceTree = "<group>"; };
+		A9C49F6B2BE5B73F4F433587 /* VideoLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLink.swift; sourceTree = "<group>"; };
+		6C2B378416B8D5555C985BB2 /* VideoFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoFrame.swift; sourceTree = "<group>"; };
+		483895A6EC933D09B178A935 /* LatencyMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyMeter.swift; sourceTree = "<group>"; };
+		99F383C9C6288528654E6B19 /* Util.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Util.swift; sourceTree = "<group>"; };
+		DD6BB9080FE983578DF8B332 /* Encoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Encoders.swift; sourceTree = "<group>"; };
+		B2FC8FECD060D4DB9967B4F1 /* UiWarp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ui/UiWarp.swift; sourceTree = "<group>"; };
+		38259055DE5C05B9D0750FB3 /* UiCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ui/UiCodec.swift; sourceTree = "<group>"; };
+		9604A8D58A1A298131C9C072 /* UiStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ui/UiStreamer.swift; sourceTree = "<group>"; };
+		BDA226C64EBDDEDD33CFD2AB /* UiShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ui/UiShared.swift; sourceTree = "<group>"; };
+		E15D3C375418F0A4354EC53C /* UiMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ui/UiMenu.swift; sourceTree = "<group>"; };
+		944710A473C2967517BE4256 /* MuseGadgetsBroadcast.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MuseGadgetsBroadcast.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0B55BB421C4C0FFEC2957A4B /* Exceptions for "Broadcast" folder in "MuseGadgetsBroadcast" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9CFFCE3045B68B2C0FE32D75 /* MuseGadgetsBroadcast */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		49812AA119E85AF8A7ECE39F /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources; sourceTree = "<group>"; };
+		1C63518EF5F18013357A5710 /* Broadcast */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (0B55BB421C4C0FFEC2957A4B /* Exceptions for "Broadcast" folder in "MuseGadgetsBroadcast" target */, ); path = Broadcast; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		BBD06BFDD9B9A1A9727923A8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9CFFCE3045B68B2C0FE32D75;
+			remoteInfo = MuseGadgetsBroadcast;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AB9B5DAB2A00633BC068AC7E /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				F78B9E233D4EB2E560EC45D5 /* MuseGadgetsBroadcast.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		EB741EB20F8932ADC61B0107 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		74A9FDDB1BB3349A159607EC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -42,11 +111,33 @@
 			children = (
 				163D89A998CE1593F628AF1C /* README.md */,
 				49812AA119E85AF8A7ECE39F /* Sources */,
+				1C63518EF5F18013357A5710 /* Broadcast */,
+				D300806F365FB657BA0F1EA7 /* Shared with the broadcast extension */,
 				7D8855CB65C64FFD4EBBC5F6 /* native */,
 				3346BE777CF86D92709C8061 /* Info.plist */,
 				C235DE1D81249A75C3622C00 /* Config.xcconfig */,
 				86024CAD1E83101D97359D73 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		D300806F365FB657BA0F1EA7 /* Shared with the broadcast extension */ = {
+			isa = PBXGroup;
+			children = (
+				6444E619183C811CDF2D7AEF /* GadgetLink.swift */,
+				5E1B7C0A2F4D9A6B3C8E1F01 /* TokenProof.swift */,
+				A9C49F6B2BE5B73F4F433587 /* VideoLink.swift */,
+				6C2B378416B8D5555C985BB2 /* VideoFrame.swift */,
+				483895A6EC933D09B178A935 /* LatencyMeter.swift */,
+				99F383C9C6288528654E6B19 /* Util.swift */,
+				DD6BB9080FE983578DF8B332 /* Encoders.swift */,
+				B2FC8FECD060D4DB9967B4F1 /* UiWarp.swift */,
+				38259055DE5C05B9D0750FB3 /* UiCodec.swift */,
+				9604A8D58A1A298131C9C072 /* UiStreamer.swift */,
+				BDA226C64EBDDEDD33CFD2AB /* UiShared.swift */,
+				E15D3C375418F0A4354EC53C /* UiMenu.swift */,
+			);
+			name = "Shared with the broadcast extension";
+			path = Sources;
 			sourceTree = "<group>";
 		};
 		7D8855CB65C64FFD4EBBC5F6 /* native */ = {
@@ -64,6 +155,7 @@
 			isa = PBXGroup;
 			children = (
 				D2A57DC1D883FD21FB995169 /* MuseGadgetsTest.app */,
+				944710A473C2967517BE4256 /* MuseGadgetsBroadcast.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -79,10 +171,12 @@
 				EB741EB20F8932ADC61B0107 /* Frameworks */,
 				966E70EE9C017A93B235DDBA /* Resources */,
 				0468DB1AC579BE685253C837 /* Copy Resources folder */,
+				AB9B5DAB2A00633BC068AC7E /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				83177FADB7437259807618DC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				49812AA119E85AF8A7ECE39F /* Sources */,
@@ -91,6 +185,25 @@
 			productName = MuseGadgetsTest;
 			productReference = D2A57DC1D883FD21FB995169 /* MuseGadgetsTest.app */;
 			productType = "com.apple.product-type.application";
+		};
+		9CFFCE3045B68B2C0FE32D75 /* MuseGadgetsBroadcast */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EAA200E5722C79B7ABA981C1 /* Build configuration list for PBXNativeTarget "MuseGadgetsBroadcast" */;
+			buildPhases = (
+				C64C7F91C8A6669561B06EEB /* Sources */,
+				74A9FDDB1BB3349A159607EC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1C63518EF5F18013357A5710 /* Broadcast */,
+			);
+			name = MuseGadgetsBroadcast;
+			productName = MuseGadgetsBroadcast;
+			productReference = 944710A473C2967517BE4256 /* MuseGadgetsBroadcast.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -117,6 +230,7 @@
 			projectRoot = "";
 			targets = (
 				42AEFBAE01D2DFD981F7DA7D /* MuseGadgetsTest */,
+				9CFFCE3045B68B2C0FE32D75 /* MuseGadgetsBroadcast */,
 			);
 		};
 /* End PBXProject section */
@@ -163,7 +277,35 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C64C7F91C8A6669561B06EEB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99AF0B6CF9410AEE7E59F663 /* GadgetLink.swift in Sources */,
+				5E1B7C0A2F4D9A6B3C8E1F02 /* TokenProof.swift in Sources */,
+				C89C36B65431D3CBD657E20A /* VideoLink.swift in Sources */,
+				E8A1E61DE018123860A6C90D /* VideoFrame.swift in Sources */,
+				DFB031C1F231D39613FCEF93 /* LatencyMeter.swift in Sources */,
+				4F60952C8DF32DC0829EA462 /* Util.swift in Sources */,
+				E971614253C86F3B5EB7BBCB /* Encoders.swift in Sources */,
+				2801A5D32919D3632D7A08C8 /* UiWarp.swift in Sources */,
+				4A1867FD99439DE7D4E8E08F /* UiCodec.swift in Sources */,
+				FE5C241765D9F5DF4DEC8FB0 /* UiStreamer.swift in Sources */,
+				790220B807A2CE9DD42BFCFB /* UiShared.swift in Sources */,
+				5A076B3F5B46D42A43CDC818 /* UiMenu.swift in Sources */,
+				2ACB8EF0B78EBB76E4BA217D /* stubs.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		83177FADB7437259807618DC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9CFFCE3045B68B2C0FE32D75 /* MuseGadgetsBroadcast */;
+			targetProxy = BBD06BFDD9B9A1A9727923A8 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		F6143EE2941E474EB4BAD052 /* Debug */ = {
@@ -251,6 +393,58 @@
 			};
 			name = Release;
 		};
+		B19349A35E8B66710C68F578 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C235DE1D81249A75C3622C00 /* Config.xcconfig */;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/native";
+				INFOPLIST_FILE = Broadcast/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MG_APP_BUNDLE_ID).broadcast";
+				PRODUCT_NAME = MuseGadgetsBroadcast;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = native/Bridging.h;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D826362606B9F5592A70B9D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C235DE1D81249A75C3622C00 /* Config.xcconfig */;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/native";
+				INFOPLIST_FILE = Broadcast/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MG_APP_BUNDLE_ID).broadcast";
+				PRODUCT_NAME = MuseGadgetsBroadcast;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = native/Bridging.h;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -268,6 +462,15 @@
 			buildConfigurations = (
 				1A9E10FAAD0A97FB97BCEC18 /* Debug */,
 				B79C83306C8ABF7373B5E45C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EAA200E5722C79B7ABA981C1 /* Build configuration list for PBXNativeTarget "MuseGadgetsBroadcast" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B19349A35E8B66710C68F578 /* Debug */,
+				D826362606B9F5592A70B9D0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // Muse Gadgets Test, for Android Studio and Gradle. Plain Java on framework
-// APIs, no dependencies; the sources stay where build.sh (the Gradle-free
-// build) finds them. The optional encoders' native libraries (jni/build.sh,
+// APIs, with no dependencies. The sources
+// stay where build.sh (the Gradle-free build) finds them. The optional encoders' native libraries (jni/build.sh,
 // jni/build_vpx.sh) are packed from LIB_DIR: the environment variable, or
 // musegadgetstest.libDir in local.properties or gradle.properties, default lib/.
 
@@ -33,6 +33,18 @@ val libDir: String = System.getenv("LIB_DIR")
     ?: (findProperty("musegadgetstest.libDir") as String?)
     ?: "lib"
 
+// An x264 library from before the UI streams lacks their JNI functions (the app would fail when one
+// starts): the build stops and says to rebuild it.
+val x264So = file("$libDir/arm64-v8a/libmgx264.so")
+if (x264So.exists()) {
+    val text = String(x264So.readBytes(), Charsets.ISO_8859_1)
+    for (f in listOf("openUi", "encodeQp", "reconI420", "rgbaConvert")) {
+        if (!text.contains("Java_com_musegadgets_test_X264_$f")) {
+            throw GradleException("$x264So is an older build without X264.$f: rebuild it with jni/build.sh")
+        }
+    }
+}
+
 android {
     namespace = "com.musegadgets.test"
     compileSdk = 36
@@ -49,7 +61,7 @@ android {
     sourceSets["main"].apply {
         manifest.srcFile("AndroidManifest.xml")
         java.setSrcDirs(listOf("src"))
-        res.setSrcDirs(emptyList<String>())
+        res.setSrcDirs(listOf("res"))
         assets.setSrcDirs(listOf("assets"))
         jniLibs.setSrcDirs(listOf(libDir))
     }

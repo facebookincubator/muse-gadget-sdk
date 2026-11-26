@@ -2683,8 +2683,9 @@ its constants.
   Face changes are logged on `mg.face` (on the Nordic UART mirror). Only
   boards with a vibration motor (the StopWatch) list `haptics_enabled` and the
   `ptt_buzz_*` settings; `request_status` lists every accepted setting.
-- **Bench client:** `tools/mg_ble_client.py` (needs `pip install bleak` and a
-  C compiler; `setup` also `pip install bleak cryptography`) is a client for a
+- **Bench client:** `tools/mg_ble_client.py` (needs a C compiler and
+  `python3 -m pip install -r tools/requirements-bench.txt`, bleak, cryptography
+  and smpclient at the versions it's tested with) is a client for a
   Mac or Linux box:
   `scan`, `test` (Device Information, Battery, request_status, settings, a
   start_mic capture decoded to `mg_capture.wav`, queue status, and a 2 s
@@ -2695,17 +2696,47 @@ its constants.
   back, saving `mg_loopback.wav`), `ptt` (records
   each button press to a WAV, then sends responding and done and prints the
   face changes; `--no-states` skips that), `state <name>` (one
-  assistant_state), `setup [--access A --refresh R] [--confirm-serial PORT]`
+  assistant_state), `call` (the phone's side of a live call: answers the
+  gadget's start with connecting then live and its end with ended;
+  `--answer`, `--start`, `--state`, `--end-after`), `tools/av60.py` (Live
+  call; the bench test AV60 on one call-video gadget:
+  a `--secs 60` call started from the Mac, H.264 at the board's video size, fps
+  and kb/s (`--size WxH --fps N --kbps N` override; two bands on the
+  ESP-Mosaico) from the repository's H.264 test streams (`tests/vectors/h264`'s
+  testsrc2 and UI clock) transcoded with ffmpeg and cached,
+  two spoken replies (LC3 at 24 kHz where listed, 32 kb/s, a sweep and a tone
+  at -18 dBFS; `--volume N` first, for the run only: `!IN vol=N`, put back
+  at the end) and one muted reply (subtitle state 1 and
+  words over the video), reply audio and video alternating on Data with
+  change_data_type about 25 times a second as the app does; it reads the
+  once-a-second `av video:` / `av play:` lines from the Nordic UART mirror,
+  and a USB console with `--console PORT` (read-only, DTR/RTS untouched,
+  115200), and prints a per-second table, PASS / FAIL per rule and a JSON
+  summary; the clip is encoded before connecting, one timed sender writes
+  only with write room and credits and logs what it sent each second and
+  what it waited on (write-wait: the Mac; credit-wait: the gadget), and a
+  sender that misses its schedule by > 5% in a 5 s window makes the run
+  INVALID (exit 3, rerun) unless the gadget's credits caused it (a FAIL);
+  every phase is bounded, so a stuck run ends with its phase named (exit
+  2), and the jsonl is written as the run goes; `--dry` runs the whole flow
+  against a gadget in the same process with its console on a pty, and
+  `--evaluate LOG` re-checks a saved run), `setup [--tokens FILE --address ADDR] [--confirm-serial PORT]`
   (Link setup as the Muse app does it: community pairing v5, a press of the
-  gadget's button, or `>pair.confirm` on its console with `--confirm-serial`,
-  then token-only `provision_v2` with the given or generated `bench-...` tokens;
+  gadget's button (a set-up gadget: a 3 s hold, or Confirm on a touch
+  screen), or `>pair.confirm` on its console with `--confirm-serial`,
+  then token-only `provision_v2` with generated `bench-...` tokens, or real
+  ones from `--tokens`: a file of two lines, access then refresh, readable
+  only by its owner, or `-` for stdin, sent only to the gadget `--address`
+  names (required with `--tokens`, as for `reprovision`);
   it keeps the proof key in `~/.mg_ble_client/`, mode 0600; a set-up gadget,
   found by its musegadgets advertisement, is set up again), `reprovision`
   (Gadget setup v2 on one connection: the kept key's proof, setup again, then
   the old key must fail and the new one match), `proof
   [--clear]` (the token proof with that key; `--clear` resets the gadget),
-  `queue --download` and `log` (the Nordic UART
-  mirror), `ui FILE` (a UI stream from the codec study's `.au`, `.264` or
+  `queue [--download] [--clear]` (it proves first; with `--download`,
+  `--clear` clears only after every clip downloaded whole, and without it
+  `--clear` erases every clip unfetched) and `log` (the Nordic UART
+  mirror), `ui FILE` (a UI stream from `.au`, `.264` or
   two-band `.mgframes` files, with the refinement ladder's timing; per-frame
   link time, received-to-shown and the device's decode times; `--md5
   --index index.json` checks every decoded picture; `--latency N`, `--hold
@@ -2714,10 +2745,19 @@ its constants.
   `hid_map`, shows `hid_status`; once HID is on, macOS asks to pair on every
   connection: say no, or use a phone), `bench [--send SECS] [--recv SECS]` (raw throughput both ways with
   `device_action throughput_test`), and `images` / `dfu` (MCUmgr SMP updates
-  on the Zephyr gadget and the ESP32 BLE-only builds). `test` round-trips every setting the board lists, checks the others
+  on the Zephyr gadget and the ESP32 BLE-only builds; `dfu` proves with the
+  saved key first; with `--unproven --address` it runs no proof, and the
+  gadget's rc 10 asks for a press of its button, which `dfu` waits for,
+  sending the write again about every second until it's admitted (rc 11: no
+  press in time, or cancelled); the image goes over BLE unencrypted, so one that
+  holds an SDK token is refused unless `--allow-token-image`, and never sent
+  with `--unproven`; best effort: it finds a plain `mgst_` token or a Zephyr
+  token slot that isn't blank, not a token stored any other way). `test` round-trips every setting the board lists, checks the others
   are refused, and runs the token proof when `setup` left a key for the
   gadget. It prints Link setup records and the gadget's log through
-  `tools/redact.py` (a secret shows as its length and a SHA-256 prefix). On
+  `tools/redact.py` (a secret shows as its length and a SHA-256 prefix), and
+  advertised names and Nordic UART lines with every control character but
+  newline and tab shown as `\xNN`. On
   macOS the terminal needs Bluetooth permission; a sandboxed agent
   usually can't use Bluetooth.
 - **Automated setup tests:** Link setup waits up to 60 s for the button
@@ -2781,7 +2821,7 @@ its constants.
   on the ESP32 catalog boards' overlays, the Wi-Fi MAC; the length check), `test_mg_codecs` (SBC, liblc3 and lc3fx round trips, lc3fx and liblc3
   decoding each other's streams, every lc3fx file but its README against VENDORED.md's hashes), `test_mg_play`
   (playback: resampler, ring, decoders), `test_mg_ble_client` (the bench
-  client's parsing and decoding, its `play` flow control and token proof
+  client's parsing and decoding, its settings and token proof
   against the firmware's protocol code, and its Link setup crypto against
   `tests/vectors/link_pairing_v5.json`, which needs `cryptography`; setup
   with `--confirm-serial` against a console on a pty; `reprovision`'s checks
@@ -3377,8 +3417,10 @@ Two tests skip quietly when their inputs are missing; check the summary for
    under the slot limit.
 2. The host tests pass. Before a push, run the whole suite on
    the exact commit with `tools/verify_commit.sh <commit>` (a clean worktree,
-   the simulator, cJSON and ESP-IDF set up so nothing skips; it prints every
-   skip, and a push needs 0). It covers the Zephyr and portable checks the
+   the simulator, cJSON and ESP-IDF set up so nothing skips; `IDF_EXPORT` or
+   `IDF_PATH` names ESP-IDF, `VERIFY_PY` a Python with the tests' packages; it
+   prints every skip and fails on any, as on a setup failure; a simulator that
+   doesn't build fails it). It covers the Zephyr and portable checks the
    ESP32 suite holds too, so run it for pushes that touch `portable/`,
    `protocols/` or `zephyr/` as well.
 3. If you flashed, the boot log reaches `starting`, and the log shows no

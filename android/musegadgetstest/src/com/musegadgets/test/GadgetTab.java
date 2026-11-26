@@ -26,9 +26,19 @@ final class GadgetTab {
 
     static void connection(MainActivity app, Ui.SettingsList l) {
         l.header("Connection");
-        l.row(() -> "Gadget", app::connectionLine, () -> app.gadgetName() != null ? app.gadgetName() : "Choose",
-                null, false, app::showPicker);
-        l.toggle("Start automatically", () -> "Stream as soon as the gadget connects, without waiting for its "
+        l.row(() -> "Gadget", app::connectionLine, () -> app.gadgetOff() ? "Not connected"
+                : app.gadgetName() != null ? app.gadgetName() : "Choose", null, false, app::showPicker);
+        l.row(() -> "Disconnect " + (app.gadgetName() != null ? app.gadgetName() : "the gadget"),
+                () -> "Ends any stream, then stays disconnected until you connect or choose a gadget",
+                null, null, false, app::disconnectGadget).showIf(() -> !app.gadgetOff());
+        l.row(() -> "Connect " + app.lastGadget(), () -> "Connect to it again", null, null, false, app::connectLast)
+                .showIf(() -> app.gadgetOff() && app.lastGadget() != null);
+        l.row(() -> "Choose a gadget", () -> "The gadgets nearby, to connect to one", null, null, false, app::showPicker)
+                .showIf(app::gadgetOff);
+        l.row(() -> "Forget " + (app.gadgetOff() ? app.lastGadget() : app.gadgetName()) + "…",
+                () -> "Disconnect, unpair it from this phone and forget it", null, null, false, app::forgetGadget)
+                .showIf(() -> app.gadgetOff() ? app.lastGadget() != null : app.gadgetName() != null);
+        l.toggle("Start automatically", () -> "Stream as soon as the gadget connects (over BLE, once it proves its key; over Wi-Fi, only the connection it is turned on for), without waiting for its "
                 + "Phone camera view", app::autoStart, app::setAutoStart);
     }
 
