@@ -24,10 +24,12 @@ token-proven connection (test_mg_unlock).
 from __future__ import annotations
 
 import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_mg_ble import MG, ROOT, compile_and_run
 
 MUSE = ROOT / "components/muse"

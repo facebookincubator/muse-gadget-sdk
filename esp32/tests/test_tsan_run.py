@@ -18,10 +18,12 @@ Actions sets it and the host-tests job passes into its container), so CI never
 passes with its race checks skipped."""
 
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 import tsan_run
 
 ROOT = Path(__file__).resolve().parents[1]
