@@ -601,8 +601,8 @@ ZTEST(core, test_capture_sample_rate)
 	zassert_mem_equal(fake_notes[0].data, get16, sizeof(get16));
 }
 
-/* An injected press (a bench word's "talk down") ends with its link: no
- * "talk up" can follow it, so the next turn is whole. */
+/* A held injected press (a bench word's "talk down") is released when its
+ * link drops: no "talk up" can follow it, so the next turn is whole. */
 ZTEST(core, test_injected_press_ends_with_link)
 {
 	mg_core_button_ev(true, k_uptime_get(), false, true); /* injected, no release follows */

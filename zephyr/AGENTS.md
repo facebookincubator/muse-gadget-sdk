@@ -2069,8 +2069,9 @@ build (`-DEXTRA_CONF_FILE="overlay-release.conf;overlay-bench-mode.conf"`).
 With it on: an injected press (`d` / `u`, the Nordic UART's `talk down` /
 `talk up`) counts as the button's for every human gate (the mic's press
 window; a setup's confirm takes any press anyway), and an injected press
-still down when its link ends is released with it (no `talk up` can follow;
-unit `test_injected_press_ends_with_link`); the bench switch over
+still held when its link drops is released then, so the turn and the
+microphone don't stay open with nothing left to send `talk up` (unit
+`test_injected_press_ends_with_link`); the bench switch over
 Bluetooth needs neither a proof nor a press (per connection, off at
 disconnect; refused in SAFE in every build); Bluetooth update writes need
 no press, automation or not (`mg_ota_release_build()`); every Nordic UART word runs

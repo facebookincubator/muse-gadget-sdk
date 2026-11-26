@@ -1535,10 +1535,11 @@ void mg_core_connected(void)
 
 void mg_core_disconnected(void)
 {
-	/* An injected press (a bench-mode image's Nordic UART "talk down") ends
-	 * with its link, as its release would: its central can't send "talk up"
-	 * any more, and a bench unit with no hand on it would hold the press
-	 * (and record offline) for good. A real press is untouched. */
+	/* A held injected press (a bench-mode image's Nordic UART "talk down")
+	 * is released when its link drops, as its release would be: its central
+	 * can't send "talk up" any more, and a bench unit with no hand on it
+	 * would keep the turn and the microphone open (and record offline) for
+	 * good. A real press is untouched. */
 	if (c.button && c.button_injected) {
 		button_at(false, k_uptime_get(), false, true);
 	}
