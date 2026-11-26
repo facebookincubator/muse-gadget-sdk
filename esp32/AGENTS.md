@@ -1091,6 +1091,11 @@ against fakes, with no board or IDF environment required:
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+To run each module in its own process under the freeze watchdog, as CI does, put
+`python3 tools/stuck_watch.py --` in front. A module that runs well past its usual
+time (1800 s until it has 5 passing runs on this computer) is stopped and
+reported as STUCK, with what it was waiting on, instead of hanging the run.
+
 Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
 `managed_components/`, and that directory only exists after a build. Set `CC`
 or `CXX` to change compilers.
