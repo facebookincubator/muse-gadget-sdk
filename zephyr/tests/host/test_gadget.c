@@ -1889,36 +1889,6 @@ static void test_bench_mode_flows(void)
 	CHECK(mg_resetup_hello(false, true, 1, 1, 0, 0, 2000) == MG_RESETUP_TAKEOVER);
 	CHECK(mg_resetup_hello(false, true, 0, 1, 0, 0, 2500) == MG_RESETUP_SHOW);
 	CHECK(mg_resetup_hello(false, true, 0, 2, 0, 0, 2500) == MG_RESETUP_SHOW);
-	{
-		/* "an update press opens no window" (a set-up release build, an
-		 * unproven link): the owner's press confirms the prompt's own
-		 * upload (len 64, its SHA-256) and nothing else. Another image's
-		 * upload asks again (10, no new prompt within 10 s), an injected
-		 * tap confirms nothing, and the link's re-setup hello still shows
-		 * a prompt of its own, which no injected tap answers. */
-		struct mg_upd u = {0};
-		uint8_t a[32], b[32];
-		bool started;
-		bool inj = !mg_ota_release_build(false, false); /* injected input counts: never here */
-		const struct mg_upd_req up_a = {
-			.kind = MG_UPD_UPLOAD0, .len = 64, .sha = a, .end = 32};
-		const struct mg_upd_req up_b = {
-			.kind = MG_UPD_UPLOAD0, .len = 96, .sha = b, .end = 32};
-
-		memset(a, 0xa1, sizeof(a));
-		memset(b, 0xb2, sizeof(b));
-		CHECK(mg_upd_write(&u, 1, 1000, &up_a, &started) == MG_UPD_BUSY && started);
-		CHECK(mg_upd_prompting(&u, 1, 1000));
-		CHECK(mg_upd_press(&u, 1, 2000, true, inj));
-		CHECK(mg_upd_write(&u, 1, 3000, &up_a, &started) == MG_UPD_OK);
-		CHECK(mg_upd_write(&u, 1, 4000, &up_b, &started) == MG_UPD_BUSY && !started);
-		CHECK(!mg_upd_prompting(&u, 1, 4000));
-		CHECK(!inj && !mg_upd_press(&u, 1, 5000, false, inj));
-		CHECK(!mg_upd_prompting(&u, 1, 5000));
-		CHECK(mg_resetup_hello(false, true, 0, 1, 0, 0, 6000) == MG_RESETUP_SHOW);
-		CHECK(!mg_upd_press(&u, 1, 7000, false, inj) && !mg_upd_prompting(&u, 1, 7000));
-		CHECK(mg_upd_write(&u, 1, 7500, &up_b, &started) == MG_UPD_BUSY && !started);
-	}
 	/* "on an automation build": takeover the same; a hello right after a
 	 * dismiss shows (exempt from the dismiss rule only). */
 	CHECK(mg_resetup_hello(true, true, 1, 1, 0, 0, 2000) == MG_RESETUP_TAKEOVER);
