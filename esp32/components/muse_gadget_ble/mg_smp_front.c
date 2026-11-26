@@ -439,11 +439,14 @@ bool mg_smp_front_up_note(const uint8_t *req, size_t n, mg_smp_front_up_t *up)
     if (up) {
         up->known = true;
         up->len = r.id.len;
+        up->has_sha = r.id.has_sha;
+        memcpy(up->sha, r.id.sha, sizeof(up->sha));
     }
     return true;
 }
 
-int mg_smp_front_gate(const uint8_t *req, size_t n, mg_smp_front_slot_t *slot, bool core_holds, bool past_len,
+int mg_smp_front_gate(const uint8_t *req, size_t n, mg_smp_front_slot_t *slot, bool core_holds,
+                      const mg_smp_front_up_t *up, bool past_len,
                       muse_update_answer_t (*ask)(void *ctx, const muse_update_req_t *r),
                       bool (*bound)(void *ctx, muse_update_ident_t *id), void *ctx, bool *ended)
 {
@@ -467,6 +470,11 @@ int mg_smp_front_gate(const uint8_t *req, size_t n, mg_smp_front_slot_t *slot, b
     if (a == MUSE_UPDATE_OPEN) {
         if (past_len) {
             return MG_SMP_EACCESSDENIED;   /* past its upload's length: refused whatever let it through */
+        }
+        if (r.kind == MUSE_UPDATE_CHUNK && core_holds && had
+            && !(up && up->known && up->has_sha && up->len == r.slot_for.len
+                 && !memcmp(up->sha, r.slot_for.sha, sizeof(up->sha)))) {
+            return MG_SMP_EACCESSDENIED;   /* the core holds another upload: not the bound one's to carry on */
         }
         mg_smp_slot_apply(slot, &r, data, core_holds);
         return 0;

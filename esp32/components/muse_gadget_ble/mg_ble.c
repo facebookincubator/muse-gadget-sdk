@@ -2884,7 +2884,7 @@ static int fifo_pop(smp_fifo_mem_t *f, uint8_t *out, size_t cap)
 
 static smp_fifo_mem_t *volatile s_smp_fifo;    /* host creates, worker frees */
 static mg_smp_front_slot_t *s_smp_slot;        /* worker: the slot the press's upload writes (mg_smp_front.h) */
-static mg_smp_front_up_t *s_smp_up;            /* worker: the length of the upload the core takes (while it runs) */
+static mg_smp_front_up_t *s_smp_up;            /* worker: the upload the core takes, its len and SHA-256 (while it runs) */
 static bool s_smp_front_ok;                    /* worker: the front let the request the core is reading through */
 static const mg_smp_env_t *s_smp_env;          /* the env the boot probe picked; NULL = off */
 static volatile uint8_t s_smp_gen;             /* +1 at every disconnect (host task) */
@@ -3266,8 +3266,8 @@ static void smp_front_whole(void *ctx, const uint8_t *req, size_t n)
         if (!s_smp_slot) {
             s_smp_slot = smp_alloc(sizeof(*s_smp_slot));   /* none: no last chunk can be the bound image's */
         }
-        rc = mg_smp_front_gate(req, n, s_smp_slot, mg_smp_upload_active(), past, smp_front_ask, smp_front_bound, NULL,
-                               &ended);
+        rc = mg_smp_front_gate(req, n, s_smp_slot, mg_smp_upload_active(), s_smp_up, past, smp_front_ask,
+                               smp_front_bound, NULL, &ended);
     } else if (past) {
         rc = MG_SMP_EACCESSDENIED;
     }

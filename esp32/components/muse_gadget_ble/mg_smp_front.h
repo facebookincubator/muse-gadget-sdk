@@ -83,6 +83,8 @@ mg_smp_front_kind_t mg_smp_front_read(const uint8_t *req, size_t n, muse_update_
 typedef struct {
     bool known;
     uint32_t len;
+    bool has_sha;
+    uint8_t sha[32];   /* the whole-image SHA-256 its first chunk named, if any */
 } mg_smp_front_up_t;
 
 /* An image upload write that runs past its upload's length (smp-v12's rule on a gated platform, whatever opened the
@@ -103,11 +105,15 @@ bool mg_smp_front_up_note(const uint8_t *req, size_t n, mg_smp_front_up_t *up);
  * core, whose hooks say yes); 10 or 11, the rc to answer (mg_smp_front_refusal) with the core never seeing it.
  * slot: the tracker (NULL: none, so no last chunk or state write can be the bound image's); core_holds: the core
  * holds an upload (mg_smp_upload_active: an upload's first chunk again resumes it there, so the slot keeps its bytes).
- * past_len: mg_smp_front_past_len said so: what the press core lets through is refused (11) all the same.
+ * past_len: mg_smp_front_past_len said so: what the press core lets through is refused (11) all the same. up: the
+ * upload the core holds, as its first chunk named it (mg_smp_front_up_note): a later chunk the press core lets through
+ * is refused (11) unless that upload is the bound one, or the core holds none (an upload another link started, held
+ * for its resume, is never carried on by a press for another image; smp-v12.1's rule).
  * ask/bound: muse_local_press_ask and muse_local_press_bound, or the pure core's. *ended: the press's binding ended
  * here (the caller drops the core's transfer: mg_smp_abort).
  */
-int mg_smp_front_gate(const uint8_t *req, size_t n, mg_smp_front_slot_t *slot, bool core_holds, bool past_len,
+int mg_smp_front_gate(const uint8_t *req, size_t n, mg_smp_front_slot_t *slot, bool core_holds,
+                      const mg_smp_front_up_t *up, bool past_len,
                       muse_update_answer_t (*ask)(void *ctx, const muse_update_req_t *r),
                       bool (*bound)(void *ctx, muse_update_ident_t *id), void *ctx, bool *ended);
 

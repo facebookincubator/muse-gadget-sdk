@@ -79,6 +79,13 @@ One local change, until a release of the core carries it:
   request-smuggling report (the front now never forwards the bytes of a request it can't hold, see
   `../mg_smp_front.c`).
 
+The smuggling fix here is a local change until the smp-v12.1 re-vendor: the core's smp-v12.1 release fixes
+the same reports in the core itself (it carries only the upload an allowed request starts, and never parses the rest
+of a refused request), and `tests/test_mg_smp.py` `Smuggling` ports its Smuggling rows to this port (one, "the
+unasked state write names the carried upload", waits for the re-vendor). Until then the front also stands in for
+v12.1's "carry only the upload an allowed request starts" on links the press opened (`../mg_smp_front.c`
+`mg_smp_front_gate`).
+
 The `mg_smp.c` line below is smp-v11's: this copy's code differs from it by that change.
 
 ## Code hashes

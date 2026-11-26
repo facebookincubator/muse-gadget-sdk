@@ -1180,7 +1180,7 @@ static int smp(const char *hex) {
     assert(mg_smp_gate(false, false, false, true) == MG_SMP_GATE_NEEDS_PRESS);   /* release, no proof, not SAFE */
     if (!mg_smp_front_depth_ok(f, n)) return 3;
     bool ended;
-    int rc = mg_smp_front_gate(f, n, &slot, false, false, f_ask, f_bound, NULL, &ended);
+    int rc = mg_smp_front_gate(f, n, &slot, false, NULL, false, f_ask, f_bound, NULL, &ended);
     return rc < 0 ? 0 : rc;
 }
 static const char *update_prompt(void) { return muse_local_press_core_prompting(&w, now_ms) ? "confirm" : "none"; }

@@ -1239,6 +1239,165 @@ class NoSmuggling(EspServerBase):
                     self.servers.remove(srv)
 
 
+class Smuggling(EspServerBase):
+    """The core's smp-v12.1 Smuggling rows (smp/conformance/test_conformance.py, tag smp-v12.1), ported to this
+    port's front and its smp-v11 core with the local fix (smp/VENDORED.md). (2) The rest of a request answered from
+    its header alone (too large to hold, or no memory for it) is never parsed, whatever it holds. (1) An allowed
+    request the core then refuses carries nothing: no other upload goes on unasked on that link. And a reset after a
+    failed upload is asked. Differences from v12.1, by design here: the front reads a request that follows an
+    oversized one in the same write as a request of its own, through every front check (v12.1 drops the rest of that
+    write), so the oversized row's last write ends with the request; an upload request with no data is refused by the
+    front (rc 11) before the core sees it (v12.1's core answers rc 3); the swap row holds by the front's rule that a
+    chunk on a link the press opened goes on only for the bound upload (mg_smp_front_gate: smp-v11 would let the held
+    upload's chunk through and carry it); the server has one gated mode (--gate) for
+    v12.1's --g95b and --auth unproven --confirm. TODO (the smp-v12.1 re-vendor PR): v12.1's "the unasked state write
+    names the carried upload" row; smp-v11 asks no hook for any state write on the link carrying a staged upload."""
+
+    @staticmethod
+    def drain(lk: sl.Link, wait: float = 0.5) -> list:
+        time.sleep(wait)
+        out = []
+        while not lk.responses.empty():
+            out.append(lk.responses.get_nowait())
+        return out
+
+    @staticmethod
+    def rc_of(frame: bytes) -> int:
+        return sl.cbor_decode(frame[8:]).get("rc", 0)
+
+    @staticmethod
+    def embedded(c: sl.Client, img: bytes) -> list:
+        """Real requests: an upload start, a state write for that image, a reset."""
+        return [c.frame(2, 1, 1, {"off": 0, "len": len(img), "sha": hashlib.sha256(img).digest(), "data": img[:100]})[1],
+                c.frame(2, 1, 0, {"hash": sl.image_hash(img), "confirm": False})[1],
+                c.frame(2, 0, 5, {})[1]]
+
+    def assert_untouched(self, lk: sl.Link, before: dict) -> None:
+        st = lk.status()
+        self.assertTrue(lk.connected.is_set(), "a reset ran")
+        self.assertFalse(st["ota_open"], "an upload started")
+        self.assertFalse(st["claimed"])
+        self.assertEqual((st["running"], st["boots"]), (before["running"], before["boots"]))
+
+    def test_the_rest_of_an_oversized_request_is_never_parsed(self) -> None:
+        img = envelope("5.0.0", 3000, seed=51)
+        for hooks, proof in (((), None), (("--auth", "proven"), None), (("--gate",), True), (("--gate",), False)):
+            with self.subTest(hooks=hooks, proof=proof):
+                srv = self.server(*hooks)
+                lk = srv.link(247)
+                if proof:
+                    lk.sock.sendto(b"\x0d\x03", lk.addr)
+                before = lk.status()   # after the proof (the server takes the link's datagrams in order)
+                c = sl.Client(lk)
+                up, st, rs = self.embedded(c, img)
+                w = lk.max_write
+                fill = bytes([0xA0]) * w
+                # the body: each real request starts a write; the oversized request ends mid-write
+                parts = [fill[:w - 8], up, fill, st, rs, fill, fill, fill]
+                tail = fill[:50]
+                body_len = sum(map(len, parts)) + len(tail)
+                self.assertGreater(8 + body_len, 1024)   # more than the front holds (the core's slot)
+                hdr = struct.pack(">BBHHBB", 2, 0, body_len, 1, 0x77, 1)
+                for x in [hdr + parts[0]] + parts[1:] + [tail]:
+                    lk.write(x)
+                    time.sleep(0.01)
+                got = self.drain(lk)
+                self.assertEqual(len(got), 1, f"answered {len(got)} times: the tail was parsed")
+                self.assertEqual((got[0][6], self.rc_of(got[0])), (0x77, 7), "EMSGSIZE for the oversized request")
+                self.assert_untouched(lk, before)
+                self.assertTrue(c.image_state())   # the next request is read as one
+                time.sleep(0.3)
+                self.assertEqual(lk.status()["held"], 0)
+                srv.stop()
+                self.servers.remove(srv)
+
+    def test_the_rest_of_a_request_refused_for_memory_is_never_parsed(self) -> None:
+        img = envelope("5.1.0", 20000, seed=52)
+        srv = self.server()
+        lk = srv.link(247)
+        before = lk.status()
+        c = sl.Client(lk)
+        rsp = c.request(2, 1, 1, {"off": 0, "len": len(img), "data": img[:200]})
+        self.assertEqual(c.rc(rsp), 0, rsp)
+        lk.drop_link()   # the upload's state stays for its resume, its buffers go
+        self.assertTrue(lk.connect(5))
+        self.assertGreater(lk.status()["mem_state"], 0)
+        c = sl.Client(lk)
+        w = lk.max_write
+        rs = c.frame(2, 0, 5, {})[1]
+        # one well-formed item, so the front's walk hands it to the core: {"x": <bytes>}, with a real reset starting
+        # the second write inside the byte string
+        inner = bytes([0xA0]) * (w - 8 - 6) + rs + bytes(20)
+        body = bytes([0xA1, 0x61, ord("x"), 0x59]) + struct.pack(">H", len(inner)) + inner
+        hdr = struct.pack(">BBHHBB", 2, 0, len(body), 1, 0x55, 1)
+        lk.mem_fail(1)   # the request buffers are refused
+        time.sleep(0.02)
+        lk.write(hdr + body[:w - 8])
+        time.sleep(0.05)
+        lk.write(body[w - 8:])   # a real reset starts this write
+        got = self.drain(lk)
+        self.assertEqual([(g[6], self.rc_of(g)) for g in got], [(0x55, 2)], "ENOMEM once, the rest not parsed")
+        self.assertTrue(lk.connected.is_set(), "the reset in the refused request's tail ran")
+        self.assertEqual(lk.status()["running"], before["running"])
+        self.assertTrue(c.image_state())
+
+    def test_an_allowed_request_the_core_refuses_carries_nothing(self) -> None:
+        # B starts with no SHA-256 on a proven link and is held; on a new, unproven link a press binds A; a request
+        # for A the core would refuse (no data) must not make that link carry B.
+        a, b = envelope("5.2.0", 20000, seed=53), envelope("5.3.0", 20000, seed=54)
+        srv = self.server("--gate")
+        lk = srv.link(247)
+        lk.sock.sendto(b"\x0d\x03", lk.addr)   # proven
+        before = lk.status()
+        c = sl.Client(lk)
+        rsp = c.request(2, 1, 1, {"off": 0, "len": len(b), "data": b[:200]})
+        self.assertEqual(c.rc(rsp), 0, rsp)
+        off = rsp["off"]
+        lk.drop_link()
+        self.assertTrue(lk.connect(5))   # a new link: unproven
+        c = sl.Client(lk)
+        first_a = {"off": 0, "len": len(a), "sha": hashlib.sha256(a).digest(), "data": a[:200]}
+        self.assertEqual(c.rc(c.request(2, 1, 1, first_a)), 10, "the press prompt for A")
+        lk.sock.sendto(b"\x0d\x01", lk.addr)   # the press
+        lk.status()
+        rsp = c.request(2, 1, 1, {"off": 0, "len": len(a), "sha": hashlib.sha256(a).digest()})   # no data
+        self.assertNotEqual(c.rc(rsp), 0, rsp)   # the front refuses it (11); v12.1's core answers 3
+        rcs = []
+        while off < len(b):
+            rsp = c.request(2, 1, 1, {"off": off, "data": b[off:off + 200]})
+            rcs.append(c.rc(rsp))
+            if rcs[-1]:
+                break
+            off = rsp["off"]
+        self.assertEqual(rcs[0], 11, "B's chunk on the new link is lone: refused")
+        self.assertNotEqual(c.rc(c.request(2, 1, 0, {"hash": sl.image_hash(b), "confirm": False})), 0)
+        lk.disconnected.clear()
+        self.assertNotEqual(c.rc(c.request(2, 0, 5, {})), 0, "the reset was not asked")
+        self.assertFalse(lk.disconnected.wait(0.5))
+        st = lk.status()
+        self.assertEqual((st["running"], st["boots"]), (before["running"], before["boots"]))
+        self.assertFalse(any(i.get("pending") for i in c.image_state()), "something was staged")
+
+    def test_a_reset_after_a_failed_upload_is_asked(self) -> None:
+        srv = self.server("--auth", "unproven")
+        lk = srv.link(247)
+        lk.sock.sendto(b"\x09\x01", lk.addr)   # proven
+        self.assertEqual(lk.status()["auth"], 1)
+        img = bytearray(envelope("5.4.0", 20000, seed=55))
+        img[1000] ^= 1   # the payload no longer matches its hash
+        c = sl.Client(lk)
+        rsp = c.request(2, 1, 1, {"off": 0, "len": len(img), "data": bytes(img[:200])})
+        while c.rc(rsp) == 0 and rsp["off"] < len(img):
+            o = rsp["off"]
+            rsp = c.request(2, 1, 1, {"off": o, "data": bytes(img[o:o + 200])})
+        self.assertEqual(c.rc(rsp), 9)
+        lk.sock.sendto(b"\x09\x00", lk.addr)   # the proof gone
+        self.assertEqual(lk.status()["auth"], 0)
+        lk.disconnected.clear()
+        self.assertEqual(c.rc(c.request(2, 0, 5, {})), 11, "no upload is carried any more: the reset is asked")
+        self.assertFalse(lk.disconnected.wait(0.5))
+
+
 class TheCoreMarksOnlyWhatItTook(EspServerBase):
     """The vendored core's local change (smp/VENDORED.md): a request the hooks allowed marks the transfer as this
     connection's (F_XAUTH: its later chunks ask no hook) only once the core took it. A held upload, resumed on a new

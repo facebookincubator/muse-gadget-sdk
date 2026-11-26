@@ -427,9 +427,16 @@ static mg_smp_config_t s_cfg = { .slot_size = 1024, .buf_size = 512, .rx_slots =
 static void *s_mem[2];
 static uint32_t s_mem_size[2], s_mem_gets;
 
+static unsigned s_mem_fail;   /* LINK.md 0x08 n: the next n memory requests are refused */
+
 static void *pf_mem_get(void *ctx, uint8_t kind, uint32_t size)
 {
     (void)ctx;
+    if (s_mem_fail) {
+        s_mem_fail--;
+        logf_("mem: request for kind %u refused (0x08)", kind);
+        return NULL;
+    }
     if (kind > 1 || s_mem[kind]) {
         logf_("BUG: mem_get kind %u while one is out", kind);
         return NULL;
@@ -671,7 +678,8 @@ static void front_whole(void *ctx, const uint8_t *req, size_t n)
     int rc = 0;
     bool gated = s_gate && g_gate() == MG_SMP_GATE_NEEDS_PRESS;
     if (gated) {
-        rc = mg_smp_front_gate(req, n, &s_fslot, mg_smp_upload_active(), past, front_ask, front_bound, NULL, &ended);
+        rc = mg_smp_front_gate(req, n, &s_fslot, mg_smp_upload_active(), &s_up, past, front_ask, front_bound, NULL,
+                               &ended);
     } else if (past) {
         rc = MG_SMP_EACCESSDENIED;
     }
@@ -904,6 +912,9 @@ int main(int argc, char **argv)
                     break;
                 case 0x06:
                     mg_smp_abort(s_env);
+                    break;
+                case 0x08:
+                    s_mem_fail = n >= 2 ? d[1] : 1;
                     break;
                 case 0x09:
                     s_auth_proven = n >= 2 && d[1] != 0;

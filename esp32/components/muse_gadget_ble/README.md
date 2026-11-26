@@ -1220,10 +1220,13 @@ length (an offset-0 request longer than its own len, or a later chunk past the
 len its first chunk named) gets rc 11 and ends the upload (`mg_smp_abort`),
 however the link was opened, as smp-v12 does on a gated platform; this
 smp-v11 core would drop the extra bytes and answer rc 0
-(`mg_smp_front_past_len`).
+(`mg_smp_front_past_len`). On a link the press opened, a chunk is carried on
+only for the bound upload: while the core holds another one (an upload a
+proven link started, held for its resume) the chunk gets rc 11 (smp-v12.1's
+rule, `mg_smp_front_gate`).
 The front costs 1 KB in the FIFO block while a link writes, 160 bytes for
-the slot while a press binds an upload, and 8 bytes for the upload's length
-while the core holds an upload.
+the slot while a press binds an upload, and 40 bytes for the upload's length
+and SHA-256 while the core holds an upload.
 
 **On the gadget's screen** (`components/muse/muse_ui.c`'s card, from
 `mg_smp_esp_ui()`): "Updating N%" with a neutral bar and the dim "Don't touch
