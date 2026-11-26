@@ -25,11 +25,14 @@
 // "@sdk_token ok" and restarts with the token, or "@sdk_token error <why>".
 // It's serial-only: BLE CMD writes never reach it, so no one nearby can
 // change a gadget's token.
+//
+// ">version" answers "@version <the app's version>": the web flasher reads it
+// back after installing and says Done only if it's the build it installed.
 
 // Also handles wifi_proxy= JSON settings/readback (esp32/README.md). Both
 // entry points stay serial-only.
 // Handles one console line, without its leading '>'. False if the line isn't
-// either command. Muse boards' console calls it (muse_input_set_console_hook).
+// one of these commands. Muse boards' console calls it (muse_input_set_console_hook).
 bool sdk_token_console_command(const char *line);
 
 // Reads '>' lines on boards without the Muse console: on the console UART,

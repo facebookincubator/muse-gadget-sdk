@@ -839,6 +839,8 @@ static void gate_flush(void)
     if (f & MUSE_VC_GATE_FLUSH_PLAYING) {
         s_flush_req.fetch_add(1);   /* the reader empties s_out; nothing new is written until it has */
         ring_clear(&s_defer);
+        /* The next reply resamples as on a fresh call (no edge or phase of the flushed one). */
+        muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);
     }
     if (f & MUSE_VC_GATE_FLUSH_WAITING) {
         ring_clear(&s_wait);
@@ -923,6 +925,8 @@ static bool take(uint32_t acts)
     if (acts & MUSE_VC_ACT_FLUSH) {
         if (!s_ptt) muse_vc_reply_gate_press(s_gate);
         s_flush_req.fetch_add(1);
+        /* A barge-in resyncs the downlink; the next reply resamples as on a fresh call. */
+        muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);
     }
     if (acts & MUSE_VC_ACT_HOLD) {
         ESP_LOGI(TAG, "input %s", s_call.held ? "held" : "resumed");

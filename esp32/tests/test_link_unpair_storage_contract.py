@@ -120,7 +120,7 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
 
     def test_long_press_restarts_only_after_verified_clear(self) -> None:
         button = _function_body(self.app, "static void on_button_long_press(")
-        reset = _function_body(self.app, "static bool reset_setup_from_control(")
+        reset = _function_body(self.app, "static bool reset_setup_checked(")
         helper = _function_body(self.app, "static bool reset_setup_with_gate_held(")
 
         self.assertIn(
@@ -165,7 +165,7 @@ class LinkUnpairStorageContractTest(unittest.TestCase):
     def test_node_unpaired_never_restarts_on_lock_or_storage_failure(self) -> None:
         worker = _function_body(self.app, "static void ws_unpaired_task(")
         status = _function_body(self.app, "static void on_ws_control_status(")
-        reset = _function_body(self.app, "static bool reset_setup_from_control(")
+        reset = _function_body(self.app, "static bool reset_setup_checked(")
 
         self.assertIn(
             'reset_setup_from_control("server unpair (node.unpaired)", '
@@ -215,6 +215,11 @@ static int create_restart_task(void) {
 static void esp_restart(void) {
     assert(gate_held);
     reboots++;
+}
+#define MUSE_RESTART_SETUP 0
+static void muse_restart(int why) {   /* muse_restart.h: a marked esp_restart() */
+    (void)why;
+    esp_restart();
 }
 static void free_ws_control_args(ws_control_args_t *args) {
     (void)args;
@@ -316,27 +321,41 @@ int main(void) {
 
     def test_only_the_users_factory_reset_forgets_wifi(self) -> None:
         # The 5 s hold and the Muse menu/Settings reset (directly, or deferred
-        # when its task can't start) forget Wi-Fi. Every unpair and recovery
-        # path keeps it, and nothing else calls the full setup clear.
-        forget = re.findall(r'"([^"]+)", SETUP_RESET_FORGET_WIFI\)', self.app)
+        # when its task can't start) forget Wi-Fi, and so does a gadget's
+        # token proof clear ("reset (hold, the Muse menu, or the
+        # token proof's clear) erases all of it", deferred the same way, on
+        # the BLE-only loop too). Every unpair and recovery path keeps it.
+        forget = re.findall(r'"([^"]+)", SETUP_RESET_FORGET_WIFI[,)]', self.app)
         self.assertEqual(
             sorted(forget),
-            ["Muse menu reset", "button long-press", "deferred setup reset"],
+            ["Muse menu reset", "button long-press", "deferred setup reset",
+             "deferred setup reset", "token proof clear"],
         )
         self.assertEqual(
             self.app.count("atomic_store_explicit(&s_setup_reset_pending, true"), 1
+        )
+        self.assertIn(
+            "atomic_store_explicit(&s_gadget_clear_pending, true",
+            _function_body(self.app, "void app_gadget_clear_setup("),
         )
         self.assertIn(
             "atomic_store_explicit(&s_setup_reset_pending, true",
             _function_body(self.app, "void app_reset_setup_async("),
         )
         clear = _function_body(self.app, "static bool clear_setup_credentials(")
-        self.assertEqual(self.app.count("config_clear_setup()"), 1)
+        # Besides the user's reset, only boot's cleanup of a gadget's
+        # token-only setup cut short (Wi-Fi skipped, no marker; and the
+        # BLE-only gadget's partial setup) clears the whole setup: that setup
+        # has no Wi-Fi of its own to keep. So does a gadget set up with no
+        # token proof key: nobody could prove it.
+        self.assertEqual(self.app.count("config_clear_setup()"), 4)
+        self.assertIn('ESP_LOGW(TAG, "set up with no proof key at boot; clearing for a fresh setup");', self.app)
         self.assertIn("config_clear_setup()", clear)
+        self.assertIn("(wifi_skipped ? config_clear_setup() : config_clear_pairing())", self.app)
         keep = re.findall(r'"([^"]+)", SETUP_RESET_KEEP_WIFI\)', self.app)
         self.assertEqual(
             sorted(keep),
-            ["BLE unpair", "deferred unpair", "server unpair (node.unpaired)"],
+            ["BLE unpair", "deferred unpair", "deferred unpair", "server unpair (node.unpaired)"],
         )
 
     def test_endpoint_urls_cleared_on_pairing_and_setup_reset(self) -> None:

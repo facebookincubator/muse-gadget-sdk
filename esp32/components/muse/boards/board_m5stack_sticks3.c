@@ -40,6 +40,7 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_mem.h"
+#include "muse_lvgl_hold.h"
 
 static const char *TAG = "board";
 
@@ -296,9 +297,9 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* bounded, shared with video */
     } else {
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 
@@ -367,6 +368,9 @@ static esp_err_t read_power(muse_power_t *out)
     int v = pmic_mv(PMIC_VBAT_MV);
     out->usb = pmic_mv(PMIC_VIN_MV) > 4000;
     out->charging = out->usb && !(in & PMIC_CHG_IDLE);
+    /* The charger releases CHRG once it terminates the charge; with
+     * USB in and a cell on it, released is charge done. */
+    out->charge_done = out->usb && v >= 2500 && (in & PMIC_CHG_IDLE);
     out->battery_mv = v;
     if (v < 2500) {
         out->battery_pct = -1;
@@ -399,6 +403,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): KEY1 (the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(TALK_GPIO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "M5Stack StickS3",
     .width = LCD_W,
@@ -418,6 +434,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
@@ -425,7 +442,9 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the charger's CHRG through the PM1 */
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

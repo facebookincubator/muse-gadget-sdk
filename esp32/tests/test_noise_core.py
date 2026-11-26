@@ -173,6 +173,7 @@ class NoiseCoreCompileTest(unittest.TestCase):
                      str(ROOT / "tests" / "noise_xx_vector_harness.cpp"),
                      str(COMPONENT / "src" / "PsaCryptoBackend.cpp"),
                      str(COMPONENT / "src" / "Status.cpp"),
+                     str(COMPONENT / "src" / "X25519Selftest.cpp"),
                      *extra, *flags, "-o", str(binary)],
                     cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
@@ -182,6 +183,10 @@ class NoiseCoreCompileTest(unittest.TestCase):
                     self.assertEqual(run.returncode, 0, msg=run.stdout + run.stderr)
                     self.assertIn("3 handshake + 3 transport messages and the handshake hash match", run.stdout)
                     self.assertRegex(run.stdout, r"x25519: (\d+)/\1 checks pass")
+                    # The device console's self-test (`>noise.x25519`).
+                    self.assertRegex(run.stdout, r"@x25519 \S+: (\d+)/\1 checks pass")
+                    if mode == "hacl":
+                        self.assertRegex(run.stdout, r"@x25519 .*incl\. 1,000 iterations")
 
 if __name__ == "__main__":
     unittest.main()

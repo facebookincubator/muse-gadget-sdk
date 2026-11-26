@@ -84,8 +84,8 @@ def _verify_and_save(credentials: Credentials, commit: Callable[[Callable[[], bo
         "sdk_token_hint": config.sdk_token_hint(sdk_token),
     }
     if node_id:
-        # The id get_device_info offered, which the tokens are for, in the
-        # same write: the device's node id until it is paired again.
+        # The id device_info offered, which the tokens are for, in the same
+        # write: the id in use until the next pairing (identity.py).
         record["node_id"] = node_id
 
     def save() -> bool:

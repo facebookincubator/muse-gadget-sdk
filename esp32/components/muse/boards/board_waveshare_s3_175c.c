@@ -29,14 +29,20 @@
 #include "bsp/esp-bsp.h"
 #include "bsp/touch.h"
 #include "driver/gpio.h"
+#include "driver/i2s_std.h"
 #include "esp_check.h"
+#include "esp_codec_dev_defaults.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "muse_lvgl_hold.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "muse_audio.h"
+#include "muse_audio_dma.h"
 #include "muse_board.h"
+#include "muse_settings.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
@@ -66,6 +72,30 @@ static muse_gpio_button_t s_boot;
 #if !CONFIG_MUSE_BOARD_WAVESHARE_S3_175
 static muse_gpio_button_t s_pwr;
 #endif
+
+/* Charge dark (muse_charge_dark.h): the AXP2101 says whether USB or the
+ * PWR key turned the board on; BOOT (GPIO0) held counts as a key. */
+static esp_err_t early_power(muse_cd_reading_t *out)
+{
+    ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
+    ESP_RETURN_ON_ERROR(muse_pmu_early(bsp_i2c_get_handle(), out), TAG, "pmu");
+    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    gpio_pullup_en(GPIO_NUM_0);
+    out->by_key |= gpio_get_level(GPIO_NUM_0) == 0;
+    return ESP_OK;
+}
+
+/* SAFE mode's key: BOOT (GPIO0), read raw: SAFE skips init(). */
+static bool safe_key(void)
+{
+    static bool set;
+    if (!set) {
+        set = true;
+        gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+        gpio_pullup_en(GPIO_NUM_0);
+    }
+    return gpio_get_level(GPIO_NUM_0) == 0;
+}
 
 static esp_err_t init(void)
 {
@@ -206,21 +236,82 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* shared with video */
         esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, (uint8_t[]){ 0x05 }, 1);
     } else {
         gpio_set_level(BSP_LCD_TOUCH_RST, 0);
         vTaskDelay(pdMS_TO_TICKS(10));
         gpio_set_level(BSP_LCD_TOUCH_RST, 1);
         vTaskDelay(pdMS_TO_TICKS(50));   /* as the driver waits after its reset */
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);   /* runs again unless video holds it */
     }
 }
 
+/*
+ * ES8311 plays and the ES7210 records (MIC1 and MIC2, two slots of plain
+ * I2S: with fewer than three mics esp_codec_dev keeps it out of TDM), on one
+ * duplex I2S bus with MCLK. The board makes the channels itself rather than
+ * through bsp_audio_init(), which takes no channel config and so leaves
+ * ESP-IDF's 6 x 240 frames of DMA (90 ms): live reply audio wants
+ * 3 x 160 (30 ms each way, muse_audio_dma.h). The codecs are set up as the
+ * BSP's bsp_audio_codec_speaker_init() / _microphone_init() do, and the
+ * channels in the format muse_audio opens them in (16-bit stereo at 16 kHz),
+ * so opening never reallocates their buffers.
+ */
 static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t *mic)
 {
-    *spk = bsp_audio_codec_speaker_init();
-    *mic = bsp_audio_codec_microphone_init();
+    i2s_chan_handle_t tx, rx;
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(CONFIG_BSP_I2S_NUM, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    /* Live reply audio: 30 ms of DMA each way, not ESP-IDF's 90 (muse_audio_dma.h). */
+    chan_cfg.dma_desc_num = MUSE_AUDIO_DMA_LIVE_DESC;
+    chan_cfg.dma_frame_num = MUSE_AUDIO_DMA_LIVE_FRAMES;
+    ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "i2s channel");
+    const i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = {
+            .mclk = BSP_I2S_MCLK,
+            .bclk = BSP_I2S_SCLK,
+            .ws = BSP_I2S_LCLK,
+            .dout = BSP_I2S_DOUT,
+            .din = BSP_I2S_DSIN,
+        },
+    };
+    ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &std_cfg), TAG, "i2s tx");
+    ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(rx, &std_cfg), TAG, "i2s rx");
+    muse_audio_attach_tx(tx);   /* a barge-in clears its DMA (muse_audio_tx.h); before enable, or ESP-IDF refuses */
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "i2s tx on");
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "i2s rx on");
+
+    i2c_master_bus_handle_t i2c = bsp_i2c_get_handle();
+    audio_codec_i2s_cfg_t i2s_cfg = { .port = CONFIG_BSP_I2S_NUM, .rx_handle = rx, .tx_handle = tx };
+    const audio_codec_data_if_t *data_if = audio_codec_new_i2s_data(&i2s_cfg);
+    audio_codec_i2c_cfg_t dac_i2c = { .port = BSP_I2C_NUM, .addr = ES8311_CODEC_DEFAULT_ADDR, .bus_handle = i2c };
+    const audio_codec_ctrl_if_t *dac_ctrl = audio_codec_new_i2c_ctrl(&dac_i2c);
+    audio_codec_i2c_cfg_t adc_i2c = { .port = BSP_I2C_NUM, .addr = ES7210_CODEC_DEFAULT_ADDR, .bus_handle = i2c };
+    const audio_codec_ctrl_if_t *adc_ctrl = audio_codec_new_i2c_ctrl(&adc_i2c);
+    const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+    ESP_RETURN_ON_FALSE(i2c && data_if && dac_ctrl && adc_ctrl && gpio_if, ESP_ERR_NO_MEM, TAG, "codec interfaces");
+
+    es8311_codec_cfg_t es8311_cfg = {
+        .ctrl_if = dac_ctrl,
+        .gpio_if = gpio_if,
+        .codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC,
+        .pa_pin = BSP_POWER_AMP_IO,
+        .use_mclk = true,
+        .hw_gain = { .pa_voltage = 5.0, .codec_dac_voltage = 3.3 },
+    };
+    const audio_codec_if_t *dac = es8311_codec_new(&es8311_cfg);
+    ESP_RETURN_ON_FALSE(dac, ESP_FAIL, TAG, "ES8311 not responding");
+    es7210_codec_cfg_t es7210_cfg = { .ctrl_if = adc_ctrl };   /* MIC1 and MIC2, as the BSP's */
+    const audio_codec_if_t *adc = es7210_codec_new(&es7210_cfg);
+    ESP_RETURN_ON_FALSE(adc, ESP_FAIL, TAG, "ES7210 not responding");
+
+    esp_codec_dev_cfg_t out_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_OUT, .codec_if = dac, .data_if = data_if };
+    esp_codec_dev_cfg_t in_cfg = { .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = adc, .data_if = data_if };
+    *spk = esp_codec_dev_new(&out_cfg);
+    *mic = esp_codec_dev_new(&in_cfg);
     return *spk && *mic ? ESP_OK : ESP_FAIL;
 }
 
@@ -264,6 +355,12 @@ static void wait_buttons(int timeout_ms)
 }
 #endif
 
+/* SAFE mode (muse_board_t.safe_display_off): the AMOLED held in reset (it drops its frame and stays dark; no backlight). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(BSP_LCD_RST, 0);   /* GPIO1 on the 1.75C, GPIO39 on the 1.75 (their BSPs) */
+}
+
 static const muse_board_t s_board = {
 #if CONFIG_MUSE_BOARD_WAVESHARE_S3_175
     .name = "Waveshare ESP32-S3-Touch-AMOLED-1.75",
@@ -294,13 +391,24 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .draw_frame = muse_lcd_bands_frame,
+    .draw_windows = muse_lcd_bands_windows,   /* only what changed of a streamed picture */
+    .panel_writes = muse_lcd_bands_writes,
+    .panel_stack_free = muse_lcd_bands_stack_free,
     .audio_init = audio_init,
+    .i2s_dma_desc = MUSE_AUDIO_DMA_LIVE_DESC,   /* the channels as audio_init makes them */
+    .i2s_dma_frames = MUSE_AUDIO_DMA_LIVE_FRAMES,
+    .i2s_ready_at_init = true,   /* audio_init: 16-bit stereo, the DMA sizes above, as muse_audio opens */
+    /* set_mic_gain's 100 (ES7210): the tuned gain, 30 dB, until this board's
+     * 30 cm speech clip check is measured; then raised to the measured ceiling. */
+    .mic_gain_speech_max_db = MUSE_MIC_GAIN_TUNED,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
+    .safe_key = safe_key,
 #if !CONFIG_MUSE_BOARD_WAVESHARE_S3_175
     .wait_buttons = wait_buttons,   /* the 1.75's PWR is on the PMU, so it's polled */
 #endif
@@ -309,7 +417,19 @@ static const muse_board_t s_board = {
     .motion_enable = motion_enable,
     .motion_read = muse_qmi8658_read,
 #endif
+    .charged = MUSE_CHARGED_DONE,   /* the AXP2101's charge-done state */
     .power_off = muse_pmu_power_off,
+    /* Low-battery shutdown: 3.30 V, as the C6 1.8 with the same
+     * AXP2101, well above its own 2.6 V VSYS power-off. Not yet measured
+     * against a meter: devices/README.md, Low battery. One low-cell level
+     * for the board: the charge-dark hold boots 300 mV above it on
+     * charge. */
+    .battery_shutdown_mv = 3300,
+    /* Charge dark below the low-cell level above: a USB power-up on a
+     * low cell boots at battery_shutdown_mv + MUSE_CD_CHARGE_MARGIN_MV on
+     * charge (3.6 V). */
+    .early_power = early_power,
+    .early_power_off = muse_pmu_power_off,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

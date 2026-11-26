@@ -336,7 +336,7 @@ static void queue_result(const std::string &json,
                          noise_ctrl_session_generation_t generation = 1) {
     cJSON *result = cJSON_CreateObject();
     assert(cJSON_AddStringToObject(result, "payload", json.c_str()));
-    result_queue.push_back({generation, strdup("request"), result});
+    result_queue.push_back({generation, strdup("request"), result, 0});
 }
 static std::vector<uint8_t> old_wire_bytes(const std::string &json) {
     uint32_t len = static_cast<uint32_t>(json.size());

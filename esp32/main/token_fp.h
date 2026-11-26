@@ -16,11 +16,20 @@
 
 #pragma once
 
-// What a log line may say about a secret (the SDK token, a device token):
-// whether there is one, its length and the first 4 bytes of its SHA-256 as 8
-// hex digits, never any of its characters. Captured logs get shared.
+// What a log line may say about a secret (the SDK token, a device token, the
+// token proof key): whether there is one, its length and the first 4 bytes of
+// its SHA-256 as 8 hex digits, never any of its characters (AGENTS.md, Muse
+// Gadgets SDK token). tools/redact.py's fingerprint() prints the same.
+
+#include <stdbool.h>
 
 #define TOKEN_FP_TEXT_LEN 40
+#define TOKEN_FP_HEX_LEN 9
+
+// The parts, for a screen that lays them out itself (Settings): false for no
+// secret; else its length and the first 4 bytes of its SHA-256 as 8 hex
+// digits ("" if the hash fails).
+bool token_fp_parts(const char *secret, unsigned *len, char hex[TOKEN_FP_HEX_LEN]);
 
 // "none" for NULL or "", else "48 chars, sha256 1a2b3c4d" ("48 chars" alone if
 // the hash fails). Returns out.

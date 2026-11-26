@@ -35,25 +35,54 @@ static const char *TAG = "link.identity";
 
 // Device identity. The device advertises over BLE as "MuseGadget-XXXXXX" and
 // identifies itself to the remote service by its node id (device-token
-// mint/refresh): the one its setup stored, or the "homelink-XXXXXX" a device
-// set up by earlier firmware keeps (identity.h). XXXXXX = last 3
+// mint/refresh): a new setup offers "gadget-XXXXXX" on a Muse Gadget build
+// with CONFIG_MUSE_GADGET_NODE_ID_PREFIX, else "homelink-XXXXXX", and a
+// set-up device keeps the id its setup stored, or the "homelink-XXXXXX" a
+// device set up before ids were stored keeps (identity.h). XXXXXX = last 3
 // WiFi STA MAC octets in hex. Builds may change the visible BLE prefix
 // (CONFIG_HOMEHUB_BLE_NAME_PREFIX) and bench boards add a suffix
-// (CONFIG_HOMEHUB_BLE_NAME_SUFFIX); neither changes the node id.
+// (CONFIG_HOMEHUB_BLE_NAME_SUFFIX). A product in the Muse Gadget catalog adds
+// its model code (CONFIG_HOMEHUB_BLE_PRODUCT_CODE): MuseGadget-<PRODUCT>-XXXXXX,
+// XXXXXX then from its Bluetooth address, or still from the Wi-Fi MAC on the
+// ESP32 catalog boards (name_tail_is_bt_address()). None of them changes the
+// node id.
 #define BLE_NAME_PREFIX CONFIG_HOMEHUB_BLE_NAME_PREFIX CONFIG_HOMEHUB_BLE_NAME_SUFFIX
-// Earlier firmware's node ids, which devices it set up keep, and what a new
-// setup offers while gadget ids are off (CONFIG_MUSE_GADGET_NODE_ID_PREFIX).
-#define LEGACY_NODE_ID_PREFIX "homelink"
-#if CONFIG_MUSE_GADGET_NODE_ID_PREFIX
-#define NODE_ID_PREFIX "gadget"
+// A plain Home Link's node ids, those of gadgets set up before gadget ids
+// came in, which keep them until they are set up again, and what
+// a gadget's new setup offers while gadget ids are off
+// (CONFIG_MUSE_GADGET_NODE_ID_PREFIX).
+#define HOMELINK_NODE_ID_PREFIX "homelink"
+#if CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_NODE_ID_PREFIX
+#define SETUP_NODE_ID_PREFIX "gadget"
 #else
-#define NODE_ID_PREFIX LEGACY_NODE_ID_PREFIX
+#define SETUP_NODE_ID_PREFIX HOMELINK_NODE_ID_PREFIX
 #endif
+#define PRODUCT_CODE CONFIG_HOMEHUB_BLE_PRODUCT_CODE
+// The name has to fit the scan response with the -XXXXXX tail.
+_Static_assert(sizeof(BLE_NAME_PREFIX) - 1 + (sizeof(PRODUCT_CODE) > 1 ? sizeof(PRODUCT_CODE) : 0) <= 22,
+               "BLE name prefix, suffix and product code together exceed 22 characters");
+
+// The catalog names a product MuseGadget-<PRODUCT>-XXXXXX, XXXXXX the last
+// three bytes of its Bluetooth address (what a BLE scan shows): a product
+// code brings that tail with it, and CONFIG_HOMEHUB_BLE_NAME_BT_ADDRESS asks
+// for it without one. Otherwise the tail is the Wi-Fi STA MAC's, as SDK
+// boards have always advertised (MuseGadget-XXXXXX, the node_id's digits).
+// ESP32 catalog boards may keep that tail with their code:
+// CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC.
+static bool name_tail_is_bt_address(void) {
+#if CONFIG_HOMEHUB_BLE_NAME_BT_ADDRESS
+    return true;
+#elif CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC
+    return false;
+#else
+    return PRODUCT_CODE[0] != '\0';
+#endif
+}
 
 static char s_setup_node_id[32];
-static char s_legacy_node_id[32];
+static char s_homelink_node_id[32];
 // The stored id, in two buffers so a reader of the one in use never sees it
-// rewritten (it changes only when setup stores new credentials).
+// rewritten (it changes only when a setup commits).
 static char s_stored_node_id[2][32];
 static int s_stored_slot;
 static _Atomic(const char *) s_node_id = "";
@@ -86,12 +115,18 @@ void identity_init(void) {
         ESP_LOGW(TAG, "STA MAC unavailable (%s); using zeros", esp_err_to_name(err));
     }
     snprintf(s_setup_node_id, sizeof(s_setup_node_id),
-             NODE_ID_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
-    snprintf(s_legacy_node_id, sizeof(s_legacy_node_id),
-             LEGACY_NODE_ID_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
+             SETUP_NODE_ID_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    snprintf(s_homelink_node_id, sizeof(s_homelink_node_id),
+             HOMELINK_NODE_ID_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
     identity_refresh_node_id();
-    snprintf(s_ble_name, sizeof(s_ble_name),
-             BLE_NAME_PREFIX "-%02X%02X%02X", mac[3], mac[4], mac[5]);
+    uint8_t tail[6];
+    memcpy(tail, mac, sizeof(tail));
+    if (name_tail_is_bt_address() && esp_read_mac(tail, ESP_MAC_BT) != ESP_OK) {
+        ESP_LOGW(TAG, "no Bluetooth address; the name ends in the Wi-Fi MAC's bytes");
+        memcpy(tail, mac, sizeof(tail));
+    }
+    snprintf(s_ble_name, sizeof(s_ble_name), BLE_NAME_PREFIX "%s%s-%02X%02X%02X",
+             PRODUCT_CODE[0] ? "-" : "", PRODUCT_CODE, tail[3], tail[4], tail[5]);
     snprintf(s_mac, sizeof(s_mac), "%02x:%02x:%02x:%02x:%02x:%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     snprintf(s_device_id, sizeof(s_device_id), "hatch-link:%s", s_mac);
@@ -118,9 +153,10 @@ bool identity_refresh_node_id(void) {
         memcpy(s_stored_node_id[s_stored_slot], stored, sizeof(stored));
         use = s_stored_node_id[s_stored_slot];
     } else if (config_is_provisioned()) {
-        // Credentials from earlier firmware, which stored no id: they were
-        // issued for the homelink- id.
-        use = s_legacy_node_id;
+        // Credentials from a setup that stored no id: earlier firmware, or a
+        // gadget setup without a proof key. They were issued for the
+        // homelink- id.
+        use = s_homelink_node_id;
     } else {
         use = s_setup_node_id;
     }

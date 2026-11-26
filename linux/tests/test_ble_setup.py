@@ -340,7 +340,7 @@ def test_provision_refusal_without_session_keys_does_not_deadlock():
 
 
 def test_device_info_without_gadget_node_ids(monkeypatch):
-    # Off by default.
+    # The default: no gadget node ids.
     monkeypatch.delenv(config.GADGET_NODE_ID_ENV)
     h = Harness()
     h.send({"action": "get_device_info"})

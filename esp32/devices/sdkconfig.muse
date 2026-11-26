@@ -60,7 +60,10 @@ CONFIG_LV_LOG_LEVEL_WARN=y
 CONFIG_LV_LOG_PRINTF=y
 
 # NimBLE: Link's pairing service and Muse's phone setup service share one
-# connection. Bonds persist so the phone setup passkey is asked once.
+# connection. Bonds persist so the phone setup passkey is asked once. No
+# central role, except on musegadgets builds, where
+# CONFIG_MUSE_GADGET_BLE_PEER_NAME selects it with the GATT client to read the
+# connected phone's GAP name for the Status page.
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n

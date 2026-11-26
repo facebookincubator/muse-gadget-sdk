@@ -61,9 +61,14 @@ streams hears busy.
   240-320 MHz MCU, with the pictures in PSRAM. Over Wi-Fi this, not the
   link, sets the bitrate and the picture size: the link carries several
   times what the decoder can use.
-- **Small pictures.** 232x232 on the round 466 px panels (Waveshare S3
-  1.75C, M5Stack StopWatch), shown two times upscaled; up to 480x480 on the
-  ESP-Mosaico (ESP32-S31, two cores at 320 MHz).
+- **Small pictures.** 240x240 on the round 466 px panels (Waveshare S3
+  1.75C, M5Stack StopWatch) and 208x208 on the SenseCAP Watcher's 412,
+  shown two times upscaled so the picture covers the circle (the 2x
+  square's corners, hidden by the round mask, take the crop, so the picture fills
+  the circle); up to 480x480 on the ESP-Mosaico (ESP32-S31, two cores at
+  320 MHz). A client that sends 232 or 200 for the round boards (which leave
+  black slivers on the flat edges) gets the picture's edge pixels extended
+  into the sliver.
 
 So the stream is H.264 constrained baseline (the only profile the small
 decoders take), 24-30 fps, with every byte that doesn't reach the viewer's
@@ -105,10 +110,11 @@ for one.
 
 The phone and the gadget are on the same network (a gadget running Home
 Link has joined it already). The gadget (`CONFIG_MUSE_VIDEO_WIFI`) listens
-on TCP port 7766 (`CONFIG_MUSE_VIDEO_WIFI_PORT`) and announces itself over
-mDNS as `_musevideo._tcp`, instance name its BLE name
-(`MuseGadget-A1B2C3`), with TXT `version=1`, `width`, `height` and
-`round` (its display). One client at a time; a client that vanished is
+on TCP port 7766 (`CONFIG_MUSE_VIDEO_WIFI_PORT`) and, while its Phone
+camera view is open, announces itself over mDNS as `_musevideo._tcp`,
+instance name its BLE name (`MuseGadget-A1B2C3`), with TXT `version=1`,
+`width`, `height` and `round` (its display): a client browses for it
+until it appears (or connects to an address it knows). One client at a time; a client that vanished is
 dropped by TCP keepalive (about 11 s). See Trust below for who may
 connect and when.
 
@@ -123,7 +129,7 @@ Messages, in the order they usually come:
 | Type | From | Fields | Meaning |
 |---|---|---|---|
 | `hello` | gadget, on connect | `version` (1), `name`, `codecs` (`["h264"]`, `["h264","vp8"]` with `CONFIG_MUSE_VIDEO_VP8`), `display` {`width`, `height`, `round`}, `max` {`width`, `height`, `fps`}, `suggested` {`width`, `height`, `fps`, `kbps`}, `buffer` (ring bytes), `max_playout_ms`, `max_bands`, `band_split_pct` | what it decodes and shows, and the stream it suggests |
-| `want` | gadget | `on` | the user opened (true) or left (false) the Phone camera view; sent again after `hello` while the view is open. A client that can stream answers true with `start`, false by stopping |
+| `want` | gadget | `on` | the user opened (true) or left (false) the Phone camera view; sent again after `hello` while the view is open. A client answers true with `start` only when its user started a stream to this gadget (the apps never start on `want` alone), false by stopping |
 | `start` | client | `codec` (`"h264"` or, where hello lists it, `"vp8"`), `width`, `height` (the picture after cropping), `fps`, `kbps`, optional `playout_ms`, `bands` | starts a stream (replacing one that's on) |
 | `buffer` | gadget | `free`, `received`, `shown`, `dropped`, `decode_ms`, optional `last_frame`, `last_age_ms` | credits and progress: after a start, and after each frame the decoder takes |
 | `error` | gadget | `for` (`"start"`), `reason` (`closed`, `busy`, `invalid`, `unsupported`) | the start was refused. `closed`: the Phone camera view isn't open, wait for `want`; `busy` (the screen still waking, another stream on): try again in a second; `invalid`: a value out of range or past `max` |
@@ -161,7 +167,8 @@ for the next beacon, up to 100 ms of extra latency and jitter.
 ### Trust
 
 The port is not authenticated or encrypted: anything on the network can
-connect, and anything on the network can answer mDNS as a gadget. Both
+connect, and anything on the network can answer mDNS as a gadget. These
+are the transport's rules, which a gadget's port and the apps follow; both
 ends treat what they receive as untrusted and limit what a stranger gets:
 
 - **A stream only while someone is looking.** The gadget takes `start`
@@ -169,6 +176,17 @@ ends treat what they receive as untrusted and limit what a stranger gets:
   otherwise), so nobody else can wake its screen, draw on it, keep its
   radio out of sleep or silence its BLE.
   `CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME` lifts this for automated benches.
+- **Announced only while someone is looking.** The port's mDNS service
+  goes up when the view opens (once the network is up) and comes down when
+  it closes; a bench build that takes starts at any time
+  (`CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME`) announces it always.
+- **Refusals slow a client down.** After 3 starts refused in a row
+  (`closed`, `invalid` or `unsupported`) the port stops looking at starts
+  for 1 s and answers each `busy`, as a board that can't take one does
+  (a stream that's on stays on);
+  each refusal after a pause doubles it, up to 30 s. A start that's taken,
+  the view opening or a new connection ends it. A `busy` for the board's
+  own state isn't counted.
 - **One client, kept.** A connection must send a whole message within
   5 s; a new connection is turned away while the client has sent
   something in the last 10 s (the apps' `status` every 4 s keeps their
@@ -178,28 +196,142 @@ ends treat what they receive as untrusted and limit what a stranger gets:
   `max`, are `invalid`. A frame longer than 64 KB closes the connection.
   The decoders are told the stream's size before they see a byte, and
   refuse an H.264 sequence parameter set or a VP8 keyframe for a larger
-  picture (nothing is allocated for it), and tinyh264 refuses sizes whose
-  arithmetic would overflow. Drawing reads only what the decoded picture
-  holds, and pictures being drawn are never freed under the show task
-  (the decoder waits for both before any access unit with a parameter
-  set or an IDR slice, which may switch to another parameter set sent
-  earlier, and before a VP8 keyframe; a band that doesn't start with a
-  start code is one NAL unit to the decoder, so its first byte counts).
-  Drawing writes exactly the piece of the panel it's filling, whatever
-  the sizes: each colour converter writes only the rows it's asked for,
-  and two bands meet where the top band's rows end, on whole rows of the
-  converter, so a piece across the seam splits into parts the converters
-  draw whole. The decode task takes two bands only in the layout above
-  (the top band whole macroblocks and shorter than the picture, the two
-  making its height).
-  `esp32/tests/test_video_untrusted.py` checks these.
+  picture (nothing is allocated for it; for H.264 the picture after frame
+  cropping, the coded size bounded to that plus an encoder's padding), and
+  tinyh264 refuses sizes whose
+  arithmetic would overflow. Drawing reads only rows the decoder has
+  finished and the decoded picture holds, and writes exactly each piece
+  the panel driver hands it: every colour converter writes its
+  destination's rows and no more, and two bands meet on the converter's
+  own row unit, whatever heights their pictures decode to (two bands make
+  the stream's height: the top band whole macroblocks, the bottom one
+  cropped to the stream or whole macroblocks). Pictures being drawn are
+  never freed under the show task (the decoder waits for both before any access unit with
+  a parameter set or an IDR slice, which may switch to another parameter
+  set sent earlier, and before a VP8 keyframe; a band that doesn't start
+  with a start code is one NAL unit to the decoder, so its first byte
+  counts). `esp32/tests/test_video_untrusted.py`
+  checks these, the drawing at every band seam and scale on the real
+  decoder's pictures with guard bytes after every piece.
+- **Damage doesn't stick.** Each frame decodes on its own: a picture the
+  decoder couldn't finish is dropped, never carried into the next frame,
+  and a keyframe always repairs the decoder. Once a keyframe has decoded,
+  the stream's size and profile are locked: a sequence parameter set for
+  another is refused, a parameter set that changes the stream's own (same
+  id) is taken only beside a keyframe, and after a decode error the last
+  keyframe's parameter sets come back. A lost frame (a jump in the frame
+  header's number, or a gap in a slice's frame_num where the stream
+  doesn't allow gaps, which the decoder takes as an error) waits for a
+  keyframe instead of decoding against a missing reference: the gadget
+  asks for one (request_keyframe) at once, then at most every 300 ms while
+  it waits. A picture that reaches no output is an error, never a NULL
+  read (damaged parameter sets can lead to one in tinyh264's
+  `h264bsdDecode`).
 - **The apps** clamp what `hello` claims (sizes, rates, buffer) before
   sizing encoders and buffers from it, and take launch options (Android
-  intent extras, iOS's `musegadgetscamera://` URLs) only in debug builds.
+  intent extras, iOS's `musegadgetscamera://` URLs) only in debug builds,
+  and start a stream only on the user's own start for that connection, never
+  on a `want` alone: a stranger's `want` starts nothing.
 
 What that leaves: someone on the network while the view is open can show
 their own video instead of the phone's, and anyone on it can see the
-video, which isn't encrypted. Use it on networks you trust.
+video, which isn't encrypted. Whoever answers as the gadget gets the stream
+the user started, including a peer that advertises the gadget's name while
+the real gadget's view is closed. Use it on networks you trust. Over BLE
+(below) the stream rides the gadget's Muse link, which is neither bonded
+nor encrypted (only speaker gadgets bond), and its L2CAP channel asks for
+no security: on a set-up gadget a stream needs the connection's token
+proof (`mgcommands.h`, Token proof), which a relay in range can forward
+(its known limit), and a nearby sniffer can read the video. The sizes and
+the decoders are guarded the same way.
+
+## BLE (mgcommands)
+
+The same frames also go over the musegadgets BLE protocol
+(`mgcommands.h`, `mg_command_stream_video`), to gadgets without Wi-Fi or
+with BLE only, such as BLE builds of the StopWatch and the ESP-Mosaico.
+On the ESP32 it is a second `muse_video_transport_t` over the same ring and
+decoder.
+
+### The budget
+
+Everything below follows from three numbers:
+
+- **The link carries 400-870 kb/s.** BLE GATT on 2M PHY with 251-byte link
+  packets, a 15 ms interval and no peripheral latency. An S22 sends 3-6
+  packets per connection event; that, not the interval, is the ceiling
+  (7.5 ms and 30 ms both carry less). It halves with a bad antenna
+  position or distance: always note where the phone and gadget were when
+  you quote a number.
+- **The decoder has 20-30 ms a frame.** A software H.264 decoder on a
+  240-320 MHz MCU, with the picture in PSRAM.
+- **Small pictures.** 240x240 (StopWatch, shown two times upscaled and
+  cropped to the round 466 px panel), or 240x240 that a gadget's GPU scales
+  to a larger round panel.
+
+So the stream is H.264 constrained baseline (the only profile the small
+decoders take), at 200-650 kb/s, 24-30 fps, with every byte that doesn't
+reach the viewer's eye removed before it is encoded.
+
+### On the wire
+
+- **Frames:** an 8-byte frame header (`MG_VIDEO_FRAME_HEADER_LEN`) then
+  one Annex B access unit (or one VP8 frame), split anywhere into Write
+  Without Response on Data.
+- **VP8:** a gadget that decodes it lists `mg_data_type_video_vp8` (25)
+  beside H.264 (24) in `capability_codecs`; the client names it as the
+  start's codec, and the stream's Data is then type 25 (change_data_type
+  25 to come back to it from audio).
+- **Write size: min(495, ATT_MTU - 3).** At the ATT MTU of 247 a stream
+  asks for (Link, below) that is 244 bytes, one full 251-byte link packet.
+  On a link with a larger MTU, 495 + 3 (ATT) + 4 (L2CAP) = 502 = two full
+  251-byte link packets, and a 512-byte write needs a third, 17-byte
+  packet, which costs nearly a whole packet's airtime: measured on such a
+  link, ~20% less throughput on an S22 (509 vs 418 kb/s raw; 341 vs
+  275 kb/s of video with two-way audio). Muse Gadgets Test writes up to
+  495 (`--ei wmax` overrides).
+- **Credits:** the client keeps bytes in flight under the gadget's free
+  buffer (buffer_update) and under about 120 ms of video (`air`, 3 KB at
+  a 15 ms interval): Android completes a Write Without Response once its
+  own stack has queued it, so writing further ahead only adds latency.
+- **Link:** a stream asks for 2M PHY, 251-byte packets (DLE), ATT MTU
+  exactly 247 (a full 244 B write in one link-layer packet at DLE 251),
+  a 15 ms interval and **latency 0**. Gadgets idle at latency 10 or more
+  for power; a stream (video, audio playback or a throughput test) must
+  drop it or the gadget listens to only a few events a second (one at
+  latency 10 measured 14 kb/s phone-to-gadget).
+- **Audio beside video** shares Data, switched with change_data_type on
+  Control (in order with the Data writes). SBC (60 B per 8 ms) and LC3
+  (40 B per 10 ms at 32 kb/s) both fit beside 30 fps video.
+- An LE L2CAP channel is offered (`l2cap_psm`) but measured slower than
+  GATT on an S22 (~680 vs ~870 kb/s).
+
+### Latency and quality
+
+The gadget echoes in buffer_update the last frame it drew and how long ago
+(`mg_stream_video_buffer_update`'s optional trailing fields; the ESP32's
+transport-neutral core keeps them but its BLE transport doesn't send them yet), so the app measures
+capture-to-shown latency per frame from a gadget that sends them.
+`android/musegadgetstest/tools/livebench` plays raw clips through the app's
+camera path and scores what the gadget shows at its panel. On a 240 px
+gadget with a GPU-scaled 360 px round panel, 250 kb/s fixed, the xiph 4CIF
+soccer, crew, city and ice clips (high motion), before -> after these
+changes: latency 500-535 ms -> 58-67 ms median (ice, which never backed
+up, 133 -> 58), panel error (MSE inside the circle) -36 to -70%, the
+gadget's decode time 25-31 -> 14-15 ms. The real camera on a still scene:
+196 -> 133 ms median, 306 -> 151 ms p90, at 229 instead of 376 kb/s; what
+is left is mostly the camera (~70 ms from its sensor timestamp to the app;
+noise reduction or edge enhancement off, the record template or two image
+buffers instead of three made no difference).
+
+### Measured over BLE
+
+| | StopWatch (ESP32-S3) |
+|---|---|
+| picture | 232x232 when measured (240x240 covers the round panel: Small pictures, above), two times upscaled |
+| camera | 30 fps, 450-620 kb/s, decode 24-27 ms |
+| clips | 24 fps, no late frames at 200 ms playout |
+| with two-way audio | 30 fps + SBC down + LC3 up, no drops |
 
 ## Encoding the camera (live)
 
@@ -266,7 +398,9 @@ link, never shows late.
 (406 test streams match upstream and ffmpeg byte for byte): an inlined bit
 reader, coefficient clears only for coded blocks, a faster start code
 search, and deblocking per macroblock while the pixels are in cache
-(15-37% less PSRAM traffic). `CONFIG_MUSE_VIDEO_DECODER_IRAM` puts its hot
+(15-37% less PSRAM traffic); and, outside what clean streams reach, error
+recovery (each access unit on its own, kept parameter sets: Trust, above).
+`CONFIG_MUSE_VIDEO_DECODER_IRAM` puts its hot
 code in IRAM: about 44 KB, which on the S3 comes out of the heap a Wi-Fi
 and UI build needs, so it's off there and the decoder runs from cache.
 
@@ -285,8 +419,9 @@ and UI build needs, so it's off there and the decoder runs from cache.
   Memory Write / Write Continue pieces, each converted from YUV
   (`muse_yuv.c`, the S3's SIMD in `muse_yuv_pie.S`, the S31's in
   `muse_yuv_pie_s31.S`) and scaled straight into a free DMA buffer while
-  the one before is on the wire: two times (232 to 464), 3/2 (320 to 480),
-  one to one, or any other factor.
+  the one before is on the wire: two times (232 to 464, or 240 to 480
+  cropped to a round 466 px panel), 3/2 (320 to 480), one to one, or any
+  other factor.
 - **Playout pacing** (clips): the decoder works up to a frame ahead and the
   show task keeps the time, so a slow frame borrows the time a quick one
   left.

@@ -44,12 +44,15 @@
 #include "muse_audio.h"
 #include "muse_board.h"
 #include "muse_ui.h"
+#include "muse_input.h"
+#include "muse_touch.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 
 #include "esp_lcd_st77916.h"
 #include "esp_lcd_touch_cst816s.h"
 #include "waveshare_s3_185c/st77916_init_185c.h"
+#include "muse_lvgl_hold.h"
 
 static const char *TAG = "board";
 
@@ -310,9 +313,9 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* bounded, shared with video */
     } else {
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 
@@ -399,6 +402,8 @@ static unsigned poll_buttons(void)
     static bool tp_talking = false;       /* hold threshold reached */
     static TickType_t tp_press_tick = 0;  /* when the current press began */
     static bool tp_on_face = false;       /* press started on the face tile */
+    static bool tp_real = false;          /* every read of this touch so far was the panel's (muse_touch_real) */
+    static bool tp_own = false;           /* the talk it started is the gadget's own (a finger), not injected */
 
     bool pressed = false;
     if (s_touch_indev) {
@@ -410,21 +415,37 @@ static unsigned poll_buttons(void)
         tp_down = true;
         tp_on_face = muse_ui_face_active();
         tp_press_tick = xTaskGetTickCount();
+        muse_input_touch_down();   /* a hold it reports later went down here */
         tp_talking = false;
+        tp_real = muse_touch_real();
     } else if (!pressed && tp_down) {
         /* Release: end the talk if one started. */
-        if (tp_talking) {
+        if (tp_talking && tp_own) {
             ev |= MUSE_BTN_TALK_RELEASE;
+        } else if (tp_talking) {
+            muse_input_touch_talk(false);   /* the injected hold's release, the way it went in */
         }
         tp_down = false;
         tp_talking = false;
     } else if (pressed && tp_down && tp_on_face && !tp_talking) {
+        tp_real = tp_real && muse_touch_real();
         /* Still held on the face: start talking once the hold threshold passes. */
         if (muse_ui_volume_swiping()) {
             tp_on_face = false;   /* a volume drag owns this touch */
         } else if ((xTaskGetTickCount() - tp_press_tick) >= pdMS_TO_TICKS(TOUCH_HOLD_MS)) {
-            tp_talking = true;
-            ev |= MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;   /* a hold, not an edge: never confirms pairing */
+            /* An injected touch (the console's or the Nordic UART's !IN press=) stays injected: never the gadget's
+             * own talk press, which opens a client's start_mic and confirms. It talks through the UI's path, where
+             * an injected press may talk at all (muse_input_talk_ok: test, bench and automation images). */
+            tp_own = tp_real && muse_touch_real();
+            if (tp_own) {
+                tp_talking = true;
+                ev |= MUSE_BTN_TALK_PRESS | MUSE_BTN_TALK_HELD;   /* a hold, not an edge: never confirms pairing */
+            } else if (muse_input_talk_ok(false)) {
+                tp_talking = true;
+                muse_input_touch_talk(true);
+            } else {
+                tp_on_face = false;   /* a release image: an injected hold never talks */
+            }
         }
     }
     return ev;
@@ -481,6 +502,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): BOOT (GPIO0), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(GPIO_NUM_0, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-LCD-1.85C",
     .width = LCD_RES,
@@ -497,6 +530,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
@@ -505,7 +539,9 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_PERCENT,   /* percent fallback: no charge line */
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

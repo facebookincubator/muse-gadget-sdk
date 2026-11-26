@@ -112,7 +112,7 @@ class DeviceDescriptionTest(unittest.TestCase):
             self.skipTest("C compiler unavailable")
         flags = ["-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter",
                  "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
-                 "-DCJSON_NESTING_LIMIT=16", "-I", str(CJSON)]
+                 "-DCJSON_NESTING_LIMIT=16", "-I", str(CJSON), "-I", str(ROOT / "main")]
         sources = [HOST_CJSON]
         if ble:
             (tmp / "ble_client_stubs.c").write_text(BLE_CLIENT_STUBS)
@@ -143,8 +143,6 @@ class DeviceDescriptionTest(unittest.TestCase):
                       display_name: str = "MuseGadget-0A1B2C", ble: bool = False,
                       ssid: str = "0123456789abcdef0123456789abcdef", apps: bool = False,
                       apps_on: bool = True) -> list[str]:
-        family = NOISE[NOISE.index("#ifndef MUSE_DEVICE_FAMILY"):]
-        family = family[: family.index("#endif") + len("#endif")]
         functions = "\n".join(function_source(NOISE, signature) for signature in (
             "static cJSON *string_param(", "static cJSON *integer_param(", "static cJSON *row_params(",
             "static void add_command(",
@@ -179,7 +177,7 @@ bool led_status_display_info(int *w, int *h) {{ *w = 800; *h = 480; return true;
 int led_status_display_bits(void) {{ return bits; }}
 void ble_commands_register(cJSON *commands);
 void muse_apps_advertise(cJSON *commands);
-{family}
+#include "register_family.h"   /* device_family and model_id */
 {functions.replace(cap, "size <= 65536 && !json")}
 int main(void) {{
     const int depths[] = {{1, 2, 4, 16}};
@@ -202,6 +200,8 @@ int main(void) {{
         params = json.loads(self.registrations([
             "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_HOMEHUB_NET_FORWARD=1", *model,
         ])[0])["params"]
+        # register_family.h: a Wi-Fi-only build registers "gadget" with
+        # the board's model id, its model name and its guide.
         self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
         self.assertEqual(params["metadata"]["model_name"], "Acme Lamp")
         # The VM keeps only string metadata values.
@@ -216,6 +216,16 @@ int main(void) {{
         self.assertNotIn("net.forward", commands)
         self.assertEqual(params["commands_v2"]["device.guide"],
                          {"description": GUIDE_DESCRIPTION, "required": {}, "optional": {}})
+        # A Muse Gadget (musegadgets BLE) registers as "gadget" with the same
+        # model id (never its catalog code), and its short product name when
+        # the overlay sets one.
+        params = json.loads(self.registrations([
+            "-DCONFIG_HOMEHUB_TUNNEL=1", "-DCONFIG_MUSE_GADGET_BLE_AUDIO=1",
+            '-DCONFIG_HOMEHUB_BLE_PRODUCT_CODE="SCW1"', '-DCONFIG_HOMEHUB_MODEL_NAME="Watcher"',
+            '-DCONFIG_MUSE_DEVICE_MODEL_ID="acme-lamp"', '-DCONFIG_MUSE_DEVICE_MODEL_NAME="Acme Lamp"',
+        ])[0])["params"]
+        self.assertEqual((params["device_family"], params["model_id"]), ("gadget", "acme-lamp"))
+        self.assertEqual(params["metadata"]["model_name"], "Watcher")
 
     def test_register_fits_its_buffer_in_the_largest_builds(self) -> None:
         # The richest option sets a board can build with, plus the opt-in BLE
@@ -331,7 +341,13 @@ int main(void) {{
         if shutil.which("cmake") is None:
             self.skipTest("cmake unavailable")
         base = ["-DCONFIG_CJSON_NESTING_LIMIT=16", "-DCONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384",
-                "-DCONFIG_LWIP_TCP_WND_DEFAULT=16384"]
+                "-DCONFIG_LWIP_TCP_WND_DEFAULT=16384",
+                # Both watchdogs on, as a BLE gadget build requires (harmless for the rest).
+                "-DCONFIG_ESP_INT_WDT=y", "-DCONFIG_ESP_INT_WDT_TIMEOUT_MS=1500",
+                "-DCONFIG_ESP_INT_WDT_CHECK_CPU1=y", "-DCONFIG_ESP_TASK_WDT_EN=y",
+                "-DCONFIG_ESP_TASK_WDT_INIT=y", "-DCONFIG_ESP_TASK_WDT_PANIC=y",
+                "-DCONFIG_ESP_TASK_WDT_TIMEOUT_S=15", "-DCONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y",
+                "-DCONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y"]
         for model_id, name, accepted in (
                 ("acme-lamp", "Acme Lamp (2nd gen) #1 ~ 100%", True), ("z" * 64, "~" * 128, True),
                 ("Acme", "Lamp", False), ("a" * 65, "Lamp", False),

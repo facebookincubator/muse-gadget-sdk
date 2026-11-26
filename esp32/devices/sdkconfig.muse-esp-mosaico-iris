@@ -27,6 +27,9 @@ CONFIG_ESP_IRIS_LAYOUT_ID="mosaico-retained-recovery-2m-v1"
 CONFIG_ESP_IRIS_RECOVERY_ABI=1
 CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY=y
 CONFIG_ESP_IRIS_SYSTEM_INVENTORY=y
+# The RPC table (8 by default): the mirror's 3 methods, the way back's 3 and the bench's (muse_mosaico_iris.c,
+# whose static assert keeps 4 spare). A full table would abort the boot before Iris.
+CONFIG_ESP_IRIS_MAX_RPC_HANDLERS=16
 # CONFIG_ESP_IRIS_OTA is not set
 
 # ESP-Iris owns the high-speed USB; no TCP transport (installs go over USB).

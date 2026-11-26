@@ -216,14 +216,18 @@ class WasmAppsTest(unittest.TestCase):
             self.assertIn(line, tool)
 
     def test_apps_are_installed_on_the_gadget(self):
-        # The partition comes last in the 16 MB table, so no offset moves.
-        rows = [line.split(",") for line in read("partitions_muse.csv").splitlines()
+        # apps and files sit where they always have (a board reflashed over USB
+        # keeps them); only the BLE offline clips' mg_queue follows, to 16 MB.
+        rows = [[c.strip() for c in line.split(",")] for line in read("partitions_muse.csv").splitlines()
                 if line.strip() and not line.startswith("#")]
-        self.assertEqual([[c.strip() for c in r[:3]] for r in rows[-2:]],
-                         [["apps", "data", "littlefs"], ["files", "data", "littlefs"]])
-        self.assertEqual(rows[-3][0], "prod_bak")
+        self.assertEqual([r[:5] for r in rows[-3:-1]],
+                         [["apps", "data", "littlefs", "0x830000", "2M"],
+                          ["files", "data", "littlefs", "0xA30000", "4M"]])
+        self.assertEqual(rows[-4][0], "prod_bak")
+        self.assertEqual(rows[-1][0], "mg_queue")
         offsets = [int(r[3], 16) for r in rows]
         self.assertEqual(offsets, sorted(offsets))
+        self.assertEqual(int(rows[-1][3], 16) + int(rows[-1][4], 16), 16 * 1024 * 1024)
         cmake = read("components/muse_apps/CMakeLists.txt")
         for module in ["store", "catalog", "launcher", "icons", "flash"]:
             self.assertRegex(cmake, r"foreach\(module [^)]*\b%s\b" % module)

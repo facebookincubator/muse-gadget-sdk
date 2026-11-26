@@ -73,7 +73,9 @@ partitions, OTA defaults, the BLE protocol or setup.
 
 Control, tunnel (including in-place batches/resets), and agent identity use
 `ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel`, and
-`/api/gadget/me` (`result.muse_name`). There is no legacy daemon-route fallback.
+`/api/gadget/me` (`result.muse_name`). There is no legacy daemon-route fallback
+over Wi-Fi; a BLE-only gadget's device session, through the phone's relay,
+keeps its control stream on the daemon's `POST /link-control`.
 A refused control stream reconnects normally; a refused identity fetch only
 leaves the name unknown. Extra `noise_ctrl_req_*` requests still target
 `ServiceType::Daemon`.

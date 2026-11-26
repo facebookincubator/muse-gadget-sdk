@@ -144,7 +144,9 @@ static void test_ring(void)
     CHECK(s.overruns == 3 * n - sizeof(ring));
     CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 1500 && fr.number == 5);
     CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 1500 && fr.number == 5);
-    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 0);   /* the cut one waits for bytes that never come */
+    /* The cut one is dropped at its loss boundary, never left to be completed by later bytes. */
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == -1);   /* no frame taken */
+    CHECK(muse_vstream_pop(&s, out, sizeof(out), &fr) == 0);
 
     /* Stopped: the producer has no space. */
     muse_vstream_stop(&s);

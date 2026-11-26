@@ -18,7 +18,13 @@
 #include <assert.h>
 #include <stdio.h>
 // Portable host CSPRNG; firmware continues using esp_fill_random on the board.
+#if TEST_COUNT_RNG_DRAWS
+extern int test_rng_draws;   // every draw, so a refused operation can show it drew nothing
+#endif
 static inline void esp_fill_random(void *p, size_t n) {
+#if TEST_COUNT_RNG_DRAWS
+    test_rng_draws++;
+#endif
     FILE *random = fopen("/dev/urandom", "rb");
     assert(random && fread(p, 1, n, random) == n);
     fclose(random);

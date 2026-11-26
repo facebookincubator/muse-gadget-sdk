@@ -1,0 +1,75 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Where the LC3 codec lives (CONFIG_MUSE_GADGET_BLE_LC3_PLACE_*): code in
+# IRAM (noflash_text), tables in DRAM (noflash), or flash. The encoder set
+# is the encoder's code and what it shares with the decoder (the FFT, the
+# spectral shaping, the bit writer); the decoder's own code stays in flash.
+[mapping:liblc3]
+archive: libliblc3.a
+entries:
+    if MUSE_GADGET_BLE_LC3_PLACE_RAM = y:
+        * (noflash)
+        # Only 16 kHz / 10 ms gets its windows and band limits in DRAM: the
+        # other rates' stay in flash, 24 kHz's included, which the build also
+        # takes (LC3_SR_MASK, LC3_DT_MASK). lc3fx keeps them all in its index
+        # tables, so they're linked; 16 KB of DRAM saved.
+        tables:mdct_win_7m5_8k (default)
+        tables:mdct_win_7m5_16k (default)
+        tables:mdct_win_7m5_24k (default)
+        tables:mdct_win_7m5_32k (default)
+        tables:mdct_win_7m5_48k (default)
+        tables:mdct_win_10m_8k (default)
+        tables:mdct_win_10m_24k (default)
+        tables:mdct_win_10m_32k (default)
+        tables:mdct_win_10m_48k (default)
+        tables:band_lim_7m5_8k (default)
+        tables:band_lim_7m5_16k (default)
+        tables:band_lim_7m5_24k (default)
+        tables:band_lim_7m5_32k (default)
+        tables:band_lim_7m5_48k (default)
+        tables:band_lim_10m_8k (default)
+        tables:band_lim_10m_24k (default)
+        tables:band_lim_10m_32k (default)
+        tables:band_lim_10m_48k (default)
+    elif MUSE_GADGET_BLE_LC3_PLACE_TEXT = y:
+        * (noflash_text)
+    elif MUSE_GADGET_BLE_LC3_PLACE_ENC = y:
+        attdet (noflash_text)
+        energy (noflash_text)
+        bwdet:lc3_bwdet_run (noflash_text)
+        mdct:fft (noflash_text)
+        mdct:lc3_mdct_forward (noflash_text)
+        sns:lc3_sns_analyze (noflash_text)
+        sns:spectral_shaping (noflash_text)
+        sns:add_pulse (noflash_text)
+        sns:unquantize (noflash_text)
+        sns:normalize (noflash_text)
+        sns:enum_mvpq (noflash_text)
+        sns:lc3_sns_put_data (noflash_text)
+        tns:lc3_tns_analyze (noflash_text)
+        tns:lc3_tns_put_data (noflash_text)
+        spec:lc3_spec_analyze (noflash_text)
+        spec:quantize (noflash_text)
+        spec:compute_nbits (noflash_text)
+        spec:lc3_spec_encode (noflash_text)
+        spec:lc3_spec_put_side (noflash_text)
+        bits:lc3_setup_bits (noflash_text)
+        bits:lc3_flush_bits (noflash_text)
+        bits:lc3_ac_write_renorm (noflash_text)
+        bits:lc3_put_bits_generic (noflash_text)
+        lc3:lc3_encode (noflash_text)
+        lc3:load_s16 (noflash_text)
+    else:
+        * (default)

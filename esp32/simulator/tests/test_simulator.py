@@ -63,6 +63,77 @@ def render(binary: Path, scenario: Path, output: Path) -> tuple[str, subprocess.
     return hashlib.sha256(pixels).hexdigest(), proc
 
 
+def lit(pixels: bytes, x0: int, y0: int, x1: int, y1: int, outside: bool = False) -> int:
+    """Pixels brighter than black inside (or outside) the box."""
+    n = 0
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            inside = x0 <= x < x1 and y0 <= y < y1
+            if inside != outside:
+                i = (y * WIDTH + x) * 3
+                if max(pixels[i : i + 3]) > 24:
+                    n += 1
+    return n
+
+
+def has_color(pixels: bytes, rgb: tuple[int, int, int], tol: int = 12) -> int:
+    n = 0
+    for i in range(0, len(pixels), 3):
+        if all(abs(pixels[i + k] - rgb[k]) <= tol for k in range(3)):
+            n += 1
+    return n
+
+
+def check_turn_dot(binary: Path, tmp: Path) -> None:
+    """On a screen without Muse a turn's thinking shows a breathing
+    #E07BFF dot and responding a #6FF0BF one, top center inside the ring
+    (412 px: ring 9, gap 4, radius 7: center (206, 20)); nothing at
+    listening or idle, nothing where Muse shows it (the home), nothing on
+    the calling screen."""
+    cx, cy, r = WIDTH // 2, 20, 7
+    box = (cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2)
+    base = "wifi=connected\nble=connected\npaired=true\nbattery=72\nclock=10:09\n"
+
+    def shot(name: str, extra: str) -> bytes:
+        path = tmp / f"dot_{name}.txt"
+        path.write_text(base + extra + "advance=900\n")
+        render(binary, path, tmp / f"dot_{name}.ppm")
+        return read_ppm(tmp / f"dot_{name}.ppm")
+
+    def center(pixels: bytes) -> tuple[int, int, int]:
+        i = (cy * WIDTH + cx) * 3
+        return pixels[i], pixels[i + 1], pixels[i + 2]
+
+    def like(rgb: tuple[int, int, int], want: int) -> bool:
+        """rgb is want, faded toward black (the breath at any step over black)."""
+        w = ((want >> 16) & 255, (want >> 8) & 255, want & 255)
+        k = max(rgb) / max(w)
+        return k >= 0.45 and all(abs(rgb[i] - w[i] * k) <= 16 for i in range(3))
+
+    def dot_pixels(pixels: bytes) -> int:
+        n = 0
+        for y in range(box[1], box[3]):
+            for x in range(box[0], box[2]):
+                i = (y * WIDTH + x) * 3
+                rgb = (pixels[i], pixels[i + 1], pixels[i + 2])
+                n += max(rgb) > 24 and (like(rgb, 0xE07BFF) or like(rgb, 0x6FF0BF))
+        return n
+
+    for page in ("page=settings\n", "page=status\n", "page=settings/sound\n"):
+        thinking = shot("thinking", "face=thinking\n" + page)
+        assert like(center(thinking), 0xE07BFF), f"{page.strip()}: thinking dot {center(thinking)}"
+        speaking = shot("speaking", "face=speaking\n" + page)
+        assert like(center(speaking), 0x6FF0BF), f"{page.strip()}: responding dot {center(speaking)}"
+        for face in ("listening", "idle", "error"):   # (listening goes to the home, battery and all)
+            assert dot_pixels(shot(face, f"face={face}\n" + page)) == 0, f"{page.strip()}: a dot at {face}"
+    for face in ("thinking", "speaking"):
+        assert lit(shot(f"home_{face}", f"face={face}\n"), *box) == 0, f"home: Muse shows {face}, no dot"
+    # The calling screen stays black but for its text, mid-turn too.
+    calling = shot("calling", "face=thinking\ncall=asked\nadvance=600\n")
+    c = WIDTH // 2
+    assert lit(calling, c - 140, c - 24, c + 140, c + 24, outside=True) == 0, "a dot on the calling screen"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
@@ -81,6 +152,8 @@ def main() -> None:
             hashes[scenario.stem] = first
 
         assert len(set(hashes.values())) == len(hashes), f"scenarios rendered identically: {hashes}"
+
+        check_turn_dot(binary, tmp_path)
 
         # Showing shutdown must not lock subsequent preview state selections.
         after_off = tmp_path / "after-off.txt"

@@ -41,6 +41,7 @@ CODE = r'''
 #include "cJSON.h"
 #include "muse_chat.h"
 #include "muse_chat_priv.h"
+const char *muse_chat_node_id(void) { return "homelink-0a1b2c"; }
 /* Not CHECK(): the fakes must still check under -DNDEBUG. */
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #c); exit(3); } } while (0)
 #define ESP_LOGW(tag, ...) ((void)(tag))

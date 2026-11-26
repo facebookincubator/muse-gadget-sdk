@@ -69,13 +69,26 @@ class GadgetTransportTest(unittest.TestCase):
         source = (ROOT / "main/noise_control.cpp").read_text()
         for name in ("static bool req_open(", "static bool req_pump_tx("):
             self.assertIn("ServiceType::Daemon, op.id", function_source(source, name))
-        self.assertNotIn('"/link-control"', source)
+        session = function_source(source, "static session_result_t run_session(")
+        # Only Wi-Fi's session left the daemon routes: the device session over
+        # BLE (ble_session_begin) still opens POST /link-control on the daemon,
+        # the route the phone's relay carries, and its control chunks go there
+        # (control_service<BleSessionOut>).
+        self.assertNotIn('"/link-control"', session)
+        self.assertIn("req.path = StringView(GADGET_CONTROL_PATH);", session)
+        ble = function_source(source, "static bool ble_session_begin(")
+        self.assertIn('req.path = StringView("/link-control");', ble)
+        self.assertIn("ServiceType::Daemon, CTRL_STREAM_ID, req,", ble)
         self.assertNotIn('"/link-tunnel"', source)
         self.assertNotIn('"/identity"', source)
-        session = function_source(source, "static session_result_t run_session(")
-        reject = session[session.index('ESP_LOGE(TAG, "server rejected /api/gadget/control') :]
-        self.assertIn("error = true;", reject[:260])
-        self.assertIn("break;", reject[:320])
+        # A refused control stream ends the session: dispatch_inbound_frame()
+        # (shared with the BLE session) says so, and run_session() ends.
+        dispatch = function_source(source, "static bool dispatch_inbound_frame(")
+        reject = dispatch[dispatch.index('ESP_LOGE(TAG, "server rejected the control stream') :]
+        self.assertIn("return false;", reject[:260])
+        loop = session[session.index("if (!dispatch_inbound_frame(inbound.frame, identity, session_generation, &end_reason)) {") :]
+        self.assertIn("error = true;", loop[:160])
+        self.assertIn("break;", loop[:200])
         # The route move keeps the baseline Noise session handshake unchanged.
         self.assertIn("noise_handshake(tls, session, ws_buf, ws_buf_size)", session)
 

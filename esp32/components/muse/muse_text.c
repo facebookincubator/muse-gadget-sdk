@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 #if CONFIG_MUSE_EMOJI
 #include "fonts/muse_emoji.h"
@@ -569,4 +570,65 @@ size_t muse_text_strip_markdown(char *s, uint64_t wrapped)
     }
     *w = '\0';
     return w - s;
+}
+
+static bool word_is(const char *w, size_t n, const char *name)
+{
+    return strlen(name) == n && strncasecmp(w, name, n) == 0;
+}
+
+/* A UTF-8 letter beyond ASCII: Latin-1 and Latin Extended-A, and Latin
+ * Extended Additional (Vietnamese). */
+static bool accented(const unsigned char *p)
+{
+    return (p[0] >= 0xC3 && p[0] <= 0xC7) || (p[0] == 0xE1 && (p[1] == 0xBA || p[1] == 0xBB));
+}
+
+void muse_text_sentence_case(char *s)
+{
+    if (!s) {
+        return;
+    }
+    for (const char *p = s; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') {
+            return;   /* already mixed case: someone chose it */
+        }
+        if (accented((const unsigned char *)p)) {
+            return;   /* a translation's own letters (muse_lang.c): as it is */
+        }
+    }
+    static const char *const KEEP_UPPER[] = { "BLE", "USB", "SDK", "VM", "OK", "I", "LC3", "SBC", "FW", "ID" };
+    bool start = true;
+    char *p = s;
+    while (*p) {
+        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z'))) {
+            if ((*p == '.' || *p == '!' || *p == '?') && p[1] == ' ') {
+                start = true;
+            }
+            p++;
+            continue;
+        }
+        char *w = p;
+        while ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '-' ||
+               (*p == '\'' && ((p[1] >= 'A' && p[1] <= 'Z') || (p[1] >= 'a' && p[1] <= 'z')))) {
+            p++;
+        }
+        size_t n = (size_t)(p - w);
+        bool upper = false;
+        for (size_t i = 0; i < sizeof(KEEP_UPPER) / sizeof(KEEP_UPPER[0]); i++) {
+            upper = upper || word_is(w, n, KEEP_UPPER[i]);
+        }
+        if (upper) {
+            /* as it is */
+        } else if (word_is(w, n, "MUSE")) {
+            memcpy(w, "Muse", 4);
+        } else if (word_is(w, n, "WI-FI")) {
+            memcpy(w, "Wi-Fi", 5);
+        } else {
+            for (size_t i = start ? 1 : 0; i < n; i++) {
+                if (w[i] >= 'A' && w[i] <= 'Z') w[i] = (char)(w[i] - 'A' + 'a');
+            }
+        }
+        start = false;
+    }
 }

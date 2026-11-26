@@ -1,0 +1,77 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: xplat codecs
+
+on:
+  pull_request:
+    paths:
+      - "xplat/**"
+      - "esp32/components/liblc3/CMakeLists.txt"
+      - "esp32/components/libsbc/CMakeLists.txt"
+      - ".github/workflows/xplat.yml"
+  push:
+    branches: [main]
+    paths:
+      - "xplat/**"
+      - "esp32/components/liblc3/CMakeLists.txt"
+      - "esp32/components/libsbc/CMakeLists.txt"
+      - ".github/workflows/xplat.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # liblc3, lc3fx and libsbc as the SDKs build them: interop, bit-exactness
+    # and refusals (xplat/tests/run_tests.py), plain and under ASan + UBSan.
+    name: Host tests (${{ matrix.cc }}${{ matrix.sanitize && ', sanitizers' || '' }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            sanitize: false
+          - cc: gcc
+            sanitize: true
+          - cc: clang
+            sanitize: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Run tests
+        env:
+          CC: ${{ matrix.cc }}
+          SANITIZE: ${{ matrix.sanitize && '--sanitize' || '' }}
+        run: python3 xplat/tests/run_tests.py $SANITIZE
+
+  fuzz:
+    # The lc3fx, liblc3 and libsbc decoders on arbitrary peer bytes, with
+    # libFuzzer and ASan + UBSan, two minutes per LC3 build.
+    name: Fuzz decoders
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Fuzz
+        env:
+          CC: clang
+        run: python3 xplat/tests/run_tests.py --fuzz 120

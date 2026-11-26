@@ -23,6 +23,16 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-m5stack-stopwatch"
 CONFIG_MUSE_DEVICE_MODEL_NAME="M5Stack StopWatch"
 CONFIG_MUSE_BOARD_M5STACK_STOPWATCH=y
+# The UI's type drawn at this panel's size (fonts/type, 466 px).
+CONFIG_MUSE_UI_PANEL_TYPE=y
+
+# Muse Gadgets catalog model code: advertises
+# MuseGadget-M5SW-XXXXXX. ESP32 catalog boards keep the Wi-Fi MAC tail, the
+# same digits as before the code.
+CONFIG_HOMEHUB_BLE_PRODUCT_CODE="M5SW"
+# link.register metadata.model_name: the product name.
+CONFIG_HOMEHUB_MODEL_NAME="StopWatch"
+CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC=y
 
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y

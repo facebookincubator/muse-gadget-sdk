@@ -1,0 +1,60 @@
+# Every wireless read that prints the owner's Live call or subtitle content, one per line: file | log tag | format.
+# All go out only through the Nordic UART log mirror. The mirror's gate (silent on a set-up release build for a
+# connection whose token proof hasn't matched, outside the local window) is what covers them; test_call_owner_reads.py
+# marks that check an expected failure until the gate is in. None prints reply, caption or on-screen text.
+# test_call_owner_reads.py checks this list against the source: a new mirrored call or subtitle line fails until
+# it's listed here.
+components/muse/muse_call.c | mg.call | %s -> %s
+components/muse/muse_call.c | mg.call | a call from the phone while locked: waiting behind the keypad
+components/muse/muse_call.c | mg.call | a call from the phone, still locked after 60 s: declined
+components/muse/muse_call.c | mg.call | call controls drawn %s %ld ms after the touch-down
+components/muse/muse_call.c | mg.call | call controls panel at %d,%d (%d.%d px/mm): hit rows - / + up %d, End call down %d (7 mm = %d px)
+components/muse/muse_call.c | mg.call | call started with the speaker at 0: no volume raise
+components/muse/muse_call.c | mg.call | call state %u from an unproven central: not shown
+components/muse/muse_call.c | mg.call | call.at at boot (bench image): a %u s call %u s after the next client is ready
+components/muse/muse_call.c | mg.call | call.at at boot: this image's timed call already ran
+components/muse/muse_call.c | mg.call | call.at: %s call ended
+components/muse/muse_call.c | mg.call | call.at: %s call starting (%u s)
+components/muse/muse_call.c | mg.call | call.at: boot-armed call given up: a call is already up
+components/muse/muse_call.c | mg.call | call.at: boot-armed call given up: the phone went before its start
+components/muse/muse_call.c | mg.call | call.at: boot-armed call given up: the speaker is at %d (over %d)
+components/muse/muse_call.c | mg.call | call: a compact End call button at %d,%d %dx%d (no room for the panel)
+components/muse/muse_call.c | mg.call | calling screen down: %s
+components/muse/muse_call.c | mg.call | connecting for 60 s with nothing newer from the phone: ending the call
+components/muse/muse_call.c | mg.call | end (%s)
+components/muse/muse_call.c | mg.call | end (%s) %s
+components/muse/muse_call.c | mg.call | live call refused: a UI stream is on
+components/muse/muse_call.c | mg.call | live call refused: locked
+components/muse/muse_call.c | mg.call | no answer from the phone
+components/muse/muse_call.c | mg.call | start (%s)%s%s
+components/muse/muse_call.c | mg.call | start (%s): no call on this board
+components/muse/muse_call.c | mg.call | stats overlay %s (%s)
+components/muse/muse_call.c | mg.call | stats overlay: no memory
+components/muse/muse_call.c | mg.call | stats overlay: no room on this panel
+components/muse/muse_call.c | mg.call | tap: %s
+components/muse/muse_call.c | mg.call | tap: End call (the compact button)
+components/muse/muse_call.c | mg.call | tap: controls dismissed (a tap away from them)
+components/muse/muse_call.c | mg.call | tap: controls shown%s
+components/muse/muse_call.c | mg.call | the phone's call ended while it waited behind the keypad
+components/muse/muse_call.c | mg.call | the unproven central's call view goes: the gadget %s
+components/muse/muse_call.c | mg.call | touch-down: controls shown (not a talk surface)
+components/muse/muse_call.c | mg.call | unlocked: the phone's call opens
+components/muse/muse_call.c | mg.call | volume %d%% (%s): the controls show it
+components/muse/muse_call.c | mg.call | volume %d%% -> %d%% (%s)
+components/muse/muse_call.c | mg.call | waking the screen for the call
+components/muse/muse_input.c | mg.bench | call.at %s
+components/muse/muse_input.c | mg.bench | page %s: refused during a call
+components/muse/muse_input.c | mg.call | last: %s
+components/muse/muse_input.c | mg.call | last: reply audio: %u underruns, %u ms silence (stream %u)
+components/muse/muse_subs.c | mg.subs | band off (%s)
+components/muse/muse_subs.c | mg.subs | band on (%s)
+components/muse/muse_subs.c | mg.subs | ignored %s: subtitles off (%u this spell, %u in all)
+components/muse/muse_subs.c | mg.subs | state %d (%s timing%s)
+components/muse/muse_subs.c | mg.subs | state 0 (call end)
+components/muse/muse_video.c | muse_video | call: no picture for %u ms: Muse in its place until the next one
+components/muse/muse_video.c | muse_video | call: the phone stopped its video %u ms ago: Muse in its place until a picture
+components/muse_gadget_ble/mg_ble.c | mg.ble | live call: %u
+components/muse_gadget_ble/mg_ble.c | mg.ble | live call: %u (failed, reason %u)
+components/muse_gadget_ble/mg_ble.c | mg.ble | live call: link to full speed at the call's start %s
+components/muse_gadget_ble/mg_lct.c | mg.lct | LCT c=%u %s
+components/muse_gadget_ble/mg_lct.c | mg.lct | LCT c=%u %s t=%lld +%lld.%lld ms%s

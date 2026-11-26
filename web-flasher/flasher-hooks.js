@@ -23,9 +23,24 @@
 //   shows what writeFlash() throws as the error, but doesn't catch errors from
 //   eraseFlash(), so a board that fails the check skips the erase and the
 //   write throws.
-// - onInstalled(port) runs when a write finishes, with the port it used.
+// - onInstalled(port) runs when a write finishes, with the port it used;
+//   onErase() and onWrite() just before the erase and the write start, so the
+//   page knows whether a stop left the gadget untouched, erased or partly
+//   written.
+// - The install dialog (ewt-install-dialog, a Lit element whose method and
+//   state names survive the build) is patched on its prototype (dialog
+//   below; each patch is skipped, and logged, if its method isn't there):
+//   onConnected(dialog) once it has opened the port (no Improv probe: the
+//   manifests set new_install_improv_wait_time 0), beforeInstall() awaited
+//   before the install takes the port, onState(state) for each install state,
+//   transferLines() added under its progress during the install, and its
+//   "Installation complete!" replaced by "Checking the version" and the
+//   dialog closed, so the page reads the version back before it says Done.
+//   The dialog's own text stays English (it has no language setting); the
+//   lines the page adds follow the page's language. Where there are no custom
+//   elements (Node's tests), the dialog isn't patched.
 
-import { LocalizedError } from "./i18n.js";
+import { LocalizedError, render, t } from "./i18n.js";
 
 // "303a:1001" -> { usbVendorId, usbProductId }
 const usbFilter = (id) => {
@@ -36,7 +51,9 @@ const usbFilter = (id) => {
 const MB = 1024 * 1024;
 
 // getSelection() returns { usb: ["vid:pid", ...] or null, minFlashBytes }.
-export function installFlasherHooks({ getSelection, onInstalled }) {
+export function installFlasherHooks({ getSelection, onInstalled, onErase, onWrite, dialog = {}, log = () => {} }) {
+  patchInstallDialog(dialog, log);
+
   let lastPort = null;
 
   const requestPort = navigator.serial.requestPort.bind(navigator.serial);
@@ -71,15 +88,98 @@ export function installFlasherHooks({ getSelection, onInstalled }) {
       };
       const eraseFlash = value.eraseFlash.bind(value);
       value.eraseFlash = async (...args) => {
-        if (!(await checkFlash())) return eraseFlash(...args);
+        if (await checkFlash()) return;
+        onErase?.();
+        return eraseFlash(...args);
       };
       const writeFlash = value.writeFlash.bind(value);
       value.writeFlash = async (options) => {
         const problem = await checkFlash();
         if (problem) throw new LocalizedError("flash.tooSmall", problem);
+        onWrite?.();
         await writeFlash(options);
         onInstalled?.(lastPort);
       };
     },
+  });
+}
+
+// Patches ESP Web Tools 10.4.0's install dialog (see the top of this file).
+function patchInstallDialog({ onConnected, beforeInstall, onState, transferLines, onFinished }, log) {
+  const registry = globalThis.customElements;
+  if (!registry) return;
+  registry.whenDefined("ewt-install-dialog").then(() => {
+    const proto = registry.get("ewt-install-dialog").prototype;
+    const missing = (name) => {
+      const ok = name in proto;
+      if (!ok) log(`installer: no ${name} to patch; the page's own checks still run`);
+      return !ok;
+    };
+
+    if (!missing("_initialize")) {
+      const initialize = proto._initialize;
+      proto._initialize = async function (justInstalled = false, ...rest) {
+        await initialize.call(this, justInstalled, ...rest);
+        if (!justInstalled && this._state !== "ERROR") onConnected?.(this);
+      };
+    }
+
+    if (!missing("_confirmInstall")) {
+      const confirmInstall = proto._confirmInstall;
+      proto._confirmInstall = async function (...args) {
+        await beforeInstall?.();
+        return confirmInstall.apply(this, args);
+      };
+    }
+
+    // Lit keeps a reactive state's accessor on the prototype.
+    const desc = Object.getOwnPropertyDescriptor(proto, "_installState");
+    if (desc?.set && desc?.get) {
+      Object.defineProperty(proto, "_installState", {
+        configurable: true,
+        get: desc.get,
+        set(value) {
+          desc.set.call(this, value);
+          if (value) onState?.(value);
+        },
+      });
+    } else {
+      log("installer: no _installState accessor; install states aren't logged");
+    }
+
+    if (!missing("_renderProgress")) {
+      const renderProgress = proto._renderProgress;
+      proto._renderProgress = function (label, progress) {
+        if (this._state !== "INSTALL" || !this._installConfirmed) return renderProgress.call(this, label, progress);
+        const extra = document.createElement("span");
+        for (const line of transferLines?.() ?? []) {
+          const strong = document.createElement("strong");
+          strong.textContent = render(line);
+          extra.append(document.createElement("br"), document.createElement("br"), strong);
+        }
+        return renderProgress.call(this, [label, extra], progress);
+      };
+    }
+
+    if (!missing("_renderInstall")) {
+      const renderInstall = proto._renderInstall;
+      const closing = new WeakSet();
+      proto._renderInstall = function (...args) {
+        // ESP Web Tools shows "Installation complete!" once its Improv check
+        // is over (_client no longer undefined) and the port is open again.
+        if (this._installState?.state !== "finished" || this._client === undefined) {
+          return renderInstall.apply(this, args);
+        }
+        if (!closing.has(this)) {
+          closing.add(this);
+          setTimeout(() => {
+            onFinished?.(this);
+            this._closeDialog?.();
+          }, 0);
+        }
+        // "Installing" is the dialog's own heading for this state.
+        return ["Installing", this._renderProgress(t("install.written")), false];
+      };
+    }
   });
 }

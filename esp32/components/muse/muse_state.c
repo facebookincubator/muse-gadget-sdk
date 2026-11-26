@@ -20,11 +20,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 
+#include "muse_perf.h"
 #include "muse_lang.h"
 #include "muse_text.h"
 
@@ -39,10 +41,12 @@ static volatile float s_level;
 static volatile float s_progress;
 static volatile int64_t s_last_poke_us;
 static volatile int64_t s_happy_until_us;
+static volatile uint32_t s_happy_seq;
 #if CONFIG_MUSE_REPLY_NOTIFY
 static volatile int64_t s_flash_start_us;   /* 0 = no reply flash */
 #endif
 static volatile bool s_asleep;
+static volatile bool s_own_turn;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_caption[MUSE_CAPTION_MAX];
@@ -54,7 +58,8 @@ static volatile int s_page_cols = 16, s_page_lines = 2;
 static volatile int s_cjk_cols, s_cjk_lines;
 static volatile int s_latin_cols, s_latin_lines;
 static muse_power_t s_power = { .battery_pct = -1 };
-static volatile bool s_as_if_battery;
+static const char *TAG = "muse_state";
+static muse_as_if_t s_as_if;   /* ">nap": as if on battery (s_lock) */
 
 static float secs_since(int64_t us)
 {
@@ -73,8 +78,21 @@ void muse_state_init(void)
     s_last_poke_us = now;
 }
 
+void muse_state_set_own_turn(bool own)
+{
+    s_own_turn = own;
+}
+
+bool muse_state_own_turn(void)
+{
+    return s_own_turn;
+}
+
 void muse_state_set_mode(muse_mode_t mode)
 {
+    if (mode == MUSE_MODE_IDLE || mode == MUSE_MODE_BOOT || mode == MUSE_MODE_OFF) {
+        s_own_turn = false;   /* the turn is over (the panel's timer runs again) */
+    }
     if (mode == s_mode) {
         return;
     }
@@ -84,6 +102,7 @@ void muse_state_set_mode(muse_mode_t mode)
     }
     s_mode_since_us = esp_timer_get_time();
     s_mode = mode;
+    muse_perf_mode(mode);
 }
 
 muse_mode_t muse_state_mode(float *secs_in_mode)
@@ -241,21 +260,56 @@ muse_power_t muse_state_power(void)
 
 bool muse_state_on_battery(void)
 {
+    bool expired;
+    portENTER_CRITICAL(&s_lock);
+    muse_power_t p = s_power;
+    bool as_if = muse_as_if_on(&s_as_if, esp_timer_get_time(), &expired);
+    portEXIT_CRITICAL(&s_lock);
+    if (expired) {
+        /* A forced low-power test on USB dropped the Mosaico's USB link, and the device, still "as if on
+         * battery", stayed asleep and out of reach. */
+        ESP_LOGI(TAG, "as if on battery (bench nap): ended by itself after %d min", (int)(MUSE_AS_IF_BATTERY_US / 60000000));
+        muse_state_nudge();
+    }
+    return as_if || muse_power_real_battery(&p);
+}
+
+bool muse_state_on_battery_real(void)
+{
     muse_power_t p = muse_state_power();
-    return s_as_if_battery || (!p.usb && p.battery_pct >= 0);
+    return muse_power_real_battery(&p);
 }
 
 void muse_state_set_as_if_battery(bool on)
 {
-    if (on != s_as_if_battery) {
-        s_as_if_battery = on;
+    portENTER_CRITICAL(&s_lock);
+    bool was = s_as_if.on;
+    muse_as_if_set(&s_as_if, on, esp_timer_get_time());
+    portEXIT_CRITICAL(&s_lock);
+    if (on != was) {
+        if (on) {
+            ESP_LOGI(TAG, "as if on battery (bench nap): on, for %d min at most", (int)(MUSE_AS_IF_BATTERY_US / 60000000));
+        } else {
+            ESP_LOGI(TAG, "as if on battery (bench nap): off");
+        }
         muse_state_nudge();
     }
+}
+
+static void (*volatile s_poke_listener)(void);
+
+void muse_state_set_poke_listener(void (*fn)(void))
+{
+    s_poke_listener = fn;
 }
 
 void muse_state_poke(void)
 {
     s_last_poke_us = esp_timer_get_time();
+    void (*fn)(void) = s_poke_listener;
+    if (fn) {
+        fn();
+    }
 }
 
 float muse_state_idle_secs(void)
@@ -329,7 +383,13 @@ float muse_state_flash_level(void)
 void muse_state_make_happy(void)
 {
     s_happy_until_us = esp_timer_get_time() + (int64_t)(HAPPY_SECS * 1e6f);
+    s_happy_seq++;
     muse_state_poke();
+}
+
+uint32_t muse_state_happy_seq(void)
+{
+    return s_happy_seq;
 }
 
 float muse_state_happiness(void)

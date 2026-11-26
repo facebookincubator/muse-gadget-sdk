@@ -101,6 +101,77 @@ are documented separately; this is not a generic ESP-VoCat profile.
 The [Waveshare 1.85B port](waveshare-s3-185b.md) has its own pin map and
 BQ27220 gauge; the similarly named 1.85C profile is not interchangeable.
 
+Four boards are products in the Muse Gadgets catalog and advertise their model
+code: `MuseGadget-M5SW-XXXXXX` (M5Stack StopWatch),
+`MuseGadget-EMO1-XXXXXX` (ESP-Mosaico), `MuseGadget-SCW1-XXXXXX` (SenseCAP
+Watcher, its gadget profile `watcher-gadget`) and `MuseGadget-WC6-XXXXXX`
+(Waveshare C6 1.8, Wi-Fi and BLE-only `c6ble` builds alike). Each of those
+overlays sets `CONFIG_HOMEHUB_BLE_PRODUCT_CODE` and
+`CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC`, so XXXXXX stays the last three Wi-Fi
+MAC bytes, the digits these boards advertised before. The Waveshare S3
+1.75C's gadget profile (`s3-gadget`) advertises `MuseGadget-W175-XXXXXX`, its
+Bluetooth address tail. Other boards, and the 1.75C's and the Watcher's Wi-Fi
+builds, keep `MuseGadget-XXXXXX`.
+
+### Low battery
+
+Every board with a battery reading warns at 15 % (the battery icon) and 10 %
+(a "Battery low" toast once per discharge), and the catalog boards power off
+cleanly at a set voltage before they brown out, on battery only, never with
+USB power (`components/muse/muse_battery.h`). The
+voltage must hold for five readings in a row (10 s awake, 50 s resting), so a
+speaker or radio burst doesn't trip it. The next boot logs
+`muse_battery: boot: after a low-battery shutdown at N mV`.
+
+| Board | Battery reading | Shutdown at | Where the number comes from |
+|---|---|---|---|
+| M5Stack StopWatch | M5PM1: mV, % from M5's LiPo curve, charging | 3300 mV | the curve's 0 %; the S3's 3.3 V LDO drops out below it. Not yet measured on the bench |
+| ESP-Mosaico | BQ27220 gauge (80 mAh cell): mV, %, current, °C, capacities | 3410 mV | EDV1 of Espressif's 80 mAh profile (about 3 % left; EDV0 3000 mV = empty) |
+| SenseCAP Watcher | ADC divider: mV, % from Seeed's curve; charger bits | 3300 mV | the curve's 0 %. Not yet measured |
+| Waveshare C6 1.8 | AXP2101: mV, %, charging | 3300 mV | above the AXP2101's own 2.6 V VSYS cut-off. Not yet measured |
+| Waveshare S3 1.75C (and 1.75, experimental: the 1.75C's board file, not run on a 1.75) | AXP2101: mV, %, charging | 3300 mV | as the C6 1.8 (the same chip), above its 2.6 V VSYS cut-off. Not yet measured |
+
+Other boards leave `battery_shutdown_mv` 0: no automatic shutdown until their
+reading is checked against a meter.
+
+The shutdown voltage is the board's one low-cell level: the charge-dark
+hold (below) boots 300 mV above it, read while charging. On the AXP2101 boards
+`muse_pmu` turns the battery reading's parts back on at boot (battery
+detection, the voltage ADC, the gauge): they survive resets and power-offs, so
+earlier firmware can leave them off, and the board then reads no battery (a
+W175 reported `battery_mv` 0 and `battery_pct` -1 with a cell that
+kept it running). The boot log says when it had to (`... was off (left by
+earlier firmware): on`).
+
+### Plugging in turns it on
+
+Plugging USB into a gadget that is off (powered off by the user, by a low
+battery, or by anything else) turns it on. On a
+healthy cell it boots at once. On a low cell it charges dark: no display, no
+radio and no advert until the cell reads its low-cell level
+(`battery_shutdown_mv`, above) plus 300 mV on charge, then it boots by itself;
+unplugged before that, it powers off again
+(`components/muse/muse_charge_dark.h`, a hold in `app_main` after the boot
+guard, before any app code, Link or BLE; never in SAFE mode). During the hold
+the USB recovery tier answers and a key press boots at once; the BLE recovery
+tier is down (no advert), which is acceptable since USB and the keys
+remain. Powered off while on USB, a gadget stays off
+(dark, radio quiet, charging) until a key press or an unplug and replug: no
+watchdog or timed boot. Each boot logs what turned the power chip on.
+
+| Board | What turns it on | Charge dark | Powered off on USB |
+|---|---|---|---|
+| M5Stack StopWatch (TriviaPOD experimental: the same board file, not run on it) | M5PM1 5VIN insertion (`WAKE_SRC` bit 1, always armed; also out of its 2.5 V low-voltage standby). The system runs from USB through ideal diodes while the LGS4056 charges | boots at 3600 mV on charge (3300 + 300) | off until red is pressed or USB is plugged in again (5VIN must rise) |
+| Waveshare C6 1.8, S3 1.75C (S3 1.75 experimental: the 1.75C's board file, not run on it) | AXP2101 VBUS insertion, when its eFuse enables it (datasheet 6.5.4.2: not a register); `muse_pmu` logs `REG20` (bit 2 = VBUS) at boot | boots at 3600 mV on charge (3300 + 300) | off until PWR or a replug |
+| SenseCAP Watcher | VBUS powers the S3 past the system latch (schematic sheet 4, "VBAT & VUSB switch") | boots at 3600 mV on charge (3300 + 300) | deep sleep until the wheel; a charger or VBUS change goes back to sleep before any radio starts; unplugged, it's off |
+| ESP-Mosaico | Doesn't comply (hardware): the SAM8108 on/off controller gates VDD from VSYS and only its POWER button (or GPIO57 while on) toggles it; VBUS feeds VSYS and the charger but never that switch (CoreBoard V1.2.1 schematic, Power page; Espressif's user guide: "regardless of the power source, use the POWER button"). No firmware setting changes it | none | can't power off on USB (`power_off_battery_only`) |
+
+Bench (StopWatch): `>power.wake=N` on the USB console arms the M5PM1 to turn
+the board on in N s (10 to 3600), the way back from a power-off test with
+USB cut; any boot drops it. It isn't on the BLE console. To try the hold on a
+healthy cell, build with `CONFIG_MUSE_CHARGE_DARK_TEST_MV=4300` (bench only):
+a USB power-up then stays dark until a key, an unplug or the 2 h limit.
+
 ## Features
 
 |  | DevKitC-1 | C6 devkit | ideaspark | Waveshare C6 LCD 1.47 | CYD (experimental) | C3 OLED 0.42 | CoreMatrix | SenseCAP Indicator | Waveshare S3 ePaper 1.54 | Waveshare S3 ePaper 1.54G | reTerminal E1001 | reTerminal E1002 | reTerminal E1003 | reTerminal Sticky* | HA Voice PE | reSpeaker Lite (experimental) | reSpeaker XVF3800 (experimental) | Waveshare S3 1.75C | Waveshare S3 1.75 | Waveshare S3 1.85C | Waveshare S3 1.46 | Waveshare S3 1.43 | Waveshare S3 1.43C | Waveshare S3 2.16 | Waveshare S3 2.06 | AIPI Lite | Waveshare C6 1.8 | Waveshare S3 1.8 | Waveshare C6 2.06 | Watcher | StickS3 | StickC Plus2 | Cardputer ADV | AtomS3 (experimental) | BOX-3 | StopWatch | TriviaPOD* | XIAO S3 1.47 | CoreS3 | CoreS3 Lite (experimental) | Core2 | FNK0104B | S3 DevKitC-1 | JC3248W535 | VN S3 1.83-inch | Waveshare LCD7 | Waveshare LCD 1.28 | Waveshare LCD 3.49 | AI Passport | EchoEar-2ST* | ATK BOX | ATK BOX2 | Waveshare P4 3.5 | RoRoLee | Waveshare S3 1.9 | SpotPear v1.0 (experimental) | SmartRing-Plus | Waveshare S3 1.85B | Waveshare S3 LCD 3.5 | UNIHIKER K10 | LilyGO 1.75 AMOLED |
@@ -116,7 +187,7 @@ BQ27220 gauge; the similarly named 1.85C profile is not interchangeable.
 | Touch | — | — | — | — | — | — | — | — | — | — | — | — | — | GT911 (checked on one unit) | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | Unverified | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ | — | ✅ | — | ✅ | CST816S | ✅ | — | ✅ |
 | Battery status | — | — | — | — | — | — | — | — | — | — | Voltage, estimated percent (unverified) | Voltage, estimated percent | Voltage, estimated percent (unverified) | BQ27220 %/mV and charging checked | — | — | — | ✅ | ✅ | ✅ | Voltage, estimated percent (unverified) | Voltage only (unverified) | Unverified | ✅ | Unverified | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Voltage only | — | — | — | ✅ | Unverified | — | ✅ | ✅ | ✅ | Voltage only | — | — | Percent only | — | Voltage only (unverified) | Voltage only | No charging state | Unverified | — | Unverified | ✅ | ✅ | — | — | Unverified | BQ27220 percent, mV, charging | ✅ | — | Voltage and charging (SY6970) |
 | Over-the-air updates | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | Off | On (checked on one unit) | Off | Off | Off | On | On | On | On | On | On | On | On | On | On | On | On | On | On | On | Off | Off | On | On | On | Off | On | On (unverified) | On | On | Off | On | On | On | On | On | Off | On | On | On | On | On | On | On (unverified) | On | On (unverified) | On | On | On |
-| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | BtnA | Top | BOOT | BOOT (talk/setup), PWR (tap: next page, hold: turn the screen) | Green | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | Front (talk/pairing) | BOOT/CONFIG (talk) | Blue top-right (talk), yellow top-left (speaker), red bottom-left (power) | Top-right (talk), top-left (speaker), power | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | M (talk), R (menu), L (speaker), Q (power) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) | A (talk), B (menu), BOOT (wake from power off) | BOOT (confirm/wake) |
+| Buttons | BOOT | BOOT | BOOT | BOOT | BOOT | BOOT | BtnA | Top | BOOT | BOOT (talk/setup), PWR (tap: next page, hold: turn the screen) | Green | Green | Green | AI (talk/setup); Up/Down wake | Centre (talk), dial | XIAO BOOT (talk/setup) | XIAO BOOT (talk/setup), hardware mute | PWR (talk), BOOT | BOOT (talk), PWR | Hold face (talk), BOOT | Hold face (talk), BOOT, PWR | BOOT | BOOT (talk), hold face (talk) | BOOT, PWR (talk), KEY (talk) on top | BOOT (talk), PWR | Two | BOOT (talk), PWR | BOOT (talk), PWR | BOOT (talk), PWR | Wheel (hold to talk, click to sleep/wake, turn to review) | Front (talk), side (menu), PWR | Front (talk), side (menu), PWR | GO/Space (talk), Esc/Enter/arrows (menu) | Front (talk/pairing) | BOOT/CONFIG (talk) | Yellow top-left (talk), blue top-right (speaker), red bottom-left (power) | Top-left (talk), top-right (speaker), power | USR1 (talk/setup), USR2 (screen) | PWR (talk), RST | PWR (talk), RST | Touch BtnB (talk), PWR | BOOT (talk) | BOOT | BOOT or on-screen mic (talk) | BOOT (talk), Vol+/Vol- (menu) | BOOT (flash only) | Screen only | BOOT (talk), PWR | OK (talk), UP/DOWN (menu) | Touch; bottom power button | K0 (talk), K1 (menu) | M (talk), R (menu), L (speaker), Q (power) | BOOT (talk), PWR | BOOT (talk), VOL- and VOL+ (menu) | BOOT (talk) | BOOT (talk/pairing) | Screen mic (talk); BOOT inside the case | BOOT (talk), PWR (hardware) | BOOT (talk) | A (talk), B (menu), BOOT (wake from power off) | BOOT (confirm/wake) |
 
 *Sticky entries describe an experimental Muse port, not Seeed's factory
 firmware. On one unit the display, touch, voice notes/CJK replies, SHT40,
@@ -133,6 +204,39 @@ pairing, touch, recording and playback, sleep and wake, and reconnect. See
 and controls (M5Stack hasn't published a pin map). Display, touch, the three
 buttons, mic, speaker and power off were checked; sleep, wake and the
 battery weren't.
+
+Push-to-talk over BLE is the musegadgets BLE protocol
+([`components/muse_gadget_ble`](../components/muse_gadget_ble/README.md)): an
+app connected over BLE that turns on push-to-talk gets the talk button's audio
+as SBC or LC3, and otherwise it goes to Muse over Wi-Fi as before. It's on in
+the gadget profiles of the Waveshare S3 1.75C and the SenseCAP Watcher
+(`tools/muse/board.sh build s3-gadget` / `watcher-gadget`: the board's
+overlay, then `sdkconfig.muse-waveshare-s3-175c-gadget` /
+`sdkconfig.muse-sensecap-watcher-gadget`), the C6's BLE-only build and the BLE
+video builds (`sdkconfig.muse-video-ble`), where the Muse app's setup can skip
+Wi-Fi and the app checks the gadget's token with the token proof on each
+connection. The boards' own overlays alone are the Wi-Fi Muse builds the web
+flasher ships, without it. Other boards with a mic and PSRAM can opt in: copy
+the BLE gadget block of `sdkconfig.muse-waveshare-s3-175c-gadget` into their
+overlay
+(`CONFIG_MUSE_GADGET_BLE_AUDIO=y` with both watchdogs on, which the build
+checks, ATT MTU 247 and first-boot volume 50) to try it (of them, only the
+Voice PE has been built with it, and none run). Offline clips need
+`partitions_muse.csv`, so the StickS3, StickC Plus2 and Voice PE don't offer
+them. The Cardputer ADV has no PSRAM.
+
+The Waveshare C6 has no PSRAM, so it can't run BLE audio beside Wi-Fi and the
+Muse session. Its BLE-only build (`tools/muse/board.sh build c6ble`, the
+[`sdkconfig.muse-waveshare-c6-18-ble`](sdkconfig.muse-waveshare-c6-18-ble)
+overlay) leaves those off and runs as a musegadgets gadget alone: the screen
+says `READY` only while the app is connected with push-to-talk on
+(`DISCONNECTED`, `CONNECTING` or `APP CONNECTED` otherwise, and `OPEN MUSE
+APP` until it's set up), and the talk button's audio goes
+to the app as SBC, or to the offline queue (clips of up to about 8 s) while no
+app is connected. The Muse app sets it up over BLE without Wi-Fi: pick it,
+press the talk button when the pairing card asks, and the app stores the
+gadget's device tokens; holding reset (or the menu's reset) sets it up again.
+Build the normal `c6` profile to go back.
 
 The CrowPanel's BOOT button is push-to-talk; the GT911 touchscreen opens
 settings. Set the K1 switch to its `S1=0, S0=0` position for microphone and
@@ -299,11 +403,15 @@ starting starts a call, as a tap does on other boards.
 The SenseCAP Watcher keeps its factory data (the identity SenseCraft uses) in
 an `nvsfactory` partition at `0x9000`, where Muse puts its partition table and
 NVS. It's unique to each Watcher, so back it up before you flash Muse the first
-time. To return to Seeed's firmware, flash it and then write the backup back:
+time. To return to Seeed's firmware, flash it and then write the backup back.
+Like every flash backup or dump (it holds the device's identity, and once Muse
+has run, its tokens), keep it 0600 in a 0700 directory, never in a repo or an
+artifact; the commands here do that:
 
 ```sh
-tools/muse/paced_esptool.py --chip esp32s3 -p PORT read-flash 0x9000 0x32000 nvsfactory.bin
-tools/muse/paced_esptool.py --chip esp32s3 -p PORT write-flash 0x9000 nvsfactory.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; tools/muse/paced_esptool.py --chip esp32s3 -p PORT read-flash 0x9000 0x32000 "$BK/nvsfactory.bin")
+tools/muse/paced_esptool.py --chip esp32s3 -p PORT write-flash 0x9000 "$BK/nvsfactory.bin"
 ```
 
 The Watcher's CH342 USB bridge corrupts reads at 921600 baud and above, so
@@ -362,7 +470,8 @@ Anything that resets the stick now boots UiFlow2 again, so pass
 Muse:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT --after no-reset read-flash 0 0x800000 sticks3.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT --after no-reset read-flash 0 0x800000 "$BK/sticks3.bin")
 tools/muse/board.sh flash sticks3 PORT
 ```
 
@@ -370,21 +479,26 @@ Muse keeps the USB serial port on, so later flashes need none of this. To go
 back to UiFlow2, write the backup:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT write-flash 0 sticks3.bin
+BK=~/.local/share/muse-gadgets/backups
+python -m esptool --chip esp32s3 -p PORT write-flash 0 "$BK/sticks3.bin"
 ```
 
 The M5Stack StopWatch has the same CO5300 round AMOLED as the Waveshare S3
 1.75C, with a CST820 touch controller and the StickS3's ES8311 audio. With USB
-at the bottom, **blue top-right is PTT/pairing confirmation**, **yellow
-top-left toggles speaker on/off**, and **red bottom-left is POWER**. Builds with
-live calls (`CONFIG_MUSE_REALTIME_VOICE`) swap the two rim keys and their
-icons: yellow talks (and confirms pairing), and blue toggles the speaker and,
-during a call, hangs up. A short
+at the bottom, **yellow top-left is PTT/pairing confirmation**, **blue
+top-right toggles speaker on/off** (and hangs up a Wi-Fi realtime call), and
+**red bottom-left is POWER**, in every build. A short
 POWER press sleeps/wakes the screen; a 1.5 s hold while awake shows goodbye
 and shuts down the M5PM1 (click red to power back on). A waking press is
 consumed, not interpreted as another action. Hardware double-click power-off
 and download access remain available; Muse disables single-click reset, as
-the factory does, and extends the PMIC long delay to 4 s. Settings are one
+the factory does, and extends the PMIC long delay to 4 s. Holding red for
+4 s ("Let go: 4 s starts update mode") puts the S3 in the ROM's download mode
+for USB flashing. **On battery, with no USB host to flash or reset it, the
+way out is to double-click red (the M5PM1 powers the board off) and then
+press red once (it powers back on into Muse).** The M5PM1's own watchdog
+can't do this for you: it stops while the S3 is in download mode (M5PM1
+datasheet). Settings are one
 swipe left from Muse. Icon-only physical hints (microphone, speaker/mute and
 power) stay beside the rim on the face, reply and pairing views, but are hidden
 in settings so they don't cover controls. Speaker/mute follows the saved
@@ -483,10 +597,11 @@ M5Stack's factory firmware. Back up the flash before you flash Muse for the
 first time:
 
 ```sh
-python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x800000 plus2.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x800000 "$BK/plus2.bin")
 ```
 
-To go back, write the backup with `write-flash 0 plus2.bin`, using the same
+To go back, write the backup with `write-flash 0 "$BK/plus2.bin"`, using the same
 chip, port and baud.
 
 ## ESP32-S3-DevKitC-1
@@ -526,10 +641,11 @@ baud, which both take. Back up the flash before you flash Muse for the first
 time:
 
 ```sh
-python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x1000000 core2.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32 -p PORT -b 230400 read-flash 0 0x1000000 "$BK/core2.bin")
 ```
 
-To go back, write the backup with `write-flash 0 core2.bin`, using the same
+To go back, write the backup with `write-flash 0 "$BK/core2.bin"`, using the same
 chip, port and baud.
 
 ## Guition JC3248W535
@@ -563,10 +679,11 @@ no battery gauge.
 
 It enumerates as the chip's own USB serial port. Back up the stock firmware
 before flashing Muse for the first time, and restore it with
-`write-flash 0 jc3248w535.bin`:
+`write-flash 0 "$BK/jc3248w535.bin"`:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 jc3248w535.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 "$BK/jc3248w535.bin")
 tools/muse/board.sh flash jc3248w535 PORT
 ```
 
@@ -630,11 +747,12 @@ chip's own USB serial port. Back up the stock 16 MB firmware before the
 first flash and keep it outside Git:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 s3-lcd-35-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 "$BK/s3-lcd-35-backup.bin")
 tools/muse/board.sh flash s3lcd35 PORT
 ```
 
-Restore with `write-flash 0 s3-lcd-35-backup.bin`. Pins and the power-up
+Restore with `write-flash 0 "$BK/s3-lcd-35-backup.bin"`. Pins and the power-up
 sequence follow xiaozhi-esp32's esp32-s3-touch-lcd-3.5 board and Waveshare's
 schematic.
 
@@ -662,10 +780,11 @@ switch off, hold GO while connecting USB, then release GO.
 Back up the original 8 MB firmware before flashing; keep it outside Git:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT read-flash 0 0x800000 cardputer-adv-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT read-flash 0 0x800000 "$BK/cardputer-adv-backup.bin")
 ```
 
-Restore with `write-flash 0 cardputer-adv-backup.bin`. Pair in Muse under
+Restore with `write-flash 0 "$BK/cardputer-adv-backup.bin"`. Pair in Muse under
 Settings > Devices > Developer mode > Add Device, then press Enter.
 
 ## Espressif ESP-Mosaico (experimental)
@@ -679,6 +798,17 @@ eFuse. Run on a v1.2 board: display, touch, buttons, audio, battery and
 installs through Vibe Mode. Muse's progress shows as a bar along the bottom
 edge (`no_ring`): the panel is square.
 
+- **PSRAM at 200 MHz** (`devices/sdkconfig.muse-esp-mosaico`), ESP-IDF's
+  S31 default, not the 250 MHz of Espressif's template. At 250 the board took
+  4 panics in 3 days that no code explains: load and store access faults
+  (mcause 5 and 7) at valid PSRAM addresses (XIP code's read-only data, the
+  video receive ring), 3 of them in the BLE host task, each with LVGL
+  mid-flush; before one, its USB stopped answering for half an hour. An
+  overnight A/B soak (4.6 h at each speed: a BLE UI stream and muted SBC
+  playback, over and over) saw none at either speed, so 200 is the cautious
+  choice, not a proven fix. A crash reboots as a panic (`muse_restart`'s S31
+  wrap) with ESP-Iris keeping the core dump: decode it before changing more
+  (PSRAM ECC, LVGL draw buffers in internal RAM are the next steps).
 - **ESP-IDF:** the S31 isn't in v6.0.3. Use the master revision Espressif
   pins for the board, `7b9cc1ac79f865983f59bb8ff3ff43eb74ff1dbe`, installed
   for `esp32s31`; `tools/muse/board.sh` looks for it in
@@ -702,7 +832,10 @@ edge (`no_ring`): the panel is square.
   `vibe_mode` (app/test) and installs into `main_app`:
   `partitions_mosaico_vibe2.csv`, whose header says which of its offsets Vibe
   Mode depends on. Never flash with esptool or
-  `idf.py flash`: they write the app over Vibe Mode.
+  `idf.py flash`: they write the app over Vibe Mode. ESP-IDF's size check also
+  measures the app against `factory` (1.75 MB) and warns when it doesn't fit;
+  Muse never writes that slot, so `board.sh` checks the app against `ota_0`
+  of the table the build used itself and stops only if it doesn't fit there.
 - **Install:** `tools/muse/board.sh build mosaico` also makes an ESP-Iris
   System Update bundle, and `tools/muse/board.sh flash mosaico` installs it
   with Espressif's `mosaico.py iris system-update` (from the esp-mosaico-vibe
@@ -745,6 +878,16 @@ edge (`no_ring`): the panel is square.
   (SC101IOT) module: a 720×1280 JPEG of 80 to 135 KB in about 1.7 s, 2.4 s
   with the flash; text on a card in the frame reads in full. The OV3640 and
   a v1.0 board were only built.
+- **Video and UI streams over BLE:** `tools/muse/board.sh build|flash
+  mosaico-video` (`devices/sdkconfig.muse-video-ble`): the phone's camera, and
+  UI streams (`../../protocols/UI.md`) at the panel's 480 px one to one with
+  lossless still patches (the S31 ROM's inflate). BOOT opens the stream's
+  menu; AI leaves the view. The square panel gets no fisheye, and its edge
+  "ring" for panning is the outer 10% along each edge.
+- **Bench console:** the console is the UART on the header, not the USB-C
+  port, so `tools/muse/iris_bench.py` sends console lines over ESP-Iris
+  (`line '>ui.menu'`) and reads a UI picture's dump (`uidump OUT.log`, for
+  `tools/muse/uidump.py`).
 
 ## Waveshare ESP32-S3-Touch-AMOLED-2.16
 
@@ -800,10 +943,11 @@ firmware won't start. Back up the original 8 MB firmware before that; keep it
 outside Git:
 
 ```sh
-python -m esptool --chip esp32c3 -p PORT read-flash 0 0x800000 ai-passport-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32c3 -p PORT read-flash 0 0x800000 "$BK/ai-passport-backup.bin")
 ```
 
-Restore with `write-flash 0 ai-passport-backup.bin`. Pair in Muse under
+Restore with `write-flash 0 "$BK/ai-passport-backup.bin"`. Pair in Muse under
 Settings > Devices > Developer mode > Add Device, then press OK.
 
 ## ESP32-S3-BOX-3
@@ -893,6 +1037,7 @@ board's overlays, in order:
 | Seeed reSpeaker Lite (experimental) | `esp32s3` | [`devices/sdkconfig.seeed-respeaker-lite`](sdkconfig.seeed-respeaker-lite) | `tools/board.sh seeed-respeaker-lite build` |
 | Seeed reSpeaker XVF3800 (experimental) | `esp32s3` | [`devices/sdkconfig.seeed-respeaker-xvf3800`](sdkconfig.seeed-respeaker-xvf3800) | `tools/board.sh seeed-respeaker-xvf3800 build` |
 | Waveshare S3 1.75C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175c`](sdkconfig.muse-waveshare-s3-175c) | by hand |
+| Waveshare S3 1.75C, Muse Gadget (W175) | `esp32s3` | the 1.75C's, then [`devices/sdkconfig.muse-waveshare-s3-175c-gadget`](sdkconfig.muse-waveshare-s3-175c-gadget) | `tools/muse/board.sh build s3-gadget` |
 | Waveshare S3 1.75 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-175`](sdkconfig.muse-waveshare-s3-175) | by hand |
 | Waveshare S3 1.85B | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-185b`](sdkconfig.muse-waveshare-s3-185b) | `tools/muse/board.sh build 185b` |
 | Waveshare S3 1.85C | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-185c`](sdkconfig.muse-waveshare-s3-185c) | `tools/muse/board.sh build 185c` |
@@ -911,7 +1056,9 @@ board's overlays, in order:
 | Waveshare C6 1.8 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-18`](sdkconfig.muse-waveshare-c6-18) | by hand |
 | Waveshare S3 1.8 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-s3-18`](sdkconfig.muse-waveshare-s3-18) | `tools/muse/board.sh build s3-18` |
 | Waveshare C6 2.06 | `esp32c6` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-waveshare-c6-206`](sdkconfig.muse-waveshare-c6-206) | `tools/muse/board.sh build c6-206` |
+| Waveshare C6 1.8, BLE only | `esp32c6` | the C6's, then [`devices/sdkconfig.muse-waveshare-c6-18-ble`](sdkconfig.muse-waveshare-c6-18-ble) | `tools/muse/board.sh build c6ble` |
 | SenseCAP Watcher | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-sensecap-watcher`](sdkconfig.muse-sensecap-watcher) | by hand |
+| SenseCAP Watcher, Muse Gadget (SCW1) | `esp32s3` | the Watcher's, then [`devices/sdkconfig.muse-sensecap-watcher-gadget`](sdkconfig.muse-sensecap-watcher-gadget) | `tools/muse/board.sh build watcher-gadget` |
 | M5Stack Cardputer ADV | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cardputer-adv` | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack AtomS3 + Atomic Voice Base (experimental) | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-atoms3` | `tools/muse/board.sh build atoms3` |
 | M5Stack StickS3 | `esp32s3` | [`devices/sdkconfig.muse`](sdkconfig.muse), [`devices/sdkconfig.muse-m5stack-sticks3`](sdkconfig.muse-m5stack-sticks3) | by hand |
@@ -1056,10 +1203,11 @@ Back up the original 16 MB firmware before flashing Muse the first time, and
 keep the backup outside Git:
 
 ```
-python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 waveshare-s3-185c-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 "$BK/waveshare-s3-185c-backup.bin")
 ```
 
-Restore with `write-flash 0 waveshare-s3-185c-backup.bin`, using the same
+Restore with `write-flash 0 "$BK/waveshare-s3-185c-backup.bin"`, using the same
 chip, port and baud.
 
 ## Waveshare ESP32-S3-Touch-AMOLED-1.43
@@ -1082,10 +1230,11 @@ Back up the original 16 MB firmware before flashing Muse the first time, and
 keep the backup outside Git:
 
 ```
-python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 waveshare-s3-143-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 "$BK/waveshare-s3-143-backup.bin")
 ```
 
-Restore with `write-flash 0 waveshare-s3-143-backup.bin`, using the same
+Restore with `write-flash 0 "$BK/waveshare-s3-143-backup.bin"`, using the same
 chip, port and baud.
 
 ## LilyGO T-Display-S3 AMOLED 1.75
@@ -1114,10 +1263,11 @@ Back up the original 16 MB firmware before flashing Muse the first time, and
 keep the backup outside Git:
 
 ```
-python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 lilygo-s3-amoled-175-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 "$BK/lilygo-s3-amoled-175-backup.bin")
 ```
 
-Restore with `write-flash 0 lilygo-s3-amoled-175-backup.bin`, using the same
+Restore with `write-flash 0 "$BK/lilygo-s3-amoled-175-backup.bin"`, using the same
 chip, port and baud.
 
 ## Waveshare ESP32-S3-Touch-LCD-1.46
@@ -1145,10 +1295,11 @@ Back up the original 16 MB firmware before flashing Muse the first time, and
 keep the backup outside Git:
 
 ```
-python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 waveshare-s3-146-backup.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 460800 read-flash 0 0x1000000 "$BK/waveshare-s3-146-backup.bin")
 ```
 
-Restore with `write-flash 0 waveshare-s3-146-backup.bin`, using the same
+Restore with `write-flash 0 "$BK/waveshare-s3-146-backup.bin"`, using the same
 chip, port and baud.
 
 ## Add a board
@@ -1264,8 +1415,9 @@ before the first flash: Muse's NVS and `prod_data` partitions sit where that
 firmware keeps its own data.
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 rorolee.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 "$BK/rorolee.bin")
 idf.py -p PORT erase-flash
 ```
 
-To go back, write the backup with `write-flash 0 rorolee.bin`.
+To go back, write the backup with `write-flash 0 "$BK/rorolee.bin"`.

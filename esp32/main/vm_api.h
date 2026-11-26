@@ -17,6 +17,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #define VM_API_MAX_VMS 8
 #define VM_API_ERR_FAILED -1
@@ -37,7 +38,19 @@ typedef struct {
 typedef struct {
     char *access_token;
     char *refresh_token;
+    // The access token's lifetime in seconds, from the response's expires_in
+    // (0: absent or not a positive number).
+    int64_t expires_in_s;
+    // The response's Date header, unix seconds (0: none, not a strict
+    // IMF-fixdate, or before 2024): the server's clock, for a gadget whose
+    // own isn't set.
+    int64_t server_date_s;
 } vm_device_tokens_t;
+
+// An HTTP Date header in RFC 7231's IMF-fixdate form ("Sun, 06 Nov 1994
+// 08:49:37 GMT", the weekday matching the date), as unix seconds; 0 if it's
+// anything else.
+int64_t vm_api_parse_http_date(const char *s);
 
 typedef enum {
     VM_TOKEN_REFRESH_NONE = 0,

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include "muse_restart.h"
+#include "muse_bootguard.h"
 #include "app.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -36,7 +38,10 @@
 #include "muse_power_test.h"
 #endif
 #if CONFIG_MUSE_ENABLED
+#include "muse_charge_dark.h"
 #include "muse_glue.h"
+#else
+#include "button.h"
 #endif
 #if CONFIG_HOMEHUB_LED_BACKEND_STICKY_SSD1677 || CONFIG_MUSE_BOARD_RETERMINAL_STICKY
 #include "driver/gpio.h"
@@ -115,7 +120,32 @@ void app_main(void) {
 #if CONFIG_HOMEHUB_ERROR_REPORT
     error_report_init();
 #endif
+    muse_boot_mark("app_main");
     ESP_LOGI("link.main", CONFIG_GADGET_PRODUCT_NAME " starting");
+    muse_restart_log_boot("link.main");   /* how it began: an intentional restart, a crash, power-on */
+    /* Before any app code: a crash loop escapes to the ROM's download
+     * mode (USB host attached) or SAFE mode (no Muse UI or audio; BLE setup
+     * and update stay). CONFIG_MUSE_BOOTGUARD, muse_bootguard.h. */
+    if (muse_bootguard_begin() == MUSE_BOOT_SAFE) {
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+        ESP_LOGW("link.main", "SAFE mode: Muse is off; BLE setup, musegadgets and the BLE update stay up");
+#elif CONFIG_MUSE_ENABLED
+        ESP_LOGW("link.main", "SAFE mode: Muse and the Link's commands are off; Wi-Fi, the Link session "
+                              "(device.health) and the console stay up");
+#else
+        ESP_LOGW("link.main", "SAFE mode: the Link's commands are off; Wi-Fi, the Link session "
+                              "(device.health), setup BLE, the console and the button stay up");
+#endif
+    }
+#if CONFIG_MUSE_ENABLED
+    /* USB turned a low-cell gadget on: charge dark (no display, radio
+     * or advert) until the cell is healthy, before Link or BLE start. The
+     * guard has run; USB recovery answers throughout. SAFE mode never holds:
+     * recovery comes first. muse_charge_dark.h. */
+    if (muse_bootguard_mode() != MUSE_BOOT_SAFE) {
+        muse_charge_dark_hold();
+    }
+#endif
 #if CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP && CONFIG_SPIRAM_IGNORE_NOTFOUND
     // The C5's TCP windows are sized for lwIP buffers in PSRAM. Its defaults
     // (sdkconfig.defaults.esp32c5) require PSRAM at boot; a config that lets
@@ -131,8 +161,12 @@ void app_main(void) {
     pipeline_bench_main();
     return;
 #endif
+    muse_boot_mark("guard");
 #if CONFIG_MUSE_ENABLED
-    muse_glue_start();
+    muse_glue_start();   /* the board's SAFE key watch first (muse_bootguard_entry_watch) */
+#else
+    button_safe_entry_watch();   /* the Link button: the way into SAFE from the boot's start */
 #endif
+    muse_boot_mark("app_run");
     app_run();
 }

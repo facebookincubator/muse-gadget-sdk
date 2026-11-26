@@ -30,6 +30,21 @@ void link_pairing_init(const char *node_id, const char *device_id,
 void link_pairing_reset(void);
 void link_pairing_add_device_info(cJSON *root);
 
+// What provision_v2 needs of Wi-Fi, as device_info's "wifi" reports it
+// (protocols/README.md, Gadget setup over Muse Link). Required is every
+// non-gadget build's behaviour, and device_info then omits the field.
+typedef enum {
+    LINK_WIFI_REQUIRED = 0,
+    LINK_WIFI_OPTIONAL,   // no ssid: token-only provisioning
+    LINK_WIFI_NONE,       // a BLE-only gadget: ssid must be absent
+} link_wifi_mode_t;
+
+// Gadget builds call this before BLE starts: the Wi-Fi mode, and whether the
+// device also serves the musegadgets service (device_info "mgcommands": 1).
+void link_pairing_set_gadget(link_wifi_mode_t wifi, bool mgcommands);
+link_wifi_mode_t link_pairing_wifi_mode(void);
+bool link_pairing_mgcommands(void);
+
 bool link_pairing_plaintext_setup_blocked(void);
 
 const char *link_pairing_handle_client_hello(cJSON *root, char **response_json);
@@ -39,9 +54,15 @@ uint32_t link_pairing_handle_client_finished(void);
 bool link_pairing_confirmation_required(void);
 // Arm physical input only after the encrypted prompt has been emitted.
 bool link_pairing_arm_confirmation(uint32_t generation);
-// Only a press that began after the prompt was armed confirms it.
-// pressed_after_us (esp_timer's clock) is a time before the press began: when
-// its control was last seen up, at the latest.
+// A dismissed prompt: no press confirms it any more (its session ends with the
+// link).
+void link_pairing_disarm_confirmation(uint32_t generation);
+// Home Link: only a press that began after the prompt was armed confirms it,
+// within its window; pressed_after_us (esp_timer's clock) is a time before the
+// press began, when its control was last seen up, at the latest. A Muse
+// Gadget (CONFIG_MUSE_GADGET_BLE_AUDIO): one press while the prompt is up
+// confirms, whenever it began (pressed_after_us unused), and the prompt has no
+// timer.
 uint32_t link_pairing_confirm_active_session(int64_t pressed_after_us);
 bool link_pairing_session_confirmed(void);
 uint32_t link_pairing_mark_provisioning_active(void);

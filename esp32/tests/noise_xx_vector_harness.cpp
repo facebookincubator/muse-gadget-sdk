@@ -18,7 +18,8 @@
 // SHA-256) run through the Noise_XX_25519_AESGCM_SHA256 test vector from
 // cacophony (vectors/cacophony.txt): both roles, every handshake and transport
 // message byte for byte, and the handshake hash. Then the backend's X25519
-// against RFC 7748 and against PSA's own X25519 on random keys.
+// against RFC 7748 and against PSA's own X25519 on random keys, and the
+// device console's X25519 self-test (X25519Selftest.cpp).
 
 #include <xplat/noise/core/PsaCryptoBackend.h>
 
@@ -29,6 +30,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+extern "C" void noise_core_x25519_selftest(void);
 
 namespace {
 
@@ -333,5 +336,7 @@ int main() {
   if (r != 0) {
     return r;
   }
-  return CheckX25519(backend);
+  r = CheckX25519(backend);
+  noise_core_x25519_selftest();
+  return r;
 }

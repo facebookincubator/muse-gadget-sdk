@@ -137,10 +137,13 @@ int main(int argc, char **argv)
     assert(lv_obj_get_scroll_bottom(s_scroll) > 0);
     assert(lv_obj_get_style_text_font(s_label, 0) == caption_font());
     assert(lv_obj_get_style_transform_scale_x(s_label, 0) == 256);
-    assert(PAGE_DOTS == 3);
+    /* The simulator's board has the v1.0 home: the latest reply, Status, the
+     * home and Settings, four dots, the page on show's lit. */
+    assert(s_home && s_status && s_ndots == 4);
     s_next_settings_tick = 0;
     update_chrome(1.0f);
-    assert(lv_obj_get_style_bg_color(s_dots[0], 0).red == lv_color_hex(COLOR_ACCENT).red);
+    assert(lv_obj_get_style_bg_color(s_dots[0], 0).red == lv_color_hex(COLOR_DOT_ON).red);
+    assert(lv_obj_get_style_bg_color(s_dots[2], 0).red == lv_color_hex(COLOR_DOT_OFF).red);
     assert(!lv_obj_has_flag(s_dots[0], LV_OBJ_FLAG_HIDDEN));
     assert(!muse_latest_reply_bench("invalid"));
     assert(muse_latest_reply_bench("ui.reply=down"));
@@ -156,7 +159,7 @@ int main(int argc, char **argv)
     assert(lv_tileview_get_tile_active(s_tv) == s_tile);
     int reread_y = lv_obj_get_scroll_y(s_scroll);
     swipe(350, 220, 100, 220);
-    assert(lv_tileview_get_tile_active(s_tv) == s_face);
+    assert(lv_tileview_get_tile_active(s_tv) == s_status);   /* the next page right: Status */
     swipe(100, 220, 350, 220);
     assert(lv_tileview_get_tile_active(s_tv) == s_tile);
     assert(lv_obj_get_scroll_y(s_scroll) == reread_y);
@@ -250,11 +253,17 @@ int main(int argc, char **argv)
     muse_ui_show_face();
     s_next_settings_tick = 0;
     update_chrome(2.0f);
-    assert(lv_obj_get_style_bg_color(s_dots[1], 0).red == lv_color_hex(COLOR_ACCENT).red);
+    assert(lv_obj_get_style_bg_color(s_dots[2], 0).red == lv_color_hex(COLOR_DOT_ON).red);
+    assert(lv_obj_get_style_bg_color(s_dots[0], 0).red == lv_color_hex(COLOR_DOT_OFF).red);
+    lv_tileview_set_tile(s_tv, s_status, LV_ANIM_OFF);
+    s_next_settings_tick = 0;
+    update_chrome(2.5f);
+    assert(lv_obj_get_style_bg_color(s_dots[1], 0).red == lv_color_hex(COLOR_DOT_ON).red);
     lv_tileview_set_tile(s_tv, s_settings, LV_ANIM_OFF);
     s_next_settings_tick = 0;
     update_chrome(3.0f);
-    assert(lv_obj_get_style_bg_color(s_dots[2], 0).red == lv_color_hex(COLOR_ACCENT).red);
+    /* None on the home's Settings list (the cards run to the bottom). */
+    for (int i = 0; i < s_ndots; i++) assert(lv_obj_has_flag(s_dots[i], LV_OBJ_FLAG_HIDDEN));
     assert(!muse_ui_face_active());
     muse_ui_show_face();
     lv_obj_update_layout(lv_screen_active());

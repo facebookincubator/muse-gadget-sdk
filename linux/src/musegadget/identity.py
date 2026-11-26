@@ -21,11 +21,11 @@ hardware address. The derived names follow the Muse Gadget conventions the
 apps expect: the node id and the BLE name end in the same six hex digits.
 
 Node ids: a new pairing offers ``gadget-xxxxxx`` when
-``MUSEGADGET_GADGET_NODE_ID=1`` (off by default), else ``homelink-xxxxxx``,
-and stores it with the device tokens, which are issued for it. The stored id
-is the one in use until the device is paired again; a pairing made before ids
-were stored keeps ``homelink-xxxxxx``, the id its tokens were issued for. A
-stored id is never renamed.
+``MUSEGADGET_GADGET_NODE_ID=1`` (off by default), else ``homelink-xxxxxx``, and stores it with the
+device tokens, which are issued for it. The stored id is the one in use until
+the device is paired again; a pairing made before ids were stored keeps
+``homelink-xxxxxx``, the id its tokens were issued for. A stored id is never
+renamed.
 """
 
 from __future__ import annotations

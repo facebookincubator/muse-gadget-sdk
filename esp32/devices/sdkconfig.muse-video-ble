@@ -1,0 +1,107 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# musegadgets BLE with video (the phone's camera on the display, over BLE
+# instead of Wi-Fi). Load last, after a full-UI board's overlay (and its
+# gadget overlay, where it has one) with PSRAM and a draw_frame panel:
+# tools/muse/board.sh build stopwatch-video (or mosaico-video, s3-video,
+# watcher-video).
+CONFIG_MUSE_VIDEO=y
+CONFIG_MUSE_VIDEO_WIFI=n
+CONFIG_MUSE_GADGET_BLE_AUDIO=y
+CONFIG_MUSE_GADGET_BLE_VIDEO=y
+# Without Wi-Fi the decoder's hot code fits in IRAM: all of tinyh264's, and
+# VP8's hot set (tokens, transforms, bilinear inter prediction: the phone
+# app's settings). VP8's compact set would take the ~20 KB that UI streams'
+# second decode task (two bands at 466 px on the S3) and HID need.
+CONFIG_MUSE_VIDEO_DECODER_IRAM=y
+CONFIG_MUSE_VP8_IRAM_HOT=y
+
+# BLE only: video wants the whole radio (Wi-Fi coexistence takes BLE
+# airtime) and the internal RAM Wi-Fi holds; Link setup still runs over BLE.
+CONFIG_MUSE_GADGET_BLE_STANDALONE=y
+CONFIG_HOMEHUB_OTA_ENABLED=n
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=n
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+
+# Video writes come in at up to ~100 KB/s: 244-byte ATT writes, each one
+# 251-byte link-layer packet (ATT MTU exactly 247: a write split across
+# packets was lost when the phone stalled between them), and room for the host to fall behind for a moment without the
+# controller running out of buffers.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=40
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=24
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=48
+# The stream may also come on an L2CAP channel (credit-based, no GATT write
+# round trips): one channel.
+CONFIG_BT_NIMBLE_L2CAP_COC_MAX_NUM=1
+CONFIG_BT_NIMBLE_L2CAP_COC_SDU_BUFF_COUNT=2
+# The channel's MPS is the msys block less 8: 252 makes it 244, so an L2CAP
+# PDU (with its 4 + 2 byte headers) fits one 251-byte link-layer packet
+# instead of spilling a 1-byte second one.
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_SIZE=252
+
+# BLE only: the app tasks' stacks follow the board (CONFIG_MUSE_STACKS_IN_PSRAM:
+# the Watcher's and the S3 1.75C's gadget overlays, and the StopWatch's
+# -video-ble overlay, move those that never map flash to PSRAM, the musegadgets player and
+# the boot task here; the ESP-Mosaico's keep them internal). watcher-video idles at 12 KB
+# internal with them forced internal.
+
+# Per-task CPU time for the muse_video stats line (how much is left for audio).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# UI streams (protocols/UI.md): the panel's own size, one to one. A keyframe
+# of a busy screen runs to ~100 KB, and the largest frame is half the ring.
+CONFIG_MUSE_GADGET_BLE_VIDEO_BUFFER=262144
+# HID over GATT (the gadget as a Bluetooth touchscreen / pointer) is off: it
+# turns on bonding, and a phone it bonded with then wants an encrypted link
+# from every build. MUSE_HID=1 tools/muse/board.sh ... adds it
+# (devices/sdkconfig.muse-hid).
+CONFIG_MUSE_GADGET_BLE_HID=n
+# The video core's stats and per-frame UI lines on the Nordic UART mirror too
+# (tools/mg_ble_client.py log / ui).
+CONFIG_MUSE_GADGET_BLE_NUS_LOG_TAGS="mg,link.main,link.heartbeat,muse_audio,muse_video"
+
+# The NimBLE host task runs Link pairing's key exchange and the companions'
+# GAP events, which log through the Nordic UART mirror and (on the Mosaico)
+# ESP-Iris: Link pairing left 368 bytes of the 4 KB default on the StopWatch.
+# 8 KB, as the HID overlay takes.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+
+# Both watchdogs on, as on every BLE gadget profile (other boards keep
+# sdkconfig.defaults', off): a hang restarts the gadget by itself. The
+# windows are long so PSRAM cache stalls and busy decode stretches stay clear
+# of them: the interrupt watchdog at 1.5 s, the task watchdog at 15 s on both
+# idle tasks and the gadget watchdog's users (CONFIG_MUSE_GADGET_WDT,
+# muse_wdt.h), each a panic with its crash record the boot guard counts.
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=1500
+CONFIG_ESP_INT_WDT_CHECK_CPU1=y
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+# The boot guard (muse_bootguard.h): a crash loop ends in SAFE mode, where
+# the BLE recovery tier stays up. On in the BLE gadget profiles only.
+CONFIG_MUSE_BOOTGUARD=y
+# Speaker volume until one is saved in Settings.
+CONFIG_MUSE_DEFAULT_VOLUME=50
+# The avatar face (main/mg_face.h): the home over the user's picture.
+CONFIG_MUSE_AVATAR_FACE=y

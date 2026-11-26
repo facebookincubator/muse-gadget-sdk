@@ -297,13 +297,14 @@ u32 h264bsdDecodeSeqParamSet(strmData_t *pStrmData, seqParamSet_t *pSeqParamSet)
             return(tmp);
 
         /* check that frame cropping params are valid, parameters shall
-         * specify non-negative area within the original picture */
-        if ( ( (i32)pSeqParamSet->frameCropLeftOffset >
-               ( 8 * (i32)pSeqParamSet->picWidthInMbs -
-                 ((i32)pSeqParamSet->frameCropRightOffset + 1) ) ) ||
-             ( (i32)pSeqParamSet->frameCropTopOffset >
-               ( 8 * (i32)pSeqParamSet->picHeightInMbs -
-                 ((i32)pSeqParamSet->frameCropBottomOffset + 1) ) ) )
+         * specify non-negative area within the original picture. OPT: in
+         * 64 bits (the same test): offsets near 2^31 overflowed the i32 sums */
+        if ( ( (uint64_t)pSeqParamSet->frameCropLeftOffset +
+               pSeqParamSet->frameCropRightOffset >=
+               8 * (uint64_t)pSeqParamSet->picWidthInMbs ) ||
+             ( (uint64_t)pSeqParamSet->frameCropTopOffset +
+               pSeqParamSet->frameCropBottomOffset >=
+               8 * (uint64_t)pSeqParamSet->picHeightInMbs ) )
         {
             EPRINT("frame_cropping");
             return(HANTRO_NOK);

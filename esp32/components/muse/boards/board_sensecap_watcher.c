@@ -37,6 +37,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_lcd_panel_io.h"
@@ -54,8 +55,11 @@
 #include "freertos/task.h"
 
 #include "muse_audio.h"
+#include "muse_audio_dma.h"
 #include "muse_board.h"
+#include "muse_settings.h"
 #include "muse_lcd_bands.h"
+#include "muse_lvgl_hold.h"
 #include "muse_mem.h"
 #if CONFIG_MUSE_POWER_TEST
 #include "boards/muse_power_test_board.h"
@@ -197,6 +201,7 @@ static const char *TAG = "board";
 #define EXP_STDBY BIT(1)           /* low once charged */
 #define EXP_VBUS BIT(2)            /* low on USB power */
 #define EXP_WHEEL BIT(3)           /* low while pressed */
+#define EXP_TP_INT BIT(5)          /* the touch controller's INT (on the LCD rail) */
 #define EXP_CAM_SYNC BIT(6)        /* high while the Himax has a reply waiting */
 #define EXP_PWR_LCD BIT(9)
 #define EXP_PWR_SYSTEM BIT(10)     /* holds the board on from battery */
@@ -274,17 +279,146 @@ static bool camera_has_data(void)
 }
 #endif
 
-/* Deep sleep until an expander input changes. The wheel's push is one. */
+/* The I2C bus and the expander, for early_power() and init(), whichever
+ * comes first. */
+static esp_err_t exp_open(void)
+{
+    if (s_exp) {
+        return ESP_OK;
+    }
+    const i2c_master_bus_config_t i2c_cfg = {
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = I2C_SDA,
+        .scl_io_num = I2C_SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c");
+    const i2c_device_config_t exp_cfg = { .device_address = EXP_ADDR, .scl_speed_hz = 400000 };
+    return i2c_master_bus_add_device(s_i2c, &exp_cfg, &s_exp);
+}
+
+/* The battery divider's ADC (GPIO3), likewise. */
+static esp_err_t adc_open(void)
+{
+    if (s_adc) {
+        return ESP_OK;
+    }
+    const adc_oneshot_unit_init_cfg_t adc_cfg = { .unit_id = ADC_UNIT_1 };
+    ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&adc_cfg, &s_adc), TAG, "adc");
+    const adc_oneshot_chan_cfg_t ch_cfg = { .atten = ADC_ATTEN_DB_2_5, .bitwidth = ADC_BITWIDTH_DEFAULT };
+    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, BATT_ADC, &ch_cfg), TAG, "adc channel");
+    const adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .chan = BATT_ADC,
+        .atten = ADC_ATTEN_DB_2_5,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali) != ESP_OK) {
+        ESP_LOGW(TAG, "no ADC calibration: battery level disabled");
+    }
+    return ESP_OK;
+}
+
+/* The divider's eight-sample average in battery mV (62k/20k); 0 without calibration. */
+static int battery_mv(void)
+{
+    if (!s_cali) {
+        return 0;
+    }
+    int sum = 0;
+    for (int i = 0; i < 8; i++) {
+        int raw, mv;
+        if (adc_oneshot_read(s_adc, BATT_ADC, &raw) != ESP_OK || adc_cali_raw_to_voltage(s_cali, raw, &mv) != ESP_OK) {
+            return 0;
+        }
+        sum += mv;
+    }
+    return sum / 8 * 82 / 20;
+}
+
+/*
+ * The LCD and touch lines driven low: before the LCD rail is up (init(), as
+ * Seeed's BSP does) and before deep sleep. The touch controller shares the
+ * LCD rail, and with the rail off its I2C bus's pull-ups (and the panel's
+ * lines) still feed it, so its INT (expander P0.5, Seeed's BSP_TOUCH_GPIO_INT)
+ * stays high; deep sleep then lets go of them, INT falls, and the expander
+ * wakes the chip ("woke from deep sleep: causes 0x4, changed 0x0020", one
+ * wake after a quiet sleep). Driven low first, INT falls
+ * while sleep_until_wheel() is still settling, so nothing changes at sleep.
+ */
+static esp_err_t lcd_lines_low(void)
+{
+    const gpio_num_t pins[] = { TP_SDA, TP_SCL, LCD_PCLK, LCD_D0, LCD_D1, LCD_D2, LCD_D3, LCD_CS, LCD_BL };
+    uint64_t mask = 0;
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        gpio_set_level(pins[i], 0);
+        mask |= BIT64(pins[i]);
+    }
+    const gpio_config_t cfg = { .pin_bit_mask = mask, .mode = GPIO_MODE_OUTPUT };
+    ESP_RETURN_ON_ERROR(gpio_config(&cfg), TAG, "lcd pins");
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        gpio_set_level(pins[i], 0);
+    }
+    return ESP_OK;
+}
+
+/*
+ * Deep sleep until an expander input changes. The wheel's push is one.
+ *
+ * ext0 wakes on EXP_INT's low level, and the PCA9535 holds it low from any
+ * input change until its inputs are read (it has no interrupt mask), and the
+ * wheel's push reaches the S3 only through it (no direct GPIO; the encoder's
+ * GPIO 41/42 can't wake deep sleep). Powered off on USB, the first
+ * sleep woke at once and, with a 60 ms quiet window,
+ * twice: input changes about 0.1 s and 1.7 s after the
+ * rails went off, the sleep from 2.7 s held. The inputs on the rails
+ * power_off() cut keep changing for a second or two as they decay, with
+ * gaps longer than any short window. So: read until the inputs have held still for
+ * SLEEP_SETTLE_QUIET_MS with EXP_INT high (at most SLEEP_SETTLE_MAX_MS; a line
+ * that still moves costs a wake that comes back here from early_power()),
+ * clear every wake source (light sleep's timer and GPIO wakes too), arm ext0.
+ * The LCD and touch lines go low first (lcd_lines_low()), so the touch
+ * controller's INT has fallen before the settling ends rather than at sleep.
+ * The inputs it slept on stay in RTC memory, so the next boot can log which
+ * one woke it.
+ */
+#define SLEEP_SETTLE_STEP_MS 20
+#define SLEEP_SETTLE_QUIET_MS 2000  /* unchanged with EXP_INT high this long: past the measured 1.6 s gap */
+#define SLEEP_SETTLE_MAX_MS 6000
+
+static RTC_NOINIT_ATTR uint32_t s_slept_inputs;   /* inputs | ~inputs << 16 when it slept */
+
 static void sleep_until_wheel(void)
 {
-    uint16_t in;
-    exp_read(&in);  /* clears the interrupt */
+    uint16_t in, last = 0, first;
+    int quiet = 0, waited = 0;
+    lcd_lines_low();   /* the touch controller's INT falls now, not at sleep entry */
+    gpio_set_direction(EXP_INT, GPIO_MODE_INPUT);
+    gpio_pullup_en(EXP_INT);
+    gpio_wakeup_disable(EXP_INT);
+    exp_read(&last);  /* clears the interrupt */
+    first = last;
+    while (waited < SLEEP_SETTLE_MAX_MS && quiet < SLEEP_SETTLE_QUIET_MS) {
+        vTaskDelay(pdMS_TO_TICKS(SLEEP_SETTLE_STEP_MS));
+        waited += SLEEP_SETTLE_STEP_MS;
+        if (exp_read(&in) != ESP_OK) {
+            break;
+        }
+        quiet = (in == last && gpio_get_level(EXP_INT)) ? quiet + SLEEP_SETTLE_STEP_MS : 0;
+        last = in;
+    }
+    ESP_LOGI(TAG, "deep sleep until the wheel: inputs 0x%04x, quiet after %d ms (changed 0x%04x)", last,
+             waited - quiet, first ^ last);
+    s_slept_inputs = last | (uint32_t)(uint16_t)~last << 16;
+    /* Nothing but the expander may wake this: not light sleep's timer or GPIO
+     * wakes. ESP_SLEEP_WAKEUP_ALL clears them all without complaining about
+     * one that wasn't set. */
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     rtc_gpio_pullup_en(EXP_INT);
     rtc_gpio_pulldown_dis(EXP_INT);
     esp_sleep_enable_ext0_wakeup(EXP_INT, 0);
-    /* Light sleep stays configured for CPU power-down (muse_input_power_init)
-     * and leaves the timer armed: only the wheel may wake this. */
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     esp_deep_sleep_start();
 }
 
@@ -338,29 +472,9 @@ static esp_err_t knob_init(void)
 static esp_err_t init(void)
 {
     /* Hold the LCD and touch lines low until the LCD rail is up, as Seeed's BSP does. */
-    const gpio_config_t lcd_pins = {
-        .pin_bit_mask = BIT64(TP_SDA) | BIT64(TP_SCL) | BIT64(LCD_PCLK) | BIT64(LCD_D0) | BIT64(LCD_D1) |
-                        BIT64(LCD_D2) | BIT64(LCD_D3) | BIT64(LCD_CS) | BIT64(LCD_BL),
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    ESP_RETURN_ON_ERROR(gpio_config(&lcd_pins), TAG, "lcd pins");
-    for (int pin = 0; pin < GPIO_NUM_MAX; pin++) {
-        if (lcd_pins.pin_bit_mask & BIT64(pin)) {
-            gpio_set_level(pin, 0);
-        }
-    }
+    ESP_RETURN_ON_ERROR(lcd_lines_low(), TAG, "lcd pins");
 
-    const i2c_master_bus_config_t i2c_cfg = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = I2C_SDA,
-        .scl_io_num = I2C_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c");
-    const i2c_device_config_t exp_cfg = { .device_address = EXP_ADDR, .scl_speed_hz = 400000 };
-    ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_i2c, &exp_cfg, &s_exp), TAG, "expander");
+    ESP_RETURN_ON_ERROR(exp_open(), TAG, "expander");
 
     s_exp_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_exp_lock, ESP_ERR_NO_MEM, TAG, "expander lock");
@@ -371,6 +485,7 @@ static esp_err_t init(void)
     s_exp_out = EXP_PWR_SYSTEM;
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, s_exp_out), TAG, "system latch");
 #else
+    s_exp_out = 0;   /* early_power() may have had the battery divider on */
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, 0), TAG, "expander outputs");
 #endif
     ESP_RETURN_ON_ERROR(exp_write(EXP_REG_CONFIG, EXP_INPUTS), TAG, "expander config");
@@ -423,19 +538,7 @@ static esp_err_t init(void)
                         "expander int isr");
     gpio_intr_disable(EXP_INT);
 
-    const adc_oneshot_unit_init_cfg_t adc_cfg = { .unit_id = ADC_UNIT_1 };
-    ESP_RETURN_ON_ERROR(adc_oneshot_new_unit(&adc_cfg, &s_adc), TAG, "adc");
-    const adc_oneshot_chan_cfg_t ch_cfg = { .atten = ADC_ATTEN_DB_2_5, .bitwidth = ADC_BITWIDTH_DEFAULT };
-    ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(s_adc, BATT_ADC, &ch_cfg), TAG, "adc channel");
-    const adc_cali_curve_fitting_config_t cali_cfg = {
-        .unit_id = ADC_UNIT_1,
-        .chan = BATT_ADC,
-        .atten = ADC_ATTEN_DB_2_5,
-        .bitwidth = ADC_BITWIDTH_DEFAULT,
-    };
-    if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali) != ESP_OK) {
-        ESP_LOGW(TAG, "no ADC calibration: battery level disabled");
-    }
+    ESP_RETURN_ON_ERROR(adc_open(), TAG, "adc");
     return ESP_OK;
 }
 
@@ -764,7 +867,7 @@ static void display_pause(bool pause)
     s_paused = pause;
     if (pause) {
         s_waiter = xTaskGetCurrentTaskHandle();   /* the input task, before a line can fire */
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* bounded, shared with video */
         panel_sleep(true);
         lcd_power(false);
         pcnt_unit_stop(s_knob);
@@ -787,7 +890,7 @@ static void display_pause(bool pause)
         pcnt_unit_start(s_knob);
         lcd_power(true);
         xTaskNotifyGive(s_tp_task);
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
         if (esp_lv_adapter_lock(-1) == ESP_OK) {
             lv_obj_invalidate(lv_screen_active());
             esp_lv_adapter_unlock();
@@ -832,6 +935,9 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     i2s_chan_handle_t tx, rx;
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
+    /* Live reply audio: 30 ms of DMA each way, not ESP-IDF's 90 (muse_audio_dma.h). */
+    chan_cfg.dma_desc_num = MUSE_AUDIO_DMA_LIVE_DESC;
+    chan_cfg.dma_frame_num = MUSE_AUDIO_DMA_LIVE_FRAMES;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "i2s channel");
 #if CONFIG_MUSE_POWER_TEST
     /* Publish ownership BEFORE init/enable: partial TX/RX failures must still
@@ -853,6 +959,7 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &std_cfg), TAG, "i2s tx");
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(rx, &std_cfg), TAG, "i2s rx");
+    muse_audio_attach_tx(tx);   /* a barge-in clears its DMA (muse_audio_tx.h); before enable, or ESP-IDF refuses */
     ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "i2s tx on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "i2s rx on");
 
@@ -995,17 +1102,12 @@ static esp_err_t read_power(muse_power_t *out)
     ESP_RETURN_ON_ERROR(exp_read(&in), TAG, "expander read");
     out->usb = !(in & EXP_VBUS);
     out->charging = out->usb && (in & EXP_STDBY);
+    out->charge_done = out->usb && !(in & EXP_STDBY);   /* the charger's STDBY: charge done */
     out->battery_pct = -1;
     out->battery_mv = 0;
     ESP_RETURN_ON_FALSE(s_cali, ESP_ERR_INVALID_STATE, TAG, "no ADC calibration");
-    int sum = 0;
-    for (int i = 0; i < 8; i++) {
-        int raw, mv;
-        ESP_RETURN_ON_ERROR(adc_oneshot_read(s_adc, BATT_ADC, &raw), TAG, "adc read");
-        ESP_RETURN_ON_ERROR(adc_cali_raw_to_voltage(s_cali, raw, &mv), TAG, "adc cali");
-        sum += mv;
-    }
-    int v = sum / 8 * 82 / 20;
+    int v = battery_mv();
+    ESP_RETURN_ON_FALSE(v > 0, ESP_FAIL, TAG, "adc read");
     out->battery_mv = v;
     int pct = (-v * v + 9016 * v - 19189000) / 10000;
     out->battery_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
@@ -1029,6 +1131,79 @@ static esp_err_t power_off(void)
     while (exp_read(&in) == ESP_OK && !(in & EXP_WHEEL)) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    sleep_until_wheel();
+    return ESP_FAIL;
+}
+
+/* SAFE mode's key: the wheel's press, on the expander as early_power()
+ * reads it (exp_open: the bus and the expander, nothing more; SAFE skips init()). */
+static bool safe_key(void)
+{
+    uint16_t in;
+    return exp_open() == ESP_OK && exp_read(&in) == ESP_OK && !(in & EXP_WHEEL);
+}
+
+/*
+ * (muse_charge_dark.h). With the system latch off, plugging USB in
+ * powers the S3 anyway: VBUS reaches VCC_IN through the "VBAT & VUSB"
+ * switch, ahead of the 3.3 V buck (schematic sheet 4, DC-DC 5 -> 3.3 V), so
+ * a cold boot with VBUS and the wheel up is USB turning it on, and the board
+ * runs from USB while U3 charges the cell. Called from app_main before
+ * init(): it touches the expander's outputs only on USB, for the battery
+ * divider (EXP_PWR_BAT_ADC), and never the latch.
+ */
+static esp_err_t early_power(muse_cd_reading_t *out)
+{
+    static bool s_first = true;
+    static bool s_wheel_boot;
+    uint16_t in;
+    ESP_RETURN_ON_ERROR(exp_open(), TAG, "expander");
+    ESP_RETURN_ON_ERROR(exp_read(&in), TAG, "expander read");
+    if (s_first) {
+        s_first = false;
+        uint32_t causes = esp_sleep_get_wakeup_causes();
+        if (causes) {
+            /* Which input changed since the sleep (what woke a power-off on USB). */
+            bool known = (uint16_t)(s_slept_inputs >> 16) == (uint16_t)~s_slept_inputs;
+            unsigned changed = known ? (unsigned)(in ^ (uint16_t)s_slept_inputs) : 0xFFFFu;
+            ESP_LOGI(TAG, "woke from deep sleep: causes 0x%lx, inputs 0x%04x, changed 0x%04x%s, INT %d",
+                     (unsigned long)causes, in, changed, changed == EXP_TP_INT ? " (touch INT only)" : "",
+                     gpio_get_level(EXP_INT));
+        }
+        if ((causes & BIT(ESP_SLEEP_WAKEUP_EXT0)) && (in & EXP_WHEEL)) {
+            /* Powered off on USB, and the charger or VBUS woke us, not the
+             * wheel: back to sleep before Link or BLE start (as init() does). */
+            sleep_until_wheel();
+        }
+        s_wheel_boot = !(in & EXP_WHEEL);
+        ESP_LOGI(TAG, "power-up: %s, USB %s", s_wheel_boot ? "wheel held" : "wheel up",
+                 in & EXP_VBUS ? "absent" : "present");
+    }
+    out->usb = !(in & EXP_VBUS);
+    out->usb_on = out->usb && !s_wheel_boot;
+    out->by_key = s_wheel_boot || !(in & EXP_WHEEL);
+    out->battery_mv = 0;
+    if (out->usb) {
+        if (!(s_exp_out & EXP_PWR_BAT_ADC)) {
+            s_exp_out |= EXP_PWR_BAT_ADC;
+            ESP_RETURN_ON_ERROR(exp_write(EXP_REG_OUTPUT, s_exp_out), TAG, "battery divider");
+            ESP_RETURN_ON_ERROR(exp_write(EXP_REG_CONFIG, EXP_INPUTS), TAG, "expander config");
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        ESP_RETURN_ON_ERROR(adc_open(), TAG, "adc");
+        out->battery_mv = battery_mv();
+    }
+    return ESP_OK;
+}
+
+/* From the hold: the latch was never set, so without USB the board is
+ * already off; on USB, sleep until the wheel as power_off() does. */
+static esp_err_t early_power_off(void)
+{
+    ESP_RETURN_ON_ERROR(exp_open(), TAG, "expander");
+    s_exp_out = 0;
+    exp_write(EXP_REG_OUTPUT, 0);
     vTaskDelay(pdMS_TO_TICKS(100));
     sleep_until_wheel();
     return ESP_FAIL;
@@ -1807,6 +1982,12 @@ esp_err_t muse_ptest_board_service(muse_ptest_load_t load)
 }
 #endif
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
 static const muse_board_t s_board = {
     .name = "Seeed SenseCAP Watcher",
     .width = LCD_RES,
@@ -1814,6 +1995,7 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.45f,
+    .panel_w_mm = 36.8,   /* derived from the 1.45" diagonal */
     .talk_button = "wheel",
     .aux_button = "wheel",
     /* Hold to talk, click to sleep/wake, turn to review the latest reply. */
@@ -1824,14 +2006,37 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .display_pause = display_pause,
+    /* Video and UI streams straight to the panel (no TE line: frames may tear),
+     * in windows on 4-column boundaries, as round_area keeps LVGL's. */
+    .draw_frame = muse_lcd_bands_frame,
+    .draw_windows = muse_lcd_bands_windows,   /* only what changed of a streamed picture */
+    .panel_writes = muse_lcd_bands_writes,
+    .panel_stack_free = muse_lcd_bands_stack_free,
+    .frame_x_align = 4,
     .audio_init = audio_init,
+    /* set_mic_gain's 100 (ES7243E / ES7243): the tuned gain, 30 dB, until this board's
+     * 30 cm speech clip check is measured; then raised to the measured ceiling. */
+    .mic_gain_speech_max_db = MUSE_MIC_GAIN_TUNED,
+    .i2s_dma_desc = MUSE_AUDIO_DMA_LIVE_DESC,   /* the channels as audio_init makes them */
+    .i2s_dma_frames = MUSE_AUDIO_DMA_LIVE_FRAMES,
     .audio_power = audio_power,
     .mic_slot = 1,              /* one mic, on the right slot */
     .poll_buttons = poll_buttons,
+    .safe_key = safe_key,
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the charger's STDBY on the expander */
     .power_off = power_off,
+    /* Low-battery shutdown: 3.30 V, where Seeed's curve above reads
+     * 0 %. Unmeasured on the bench: devices/README.md, Low battery. */
+    .battery_shutdown_mv = 3300,
+    /* Charge dark below the low-cell level above: a USB power-up on a
+     * low cell boots at battery_shutdown_mv + MUSE_CD_CHARGE_MARGIN_MV on
+     * charge (3.6 V). */
+    .early_power = early_power,
+    .early_power_off = early_power_off,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

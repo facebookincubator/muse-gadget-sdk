@@ -74,6 +74,21 @@ if((NOT CONFIG_LWIP_TCP_SND_BUF_DEFAULT EQUAL 16384 OR
         "ESP32 Device SDK requires TCP send buffer and receive window 16384 (up to 65535 on the C5 with PSRAM, CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, 64+ dynamic RX buffers, a 64+ entry TCP receive mailbox and 1-12 out-of-order segments, or up to 98304 as in sdkconfig.defaults.esp32c5, adding window scaling, PSRAM required at boot, 96+ dynamic RX buffers and a 96+ entry mailbox; 5760 on the no-tunnel Cardputer ADV and AI Passport) for DMA headroom. ${GADGET_CONFIG_REGEN_HINT}")
 endif()
 
+# Both watchdogs on in every BLE gadget profile (the overlays that turn on
+# CONFIG_MUSE_GADGET_BLE_AUDIO): a generated sdkconfig from before keeps them
+# off, so a rebuild in an old build directory would ship a gadget that stays
+# hung. Tighter values are fine; off or looser are not. Other boards keep
+# sdkconfig.defaults' (off).
+if(CONFIG_MUSE_GADGET_BLE_AUDIO AND
+   (NOT CONFIG_ESP_INT_WDT OR CONFIG_ESP_INT_WDT_TIMEOUT_MS GREATER 1500 OR
+    (CONFIG_FREERTOS_NUMBER_OF_CORES GREATER 1 AND NOT CONFIG_ESP_INT_WDT_CHECK_CPU1) OR
+    NOT CONFIG_ESP_TASK_WDT_EN OR NOT CONFIG_ESP_TASK_WDT_INIT OR NOT CONFIG_ESP_TASK_WDT_PANIC OR
+    CONFIG_ESP_TASK_WDT_TIMEOUT_S GREATER 15 OR NOT CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 OR
+    (CONFIG_FREERTOS_NUMBER_OF_CORES GREATER 1 AND NOT CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1)))
+    message(FATAL_ERROR
+        "ESP32 Device SDK requires both watchdogs on in a musegadgets BLE build: the interrupt watchdog at 1.5 s or less on every core, the task watchdog at 15 s or less with a panic, watching every idle task. ${GADGET_CONFIG_REGEN_HINT}")
+endif()
+
 # With BLE kept up after setup, the gadget keeps advertising a connectable
 # service. Any nearby device may connect to it and hold the connection, so a
 # single NimBLE connection would let it lock out everything else on BLE (the
@@ -169,3 +184,8 @@ if(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL)
     message(WARNING
         "This build trusts ESP-IDF's full root CA bundle, but sdkconfig.defaults picks the common one. If you didn't choose it in menuconfig: ${GADGET_CONFIG_REGEN_HINT}")
 endif()
+
+# Production builds never sign with the repository's dev key (cmake/signing_key.cmake).
+include("${CMAKE_CURRENT_LIST_DIR}/signing_key.cmake")
+muse_check_signing_key("${CONFIG_HOMEHUB_DEV_BUILD}" "${CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES}"
+                       "${CONFIG_SECURE_BOOT_SIGNING_KEY}" "${CMAKE_SOURCE_DIR}")

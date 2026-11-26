@@ -256,8 +256,8 @@ class Service:
             return
         if paired != config.sdk_token_hint(self.sdk_token):
             self._sdk_token_change_warned = True
-            log.warning("paired with SDK token %s, not this one; run `musegadget pair --force` "
-                        "to use it", paired)
+            log.warning("paired with another SDK token, not this one; run `musegadget pair --force` "
+                        "to use it")
 
     async def _maybe_refresh(self, pairing: dict, force: bool = False) -> dict | None:
         """Return current pairing, rotating tokens first if they are due.

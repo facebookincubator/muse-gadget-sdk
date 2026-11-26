@@ -50,7 +50,54 @@ typedef struct {
     size_t len;
     size_t cap;
     const char *auth_header;
+    int64_t date_s;   // the response's Date header, unix seconds (0: none)
 } resp_buf_t;
+
+// Days from 1970-01-01 to y-m-d (proleptic Gregorian; Howard Hinnant's
+// days_from_civil).
+static int64_t days_from_civil(int64_t y, int m, int d) {
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int64_t yoe = y - era * 400;
+    int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+static int two_digits(const char *s) {
+    return s[0] >= '0' && s[0] <= '9' && s[1] >= '0' && s[1] <= '9' ? (s[0] - '0') * 10 + (s[1] - '0') : -1;
+}
+
+int64_t vm_api_parse_http_date(const char *s) {
+    static const char days[7][4] = {"Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"};  // 1970-01-01 a Thursday
+    static const char months[12][4] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    // "Sun, 06 Nov 1994 08:49:37 GMT": exactly 29 characters.
+    if (!s || strlen(s) != 29 || s[3] != ',' || s[4] != ' ' || s[7] != ' ' || s[11] != ' '
+        || s[16] != ' ' || s[19] != ':' || s[22] != ':' || s[25] != ' ' || strcmp(s + 26, "GMT") != 0) {
+        return 0;
+    }
+    int day = two_digits(s + 5), hh = two_digits(s + 17), mm = two_digits(s + 20), ss = two_digits(s + 23);
+    int y_hi = two_digits(s + 12), y_lo = two_digits(s + 14);
+    int month = -1;
+    for (int i = 0; i < 12; i++) {
+        if (memcmp(s + 8, months[i], 3) == 0) month = i + 1;
+    }
+    if (day < 1 || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 60 || y_hi < 0 || y_lo < 0
+        || month < 1) {
+        return 0;
+    }
+    int year = y_hi * 100 + y_lo;
+    static const int mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    if (day > mdays[month - 1] + (month == 2 && leap)) return 0;
+    int64_t d = days_from_civil(year, month, day);
+    int64_t wd = ((d % 7) + 7) % 7;
+    if (memcmp(s, days[wd], 3) != 0) return 0;   // the weekday must be the date's
+    return d * 86400 + hh * 3600 + mm * 60 + (ss == 60 ? 59 : ss);
+}
+
+#define HTTP_DATE_AFTER 1704067200LL   // 2024-01-01: anything earlier isn't a server's clock
 
 static bool http_origin(esp_http_client_handle_t client, char *out, size_t cap) {
     if (esp_http_client_get_url(client, out, (int)cap) != ESP_OK) return false;
@@ -81,6 +128,12 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
         if (r->auth_header && *r->auth_header) {
             return esp_http_client_set_header(evt->client, "Authorization", r->auth_header);
         }
+        return ESP_OK;
+    }
+    if (evt->event_id == HTTP_EVENT_ON_HEADER && r && evt->header_key
+        && strcasecmp(evt->header_key, "Date") == 0) {
+        int64_t t = vm_api_parse_http_date(evt->header_value);
+        r->date_s = t >= HTTP_DATE_AFTER ? t : 0;
         return ESP_OK;
     }
     if (evt->event_id != HTTP_EVENT_ON_DATA || !r) return ESP_OK;
@@ -396,6 +449,15 @@ static int parse_token_pair(resp_buf_t *resp, vm_device_tokens_t *out) {
     }
     out->access_token = strdup(access->valuestring);
     out->refresh_token = strdup(refresh->valuestring);
+    out->server_date_s = resp->date_s;
+    // The access token's lifetime (what access_expires_at is
+    // counted from). A whole number of seconds, up to ten years; else none.
+    cJSON *expires = cJSON_GetObjectItem(root, "expires_in");
+    out->expires_in_s = cJSON_IsNumber(expires) && expires->valuedouble >= 1
+                                && expires->valuedouble <= 10.0 * 366 * 86400
+                                && expires->valuedouble == (double)(int64_t)expires->valuedouble
+                            ? (int64_t)expires->valuedouble
+                            : 0;
     cJSON_Delete(root);
     if (!out->access_token || !out->refresh_token) {
         vm_device_tokens_free(out);
@@ -517,6 +579,8 @@ void vm_device_tokens_free(vm_device_tokens_t *tokens) {
     free(tokens->refresh_token);
     tokens->access_token = NULL;
     tokens->refresh_token = NULL;
+    tokens->expires_in_s = 0;
+    tokens->server_date_s = 0;
 }
 
 void vm_list_free(vm_info_t *vms, int count) {

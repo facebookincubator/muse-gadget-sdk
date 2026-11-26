@@ -40,6 +40,19 @@ static psa_status_t test_sign_hash(psa_key_id_t, psa_algorithm_t, const uint8_t 
 #undef psa_import_key
 #undef psa_sign_hash
 
+// secure_random() (components/secure_random, compiled in): the BT controller
+// "enabled" unless a test turns it off, after test_bt_on_left more queries.
+#include "esp_bt.h"
+#include "esp_random.h"   // the phone side's nonce in hello()
+int test_rng_draws;
+static int test_bt_on_left = -1;   // -1: on for good; 0: off; N: N more queries on
+esp_bt_controller_status_t esp_bt_controller_get_status(void) {
+    if (test_bt_on_left < 0) return ESP_BT_CONTROLLER_STATUS_ENABLED;
+    if (test_bt_on_left == 0) return ESP_BT_CONTROLLER_STATUS_INITED;
+    test_bt_on_left--;
+    return ESP_BT_CONTROLLER_STATUS_ENABLED;
+}
+
 #define TEST_POLICY PAIRING_POLICY_BUTTON
 
 static psa_status_t test_import_key(const psa_key_attributes_t *a, const uint8_t *data, size_t n, psa_key_id_t *id) {
@@ -147,6 +160,30 @@ static void check_device_info(bool community, int epoch) {
     assert(cJSON_GetObjectItem(info, "pairing_auth_epoch")->valueint == epoch);
     assert(strcmp(cJSON_GetObjectItem(info, "pairing_auth")->valuestring,
                   community ? PAIRING_COMMUNITY_AUTH : PAIRING_AUTH) == 0);
+    // Without gadget support both fields stay absent ("wifi" absent = required).
+    assert(link_pairing_wifi_mode() != LINK_WIFI_REQUIRED
+           || (cJSON_GetObjectItem(info, "wifi") == NULL
+               && cJSON_GetObjectItem(info, "mgcommands") == NULL));
+    cJSON_Delete(info);
+}
+static void check_gadget_device_info(void) {
+    static const struct { link_wifi_mode_t mode; const char *wifi; } cases[] = {
+        { LINK_WIFI_OPTIONAL, "optional" }, { LINK_WIFI_NONE, "none" },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        link_pairing_set_gadget(cases[i].mode, true);
+        assert(link_pairing_wifi_mode() == cases[i].mode && link_pairing_mgcommands());
+        cJSON *info = cJSON_CreateObject();
+        link_pairing_add_device_info(info);
+        assert(strcmp(cJSON_GetObjectItem(info, "wifi")->valuestring, cases[i].wifi) == 0);
+        assert(cJSON_GetObjectItem(info, "mgcommands")->valueint == 1);
+        assert(cJSON_GetObjectItem(info, "pairing_protocol")->valueint == 5);
+        cJSON_Delete(info);
+    }
+    link_pairing_set_gadget(LINK_WIFI_REQUIRED, false);
+    cJSON *info = cJSON_CreateObject();
+    link_pairing_add_device_info(info);
+    assert(!cJSON_GetObjectItem(info, "wifi") && !cJSON_GetObjectItem(info, "mgcommands"));
     cJSON_Delete(info);
 }
 static void verify_official_proof(cJSON *ready) {
@@ -199,6 +236,48 @@ static void accept(bool community) {
     assert(!link_pairing_provisioning_session_valid(0) && s_state == PAIRING_WAIT_CLIENT_FINISHED);
     cJSON_Delete(j); cJSON_Delete(r); free(reply);
 }
+// The hello's ephemeral key, device nonce and ECDH blinding
+// are security draws. With no radio on at any one of them the hello is
+// refused as error_pairing_unavailable, with nothing drawn from then on and no
+// session left; with the radio on throughout it's accepted as before.
+static void no_radio_refuses_hello(bool community) {
+    const char *auth = community ? PAIRING_COMMUNITY_AUTH : PAIRING_AUTH;
+    unsigned char b[8] = {1};
+    test_bt_on_left = 0;
+    int before = test_rng_draws;
+    assert(rng_cb(NULL, b, sizeof(b)) == MBEDTLS_ERR_ECP_RANDOM_FAILED);
+    assert(test_rng_draws == before && b[0] == 0);
+    test_bt_on_left = -1;
+    bool refused_after_key = false;
+    int accepted_from = -1;
+    for (int left = 0; left < 64 && accepted_from < 0; left++) {
+        cJSON *j = hello(5, auth);   // the phone's side, drawn with the radio on
+        static const uint8_t zero[NONCE_BYTES];
+        test_bt_on_left = left;
+        int draws = test_rng_draws;
+        char *reply = (char *)1;
+        const char *err = link_pairing_handle_client_hello(j, &reply);
+        int drawn = test_rng_draws - draws;
+        test_bt_on_left = -1;
+        if (err) {
+            if (strcmp(err, "error_pairing_unavailable") != 0) fprintf(stderr, "no radio: %s\n", err);
+            assert(strcmp(err, "error_pairing_unavailable") == 0 && !reply);
+            assert(drawn == left);   // every query that passed drew once; the refused one none
+            assert(s_state == PAIRING_IDLE && !link_pairing_session_confirmed());
+            assert(memcmp(s_device_nonce, zero, sizeof(zero)) == 0 && s_device_pub_b64[0] == 0);
+            // Refused after the key's first draw (its later draws, the nonce, the ECDH).
+            if (left > 0) refused_after_key = true;
+        } else {
+            assert(reply && s_state == PAIRING_WAIT_CLIENT_FINISHED);
+            free(reply);
+            accepted_from = left;
+        }
+        cJSON_Delete(j);
+    }
+    assert(accepted_from > 1 && refused_after_key);
+    printf("no radio: hello refused at each of its %d security draws\n", accepted_from);
+    accept(community);   // the radio on: as before
+}
 static cJSON *encrypted_finished(void) {
     const char *plain="{\"action\":\"pairing_client_finished\"}";
     uint8_t cipher[128], tag[16];
@@ -216,10 +295,18 @@ static void finished_confirm_and_replay(void) {
     assert(!link_pairing_confirm_active_session(test_now)); // The prompt is not emitted yet.
     test_now += 1000;
     assert(link_pairing_arm_confirmation(link_pairing_session_generation()));
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    // A Muse Gadget: the prompt has no timer (an hour on it's still up), and one press confirms it, whenever it
+    // began.
+    test_now += 3600LL * 1000000LL;
+    assert(link_pairing_confirmation_required() && !link_pairing_session_confirmed());
+    assert(link_pairing_confirm_active_session(0));
+#else
     // A press that began before the prompt was armed doesn't confirm it.
     assert(!link_pairing_confirm_active_session(test_now - 1));
     assert(link_pairing_confirmation_required() && !link_pairing_session_confirmed());
     assert(link_pairing_confirm_active_session(test_now));
+#endif
     assert(link_pairing_session_confirmed());
     // A duplicate record resets the session instead of accepting nonce reuse.
     assert(strcmp(link_pairing_decrypt_command(j,&plain),"error_pairing_decrypt")==0 && !plain);
@@ -285,6 +372,61 @@ static void stale_confirmation_work_cannot_affect_replacement(void) {
     assert(s_state == PAIRING_IDLE);
     assert(link_pairing_reset_session(current_generation));
     assert(!link_pairing_reset_session(current_generation));
+}
+
+// A takeover hello refused on its own key or nonce wipes nothing (the portable core's #524 finding): the session
+// is as it was, armed, with its keys and token, so its error can go under those keys (ble_server.c answers it
+// there, then ends the session and the link). One that fails after the wipe (a security draw refused) has ended
+// that session already: its token is no longer current. A dismissed prompt takes no press.
+static void reject_takeover(cJSON *j, const char *want) {
+    char *reply = (char *)1;
+    const char *err = link_pairing_handle_client_hello(j, &reply);
+    assert(err && strcmp(err, want) == 0 && !reply);
+    cJSON_Delete(j);
+}
+static uint32_t armed_prompt(void) {
+    accept(true);
+    cJSON *finished = encrypted_finished();
+    char *plain = NULL;
+    assert(!link_pairing_decrypt_command(finished, &plain));
+    free(plain); cJSON_Delete(finished);
+    uint32_t prompt = link_pairing_handle_client_finished();
+    assert(prompt && link_pairing_arm_confirmation(prompt));
+    return prompt;
+}
+static void bad_takeover_hello_changes_nothing(void) {
+    uint32_t prompt = armed_prompt();
+    uint8_t rx[KEY_BYTES];
+    memcpy(rx, s_rx_key, sizeof(rx));
+    uint8_t off_curve[P256_POINT_BYTES] = {4}, short_nonce[4] = {1};
+    char b64[96];
+    cJSON *j = hello(5, PAIRING_COMMUNITY_AUTH);
+    assert(base64url_encode(off_curve, sizeof(off_curve), b64, sizeof(b64)));
+    cJSON_ReplaceItemInObject(j, "mobile_pub", cJSON_CreateString(b64));
+    reject_takeover(j, "error_pairing_invalid_hello");
+    j = hello(5, PAIRING_COMMUNITY_AUTH);
+    cJSON_ReplaceItemInObject(j, "mobile_pub", cJSON_CreateString("AAAA"));
+    reject_takeover(j, "error_pairing_invalid_hello");
+    j = hello(5, PAIRING_COMMUNITY_AUTH);
+    assert(base64url_encode(short_nonce, sizeof(short_nonce), b64, sizeof(b64)));
+    cJSON_ReplaceItemInObject(j, "mobile_nonce", cJSON_CreateString(b64));
+    reject_takeover(j, "error_pairing_invalid_hello");
+    assert(link_pairing_session_is_current(prompt) && link_pairing_session_generation() == prompt);
+    assert(link_pairing_confirmation_required() && s_confirmation_armed && memcmp(rx, s_rx_key, sizeof(rx)) == 0);
+    char *status = link_pairing_encrypt_status("error_pairing_invalid_hello", 0, NULL);
+    assert(status); free(status);
+    // Fails after the wipe: no radio at its first security draw.
+    j = hello(5, PAIRING_COMMUNITY_AUTH);
+    test_bt_on_left = 0;
+    reject_takeover(j, "error_pairing_unavailable");
+    test_bt_on_left = -1;
+    assert(!link_pairing_session_is_current(prompt) && link_pairing_session_generation() == 0);
+    assert(!link_pairing_confirmation_required() && !link_pairing_confirm_active_session(test_now));
+    // A dismissed prompt: still waiting (its status and the link's end follow), but no press confirms it.
+    prompt = armed_prompt();
+    link_pairing_disarm_confirmation(prompt);
+    assert(link_pairing_confirmation_required() && !link_pairing_confirm_active_session(test_now));
+    assert(link_pairing_reset_session(prompt));
 }
 
 static int test_commits;
@@ -386,6 +528,12 @@ static void token_fingerprints_show_no_characters(void) {
     token_fp_text(FAKE_SDK_TOKEN, fp);
     assert(strncmp(fp, "48 chars, sha256 ", 17) == 0 && strlen(fp) == 25 && !strstr(fp, "mgst"));
     printf("FP %s\n", fp);
+    unsigned len = 99;
+    char hex[TOKEN_FP_HEX_LEN] = "x";
+    assert(!token_fp_parts(NULL, &len, hex) && len == 0 && hex[0] == 0);
+    assert(!token_fp_parts("", &len, hex) && len == 0 && hex[0] == 0);
+    assert(token_fp_parts("abc", &len, hex) && len == 3 && strcmp(hex, "ba7816bf") == 0);
+    assert(token_fp_parts(FAKE_SDK_TOKEN, &len, hex) && len == 48 && strstr(fp, hex));   /* what Settings shows */
 }
 
 int main(void) {
@@ -399,6 +547,7 @@ int main(void) {
     cJSON_ReplaceItemInObject(invalid,"mobile_pub",cJSON_CreateString(invalid_b64));
     reject(invalid,"error_pairing_invalid_hello");
     assert(link_pairing_plaintext_setup_blocked());
+    no_radio_refuses_hello(true);
     accept(true); assert(test_imports==0 && test_signs==0);
     char previous_pub[sizeof(s_device_pub_b64)];strcpy(previous_pub,s_device_pub_b64);
     finished_confirm_and_replay();
@@ -407,7 +556,13 @@ int main(void) {
     assert(!link_pairing_decrypt_command(j,&plain));free(plain);cJSON_Delete(j);
     assert(link_pairing_handle_client_finished());
     test_now += PAIRING_CONFIRM_TIMEOUT_US+1;
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+    // No timer on a gadget's prompt: past Home Link's window the session still waits for its press.
+    assert(link_pairing_confirmation_required() && s_state==PAIRING_CONFIRM_REQUIRED);
+    assert(link_pairing_reset_session(link_pairing_session_generation()) && s_state==PAIRING_IDLE);
+#else
     assert(!link_pairing_confirm_active_session(test_now) && s_state==PAIRING_IDLE);
+#endif
     accept(true);
     test_now += PAIRING_CLIENT_FINISHED_TIMEOUT_US+1;
     assert(!link_pairing_handle_client_finished() && s_state==PAIRING_IDLE);
@@ -430,10 +585,12 @@ int main(void) {
     accept(true); assert(test_efuse_reads==0 && test_imports==0 && test_signs==0);
 #endif
     reboot(0);
+    bad_takeover_hello_changes_nothing();
     stale_confirmation_work_cannot_affect_replacement();
     provisioning_and_scan_work_cannot_cross_sessions();
     pairing_confirmed_carries_sdk_token();
-    printf("PASS actual pairing: eFuse=%d, explicit auth/policy agreement, encrypted finished/confirmation/replay/timeouts\n",
+    check_gadget_device_info();
+    printf("PASS actual pairing: eFuse=%d, explicit auth/policy agreement, encrypted finished/confirmation/replay/timeouts, gadget device_info\n",
            TEST_PAIRING_EFUSE_AUTH);
     return 0;
 }

@@ -53,6 +53,18 @@ uint32_t muse_pixel_working_accent(void);
 /* Render one frame into Muse's own MUSE_PX_W x MUSE_PX_H grid. */
 void muse_pixel_render(const muse_pose_t *pose);
 
+/*
+ * Optional fast path, implemented by the default avatar. After render(), returns
+ * the current cell's palette-resolved, undimmed RGB565 (0 outside the grid),
+ * independent of set_size(). Like scale(), call on the rendering task only.
+ * Custom renderers need not implement it: optional callers define
+ * MUSE_PIXEL_OPTIONAL_CELLS before including this header, declare the function
+ * weak locally, check its pointer, and fall back to scale() if NULL.
+ */
+#ifndef MUSE_PIXEL_OPTIONAL_CELLS
+uint16_t muse_pixel_cell_rgb565(int x, int y);
+#endif
+
 /* Size (square, in screen pixels) muse_pixel_scale() blows the grid up to. */
 void muse_pixel_set_size(int px);
 

@@ -51,6 +51,8 @@ bool led_status_display_info(int *width, int *height);
 // four-gray e-paper, 1 for black and white e-paper and LED matrices, 0
 // without a display.
 int led_status_display_bits(void);
+// Whether the screen is round (corners cut off): the full UI's round panels.
+bool led_status_display_round(void);
 // Draw w x h pixels at (x, y). `pixels` holds RGB565, 2 bytes each with the
 // high byte first, left to right and top to bottom; at most 23 full rows'
 // worth per call. The first call replaces the animation and title until
@@ -84,3 +86,12 @@ void led_status_set_level(float level);
 // Show the speaker volume (0 to 100) on the ring for a moment, over whatever
 // it shows.
 void led_status_show_volume(int percent);
+
+// The bench switch is on for the connected central (bench.out=1, the
+// USB console's or the Nordic UART's): while on, screenless boards' "Bench"
+// mark: a blue double flash
+// 30/100/30 ms every 4 s at the lowest priority (only over a steady
+// connection colour; the voice states, the volume and any blinking or
+// breathing state win); "Bench - " before the status text on e-paper. Any
+// task. No-op on the Muse UI and on boards with no light.
+void led_status_set_bench(bool on);

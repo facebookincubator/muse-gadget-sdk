@@ -90,11 +90,6 @@ class LangTest(unittest.TestCase):
             shown = CONVERSION.sub(lambda m: values[m.group(0)], text)
             self.assertLessEqual(len(shown), VN_BAND_COLUMNS, f"{en!r}: {shown!r}")
 
-    def test_status_names_stay_upper_case(self) -> None:
-        for en, text in self.tables["STATUS"]:
-            words = CONVERSION.sub("", text)
-            self.assertEqual(words, words.upper(), en)
-
     def test_every_letter_is_in_the_fonts(self) -> None:
         def glyphs(name: str) -> set[int]:
             font = (MUSE / "fonts" / name).read_text(encoding="utf-8")

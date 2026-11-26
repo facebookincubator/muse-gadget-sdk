@@ -243,7 +243,8 @@ replaced by rename. Names/icons/colours default from the manifest, with
 optional install overrides and a SHA-256 check. Installed VM folders are
 assumed to be `workspace/gadgets/apps/<id>/`. Unpairing removes all apps.
 
-The 4 MB `files` partition follows `apps`. `files.put` streams VM files up
+The 4 MB `files` partition follows `apps` (the BLE offline clips' `mg_queue`
+takes the rest of the 16 MB after it). `files.put` streams VM files up
 to 3 MB into flash, hashes them and optionally checks the requested SHA-256.
 `files.list` and `files.remove` manage them. Apps read paths starting with
 `/` through `file_read` and `ui_image_load`, with `files.gadget` permission,

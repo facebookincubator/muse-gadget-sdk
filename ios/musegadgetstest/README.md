@@ -147,3 +147,11 @@ Release builds ignore it, since any app or web page can open a URL. The log
 
 Not ported: Android's raw-file test source and its bench dumps
 (`tools/livebench` drives the Android app).
+
+## Live call
+
+Live call (a video call with your Muse, started from a gadget) is in the
+Muse app only, on the app's own sign-in. This app doesn't implement it. A
+gadget's side of it (`mg_command_live_call`, video and subtitles in
+[`../../protocols/mgcommands.h`](../../protocols/mgcommands.h)) is tested
+with the Muse app.

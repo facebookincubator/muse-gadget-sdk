@@ -389,6 +389,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): BOOT (GPIO0, the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(TALK_GPIO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "VN ESP32-S3 1.83-inch NV3023",
     .width = LCD_H_RES,
@@ -409,12 +421,15 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .audio_init = audio_init,
     .mic_slot = 0,              /* MIC1; slot 1 is the speaker reference */
     .poll_buttons = poll_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_PERCENT,   /* percent fallback: its charge line only says charging */
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

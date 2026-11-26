@@ -103,7 +103,7 @@ class WatcherSleepTest(unittest.TestCase):
         main = (ROOT / "main" / "main.c").read_text()
         self.assertLess(main.index("muse_glue_start();"), main.index("app_run();"))
         glue = body((ROOT / "main" / "muse_glue.c").read_text(), "void muse_glue_start(void)")
-        self.assertLess(glue.index("muse_input_power_init();"), glue.index("xTaskCreatePinnedToCore(boot_task"))
+        self.assertLess(glue.index("muse_input_power_init();"), glue.index("muse_task_slot_run(&s_boot_slot, boot_task"))
         init = body(INPUT.read_text(), "void muse_input_power_init(void)")
         self.assertIn("esp_sleep_cpu_retention_init()", init)
         self.assertIn('esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "muse_awake", &s_awake)', init)
@@ -153,9 +153,17 @@ class WatcherSleepTest(unittest.TestCase):
         off = body(INPUT.read_text(), "static void power_off(void)")
         self.assertLess(off.index("esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);"),
                         off.index("muse_board->power_off()"))
+        # Armed first, so the disable never logs "Incorrect wakeup source (4)".
+        self.assertLess(off.index("esp_sleep_enable_timer_wakeup("),
+                        off.index("esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);"))
         watcher = body((MUSE / "boards" / "board_sensecap_watcher.c").read_text(), "static void sleep_until_wheel(void)")
-        self.assertLess(watcher.index("esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);"),
+        # Every wake source but ext0 goes (light sleep's timer and GPIO wakes), then ext0.
+        self.assertLess(watcher.index("esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);"),
+                        watcher.index("esp_sleep_enable_ext0_wakeup(EXP_INT, 0);"))
+        self.assertLess(watcher.index("esp_sleep_enable_ext0_wakeup(EXP_INT, 0);"),
                         watcher.index("esp_deep_sleep_start();"))
+        self.assertNotIn("ESP_SLEEP_WAKEUP_TIMER", watcher)
+
 
 if __name__ == "__main__":
     unittest.main()

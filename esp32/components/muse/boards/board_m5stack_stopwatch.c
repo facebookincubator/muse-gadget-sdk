@@ -70,21 +70,25 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "muse_lvgl_hold.h"
 #include "esp_rom_gpio.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "sdkconfig.h"
 
 #include "muse_audio.h"
 #if CONFIG_CAPABILITIES_REGISTRY
 #include "bmi270_device.h"
 #endif
+#include "muse_audio_dma.h"
 #include "muse_board.h"
 #if CONFIG_CAPABILITIES_REGISTRY
 #include "capabilities_registry.h"
 #endif
+#include "muse_settings.h"
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "soc/spi_periph.h"
@@ -118,16 +122,11 @@ static const char *TAG = "board";
 #define CODEC_ARM_MS 30            /* M5Unified arms capture at +30/60/90 ms of running I2S clock */
 #define ES8311_REG_SYSTEM 0x0D     /* 0x01: analog circuitry powered up */
 
-/* With live calls (CONFIG_MUSE_REALTIME_VOICE), yellow is the talk button
- * (hold to talk or interrupt) and blue the speaker button, which also hangs
- * up during a call (muse_input.c). Otherwise blue talks, yellow mutes. */
-#if !CONFIG_MUSE_REALTIME_VOICE
-#define TALK_GPIO GPIO_NUM_1       /* KEYB / BtnB, blue, upper right: PTT */
-#define SPEAKER_GPIO GPIO_NUM_2    /* KEYA / BtnA, yellow, upper left: speaker */
-#else
+/* Yellow is the talk button in every build (matching its
+ * rim icons) and blue the speaker button, which also
+ * hangs up a Wi-Fi realtime call (muse_input.c). */
 #define TALK_GPIO GPIO_NUM_2       /* KEYA / BtnA, yellow, upper left: talk */
 #define SPEAKER_GPIO GPIO_NUM_1    /* KEYB / BtnB, blue, upper right: speaker, hang up */
-#endif
 
 #define TP_ADDR 0x15
 #define TP_REG_POINTS 0x02         /* finger count, then X and Y, 12 bits each */
@@ -159,6 +158,25 @@ static const char *TAG = "board";
 #define PMIC_LONG_DELAY_4S 0x18
 #define PMIC_SYS_CMD 0x0C
 #define PMIC_SHUTDOWN 0xA1
+/* What turned the PM1 on (M5PM1 user manual, WAKE_SRC 0x05; write 0 to
+ * clear). 5VIN is the USB-C port behind its OVP switch (schematic sheet 2:
+ * VUSB_IN -> AW32901 -> 5V_IN -> R14/R16 -> PM_5VIN_ADC); 5VINOUT is the
+ * Grove port, an input while the 5 V boost is off (init keeps it off). */
+#define PMIC_WAKE_SRC 0x05
+#define PMIC_WAKE_TIMER BIT(0)
+#define PMIC_WAKE_VIN BIT(1)
+#define PMIC_WAKE_PWRBTN BIT(2)
+#define PMIC_WAKE_RSTBTN BIT(3)
+#define PMIC_WAKE_5VINOUT BIT(6)
+/* The PM1's timer (user manual, System Timer): seconds in 0x38-0x3B, then
+ * TIM_CFG ARM + ACTION (011 power on), then 0xA5 to TIM_KEY to load it; as
+ * M5PM1 src/M5PM1.cpp timerSet()/timerClear(). Bench only (power_on_timer). */
+#define PMIC_TIM_CNT 0x38
+#define PMIC_TIM_CFG 0x3C
+#define PMIC_TIM_ARM BIT(3)
+#define PMIC_TIM_POWER_ON 0x03
+#define PMIC_TIM_KEY 0x3D
+#define PMIC_TIM_RELOAD 0xA5
 #define POWER_DEBOUNCE_US 30000
 #define POWER_HOLD_US 1500000
 /* The PM1's IRQ output, for wait_buttons(): its GPIO1 (G1_IRQout_ADC) is net
@@ -415,6 +433,69 @@ static esp_err_t ioe_set(uint16_t pins, bool high)
     return ioe_update(IOE_OUT, pins, high ? pins : 0);
 }
 
+/* The vibration motor (IO9, the expander's push-pull output; its PWM stays
+ * off): on for ms, then off from the timer task, so the caller (the voice
+ * task at the talk threshold) never waits on it. pct is
+ * ignored: the motor runs at full drive or not at all. */
+static TimerHandle_t s_buzz_timer;
+
+/* On the timer task, which must not block: a busy expander lock or a failed
+ * transfer isn't waited out or retried here; the timer fires again shortly
+ * until the motor is off. */
+static void buzz_off(TimerHandle_t t)
+{
+    esp_err_t err = ESP_ERR_TIMEOUT;
+    if (xSemaphoreTake(s_ioe_lock, 0) == pdTRUE) {
+        uint8_t reg = IOE_OUT, b[2] = { 0 };
+        err = i2c_master_transmit_receive(s_ioe, &reg, 1, b, sizeof(b), 50);
+        uint16_t v = b[0] | b[1] << 8;
+        if (err == ESP_OK && (v & IOE_MOTOR)) {
+            v &= ~IOE_MOTOR;
+            err = i2c_master_transmit(s_ioe, (uint8_t[]){ IOE_OUT, v & 0xFF, v >> 8 }, 3, 50);
+        }
+        xSemaphoreGive(s_ioe_lock);
+    }
+    if (err != ESP_OK) {
+        xTimerChangePeriod(t, pdMS_TO_TICKS(MOTOR_RETRY_US / 1000), 0);
+    }
+}
+
+static void buzz(int ms, int pct)
+{
+    (void)pct;
+    if (!s_ioe_lock) {
+        return;
+    }
+    if (ms <= 0) {
+        /* Off at once (the haptics core's off steps; muse_board.h). */
+        if (s_buzz_timer) {
+            xTimerStop(s_buzz_timer, pdMS_TO_TICKS(20));
+        }
+        if (ioe_set(IOE_MOTOR, false) != ESP_OK && s_buzz_timer) {
+            xTimerChangePeriod(s_buzz_timer, pdMS_TO_TICKS(MOTOR_RETRY_US / 1000), pdMS_TO_TICKS(20));
+        }
+        return;
+    }
+    if (!s_buzz_timer) {
+        s_buzz_timer = xTimerCreate("motor", 1, pdFALSE, NULL, buzz_off);
+        if (!s_buzz_timer) {
+            return;
+        }
+    }
+    if (ms > 500) {
+        ms = 500;   /* a buzz, never a stuck motor */
+    }
+    if (ioe_set(IOE_MOTOR, true) == ESP_OK &&
+        xTimerChangePeriod(s_buzz_timer, pdMS_TO_TICKS(ms) ? pdMS_TO_TICKS(ms) : 1, pdMS_TO_TICKS(20)) != pdPASS) {
+        /* No timer to turn it off: off now, trying until the write lands. */
+        esp_err_t err = ESP_FAIL;
+        for (int i = 0; i < 5 && err != ESP_OK; i++) {
+            err = ioe_set(IOE_MOTOR, false);
+        }
+        ESP_LOGW(TAG, "buzz: the motor timer didn't start%s", err == ESP_OK ? "" : "; motor off failed");
+    }
+}
+
 /* The codec driver switches the amp through this as the speaker opens and closes. */
 static int ioe_gpio_setup(int16_t gpio, audio_gpio_dir_t dir, audio_gpio_mode_t mode)
 {
@@ -582,10 +663,9 @@ static void register_devices(void)
 }
 #endif /* CONFIG_CAPABILITIES_REGISTRY */
 
-static esp_err_t init(void)
+static esp_err_t pmic_open(void)
 {
-    s_ioe_lock = xSemaphoreCreateMutex();
-    ESP_RETURN_ON_FALSE(s_ioe_lock, ESP_ERR_NO_MEM, TAG, "ioe lock");
+    if (s_pmic) return ESP_OK;
     const i2c_master_bus_config_t i2c_cfg = {
         .i2c_port = I2C_NUM_0,
         .sda_io_num = I2C_SDA,
@@ -595,7 +675,103 @@ static esp_err_t init(void)
         .flags.enable_internal_pullup = true,
     };
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_cfg, &s_i2c), TAG, "i2c");
-    ESP_RETURN_ON_ERROR(add_device(PMIC_ADDR, 100000, &s_pmic), TAG, "pmic");
+    return add_device(PMIC_ADDR, 100000, &s_pmic);
+}
+
+/* SAFE mode's key: the talk key (KEYA, GPIO2), read raw. */
+static bool safe_key(void)
+{
+    static bool set;
+    if (!set) {
+        set = true;
+        gpio_set_direction(TALK_GPIO, GPIO_MODE_INPUT);
+        gpio_pullup_en(TALK_GPIO);
+    }
+    return gpio_get_level(TALK_GPIO) == 0;
+}
+
+/* SAFE mode skips init: the power chip keeps its settings across ESP32
+ * resets, and M5's firmware may have left its watchdog or I2C sleep on, which
+ * would reset or cut a unit whose first boot with this image is SAFE. */
+static esp_err_t safe_init(void)
+{
+    ESP_RETURN_ON_ERROR(pmic_open(), TAG, "pmic");
+    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_I2C_CFG, (uint8_t[]){ 0 }, 1), TAG, "pmic i2c sleep off");
+    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_WDT, (uint8_t[]){ 0 }, 1), TAG, "pmic watchdog off");
+    return ESP_OK;
+}
+
+/*
+ * (muse_charge_dark.h): the PM1 turns the board on when 5VIN rises
+ * (USB plugged in; WAKE_SRC bit 1, no enable bit: it's always armed) and
+ * when its low-voltage standby sees 5VIN (user manual, BATT_LVP and Low
+ * Voltage Protection). The ESP32 then powers up and this reads why. The
+ * system runs from USB through the CH213K ideal diodes while the LGS4056
+ * charges the cell (schematic sheet 2), so a low cell can't brown it out.
+ * Called from app_main before init(); the bus and PM1 handle stay for it.
+ */
+static esp_err_t early_power(muse_cd_reading_t *out)
+{
+    static bool s_logged;
+    static uint8_t s_wake;
+    ESP_RETURN_ON_ERROR(pmic_open(), TAG, "pmic");
+    if (!s_logged) {
+        s_logged = true;
+        /* As safe_init: M5's firmware may have left the PM1's watchdog or I2C
+         * sleep on, which would cut or reset a gadget charging dark. */
+        reg_write(s_pmic, PMIC_I2C_CFG, (uint8_t[]){ 0 }, 1);
+        reg_write(s_pmic, PMIC_WDT, (uint8_t[]){ 0 }, 1);
+        if (reg_read(s_pmic, PMIC_WAKE_SRC, &s_wake, 1) == ESP_OK) {
+            ESP_LOGI(TAG, "power chip woke on 0x%02x%s%s%s%s%s", s_wake, s_wake & PMIC_WAKE_VIN ? " USB" : "",
+                     s_wake & PMIC_WAKE_5VINOUT ? " Grove 5V" : "", s_wake & PMIC_WAKE_PWRBTN ? " power key" : "",
+                     s_wake & PMIC_WAKE_RSTBTN ? " reset key" : "", s_wake & PMIC_WAKE_TIMER ? " timer" : "");
+            reg_write(s_pmic, PMIC_WAKE_SRC, (uint8_t[]){ 0 }, 1);
+        }
+        /* A bench power-on timer (power_on_timer) is spent once it has woken
+         * the board; any other boot drops it, so nothing turns the gadget on
+         * later by itself. */
+        reg_write(s_pmic, PMIC_TIM_CFG, (uint8_t[]){ 0 }, 1);
+        reg_write(s_pmic, PMIC_TIM_KEY, (uint8_t[]){ PMIC_TIM_RELOAD }, 1);
+    }
+    uint8_t b[2], btn;
+    ESP_RETURN_ON_ERROR(reg_read(s_pmic, PMIC_VIN_MV, b, sizeof(b)), TAG, "pmic vin");
+    out->usb = (b[0] | b[1] << 8) > 4000;
+    out->usb_on = s_wake & (PMIC_WAKE_VIN | PMIC_WAKE_5VINOUT);
+    out->by_key = (s_wake & (PMIC_WAKE_PWRBTN | PMIC_WAKE_RSTBTN)) ||
+                  (reg_read(s_pmic, PMIC_BTN_STATUS, &btn, 1) == ESP_OK && (btn & PMIC_BTN_PRESSED));
+    out->battery_mv = pmic_mv(PMIC_VBAT_MV);
+    return ESP_OK;
+}
+
+static esp_err_t early_power_off(void)
+{
+    ESP_RETURN_ON_ERROR(pmic_open(), TAG, "pmic");
+    reg_write(s_pmic, PMIC_WAKE_SRC, (uint8_t[]){ 0 }, 1);
+    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_SYS_CMD, (uint8_t[]){ PMIC_SHUTDOWN }, 1), TAG, "pmic shutdown");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    return ESP_FAIL;
+}
+
+/* Bench: the PM1 turns the board on in secs (TIM_CFG action 011), the way
+ * back from a power-off test with USB cut. early_power drops it at boot. */
+static esp_err_t power_on_timer(int secs)
+{
+    ESP_RETURN_ON_FALSE(secs > 0, ESP_ERR_INVALID_ARG, TAG, "secs");
+    ESP_RETURN_ON_ERROR(pmic_open(), TAG, "pmic");
+    uint8_t cnt[4] = { secs & 0xFF, (secs >> 8) & 0xFF, (secs >> 16) & 0xFF, (secs >> 24) & 0x7F };
+    for (int i = 0; i < 4; i++) {
+        ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_TIM_CNT + i, &cnt[i], 1), TAG, "timer count");
+    }
+    ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_TIM_CFG, (uint8_t[]){ PMIC_TIM_ARM | PMIC_TIM_POWER_ON }, 1), TAG,
+                        "timer action");
+    return reg_write(s_pmic, PMIC_TIM_KEY, (uint8_t[]){ PMIC_TIM_RELOAD }, 1);
+}
+
+static esp_err_t init(void)
+{
+    s_ioe_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_ioe_lock, ESP_ERR_NO_MEM, TAG, "ioe lock");
+    ESP_RETURN_ON_ERROR(pmic_open(), TAG, "pmic");
     ESP_RETURN_ON_ERROR(add_device(IOE_ADDR, 100000, &s_ioe), TAG, "ioe");
     ESP_RETURN_ON_ERROR(add_device(TP_ADDR, 400000, &s_tp), TAG, "touch");
 
@@ -910,13 +1086,13 @@ static void lcd_power(bool on)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* shared with video */
         reg_write(s_tp, TP_REG_SLEEP, (uint8_t[]){ 0x03 }, 1);
         lcd_power(false);
     } else {
         lcd_power(true);
         tp_reset();
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);   /* runs again unless video holds it */
         if (esp_lv_adapter_lock(-1) == ESP_OK) {
             lv_obj_invalidate(lv_screen_active());
             esp_lv_adapter_unlock();
@@ -1032,6 +1208,9 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     i2s_chan_handle_t tx, rx;
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
+    /* Live reply audio: 30 ms of DMA each way, not ESP-IDF's 90 (muse_audio_dma.h). */
+    chan_cfg.dma_desc_num = MUSE_AUDIO_DMA_LIVE_DESC;
+    chan_cfg.dma_frame_num = MUSE_AUDIO_DMA_LIVE_FRAMES;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "i2s channel");
     const i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MUSE_AUDIO_RATE),
@@ -1046,6 +1225,7 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &std_cfg), TAG, "i2s tx");
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(rx, &std_cfg), TAG, "i2s rx");
+    muse_audio_attach_tx(tx);   /* a barge-in clears its DMA (muse_audio_tx.h); before enable, or ESP-IDF refuses */
     ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "i2s tx on");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "i2s rx on");
 
@@ -1077,6 +1257,12 @@ static esp_err_t audio_init(esp_codec_dev_handle_t *spk, esp_codec_dev_handle_t 
 /* Read the live PMIC key: its IRQ click flag has no held state. A click
  * only stands in for a tap the poll missed (pmic_irq_setup). Failed
  * transfers never create edges or count towards a shutdown hold. */
+/* Held since boot: pressed, and not yet released once (s_power_armed). */
+static bool power_held_from_boot(void)
+{
+    return s_power_pressed && !s_power_armed;
+}
+
 static unsigned poll_power_button(void)
 {
     int64_t now = esp_timer_get_time();
@@ -1200,6 +1386,10 @@ static esp_err_t read_power(muse_power_t *out)
     ESP_RETURN_ON_ERROR(read_usb_power(&out->usb), TAG, "power LED");
     int v = pmic_mv(PMIC_VBAT_MV);
     out->charging = out->usb && !(in & PMIC_CHG_STAT);
+    /* The LGS4056 releases CHG_STAT once it terminates the charge;
+     * with USB in and a cell on it, released is charge done. The PM1 has no
+     * charge register of its own. */
+    out->charge_done = out->usb && v >= 2500 && (in & PMIC_CHG_STAT);
     out->battery_mv = v;
     if (v < 2500) {
         out->battery_pct = -1;
@@ -1216,11 +1406,34 @@ static esp_err_t read_power(muse_power_t *out)
 static esp_err_t power_off(void)
 {
     uint8_t cmd = PMIC_SHUTDOWN;
+    /* The next boot's WAKE_SRC then names only what turned it back on. */
+    reg_write(s_pmic, PMIC_WAKE_SRC, (uint8_t[]){ 0 }, 1);
     /* Don't turn off peripheral rails first: on a failed command the shared
      * input/UI must be able to display COULDN'T POWER OFF and remain usable. */
     ESP_RETURN_ON_ERROR(reg_write(s_pmic, PMIC_SYS_CMD, &cmd, 1), TAG, "pmic shutdown");
     vTaskDelay(pdMS_TO_TICKS(500));
     return ESP_FAIL;   /* still running: the PMIC didn't cut power */
+}
+
+/* SAFE mode (muse_board_t.safe_display_off): the OLED dark: its reset held and its rail off, through the expander; a buzz as the cue. */
+static void safe_display_off(void)
+{
+    /* safe_init opened the bus and the PM1: the expander, then the OLED's
+     * reset low and its rail (L3B) off, as lcd_power(false); then a short
+     * buzz, the cue that this is SAFE. */
+    if (!s_ioe_lock) {
+        s_ioe_lock = xSemaphoreCreateMutex();
+    }
+    if (!s_ioe_lock || (!s_ioe && add_device(IOE_ADDR, 100000, &s_ioe) != ESP_OK)) {
+        return;
+    }
+    reg_write(s_ioe, IOE_I2C_CFG, (uint8_t[]){ 0 }, 1);
+    reg_write(s_ioe, IOE_PWM1_DUTY, (uint8_t[]){ 0, 0 }, 2);
+    ioe_update(IOE_OD, IOE_LCD_RST | IOE_L3B | IOE_MOTOR, 0);
+    ioe_update(IOE_OUT, IOE_LCD_RST | IOE_L3B | IOE_MOTOR, 0);
+    ioe_set(IOE_MOTOR, true);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    ioe_set(IOE_MOTOR, false);
 }
 
 static const muse_board_t s_board = {
@@ -1234,40 +1447,66 @@ static const muse_board_t s_board = {
     .round = true,
     .touch = true,
     .diagonal_in = 1.75f,
+    .panel_w_mm = 43.8,   /* the CO5300 1.75" panel's display area, 43.76 mm */
+    /* The ES8311 already runs +3.6 dB of digital gain at full volume (its
+     * driver's 3.3 V DAC into the 5 V amp) and the AW8737A's gain is set by
+     * pulses on its enable line, which sits behind the I2C expander: the
+     * extra +6 dB is digital, ahead of the codec, limited to -4 dBFS. */
+    .speaker_boost_db10 = 60,
     .power_button = "red bottom-left",
     .rim_controls = true,
     /* Physical positions with USB down: blue ~2 o'clock, yellow ~10,
      * red ~7:30. All hint corners fit inside the 223 px inner rim. */
-#if !CONFIG_MUSE_REALTIME_VOICE
-    .talk_button = "top-right",
-    .speaker_button = "top-left",
-    .talk_hint = { LV_ALIGN_CENTER, 144, -110 },
-    .speaker_hint = { LV_ALIGN_CENTER, -144, -110 },
-#else
-    .talk_button = "top-left",
-    .speaker_button = "top-right",
+    .talk_button = "yellow top-left",
+    .speaker_button = "blue top-right",
     .talk_hint = { LV_ALIGN_CENTER, -144, -110 },
     .speaker_hint = { LV_ALIGN_CENTER, 144, -110 },
-#endif
-    .power_hint = { LV_ALIGN_CENTER, -144, 110 },
+    /* At the red key, 7:30 at r 190: the home's lowered Speaker
+     * button would cover the old (-144, 110). */
+    .power_hint = { LV_ALIGN_CENTER, -134, 134 },
     .frame_ms = 40,
     .init = init,
+    .safe_init = safe_init,
+    .safe_key = safe_key,
+    .power_held_from_boot = power_held_from_boot,   /* the PM1's 4 s hold is download mode */
     .display_start = display_start,
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .draw_frame = muse_lcd_bands_frame,
+    .draw_windows = muse_lcd_bands_windows,   /* only what changed of a streamed picture */
+    .panel_writes = muse_lcd_bands_writes,
+    .panel_stack_free = muse_lcd_bands_stack_free,
     .audio_init = audio_init,
+    /* set_mic_gain's 100 (ES8311): the tuned gain, 30 dB, until this board's
+     * 30 cm speech clip check is measured; then raised to the measured ceiling. */
+    .mic_gain_speech_max_db = MUSE_MIC_GAIN_TUNED,
+    .i2s_dma_desc = MUSE_AUDIO_DMA_LIVE_DESC,   /* the channels as audio_init makes them */
+    .i2s_dma_frames = MUSE_AUDIO_DMA_LIVE_FRAMES,
     .mic_slot = 0,              /* one mic, on the left slot */
     .audio_power = audio_power,
     .codec_power = codec_power,
+    .i2s_ready_at_init = true,   /* audio_init: 16-bit stereo, the DMA sizes above, as muse_audio opens */
     .poll_buttons = poll_buttons,
+    .buzz = buzz,
     /* Red POWER is on the PMIC: its click interrupt (GPIO12) wakes the wait. */
     .wait_buttons = wait_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the LGS4056's CHG_STAT through the PM1 */
     .power_off = power_off,
+    /* Low-battery shutdown: 3.30 V, where the LiPo curve above reads
+     * 0 %, before the ESP32-S3's 3.3 V LDO drops out and the M5PM1 cuts the
+     * rail. Unmeasured on the bench: devices/README.md, Low battery. */
+    .battery_shutdown_mv = 3300,
+    /* Charge dark below the low-cell level above: a USB power-up on a
+     * low cell boots at battery_shutdown_mv + MUSE_CD_CHARGE_MARGIN_MV on
+     * charge (3.6 V). */
+    .early_power = early_power,
+    .early_power_off = early_power_off,
+    .power_on_timer = power_on_timer,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

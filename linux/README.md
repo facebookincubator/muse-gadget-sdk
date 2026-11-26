@@ -382,28 +382,24 @@ control channel. `send_chat()` still returns its buffered acknowledgment.
 ### History and user-VM files
 
 On servers that enable these device-token operations, the existing
-`LinkSession.request()` API can use `GET /chat/history?limit=1` and
-`POST /fs/read` / `POST /fs/write`. File paths follow the server's existing
-home-relative rules; they are not limited to `workspace/`. No list, stat,
-upload, or deletion API is implied by this access.
+`LinkSession.request()` API can use `GET /chat/history?limit=1`,
+`GET /fs/raw/<path>` and `POST /fs/upload`. File paths are relative to the
+server's file root (percent-encode them in `/fs/raw/`, except for slashes).
+No list, stat or deletion API is implied by this access, and `POST /fs/read` /
+`POST /fs/write` are owner-only: a device's credentials get 403 there.
 
-Send file requests with `Content-Type: application/json`. For example:
+- **Read:** `GET /fs/raw/gadget-data/example.txt` returns the file's raw bytes.
+  Send `Range: bytes=0-65535` (and so on) to read it in parts: the reply is a
+  `206` with that range, or a `200` with the whole file.
+- **Write:** `POST /fs/upload` with a `multipart/form-data` body: text fields
+  `path` (required), `overwrite` (`true` or `1` replaces an existing file) and
+  `create_parent` (missing folders are made unless it is `false` or `0`), then
+  the bytes in a `file` part. Each upload writes the whole file; there's no
+  append.
 
-```json
-{"path":"gadget-data/example.txt","offset":0,"len":4096}
-```
-
-```json
-{"path":"gadget-data/example.txt","text":"hello","overwrite":false,"append":false,"create_parent":true}
-```
-
-`read` returns `data_base64`, optional UTF-8 `text`, and `eof` under the
-existing `{ok,result}` response envelope. Read until `eof`, not a guessed file
-size. `write` accepts exactly one of `text` or `data_base64`; the three booleans
-are required. `append` supports chunked writes, but several requests are not one
-atomic upload. Buffered SDK replies are limited to 1 MiB, so use modest read
-lengths and history pages. Keep the acknowledgment from `send_chat()` when
-correlating history entries with your request.
+Buffered SDK replies are limited to 1 MiB, so use modest ranges and history
+pages. Keep the acknowledgment from `send_chat()` when correlating history
+entries with your request.
 
 ## Hack and extend it
 

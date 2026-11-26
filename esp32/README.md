@@ -307,6 +307,7 @@ serial logs because its vendor LED ring is not a Muse status indicator.
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 | UI, touch, push-to-talk, settings, images (unverified) | `tools/muse/board.sh build s3-18` |
 | Waveshare ESP32-C6-Touch-AMOLED-2.06 | UI, touch, push-to-talk with text replies | `tools/muse/board.sh build c6-206` |
+| Waveshare ESP32-C6-Touch-AMOLED-1.8, BLE only | UI, push-to-talk to the Muse app over BLE, no Wi-Fi | `tools/muse/board.sh build c6ble` |
 | Seeed SenseCAP Watcher | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Cardputer ADV (experimental) | UI, GO/Space push-to-talk with text replies, Esc/Enter/arrow menu controls | `tools/muse/board.sh build cardputer-adv` |
 | M5Stack AtomS3 + Atomic Voice Base (experimental) | UI, front-button push-to-talk, voice notes with text replies | `tools/muse/board.sh build atoms3` |
@@ -459,17 +460,20 @@ describes the model.
 Replies from Muse are text: push-to-talk sends your voice note, Muse
 transcribes it and answers in writing, and boards with a screen show the
 answer as captions (Voice PE and reSpeaker Lite replies show up in the Muse app).
-On boards with the full UI other than the Watcher, voice notes require a
-600 ms button hold and at
-least 500 ms of audio captured during that hold before uploading starts.
-Pre-roll and the release tail are preserved in accepted notes but do not count
-toward either minimum. These checks measure duration, not whether speech is
-present; a shorter press shows "Hold longer to talk". A press that wakes the
-screen only wakes it unless it is held long enough for a note. With live calls,
-a tap released within 300 ms still starts a call on boards other than the
-StopWatch. The Watcher keeps its existing wheel click/hold gesture. Buffering
-the hold costs about 5 KB more internal RAM on boards without PSRAM, and about
-19 KB more PSRAM on the others.
+A talk press counts once it has been held 250 ms (the hold contract), timed
+from the press itself, on a lit screen or a dark one.
+From the key- or touch-down the mic records into a 400 ms pre-roll (360 ms on
+the Cardputer ADV and the AI Passport) with the red mic ring on, so the first
+words are kept, and boards with a vibration motor buzz once the press counts.
+A shorter press is a tap: nothing is sent, and the screen hints "Hold to talk"
+(a tap on the home screen's hold region plays the happy animation instead).
+The check measures duration, not whether speech is present. A press that
+interrupts a reply is judged by how long it was held before its release; with
+live voice calls, such a tap starts a call on boards other than the StopWatch.
+The SenseCAP Watcher's wheel posts a press only once it has been held 300 ms (a
+shorter click sleeps), already past the threshold. On boards without PSRAM the
+pre-roll goes up in short bursts between mic reads, so capture doesn't stall
+behind it.
 
 Two things you can change:
 
@@ -489,9 +493,8 @@ and builds without it don't change. With it on:
 
 - **StopWatch:** hold yellow to talk or interrupt playback; release to let Muse
   answer without ending the call. A capture tail of up to 120 ms preserves the
-  last syllable. Tap blue to hang up. With calls built in, yellow is the talk
-  button and blue the speaker button (mute outside a call), the other way round
-  from builds without them; red stays power. Use **Settings > Sound > Voice notes** for
+  last syllable. Tap blue to hang up. Yellow is the talk button and blue the
+  speaker button (mute outside a call) in every build; red stays power. Use **Settings > Sound > Voice notes** for
   the old note-and-text mode. Interrupting playback does not cancel detached
   background work, whose results may arrive later.
 - **Other boards:** tap the talk button to start a call, press again to hang up;
@@ -532,6 +535,25 @@ A few things worth knowing:
   delete the build directory so the change takes effect.
 - Builds are signed with the included development key and never turn on
   Secure Boot, so you can reflash your board as often as you like.
+- **Talk over BLE instead of Wi-Fi.** With `CONFIG_MUSE_GADGET_BLE_AUDIO`
+  (on in the gadget profiles of the Waveshare S3 1.75C and the SenseCAP
+  Watcher, `tools/muse/board.sh build s3-gadget` / `watcher-gadget`, the C6's
+  BLE-only build and the BLE video builds; the web flasher's images of those
+  boards are Wi-Fi Muse builds without it), the device also speaks the musegadgets BLE
+  protocol in [`../protocols`](../protocols): an app that connects and turns on
+  push-to-talk gets your voice as SBC or LC3 audio, and the rest still goes to
+  Muse over Wi-Fi. The Muse app sets the gadget up with Link setup (a press
+  of the talk button confirms it), then proves on each connection that it
+  holds the gadget's token (the token proof); the BLE link itself isn't
+  encrypted. With
+  `CONFIG_MUSE_GADGET_BLE_STANDALONE` a board is a BLE gadget only, with Wi-Fi
+  off (the Waveshare C6 has a build for it), and `tools/mg_ble_client.py` tests
+  a gadget from your computer, setup included: on full-UI boards built for
+  the bench (`MUSE_BENCH=1`) `>pair.confirm` on the USB console presses the
+  button for it (`tools/mg_confirm.py`), so tests run unattended. A set-up
+  gadget can be set up again from the app without forgetting it first. The app can also play audio on a full-UI board's
+  speaker over BLE (`tools/mg_ble_client.py play` tries it). See
+  [`components/muse_gadget_ble`](components/muse_gadget_ble/README.md).
 
 ### Toggle voice-note recording
 
@@ -583,6 +605,11 @@ The tests run on your computer, with no board attached:
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+To run each module in its own process under the freeze watchdog, as CI does, put
+`python3 tools/stuck_watch.py --` in front. A module that runs well past its usual
+time (1800 s until it has 5 passing runs on this computer) is stopped and
+reported as STUCK, with what it was waiting on, instead of hanging the run.
+
 Run `idf.py build` once first so the downloaded components are in place.
 The loopback proxy/TLS tests also use the OpenSSL CLI and development library
 (`openssl` with `pkg-config` on macOS; `openssl libssl-dev pkg-config` on Debian
@@ -610,6 +637,9 @@ their upstream licenses:
 
 - [`components/minimp3/include/minimp3.h`](components/minimp3), the MP3
   decoder, is CC0-1.0. See [`components/minimp3/LICENSE`](components/minimp3/LICENSE).
+- [`components/muse/muse_icons_gen.h`](components/muse/muse_icons_gen.h), the
+  Muse Gadgets standard icons (Call, Speaker, mic and the rest), are Google's
+  Material Icons glyphs, Apache-2.0, generated from the Material Icons set.
 - [`main/pixel_font.c`](main/pixel_font.c), the Adafruit GFX font, is
   BSD-2-Clause, as its header says.
 - [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
@@ -666,7 +696,8 @@ their upstream licenses:
 - [`components/muse/fonts/`](components/muse/fonts/), the caption and
   button-menu fonts, are subsets of GNU Unifont (SIL OFL 1.1, or GPL-2.0+ with
   the font embedding exception), Noto Sans SC (SIL OFL 1.1) and Montserrat
-  Medium (SIL OFL 1.1); see its README.
+  Medium (SIL OFL 1.1), and its `fonts/type/` subsets of Montserrat Medium
+  and SemiBold (SIL OFL 1.1); see its README.
 - [`components/muse/fonts/muse_font_emoji_16.c`](components/muse/fonts/muse_font_emoji_16.c),
   the captions' emoji (`CONFIG_MUSE_EMOJI`), are 190 Twemoji v16.0.1 graphics
   by Twitter, Inc, jdecked and other contributors, scaled to 16 px: CC-BY 4.0.
@@ -696,6 +727,26 @@ their upstream licenses:
   the opt-in wake word model, was trained for this SDK on public-domain, CC0
   and CC BY data; [`ATTRIBUTION.md`](components/muse_wakeword/models/ATTRIBUTION.md)
   credits it as CC BY requires.
+- [`../xplat/libsbc`](../xplat/libsbc), the SBC codec built by
+  [`components/libsbc`](components/libsbc) for the BLE gadgets
+  (`components/muse_gadget_ble`), is Google's libsbc, Apache-2.0
+  under Google's copyright. See [`LICENSE`](../xplat/libsbc/LICENSE).
+- [`../xplat/liblc3`](../xplat/liblc3), the LC3 codec built by
+  [`components/liblc3`](components/liblc3) for the same BLE gadgets, is Google's liblc3, Apache-2.0
+  under Google's copyright. See [`LICENSE`](../xplat/liblc3/LICENSE).
+- [`../xplat/lc3fx`](../xplat/lc3fx), the fixed-point LC3 codec built by
+  [`components/liblc3`](components/liblc3) for chips without an FPU, is a
+  derivative of Google's liblc3, Apache-2.0. See
+  [`LICENSE`](../xplat/lc3fx/LICENSE).
+
+- [`tests/vectors/esp_lvgl_adapter/pause_0.6.4.c`](tests/vectors/esp_lvgl_adapter/pause_0.6.4.c),
+  `esp_lv_adapter_pause()` from espressif/esp_lvgl_adapter 0.6.4 (a test
+  input for its pause fix, `cmake/esp_lvgl_adapter_fix.cmake`), is Apache-2.0
+  under Espressif's copyright, as its header says.
+- [`tests/vectors/h264/regress/`](tests/vectors/h264/regress), the tinyh264
+  regression corpus, holds frames of an x264 encode of Big Buck Bunny
+  (c) 2008 Blender Foundation, CC BY 3.0; see its
+  [`README.md`](tests/vectors/h264/regress/README.md).
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses. For the opt-in wake word these are the ExecuTorch

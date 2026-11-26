@@ -83,7 +83,11 @@ Replace `COM7` below with that port. To retain the factory firmware, make a
 full flash backup before the first Muse flash:
 
 ```powershell
-python -m esptool --chip esp32s3 -p COM7 read-flash 0 0x1000000 box3-factory.bin
+$BK = "$env:LOCALAPPDATA\muse-gadgets\backups"   # flash backups: a folder only you can read
+New-Item -ItemType Directory -Force $BK | Out-Null
+icacls $BK /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
+python -m esptool --chip esp32s3 -p COM7 read-flash 0 0x1000000 "$BK\box3-factory.bin"
+if ($LASTEXITCODE -ne 0) { throw "The backup failed: don't flash yet." }
 idf.py @box3Args -p COM7 flash monitor
 ```
 

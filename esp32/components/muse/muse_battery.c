@@ -400,6 +400,13 @@ void muse_battery_init(void)
         s_nvs = 0;
     } else {
         nvs_get_u16(s_nvs, "boots", &s_boots);
+        uint16_t lowbat = 0;
+        if (nvs_get_u16(s_nvs, "lowbat_mv", &lowbat) == ESP_OK) {
+            /* The last power-off was the low-battery shutdown, not a fault. */
+            ESP_LOGW(TAG, "boot: after a low-battery shutdown at %u mV", (unsigned)lowbat);
+            nvs_erase_key(s_nvs, "lowbat_mv");
+            nvs_commit(s_nvs);
+        }
     }
     size_t n = SAVED_MAX;
     if (s_saved.magic == SAVED_MAGIC && s_saved.len < SAVED_MAX && s_saved.sum == checksum(s_saved.json, s_saved.len)) {
@@ -429,7 +436,88 @@ void muse_battery_init(void)
 #endif
 }
 
+static void muse_battery_note_power_locked(const muse_power_t *p, bool on_battery);
+static muse_battery_listener_t s_listener;
+static int64_t s_reading_us;
+static bool s_have_reading;
+static muse_battery_policy_t s_low;
+static muse_battery_thresholds_t s_low_thresholds;
+
+/* muse_input.c: the board's goodbye and power-off, on the input task. */
+void muse_input_request_power_off(void);
+
+#ifndef MUSE_BATTERY_HOST_HOOKS   /* the host harness defines its own */
+__attribute__((weak)) void muse_ui_notify_low_battery(int pct, muse_battery_level_t level)
+{
+    (void)pct;
+    (void)level;
+}
+#endif
+
+void muse_battery_set_shutdown_mv(int mv)
+{
+    s_low_thresholds.shutdown_mv = mv;
+}
+
+muse_battery_level_t muse_battery_low_level(void)
+{
+    return s_low.level;
+}
+
+/* Low battery: from the input task, after each reading. It goes by the
+ * reading's own USB flag, never on_battery's as-if (a bench nap on USB): on
+ * USB nothing is low and nothing shuts down (muse_battery_policy_step). */
+static void check_low(const muse_power_t *p)
+{
+    muse_battery_level_t was = s_low.level;
+    muse_battery_level_t now = muse_battery_policy_step(&s_low, &s_low_thresholds, p->battery_pct, p->battery_mv,
+                                                        p->usb);
+    if (now == was) {
+        return;
+    }
+    ESP_LOGI(TAG, "battery level %d -> %d (%d%%, %d mV%s)", was, now, p->battery_pct, p->battery_mv,
+             p->usb ? ", USB" : "");
+    if (now == MUSE_BATTERY_LEVEL_WARN10) {
+        if (s_low.toasted) {
+            return;
+        }
+        s_low.toasted = true;
+    }
+    muse_ui_notify_low_battery(p->battery_pct, now);
+    if (now == MUSE_BATTERY_LEVEL_CRITICAL) {
+        ESP_LOGW(TAG, "battery at %d mV (shutdown at %d mV): powering off", p->battery_mv,
+                 s_low_thresholds.shutdown_mv);
+        if (s_nvs) {
+            nvs_set_u16(s_nvs, "lowbat_mv", (uint16_t)p->battery_mv);
+            nvs_commit(s_nvs);
+        }
+        muse_input_request_power_off();
+    }
+}
+
+void muse_battery_set_listener(muse_battery_listener_t fn)
+{
+    s_listener = fn;
+}
+
+int64_t muse_battery_reading_us(void)
+{
+    return s_reading_us;
+}
+
 void muse_battery_note_power(const muse_power_t *p, bool on_battery)
+{
+    bool changed = !s_have_reading || p->charging != s_power.charging || p->usb != s_power.usb;
+    s_have_reading = true;
+    s_reading_us = esp_timer_get_time();
+    muse_battery_note_power_locked(p, on_battery);
+    if (s_listener) {
+        s_listener(p, changed);
+    }
+    check_low(p);
+}
+
+static void muse_battery_note_power_locked(const muse_power_t *p, bool on_battery)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_power = *p;

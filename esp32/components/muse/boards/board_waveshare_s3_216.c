@@ -39,6 +39,7 @@
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#include "muse_lvgl_hold.h"
 
 static const char *TAG = "board";
 
@@ -185,14 +186,14 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);   /* bounded, shared with video */
         esp_lcd_panel_io_tx_param(s_tp->io, 0xD1, (uint8_t[]){ 0x05 }, 1);
     } else {
         gpio_set_level(BSP_LCD_TOUCH_RST, 0);
         vTaskDelay(pdMS_TO_TICKS(10));
         gpio_set_level(BSP_LCD_TOUCH_RST, 1);
         vTaskDelay(pdMS_TO_TICKS(50)); /* as the driver waits after its reset */
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 
@@ -254,6 +255,18 @@ static void wait_buttons(int timeout_ms)
     muse_gpio_buttons_wait((muse_gpio_button_t *const[]){ &s_key, &s_boot }, 2, timeout_ms);
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the AMOLED held in reset (it drops its frame and stays dark; no backlight). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(BSP_LCD_RST, 0);   /* GPIO39 (its BSP 2.0.1) */
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): KEY3 (GPIO18, the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(KEY_GPIO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-AMOLED-2.16",
     .width = BSP_LCD_H_RES, .height = BSP_LCD_V_RES, .round = false, .touch = true, .diagonal_in = 2.16f,
@@ -268,6 +281,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .display_pause = display_pause,
     .audio_init = audio_init,
@@ -276,7 +290,9 @@ static const muse_board_t s_board = {
     .poll_buttons = poll_buttons,
     .wait_buttons = wait_buttons,
     .read_power = muse_pmu_read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the AXP2101's charge-done state */
     .power_off = muse_pmu_power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

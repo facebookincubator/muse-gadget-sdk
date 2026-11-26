@@ -312,8 +312,6 @@ void error_report_mark_sent(void) {
 }
 
 #ifdef ESP_PLATFORM
-void __real_esp_panic_handler(panic_info_t *info);
-
 // The caller, when the faulting function calls nothing itself; otherwise a
 // point in the faulting function just after the last call it made.
 static const void *frame_return_address(const panic_info_t *info) {
@@ -326,16 +324,16 @@ static const void *frame_return_address(const panic_info_t *info) {
 #endif
 }
 
-// Linked in place of esp_panic_handler (see main/CMakeLists.txt). An abort
-// reaches here through a deliberate fault inside panic_abort, so its address
-// and exception name say nothing; its message does.
-void __wrap_esp_panic_handler(panic_info_t *info) {
+// Called from the panic wrapper in front of esp_panic_handler
+// (muse_crashrec.c's, the one the link allows), after the crash record. An
+// abort reaches here through a deliberate fault inside panic_abort, so its
+// address and exception name say nothing; its message does.
+void muse_crashrec_panic_hook(panic_info_t *info) {
     if (g_panic_abort) {
         error_report_note_panic(NULL, NULL, "abort", g_panic_abort_details);
     } else {
         error_report_note_panic(info->addr, frame_return_address(info),
                                 info->reason, NULL);
     }
-    __real_esp_panic_handler(info);
 }
 #endif

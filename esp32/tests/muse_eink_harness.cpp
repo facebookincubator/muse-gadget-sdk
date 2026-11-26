@@ -51,10 +51,12 @@ static int64_t now_us;
 static std::vector<bool> ptt;
 static int wakes, pokes, notifications;
 static bool asleep, pairing;
-struct Board { bool touch_talk; };
-static Board board{true}, *muse_board = &board;
+struct Board { bool touch_talk; bool touch; };
+static Board board{true, true}, *muse_board = &board;
 #define MUSE_LINK_CONFIRM 1
+static int confirms;   /* the pairing prompt's confirm, never as the talk key's press */
 static int muse_link_state() { return pairing ? MUSE_LINK_CONFIRM : 0; }
+static bool muse_link_confirm_key_press() { confirms++; return true; }
 static void muse_input_touch_talk(bool down) { ptt.push_back(down); }
 static void muse_state_poke() { pokes++; }
 static bool muse_state_asleep() { return asleep; }
@@ -264,7 +266,8 @@ static void test_touch(const std::string &name) {
         assert(ptt == std::vector<bool>({true,false})); assert(events.empty());
     } else if (name == "touch_wake_pairing") {
         asleep = true; tap(); assert(wakes == 1); assert(ptt.empty()); assert(events.empty());
-        pairing = true; tap(20,20); assert(ptt == std::vector<bool>({true,false}));
+        /* The pairing prompt: a tap anywhere is its Confirm (a confirm key's press, never the talk key's). */
+        pairing = true; tap(20,20); assert(confirms == 1); assert(ptt.empty());
     } else if (name == "touch_longpress") {
         set_page(true); paint_view(); touch_sample(true,240,737); now_us += 650000;
         touch_sample(false,240,737); now_us += 3000000; handle_touch();

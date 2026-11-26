@@ -41,6 +41,8 @@ static std::string reply;
 static size_t reply_pos;
 static int64_t esp_timer_get_time() { return now; }
 static void vTaskDelay(int ticks) { now += ticks * 1000; }
+// noise_control.cpp's TLS retry wait (it also feeds the Link session's watchdog there).
+static void io_retry_wait(void) { vTaskDelay(1); }
 static ssize_t write_all(esp_tls_t *, const char *, size_t n) { return n; }
 static ssize_t esp_tls_conn_read(esp_tls_t *, char *out, size_t n) {
     size_t take = std::min(n, reply.size() - reply_pos);

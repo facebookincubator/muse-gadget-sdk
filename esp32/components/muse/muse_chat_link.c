@@ -844,8 +844,10 @@ void muse_hatch_turn_begin(void)
         fail("OUT OF MEMORY");
         return;
     }
-    if (!request(RX_NOTE, "POST", "/chat/stream", true, false)
-        || !muse_link_req_send(s_stream[RX_NOTE], MUSE_HATCH_NOTE_HEAD, sizeof(MUSE_HATCH_NOTE_HEAD) - 1, false, SEND_WAIT_MS)) {
+    char head[MUSE_NOTE_HEAD_MAX];   /* names the node (muse_chat_priv.h) */
+    size_t head_len = muse_note_head(head, sizeof(head), muse_chat_node_id());
+    if (!head_len || !request(RX_NOTE, "POST", "/chat/stream", true, false)
+        || !muse_link_req_send(s_stream[RX_NOTE], head, head_len, false, SEND_WAIT_MS)) {
         fail("CAN'T REACH MUSE");
         return;
     }

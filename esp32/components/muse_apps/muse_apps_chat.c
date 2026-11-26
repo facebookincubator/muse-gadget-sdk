@@ -35,6 +35,7 @@
 #include "freertos/semphr.h"
 #include "muse_apps_priv.h"
 #include "muse_apps_vm.h"
+#include "muse_chat_priv.h"   /* the gadget's node in every chat body */
 #include "muse_link.h"
 
 /* ---- The chat's formats and messages: plain C from here to "The chat for apps" ----
@@ -1346,14 +1347,20 @@ int32_t gadget_chat_send(wasm_exec_env_t env, const char *text)
     const char *name = muse_apps_name();
     size_t msg_cap = strlen(name) + n + 32;
     char *message = heap_caps_malloc(msg_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    send_job_t *j = message ? heap_caps_malloc(sizeof(*j) + 6 * msg_cap + 64, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    send_job_t *j = message ? heap_caps_malloc(sizeof(*j) + 6 * msg_cap + 64 + MUSE_CHAT_NODE_MAX + 16,
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                            : NULL;
     if (!j) {
         heap_caps_free(message);
         return GADGET_ERR_NO_MEMORY;
     }
     int len = snprintf(message, msg_cap, "[%s on the gadget] %s", name, text);
     char *o = j->body;
-    o += sprintf(o, "{\"message\":\"");
+    *o++ = '{';
+    /* The gadget's node first, at the top level: a gadget's chat turn names
+     * its node, never chat_context, which the VM refuses (muse_chat_priv.h). */
+    o += muse_chat_node_field(o, MUSE_CHAT_NODE_MAX + 16, muse_chat_node_id());
+    o += sprintf(o, "\"message\":\"");
     o += muse_apps_vm_json_escape(o, message, (size_t)len);
     o += sprintf(o, "\",\"output_modality\":\"text\"}");
     j->len = (size_t)(o - j->body);

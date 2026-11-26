@@ -24,21 +24,43 @@ set(embed)
 if(CONFIG_MUSE_ENABLED)
     list(APPEND srcs
         "muse_app.c"
+        "muse_f2.c"
         "muse_board.c"
         "muse_console.c"
         "muse_state.c"
         "muse_options.c"
         "muse_battery.c"
+        "muse_battery_policy.c"
+        "muse_charge_dark.c"
+        "muse_charge_dark_core.c"
+        "muse_charged.c"        # Sleep when charged: what counts as charged, pure C
+        "muse_status_conn.c"
+        "muse_mic_ring.c"
+        "muse_turn_dot.c"
+        "muse_clock.c"
         "muse_audio.c"
+        "muse_spk_dsp.c"        # the speech chain (muse_board_t.speaker_speech_chain)
+        "muse_audio_dma.c"
+        "muse_audio_tx.c"       # the speaker's DMA, cleared at a barge-in's touch-down
+        "muse_audio_tx_esp.c"
         "muse_pmu.c"
         "muse_input.c"
         "muse_voice.c"
         "muse_adpcm.c"
         "muse_settings.c"
         "muse_text.c"
-        "muse_lang.c"
+        "muse_lang.c")
+    if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+        # The passcode lock, with the v1.0 home (muse_home_ui.h): without them, the headers' stubs.
+        list(APPEND srcs
+            "muse_passcode_core.c"  # its rules, pure C
+            "muse_passcode.c"
+            "muse_passcode_esp.c")
+    endif()
+    list(APPEND srcs
         "muse_link.c"
-        "muse_ble.c")
+        "muse_ble.c"
+        "muse_ble_gate.c")
     if(CONFIG_MUSE_UI_THEME)
         list(APPEND srcs "muse_theme.c" "muse_theme_policy.c" "muse_theme_lvgl.c")
     endif()
@@ -67,7 +89,18 @@ if(CONFIG_MUSE_ENABLED)
         # The LVGL UI's fonts, as the TTFs LVGL builds them from (eink/fonts/).
         list(APPEND embed "eink/fonts/montserrat.ttf" "eink/fonts/symbols.ttf" "eink/fonts/unscii.ttf")
     else()
-        list(APPEND srcs "muse_ui.c" "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c" "muse_lv_mem.c")
+        # The LVGL UI: the face, home, menu, Settings, keypad and passcode screens. The v1.0 home's icon set and
+        # passcode screens only with BLE gadget audio (muse_home_ui.h).
+        list(APPEND srcs "muse_ui.c")
+        if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+            list(APPEND srcs "muse_icons.c")
+        endif()
+        list(APPEND srcs "muse_home.c" "muse_type.c" "muse_touch.c"
+                         "muse_options_ui.c" "muse_menu.c" "muse_settings_ui.c" "muse_keypad.c")
+        if(CONFIG_MUSE_GADGET_BLE_AUDIO)
+            list(APPEND srcs "muse_passcode_ui.c")
+        endif()
+        list(APPEND srcs "muse_lv_mem.c")
     endif()
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp" "muse_options_json.c")
@@ -109,6 +142,36 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "fonts/muse_font_pt_12.c" "fonts/muse_font_pt_14.c" "fonts/muse_font_pt_16.c"
                          "fonts/muse_font_pt_20.c" "fonts/muse_font_pt_28.c")
     endif()
+    # The v1.0 UI's type at the panel's size (muse_type.c, tools/muse/gen_ui_assets.py):
+    # only the board's own set, with CONFIG_MUSE_UI_PANEL_TYPE.
+    set(type_px "")
+    if(CONFIG_MUSE_BOARD_M5STACK_STOPWATCH)
+        set(type_px 466)
+    elseif(CONFIG_MUSE_BOARD_ESP_MOSAICO)
+        set(type_px 480)
+    elseif(CONFIG_MUSE_BOARD_SENSECAP_WATCHER)
+        set(type_px 412)
+    elseif(CONFIG_MUSE_BOARD_WAVESHARE_C6_18)
+        set(type_px 368)
+    endif()
+    if(type_px AND CONFIG_MUSE_UI_PANEL_TYPE)
+        foreach(role time date title conn row label value small digit)
+            list(APPEND srcs "fonts/type/muse_font_${role}_${type_px}.c")
+        endforeach()
+    endif()
+    if(CONFIG_MUSE_PERF)
+        list(APPEND srcs "muse_perf.c")
+    endif()
+    if(CONFIG_MUSE_GADGET_BLE_LIVE_CALL)
+        list(APPEND srcs "muse_call.c")   # a live call with the Muse, held by the phone over BLE
+        list(APPEND srcs "muse_call_at.c")   # the bench's timed call (call.at=)
+        list(APPEND srcs "fonts/muse_font_ellipsis_20.c" "fonts/muse_font_ellipsis_28.c")   # its "Calling…"
+        list(APPEND srcs "muse_subs.c" "muse_subs_core.c")   # its subtitles
+        list(APPEND srcs "muse_call_stats.c")   # its video's stats overlay
+    endif()
+    if(CONFIG_LV_USE_PROFILER)
+        list(APPEND srcs "lvprof/muse_lv_profiler.c")   # LVGL's profiler hooks, for mg.perf
+    endif()
     # Your own character (tools/muse/AVATAR_RECIPE.md) stands in for the default
     # avatar when avatar/muse_pixel.c exists here; this avatar/ is gitignored. The
     # default is in avatar/ at the top of the project.
@@ -118,6 +181,11 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "avatar/muse_pixel.c")
     else()
         list(APPEND srcs "../../avatar/muse_pixel.c")
+        if(NOT CONFIG_MUSE_GADGET_BLE_AUDIO)
+            # Its rings' angle slots (1 KB of internal RAM) only with BLE gadget audio: the same pixels without.
+            set_source_files_properties("../../avatar/muse_pixel.c" PROPERTIES COMPILE_DEFINITIONS
+                                        "MUSE_PIXEL_RING_CACHE=0")
+        endif()
     endif()
     if(CONFIG_MUSE_BOARD_WAVESHARE_S3_175C OR CONFIG_MUSE_BOARD_WAVESHARE_S3_175)
         # One driver: the 1.75 differs only in pins (its BSP's) and its PWR key.
@@ -225,6 +293,7 @@ if(CONFIG_MUSE_ENABLED)
     endif()
     if(CONFIG_MUSE_VIDEO OR CONFIG_MUSE_AVATAR_ANIMATIONS)
         list(APPEND srcs "muse_vdec.c")
+        list(APPEND srcs "muse_vdec_same.c")   # the decoder's map of unchanged macroblocks
     endif()
     if(CONFIG_MUSE_AVATAR_ANIMATIONS)
         list(APPEND srcs "muse_avatar_motion.c" "muse_avatar_pack.c")
@@ -233,13 +302,14 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "muse_yuv.c")
         # Phone camera: decode and draw (muse_video), and the transports that feed it.
         list(APPEND srcs "muse_video.c")
+        list(APPEND srcs "muse_ui_fb.c" "muse_video_tick.c" "muse_video_fit.c" "muse_vdirty.c")
         if(CONFIG_IDF_TARGET_ESP32S3)
             list(APPEND srcs "muse_yuv_pie.S")   # the S3's SIMD colour conversion
         elseif(CONFIG_IDF_TARGET_ESP32S31)
             list(APPEND srcs "muse_yuv_pie_s31.S")   # the same on the S31's SIMD (checked at first use)
         endif()
         if(CONFIG_MUSE_VIDEO_WIFI)
-            list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c")
+            list(APPEND srcs "muse_video_wifi.c" "muse_video_wire.c" "muse_video_wifi_gate.c")
         endif()
     endif()
     if(CONFIG_CAPABILITIES_REGISTRY)
@@ -250,6 +320,7 @@ if(CONFIG_MUSE_ENABLED)
     endif()
     # Shared core, independent of board selection. Keep it after the BSP so
     # Watcher's independently retained recovery markers keep their link order.
+    list(APPEND srcs "muse_lvgl_hold.c")   # who stops LVGL (the screen off, video)
     if(CONFIG_MUSE_POWER_TEST)
         list(APPEND srcs "muse_power_test.c")
         if(CONFIG_MUSE_BOARD_RETERMINAL_STICKY)
@@ -272,11 +343,12 @@ elseif(CONFIG_HOMEHUB_VOICE)
 endif()
 
 set(muse_priv_requires
+    muse_restart secure_random
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash esp_pm esp_event esp_netif
     bt esp-tls mbedtls esp_app_format esp_http_client network_proxy
-    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 muse_mirror capabilities_registry
+    noise_core minimp3 muse_vstream tinyh264 libvpx_vp8 muse_mirror muse_gadget_ble capabilities_registry
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
-    esp_driver_pcnt efuse
+    esp_driver_pcnt efuse bootloader_support app_update esp_partition esp_mm
     # The Sticky's microSD (CONFIG_MUSE_STICKY_SD). Requirements are resolved
     # before Kconfig values exist, so these can't depend on it; only the code does.
     fatfs esp_driver_sdspi sdmmc)
@@ -322,4 +394,9 @@ elseif(CONFIG_MUSE_ENABLED)
     target_compile_definitions(${lvgl_lib} PUBLIC
         "LV_ASSERT_HANDLER_INCLUDE=<stdlib.h>"
         "LV_ASSERT_HANDLER=abort()\;")
+    if(CONFIG_LV_USE_PROFILER)
+        # LV_PROFILER_INCLUDE names muse_lv_profiler.h: LVGL and everything
+        # that includes lvgl.h needs to find it.
+        target_include_directories(${lvgl_lib} PUBLIC "${COMPONENT_DIR}/lvprof")
+    endif()
 endif()
