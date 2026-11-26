@@ -2651,7 +2651,7 @@ class ProofGateDevice(GatedDevice):
         if what == "press" and self.update_prompt() == "confirm":
             self.updates.event("press")   # the update's own prompt takes the press: that upload, nothing else
             return []
-        if what == "injected_press":   # a console or Nordic UART word, or a scripted tap: it confirms nothing
+        if what == "injected_press":   # a Nordic UART word or a scripted tap: it confirms nothing
             if self.updates:
                 self.updates.event("injected_press")
             return []
@@ -2993,9 +2993,10 @@ def resetup_bad_takeover_exchange(encrypted: bool = False, drops_link: bool = Fa
 
 
 def resetup_injected_press_exchange() -> dict:
-    r = ProofGateRecorder("an injected tap never confirms a re-setup", "On a set-up gadget's release build a console "
-                          "or Nordic UART word, or a scripted tap, confirms nothing while a re-setup prompt is up: "
-                          "the prompt stays, and the owner's physical press then confirms it.")
+    r = ProofGateRecorder("an injected tap never confirms a re-setup", "On a set-up gadget's release build a Nordic "
+                          "UART word or a scripted tap confirms nothing while a re-setup prompt is up: the prompt "
+                          "stays, and the owner's physical press then confirms it. (The wired console is physical "
+                          "access: its key press isn't injected.)")
     r.event("resetup_request", "a re-setup hello (1): the prompt shows")
     r.event("injected_press", "an injected tap: nothing, the prompt stays")
     r.event("injected_press", "another: still nothing")
@@ -3058,8 +3059,9 @@ def proof_gate_section() -> dict:
                        "way round; an exchange without the flag holds for both. An smp step is an SMP v1 request to "
                        "the update gate of mg-update-v2.json (mg_update_ref.py's model) with the rc it answers and "
                        "update_prompt after it (none or confirm); a press while the update prompt shows answers only "
-                       "that prompt's upload. Event injected_press is a console or Nordic UART word or a scripted "
-                       "tap: it confirms neither prompt.",
+                       "that prompt's upload. Event injected_press is a Nordic UART word or a scripted tap: it "
+                       "confirms neither prompt (the wired console is physical access, so its key press isn't "
+                       "injected).",
         "resetup_prompt_ms": RESETUP_PROMPT_MS,
         "setup_mode_ms": SETUP_MODE_MS,
         "exchanges": [gate_hid_key_exchange(), gate_skills_exchange(), gate_haptics_exchange(), gate_open_exchange(),
