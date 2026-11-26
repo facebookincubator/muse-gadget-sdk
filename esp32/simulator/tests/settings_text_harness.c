@@ -85,7 +85,7 @@ int muse_settings_text_size(void) { return MUSE_TEXT_SMALL; }
 void muse_settings_set_text_size(int v) { (void)v; abort(); }
 bool muse_settings_speaker_on(void) { return true; }
 int muse_settings_volume(void) { return volume_setting; }
-bool muse_settings_wifi_on(void) { abort(); }
+bool muse_settings_wifi_on(void) { return false; }
 void muse_wifi_status(muse_wifi_status_t *out) { *out = (muse_wifi_status_t){.state=MUSE_WIFI_OFF}; }
 void muse_ble_status(muse_ble_status_t *out) { *out = (muse_ble_status_t){.state=MUSE_BLE_OFF}; }
 void muse_hatch_status(muse_hatch_status_t *out) { *out = (muse_hatch_status_t){0}; }
@@ -110,7 +110,13 @@ void muse_ui_show_face(void) { abort(); }
 bool muse_ui_text_size_applies(void) { return true; }
 void muse_voice_request_chirp(void) { abort(); }
 esp_err_t muse_wifi_scan(void) { abort(); }
-esp_err_t esp_read_mac(uint8_t *mac, int type) { (void)mac; (void)type; abort(); }
+esp_err_t esp_read_mac(uint8_t *mac, int type)
+{
+    (void)type;
+    static const uint8_t m[6] = { 0x02, 0x12, 0x34, 0x56, 0x78, 0x9a };   /* Wi-Fi's MAC address row */
+    memcpy(mac, m, sizeof(m));
+    return ESP_OK;
+}
 int64_t esp_timer_get_time(void) { return 1000000; }   /* a page's tick reads the time */
 void muse_settings_set_wifi(const char *ssid, const char *pass)
 {
@@ -165,11 +171,45 @@ size_t muse_sim_strlcpy(char *dst, const char *src, size_t cap)
 static void on_switch(lv_event_t *event) { (void)event; }
 static esp_err_t fake_mic_init(void) { return ESP_OK; }
 
+/* The panel's pixels (RGB565), for the screenshot rows. */
+static uint16_t *s_frame;
+
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 {
-    (void)area;
-    (void)pixels;
+    int w = area->x2 - area->x1 + 1;
+    for (int y = area->y1; y <= area->y2; y++) {
+        memcpy(s_frame + (size_t)y * muse_board->width + area->x1, pixels + (size_t)(y - area->y1) * w * 2,
+               (size_t)w * 2);
+    }
     lv_display_flush_ready(display);
+}
+
+/* The frame as a PPM. */
+static void screenshot(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fprintf(f, "P6\n%d %d\n255\n", muse_board->width, muse_board->height);
+    for (size_t i = 0; i < (size_t)muse_board->width * muse_board->height; i++) {
+        uint16_t p = s_frame[i];
+        uint8_t rgb[3] = { (uint8_t)((p >> 11) * 255 / 31), (uint8_t)(((p >> 5) & 63) * 255 / 63),
+                           (uint8_t)((p & 31) * 255 / 31) };
+        fwrite(rgb, 1, sizeof(rgb), f);
+    }
+    assert(fclose(f) == 0);
+}
+
+/* Pixels in the box that differ from its top-left one: drawn text. */
+static int drawn(lv_area_t b)
+{
+    int n = 0;
+    uint16_t bg = s_frame[(size_t)b.y1 * muse_board->width + b.x1];
+    for (int y = b.y1; y <= b.y2; y++) {
+        for (int x = b.x1; x <= b.x2; x++) {
+            n += s_frame[(size_t)y * muse_board->width + x] != bg;
+        }
+    }
+    return n;
 }
 
 static lv_area_t area(lv_obj_t *obj)
@@ -223,6 +263,25 @@ static void one_line_in(lv_obj_t *l, lv_obj_t *card)
 static const char *child_text(lv_obj_t *parent, int i)
 {
     return lv_label_get_text(lv_obj_get_child(parent, i));
+}
+
+/* An info row (info_row()), its value v: where they don't fit side by side (stacked_rows()) the label, then the
+ * value on its own line under it, both inside the card and whole (no "..." in place of any letter); else each on
+ * one bounded line beside the other. */
+static void info_in(lv_obj_t *v, const char *label_text, const char *value)
+{
+    lv_obj_t *card = lv_obj_get_parent(v), *t = lv_obj_get_child(card, 0);
+    if (!stacked_rows()) {
+        one_line_in(t, card);
+        one_line_in(v, card);
+        return;
+    }
+    lv_area_t a = area(t), b = area(v), c = area(card);
+    c.x1 += lv_obj_get_style_pad_left(card, 0);
+    c.x2 -= lv_obj_get_style_pad_right(card, 0);
+    assert(a.y2 < b.y1);
+    assert(box_inside(a, c) && box_inside(b, c));
+    assert(!strcmp(lv_label_get_text(t), label_text) && !strcmp(lv_label_get_text(v), value));
 }
 
 /* A page (page()): its title in a hit area (child 0), after the back chevron on a sub-page, then its list. */
@@ -311,7 +370,7 @@ static void enter_digit(void)
 
 int main(int argc, char **argv)
 {
-    assert(argc == 6);
+    assert(argc == 6 || argc == 7);   /* argv[6]: a scenario's screenshot (PPM) */
     test_board.width = atoi(argv[1]);
     test_board.height = atoi(argv[2]);
     test_board.round = atoi(argv[3]) != 0;
@@ -327,6 +386,8 @@ int main(int argc, char **argv)
     assert(buffer);
     lv_display_set_buffers(display, buffer, NULL, bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
+    s_frame = calloc((size_t)test_board.width * test_board.height, sizeof(*s_frame));
+    assert(s_frame);
     s_tile = lv_obj_create(lv_screen_active());
     lv_obj_remove_style_all(s_tile);
     lv_obj_set_size(s_tile, lv_pct(100), lv_pct(100));
@@ -351,7 +412,8 @@ int main(int argc, char **argv)
         const char *states[]={"Up to date","Using saved avatar","Up to date (not saved)","Waiting for Muse"};
         for(size_t i=0;i<sizeof(states)/sizeof(states[0]);i++) {
             avatar_status_text=states[i];tick_avatar();lv_obj_update_layout(s_avatar);
-            one_line_in(s_avatar_status,lv_obj_get_parent(s_avatar_status));
+            if (stacked_rows()) info_in(s_avatar_status,"Status",states[i]);
+            else one_line_in(s_avatar_status,lv_obj_get_parent(s_avatar_status));
         }
         lv_obj_t *list=page_list(s_avatar);
         lv_obj_send_event(lv_obj_get_child(list,2),LV_EVENT_CLICKED,NULL);
@@ -501,21 +563,18 @@ int main(int argc, char **argv)
         lv_area_t t = area(text), w = area(sw), c = area(card);
         assert(t.x2 < w.x1 && box_inside(t, c) && box_inside(w, c));
     } else if (!strcmp(scenario, "rows")) {
-        /* Long values stay on bounded lines inside their cards. */
+        /* Long values stay inside their cards: on bounded lines, or whole under their label where the two don't fit
+         * side by side. */
         lv_obj_t *list;
         lv_obj_t *p = page(s_tile, "BLUETOOTH", true, &list);
         lv_obj_remove_flag(p, LV_OBJ_FLAG_HIDDEN);
         lv_obj_t *mac = info_row(list, "MAC address");
         set_text(mac, "02:12:34:56:78:9A");
-        lv_obj_t *card = lv_obj_get_parent(mac);
-        one_line_in(lv_obj_get_child(card, 0), card);
-        one_line_in(mac, card);
+        info_in(mac, "MAC address", "02:12:34:56:78:9A");
         lv_obj_t *batt = info_row(list, "Also kept awake by a long list of reasons");
         set_text(batt, "Wi-Fi, Bluetooth, voice, the screen and a long tail");
-        card = lv_obj_get_parent(batt);
-        one_line_in(lv_obj_get_child(card, 0), card);
-        one_line_in(batt, card);
-        lv_obj_t *value;
+        info_in(batt, "Also kept awake by a long list of reasons", "Wi-Fi, Bluetooth, voice, the screen and a long tail");
+        lv_obj_t *card, *value;
         card = row(list, LV_SYMBOL_BLUETOOTH, "Bluetooth", &value, on_switch, NULL);
         set_text(value, "Connected");
         one_line_in(lv_obj_get_child(card, 1), card);
@@ -528,6 +587,38 @@ int main(int argc, char **argv)
             assert(page_back(p) == title && lv_obj_has_flag(title, LV_OBJ_FLAG_CLICKABLE));
             assert(!strcmp(page_title(p), "BLUETOOTH"));
             assert(in_circle(area(lv_obj_get_child(title, 0))));
+        }
+    } else if (!strcmp(scenario, "info")) {
+        /* Wi-Fi's MAC address row as the panel draws it, scrolled to the top of the list: where a label and its
+         * value don't fit side by side, the address on its own line under the label, whole and on one line;
+         * else one line, the address whole. argv[6]: the screenshot. */
+        lv_obj_add_flag(s_home, LV_OBJ_FLAG_HIDDEN);   /* the stand-in Settings page: not in the picture */
+        build_wifi_page(s_tile);
+        show(s_wifi);
+        lv_obj_t *list = page_list(s_wifi), *mac = NULL;
+        for (uint32_t i = 0; i < lv_obj_get_child_count(list) && !mac; i++) {
+            lv_obj_t *c = lv_obj_get_child(list, (int32_t)i);
+            lv_obj_t *l = lv_obj_get_child_count(c) ? lv_obj_get_child(c, 0) : NULL;
+            if (l && lv_obj_check_type(l, &lv_label_class) && !strcmp(lv_label_get_text(l), "MAC address")) {
+                mac = lv_obj_get_child(c, 1);
+            }
+        }
+        assert(mac);
+        lv_obj_t *card = lv_obj_get_parent(mac);
+        lv_obj_scroll_by_bounded(list, 0, -(area(card).y1 - area(list).y1), LV_ANIM_OFF);
+        lv_obj_update_layout(s_tile);
+        lv_refr_now(display);
+        info_in(mac, "MAC address", "02:12:34:56:78:9A");
+        assert(!strcmp(lv_label_get_text(mac), "02:12:34:56:78:9A"));
+        assert(lv_obj_get_height(mac) == lv_font_get_line_height(lv_obj_get_style_text_font(mac, 0)));
+        if (test_board.round) {
+            assert(in_circle(area(card)));
+        } else {
+            inside(card);
+        }
+        assert(drawn(area(lv_obj_get_child(card, 0))) > 0 && drawn(area(mac)) > 0);
+        if (argc == 7) {
+            screenshot(argv[6]);
         }
     } else if (!strcmp(scenario, "screen") || !strcmp(scenario, "mic")) {
         /* Only a board with neither speaker nor microphone loses the mic controls: no Sound row or page, and the
@@ -599,6 +690,7 @@ int main(int argc, char **argv)
     lv_display_delete(display);
     lv_deinit();
     free(buffer);
+    free(s_frame);
     printf("PASS %dx%d %s\n", test_board.width, test_board.height, scenario);
     return 0;
 }

@@ -697,10 +697,34 @@ static lv_obj_t *column(lv_obj_t *list)
     return l;
 }
 
+/* 240 px wide and narrower (the round 240s, the 172 px portrait): a label and
+ * its value don't fit side by side, so an info row stacks them. */
+static bool stacked_rows(void)
+{
+    return muse_board->width < 300;
+}
+
 /* Label and value, not tappable. */
 static lv_obj_t *info_row(lv_obj_t *list, const char *text)
 {
     lv_obj_t *c = card(list, false);
+    if (stacked_rows()) {
+        /* The label, then the value on its own line under it, each the card's
+         * width: nothing cut (a value too long for one line wraps). */
+        lv_obj_set_height(c, LV_SIZE_CONTENT);
+        lv_obj_set_style_min_height(c, 44, 0);
+        lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(c, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_ver(c, 6, 0);
+        lv_obj_set_style_pad_row(c, 2, 0);
+        lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_DIM, text);
+        lv_obj_set_width(t, lv_pct(100));
+        lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_t *v = label(c, &lv_font_montserrat_16, COLOR_TEXT, "");
+        lv_obj_set_width(v, lv_pct(100));
+        lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_WRAP);
+        return v;
+    }
     lv_obj_set_height(c, 44);
     /* One line each (DOTS wraps an auto-height label): the name at most 60 % of the card, ending in dots past it. */
     lv_obj_t *t = label(c, &lv_font_montserrat_16, COLOR_TEXT, text);

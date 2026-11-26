@@ -523,6 +523,18 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulator.py
     add_test(NAME muse_settings_round_switch COMMAND muse_settings_text_test 466 466 1 1.75 switch)
     add_test(NAME muse_settings_round_240_switch COMMAND muse_settings_text_test 240 240 1 1.28 switch)
     add_test(NAME muse_settings_round_240_rows COMMAND muse_settings_text_test 240 240 1 1.28 rows)
+    # Wi-Fi's MAC address row as each panel draws it, a screenshot of each in the build tree: stacked and whole
+    # where a label and its value don't fit side by side (240 px wide and narrower), one line elsewhere.
+    foreach(panel "round_240;240;240;1;1.28" "xiao;172;320;0;1.47" "portrait;240;320;0;2.8" "round_466;466;466;1;1.75")
+        list(GET panel 0 name)
+        list(GET panel 1 w)
+        list(GET panel 2 h)
+        list(GET panel 3 round)
+        list(GET panel 4 diag)
+        add_test(NAME muse_settings_${name}_info
+                 COMMAND muse_settings_text_test ${w} ${h} ${round} ${diag} info
+                         "${CMAKE_CURRENT_BINARY_DIR}/settings-info-${name}.ppm")
+    endforeach()
     add_test(NAME muse_settings_xiao_rows COMMAND muse_settings_text_test 172 320 0 1.47 rows)
     add_test(NAME muse_settings_round_240_screen COMMAND muse_settings_text_test 240 240 1 1.28 screen)
     add_test(NAME muse_settings_round_240_mic COMMAND muse_settings_text_test 240 240 1 1.28 mic)
