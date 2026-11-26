@@ -1131,6 +1131,13 @@ Kconfig options live in `Kconfig.mg` (`CONFIG_MG_*`): SBC bitpool, LC3 frame
 size, audio source, mic gain, queue size, the setup reset hold, firmware
 updates, the bench console.
 
+Live audio goes as whole frames per Data notification, so a frame must fit
+the link's room (ATT_MTU - 3): before the format is announced, a frame that
+doesn't (an SBC bitpool up to 124 makes 256 B frames, a high LC3 bitrate on
+a small MTU) is cut to the largest SBC bitpool or LC3 frame that fits, and
+logged once (`mg_codec_fit()`, unit `test_fit_room_sbc`,
+`test_fit_room_lc3`). The announced format is always what's sent.
+
 ### Firmware updates (MCUmgr SMP)
 
 The SMP GATT service sits beside the mg service, DIS, BAS and NUS, with the

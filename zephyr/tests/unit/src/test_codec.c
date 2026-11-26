@@ -276,6 +276,66 @@ ZTEST(codec, test_lc3_24k_roundtrip)
 	zassert_equal(mg_codec_format_rate(mg_data_type_audio_lc3, 32000, &f), -ENOTSUP);
 }
 
+/* A live frame that doesn't fit the link's room (one Data notification,
+ * ATT_MTU - 3) is cut to the largest that does before the format goes out,
+ * so the announced format is what's sent. A frame that fits is left as it
+ * is. */
+static int16_t fit_pcm[MG_CODEC_MAX_FRAME_SAMPLES];
+static uint8_t fit_out[MG_CODEC_MAX_FRAME_BYTES + 64];
+
+/* SBC at bitpool 124 (256 B frames) on a 247-byte MTU (244 B). */
+ZTEST(codec, test_fit_room_sbc)
+{
+	struct mg_audio_format f, g;
+	struct sbc_frame fr;
+	uint8_t cdt[9];
+	int n;
+
+	zassert_ok(mg_codec_format(mg_data_type_audio_sbc, &f));
+	f.sbc_bitpool = 124;
+	zassert_equal(mg_codec_fit(&f, 244), 1, "cut to fit");
+	zassert_true(f.frame_bytes <= 244 && f.sbc_bitpool < 124);
+	g = f;
+	g.sbc_bitpool++;
+	zassert_equal(mg_codec_fit(&g, 1000), 0);
+	zassert_true(g.frame_bytes > 244, "the largest bitpool that fits");
+	zassert_ok(mg_codec_open_fmt(&f));
+	n = mg_codec_encode(fit_pcm, fit_out, sizeof(fit_out));
+	zassert_equal(n, f.frame_bytes, "sent as announced");
+	zassert_equal(sbc_probe(fit_out, &fr), 0);
+	zassert_equal(fr.bitpool, f.sbc_bitpool);
+	zassert_equal(sbc_get_frame_size(&fr), (unsigned int)n);
+	zassert_equal(mg_codec_change_data_type(&f, cdt), 9);
+	zassert_equal(cdt[5] | cdt[6] << 8, n);
+	/* The configured bitpool, which fits: as it is. */
+	zassert_ok(mg_codec_format(mg_data_type_audio_sbc, &f));
+	g = f;
+	zassert_equal(mg_codec_fit(&f, 244), 0);
+	zassert_mem_equal(&f, &g, sizeof(f));
+}
+
+/* LC3 at 96 kb/s (120 B frames) on a 100-byte MTU (97 B). */
+ZTEST(codec, test_fit_room_lc3)
+{
+	struct mg_audio_format f;
+	uint8_t cdt[9];
+	int n;
+
+	zassert_ok(mg_codec_format_cfg(mg_data_type_audio_lc3, 16000, 32, &f));
+	f.frame_bytes = 96 * 10000 / 8000; /* 96 kb/s */
+	zassert_equal(mg_codec_fit(&f, 100 - 3), 1, "cut to fit");
+	zassert_equal(f.frame_bytes, 97);
+	zassert_ok(mg_codec_open_fmt(&f));
+	n = mg_codec_encode(fit_pcm, fit_out, sizeof(fit_out));
+	zassert_equal(n, 97, "sent as announced");
+	zassert_equal(mg_codec_change_data_type(&f, cdt), 9);
+	zassert_equal(cdt[5] | cdt[6] << 8, n);
+	/* 32 kb/s (40 B), which fits: as it is. */
+	zassert_ok(mg_codec_format_cfg(mg_data_type_audio_lc3, 16000, 32, &f));
+	zassert_equal(mg_codec_fit(&f, 97), 0);
+	zassert_equal(f.frame_bytes, 40);
+}
+
 ZTEST(codec, test_bad_codec)
 {
 	uint8_t out[64];
