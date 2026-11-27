@@ -451,6 +451,9 @@ jobs:
           - board: muse-waveshare-s3-175c-avatars
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-avatar-rendering"
+          - board: muse-waveshare-s3-206-avatars
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206;devices/sdkconfig.muse-avatar-rendering"
           BOARDS
           echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
           targets=$(jq -r '[.include[].boards[].target] | unique | join(",")' /tmp/matrix.json)

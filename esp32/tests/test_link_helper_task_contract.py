@@ -93,6 +93,32 @@ class HelperTaskContractTest(unittest.TestCase):
         self.assertIn("CONFIG_SPIRAM_RODATA=y", overlay)
         self.assertIn("CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024", overlay)
 
+    def test_waveshare_206_preserves_avatar_and_setup_memory_headroom(self) -> None:
+        overlay = (ROOT / "devices" / "sdkconfig.muse-waveshare-s3-206").read_text()
+        lines = overlay.splitlines()
+        # Keep the hardware-validated placement profile with the board, so the
+        # default build does not lose internal/DMA headroom after a rebuild.
+        for line in (
+            "CONFIG_MUSE_STATIC_BUFFERS_IN_PSRAM=y",
+            "CONFIG_MUSE_STACKS_IN_PSRAM=y",
+            "CONFIG_HOMEHUB_SETUP_TASKS_IN_PSRAM=y",
+            "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024",
+            "CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y",
+            "CONFIG_SPIRAM_RODATA=y",
+            "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y",
+            "CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y",
+        ):
+            self.assertIn(line, lines)
+        # Memory placement must not silently enable optional avatar features or
+        # replace measured headroom with smaller stacks/weaker watchdogs.
+        for key in (
+            "CONFIG_MUSE_AVATAR_SYNC", "CONFIG_MUSE_AVATAR_ANIMATIONS",
+            "CONFIG_MUSE_PIXEL_AVATAR", "CONFIG_MUSE_AVATAR_WHITE_MATTE",
+            "CONFIG_LV_DRAW_THREAD_STACK_SIZE", "CONFIG_ESP_INT_WDT_TIMEOUT_MS",
+            "CONFIG_ESP_TASK_WDT_TIMEOUT_S",
+        ):
+            self.assertFalse(any(line.startswith(key + "=") for line in lines), key)
+
     def test_aipi_lite_opts_into_psram_setup_stacks(self) -> None:
         overlay = (ROOT / "devices" / "sdkconfig.muse-aipi").read_text()
         # The AIPI Lite's largest free internal block is about 7 KB once

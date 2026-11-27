@@ -29,7 +29,9 @@ python tools/muse/pixel_avatar.py install --port PORT --no-enable avatar.mspix
 
 ## Storage, memory and limits
 
-The existing normal-avatar cache format and original pixels are unchanged. Masks are reconstructed on cache restore and held with the same image reference count through the final strip. Temporary allocation pressure retains the original image and retries with bounded backoff; failed cache loads are no longer marked complete. With matting enabled the tracked allocation cap is 4 MiB instead of the legacy 1.5 MiB, with the existing PSRAM reserve still required. Allow this headroom on smaller boards.
+The existing normal-avatar cache format and original pixels are unchanged. Masks are reconstructed on cache restore and held with the same image reference count through the final strip. Temporary allocation pressure retains valid existing content and retries with bounded backoff; failed cache loads are not marked complete.
+
+The tracked allocation ceiling is 4 MiB with matting enabled, or 1.5 MiB without it. Each refresh admits a smaller ceiling when necessary, based on current free PSRAM, retained image allocations, encoded size and the existing 16 KiB workspace allowance. Decoder and matte buffers share that limit; cache restore and matte retries obtain fresh limits. The 1 MiB PSRAM reserve and internal/DMA gates are unchanged, with allocation-time checks rejecting pressure that would consume the reserve. A failed replacement matte keeps the previous display/cache. This lets bounded images load on an 8 MiB S3 without requiring the full maximum ceiling to be free. See [S3 2.06 configuration and validation](avatar-validation-s3-206.md).
 
 H.264 clip views remain opaque and unchanged. This path handles canonical stills and optional pixel-art packs, not per-frame video alpha or facial/body rigging.
 

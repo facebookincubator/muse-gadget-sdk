@@ -391,6 +391,11 @@ avatar also removes the animation pack. No partition changes are required.
 
 ### Validation and remaining release gates
 
+The [S3 2.06 fixes and hardware validation](avatar-validation-s3-206.md) cover
+bounded image admission, PSRAM placement and software H.264 playback through the
+real home UI. That playback check uses a synthetic constrained-baseline clip;
+it is not evidence of phone-animation parity or per-frame transparency.
+
 On the Waveshare 1.75C, the current two-clip 192-pixel CRF 20 pack is 401,067
 bytes. Two 10-second samples produced 19.97–20.04 decoded pictures/s at the
 20 fps source rate, with 15.50–15.85 frames/s accepted by the UI. Neither sample

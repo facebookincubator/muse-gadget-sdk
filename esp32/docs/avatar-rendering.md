@@ -14,9 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Optional avatar rendering
+# Optional avatar rendering: software H.264, pixel packs and alpha
 
-These experimental paths extend existing avatar sync with shared animation, reusable pixel packs and local white-background matting. All new feature flags default off. Shipped board profiles, the existing Built-in/My Muse source selection, pairing and home controls are unchanged.
+The optional home-avatar paths combine shared software H.264 clip playback, reusable pixel packs and conservative white-background matting. Avatar features remain off unless enabled. The S3 2.06 board profile now preserves internal/DMA headroom through the SDK's existing PSRAM placement controls; source selection, pairing, home controls and web-flasher feature selection are unchanged.
 
 ## Data flow
 
@@ -24,9 +24,11 @@ The authenticated Muse identity and canonical still feed avatar sync and its pri
 
 ## Implementation highlights
 
-### Shared software H.264 on S3 and P4
+### Software H.264 home-avatar playback on S3 and P4
 
-`CONFIG_MUSE_AVATAR_ANIMATIONS` enables constrained-stream playback on suitable PSRAM-equipped S3 and P4 UI builds. The local decoder archive/linker mapping avoids a P4 dependency collision; idle clips must loop, and absent or invalid mode clips retain the still fallback. This is software decoding, not a P4 hardware-decoder implementation or support for arbitrary phone MP4s. See [avatar sources and animation constraints](avatar-sources.md).
+`CONFIG_MUSE_AVATAR_ANIMATIONS` feeds bounded clip packs through the shared TinyH264 software decoder and scalar RGB565 conversion into the home canvas. This extends the S3 playback path already in `main` to P4, where home-avatar clip playback was not enabled. It reuses the source-built decoder rather than introducing a new codec or relying on a P4 hardware decoder. The decoder archive/linker mapping is namespaced to coexist with the P4 BSP's dependency.
+
+Idle clips must loop, and absent or invalid mode clips retain the personal still fallback. Voice states and screen sleep suspend decoding; wake resumes the saved pack. Conversion of phone MP4 assets into the supported constrained-baseline stream remains necessary. No camera view, video network listener, anatomical rig or per-frame alpha is added. See [avatar sources and animation constraints](avatar-sources.md).
 
 ### Pixel compiler, API and common renderer
 
@@ -42,7 +44,9 @@ The compiler/API offers the same opt-in treatment with `--remove-white-backgroun
 
 ## Configuration and recovery
 
-Use the normal ESP-IDF v6.0.3 board/token setup. `devices/sdkconfig.muse-avatar-rendering` is an optional combined fragment for a suitable S3/P4 UI board; it enables sync, animations, pixels and matting without selecting pixel style. Features can also be enabled separately. Speaker/mute, captions, touch controls and volume behavior stay unchanged.
+Use the normal ESP-IDF v6.0.3 board/token setup. `devices/sdkconfig.muse-avatar-rendering` is an optional combined fragment for a suitable S3/P4 UI board; it enables sync, software H.264 playback, pixels and matting without selecting pixel style. Features can also be enabled separately. Speaker/mute, captions, touch controls and volume behavior stay unchanged.
+
+The [S3 2.06 fixes and hardware validation](avatar-validation-s3-206.md) cover two separate limits: internal/DMA headroom, and a still-image preflight that incorrectly demanded the entire maximum image budget. The board profile places CPU-only buffers and eligible task stacks in PSRAM. Refresh, cache restore and matte retries now use an effective allocation ceiling derived from available memory and retained images, while keeping the original maximum caps, 1 MiB reserve and internal/DMA gates. The image budget is a ceiling, not a requirement to have the entire maximum free before downloading a small image.
 
 Private pixel caches bind to the stored owner and validated generation. HTTP 502s and temporary allocation/storage failures do not themselves invalidate a matching pack. An identity mismatch or unreadable identity blocks outdated pixels; a late still-cache load cannot re-authorize them. Pairing/token journals fence provisional ownership, rollback preserves the prior durable pack without erasing a validated mismatch, and real owner changes revoke it. Committed credential rotation can still require revalidation/reinstallation. Invalid/interrupted installations keep the prior valid file; mount failures never format existing data.
 

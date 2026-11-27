@@ -16,7 +16,7 @@ CONFIG_MUSE_PIXEL_AVATAR=y
 
 For the Waveshare ESP32-P4 3.5, build in a separate directory using `sdkconfig.defaults`, `devices/sdkconfig.muse`, `devices/sdkconfig.muse-waveshare-p4-lcd35` and that fragment. Keep silicon-revision settings as described in [the P4 setup guide](../devices/waveshare-p4-lcd35.md). The new feature defaults off and works independently of `CONFIG_MUSE_AVATAR_ANIMATIONS`; original still images and H.264 clips remain separate fallback sources. Do not enable Apps, camera or live voice merely to use a pixel sprite.
 
-The optional `devices/sdkconfig.muse-avatar-rendering` fragment enables avatar sync, pixel packs, white matting and software H.264 on a PSRAM-equipped S3/P4 UI board. CI builds that profile on the P4 3.5 and S3 1.75C, in addition to the unchanged default profiles. It contains no token or personal asset and does not select pixel style. To use only pixels, keep the smaller two-option fragment above.
+The optional `devices/sdkconfig.muse-avatar-rendering` fragment enables avatar sync, pixel packs, white matting and software H.264 on a PSRAM-equipped S3/P4 UI board. CI builds that profile on the P4 3.5, S3 1.75C and S3 2.06, in addition to their normal profiles. It contains no token or personal asset and does not select pixel style. To use only pixels, keep the smaller two-option fragment above. The [S3 2.06 validation notes](avatar-validation-s3-206.md) explain its board-level PSRAM placement and bounded image-admission fixes.
 
 The native renderer/parser is `components/muse/muse_pixel_art.c`; the owner-bound cache/USB installer is `main/pixel_avatar.c`. The UI pins a model and its pose per render strip, so a concurrent asset/source change cannot free its palette or mix transforms halfway through a strip.
 
