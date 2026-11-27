@@ -215,7 +215,10 @@ int mbedtls_base64_encode(unsigned char *out,size_t cap,size_t *n,const uint8_t 
     out[at]=0;*n=at;return 0;
 }
 int mbedtls_base64_decode(uint8_t *out,size_t cap,size_t *n,const uint8_t *input,size_t size) {
-    if(size%4)return -1;size_t at=0;
+    if (size%4) {
+        return -1;
+    }
+    size_t at=0;
     for(size_t i=0;i<size;i+=4) {unsigned v=0,pad=0;for(unsigned j=0;j<4;j++){const char *p=strchr(alphabet,input[i+j]);if(input[i+j]=='='){v<<=6;pad++;}else if(p && !pad)v=(v<<6)|(unsigned)(p-alphabet);else return -1;}
         unsigned bytes=3-pad;if(pad>2 || at+bytes>cap)return -1;out[at++]=(uint8_t)(v>>16);if(bytes>1)out[at++]=(uint8_t)(v>>8);if(bytes>2)out[at++]=(uint8_t)v;
     }*n=at;return 0;
@@ -263,7 +266,10 @@ int main(int argc,char **argv) {
         muse_pixel_avatar_start();assert(!s_have_identity);
         if(!strcmp(which,"start_retry")) {
             assert(!atomic_load(&s_running) && atomic_load(&start_attempts)==1);
-            for(int i=0;i<10;i++)muse_pixel_avatar_poll();assert(atomic_load(&start_attempts)==1);
+            for (int i=0;i<10;i++) {
+                muse_pixel_avatar_poll();
+            }
+            assert(atomic_load(&start_attempts)==1);
             atomic_store(&clock_us,1000000);muse_pixel_avatar_poll();assert(atomic_load(&start_attempts)==2 && atomic_load(&s_running));
             pthread_t t;assert(!pthread_create(&t,NULL,queued_job,NULL));assert(!pthread_join(t,NULL));live_is(asset_a);
         } else {

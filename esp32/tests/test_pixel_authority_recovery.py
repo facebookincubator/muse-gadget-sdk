@@ -73,7 +73,7 @@ static int mbedtls_md_setup(mbedtls_md_context_t *p,const void *info,int hmac) {
 static int mbedtls_md_starts(mbedtls_md_context_t *p) {p->hash=1;return 0;}
 static int mbedtls_md_update(mbedtls_md_context_t *p,const uint8_t *b,size_t n) {while(n--)p->hash=p->hash*33+*b++;return 0;}
 static int mbedtls_md_finish(mbedtls_md_context_t *p,uint8_t out[32]) {for(unsigned i=0;i<32;i++)out[i]=(uint8_t)(p->hash>>(8*(i%4)));return 0;}
-void muse_pixel_avatar_identity(const uint8_t *key) {
+void muse_pixel_avatar_identity(const uint8_t key[32]) {
     if(!key)return;
     memcpy(pixel_key,key,32);pixel_required=pixel_known=true;
     pixel_visible=!memcmp(key,digest_a,32);

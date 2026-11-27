@@ -97,7 +97,10 @@ void *heap_caps_calloc(size_t n,size_t bytes,unsigned caps) {
     void *p=heap_caps_malloc(n*bytes,caps);if(p)memset(p,0,n*bytes);return p;
 }
 void heap_caps_free(void *p) {
-    if(!p)return;heap_header_t *h=(heap_header_t *)p-1;
+    if (!p) {
+        return;
+    }
+    heap_header_t *h=(heap_header_t *)p-1;
     assert(heap_used>=h->bytes && heap_blocks);heap_used-=h->bytes;heap_blocks--;free(h);
 }
 size_t heap_caps_get_free_size(unsigned caps) {
