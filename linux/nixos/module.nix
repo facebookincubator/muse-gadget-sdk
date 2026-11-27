@@ -68,6 +68,7 @@ in
         "bluetooth.target"
       ];
       wantedBy = [ "multi-user.target" ];
+      path = [ pkgs.bash ];
       environment = {
         PYTHONUNBUFFERED = "1";
         MUSEGADGET_RUN_AS = cfg.runAs;

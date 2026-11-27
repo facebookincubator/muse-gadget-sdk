@@ -69,6 +69,7 @@ buildPythonApplication {
   # The SDK's linux/ directory (pyproject.toml + src/ layout).
   # The flake passes the repo checkout in; pin it there, not here.
   src = musegadget-src;
+  patches = [ ./executor-bash-lookup.patch ];
 
   build-system = [ setuptools ];
 
