@@ -168,8 +168,61 @@ Compile-time switches for ports to other MCUs, each off by default: off, the
 code is the same as without it. Define them for the decoder's sources and for
 the code that calls their functions. `esp32/tests/test_tinyh264_knobs.py` builds
 each one in and compares it with the decoder as it ships, picture for picture
-(set `TINYH264_CORPUS` to a directory of `.264` streams to run more).
+(set `TINYH264_CORPUS` to a directory of `.264` streams to run more), and
+`esp32/tests/test_tinyh264_knob_builds.py` builds the portable ones (the
+packed operations on their C model, the DSP stand-ins, the cold and hot
+switches) and compares the vectors' pictures, under ASan and UBSan where
+the host has them. `TINYH264_MVE` and the DSP instructions are experimental:
+they have run on QEMU's Cortex-M55 and M33, by hand and not on hardware; CI
+only compiles them (Arm GCC, for a Cortex-M55 and a Cortex-M33) and runs the
+DSP's plain-C stand-ins. The memory and API
+switches from `TINYH264_CUSTOM_ALLOC` down are checked on the host only (those
+tests and a corpus of 256 streams); no board here builds them in, so they are
+experimental until a port runs them.
 
+- `TINYH264_MVE=1` (experimental): Arm Helium (MVE), with the ACLE intrinsics
+  of `arm_mve.h`, where the compiler targets it (`__ARM_FEATURE_MVE`:
+  Cortex-M55, M85); elsewhere the C. All of motion compensation
+  (`src/h264bsd_inter_mve.c`: every partition and position, predicted straight
+  into the picture and the residual added there), the general inverse
+  transform, deblocking a whole edge at a time, the intra residual add and the
+  macroblock writes. The first call checks the Helium motion compensation
+  against the C on random blocks and keeps the C if they differ
+  (`h264bsdPieState()`; `TINYH264_LOG`, a printf-style macro, reports it); the
+  transform, deblocking and residual paths have no such check. On QEMU's
+  Cortex-M55, 40 % fewer instructions per picture; the same pictures, byte for
+  byte. Where it builds Helium, not with `H264BSD_LOWMEM` or `H264BSD_STRIP`
+  yet.
+- `TINYH264_DSP_MC=1` (experimental): the luma 6-tap and chroma interpolation
+  on the Armv7E-M / Armv8-M DSP extension (`src/h264bsd_interp_dsp.c`, under
+  `__ARM_FEATURE_DSP`; plain-C stand-ins with the same results elsewhere), two
+  pixels to a register, behind the same hooks and first-use check as the S31's
+  SIMD. `TINYH264_TLS=__thread` where several threads decode.
+- `TINYH264_PACKED4_MC=1`: every interpolation function in packed 4-lane
+  operations (`src/h264bsd_interp_packed4.c`): 4 x 8-bit multiplies into
+  4 x 16-bit lanes, a rounding shift and saturating pack, funnel shifts. The
+  operations come from `src/h264bsd_packed4_ops.h`, their plain-C model, or
+  from the port's own header with the same names and results
+  (`TINYH264_PACKED4_OPS_H='"ops.h"'`); `h264bsdPacked4Check()`
+  (`src/h264bsd_reconstruct.h`) runs every function against the C on random
+  blocks, for checking the port's operations on the target: there is no
+  first-use check. Little-endian targets only (a big-endian one is refused at
+  compile time). One motion-compensation switch at a time (0 is off).
+- `H264BSD_COLD_LEVEL=1` or `2`: small or rare functions (`H264BSD_COLD_FN`,
+  some of which run per macroblock: the DC transforms, motion vector
+  prediction from the neighbours; at 2 also the once-per-slice and
+  once-per-picture ones, `H264BSD_COLD_FN2`) compiled for size with GCC's
+  `optimize("Os")`, the rest at the build's level: on a Cortex-M33 at -O2,
+  78668 B of code at 0, 78480 at 1, 77288 at 2. GCC only (other compilers
+  ignore it), and GCC documents the attribute as a debugging aid: check that
+  the port's own flags (stack protection, say) hold in those functions, or
+  compile `src/h264bsd_slice_header.c` and `src/h264bsd_dpb.c` at -Os per file
+  instead.
+- `H264BSD_HOT_SECTION='".itcm.h264"'`, `H264BSD_HOT_DATA_SECTION='".dtcm.h264"'`:
+  the per-macroblock code (`H264BSD_HOT`) and the tables it reads
+  (`H264BSD_HOT_DATA`) in the port's own sections, for its linker script to
+  place in fast RAM (about 36-41 KB of code and 5 KB of tables on a
+  Cortex-M); `xplat/PORTING-PERF.md`. The ESP-IDF component uses `linker.lf`.
 - `TINYH264_CUSTOM_ALLOC=1`: every block comes from the port's allocator,
   `tinyh264_alloc`, `tinyh264_alloc_hot` (the blocks read for every
   macroblock, where faster memory pays) and `tinyh264_free`, which the port

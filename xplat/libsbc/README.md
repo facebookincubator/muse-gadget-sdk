@@ -61,6 +61,9 @@ are left out.
 | `SBC_MERGE_TABLES=1` | identical constant tables (the header maps, the frequency and cos(i*pi/8) tables) in mergeable sections, so the linker keeps one copy; GCC on ELF targets with a 4-byte `int`, a no-op elsewhere. 8 B of 924 on RISC-V, 24 of 940 on Xtensa (the SDKs' build) | off | off |
 | `SBC_PLC` | packet loss concealment: a lost frame replays the last good one, 6 dB quieter each time; changes `struct sbc` | off | off |
 
+Building it for another MCU (its own -O2 archive, what to put in RAM):
+[`../PORTING-PERF.md`](../PORTING-PERF.md).
+
 `SBC_MAX_CHANNELS` and `SBC_PLC` change the size and layout
 of `sbc_t`, so they are public definitions: build every file that includes
 `sbc.h` with the same values (the ESP32 component exports them `PUBLIC`), or
