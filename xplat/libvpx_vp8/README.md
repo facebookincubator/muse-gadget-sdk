@@ -29,7 +29,7 @@ with its ESP-IDF component, `../../esp32/components/libvpx_vp8`
 (`CMakeLists.txt`, `Kconfig`, `linker.lf`).
 
 Changes from upstream, each marked `Muse gadget port` in the source. All but
-the progress hook are speed-ups, bit-exact: the decoded pictures match stock
+the progress hook and one stack array's alignment are speed-ups, bit-exact: the decoded pictures match stock
 libvpx byte for byte on 933 test streams (profiles 0 to 3, loop filter
 normal, simple and off, one and two token partitions, alt-ref frames,
 segmentation, 240 to 480 px).
@@ -59,6 +59,11 @@ segmentation, 240 to 480 px).
   stores instead of memset/memcpy calls (`vp8/common/mgx_mem.h`).
 - With segmentation, the dequantisation tables are rebuilt only when a
   macroblock's Q index changes (`vp8/decoder/decodeframe.c`).
+- The left column that 16x16 intra prediction copies onto the stack
+  (`vp8/common/reconintra.c`) is 16-byte aligned by hand, with slack,
+  instead of `DECLARE_ALIGNED`: compilers that realign over-aligned stack
+  arrays without slack on a 4-byte-aligned stack would place it partly past
+  its frame.
 - On the ESP32-S3, bilinear prediction of 16x16 and 8x8 blocks runs on its
   SIMD (`src/vp8/common/xtensa/bilinear_pie.S`, `MGX_PIE_S3`): 16-bit lanes,
   the same arithmetic as the C; checked against the C on 4000 random blocks

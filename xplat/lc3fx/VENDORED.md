@@ -42,6 +42,11 @@ band of zeros has that much headroom). The output is bit-exact with the
 code before the change. The postfilter (`LC3_DEC_LTPF=1`, `src/ltpf.c`)
 does the same; `run_tests.py` builds and fuzzes it too.
 
+The encoder's stack scratch buffer in `src/lc3.c` is 8-byte aligned by
+hand, with a word of slack, instead of `alignas(8)`: compilers that realign
+over-aligned stack arrays without slack on a 4-byte-aligned stack wrote past
+it. The output is unchanged elsewhere.
+
 `LC3_ENC_LTPF` and `LC3_DEC_LTPF` are layout definitions
 (`include/lc3_private.h`): the library and every file that includes
 `lc3.h` must be built with the same values.
@@ -68,7 +73,7 @@ b4e732b32e45b39c505238acd986303e63791587afb9567ae81f47a8eb3ca7bf  src/bwdet.c
 a0425e18de54fc3ecc7eec899b0ff80ef6b076929545e61357c24e8416b34299  src/energy.c
 4be279f7455a5194542000a66b1c1987c9ee306f7fe4528363abe64ca5f1e076  src/energy.h
 fde134dd8e855eabcbf30d81ddedfc3b6f52d2df8db663069bdac8d5ef0648b3  src/fxmath.h
-b0bcfb0cc62d7cad0bf8b27cd1ef5024fbedc0d671b91778450e1e55df229f35  src/lc3.c
+ae3e38d4b50190ca05e136d024538e38ad9697c23569f7797cf6af405746c110  src/lc3.c
 355d5e40dd40f123b904f90182124d8bdaf87f0a1743ba1074277f290c121c38  src/ltpf.c
 5bb2f262b280eb6a26168466308a000c37d99b0f5642f67fec10180168e06f39  src/ltpf.h
 cce018f41fa447d10427691c75ee75331f019e3cc8efb3d2b59af3b040193209  src/mdct.c

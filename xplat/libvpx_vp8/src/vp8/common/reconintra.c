@@ -49,7 +49,11 @@ void vp8_build_intra_predictors_mby_s(MACROBLOCKD *x, unsigned char *yabove_row,
                                       unsigned char *yleft, int left_stride,
                                       unsigned char *ypred_ptr, int y_stride) {
   MB_PREDICTION_MODE mode = x->mode_info_context->mbmi.mode;
-  DECLARE_ALIGNED(16, uint8_t, yleft_col[16]);
+  /* Muse gadget port: 16-byte aligned by hand, with slack: compilers that realign
+   * over-aligned stack arrays without slack on a 4-byte-aligned stack
+   * would place a DECLARE_ALIGNED(16) array partly past its frame */
+  uint8_t yleft_raw[16 + 15];
+  uint8_t *yleft_col = (uint8_t *)(((uintptr_t)yleft_raw + 15) & ~(uintptr_t)15);
   int i;
   intra_pred_fn fn;
 
