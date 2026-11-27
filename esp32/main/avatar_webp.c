@@ -30,7 +30,16 @@ void *muse_webp_malloc(size_t bytes) {
         if (used > s_limit || need > s_limit - used) return NULL;
     } while (!atomic_compare_exchange_weak(&s_live, &used, used + need));
 #ifdef ESP_PLATFORM
+    size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (available <= AVATAR_WEBP_RESERVE_BYTES || need > available - AVATAR_WEBP_RESERVE_BYTES) {
+        atomic_fetch_sub(&s_live, need); return NULL;
+    }
     allocation_t *a = heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* Other tasks may consume PSRAM after admission. Give this allocation
+     * back rather than taking the reserve; callers retain/retry old content. */
+    if (a && heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < AVATAR_WEBP_RESERVE_BYTES) {
+        heap_caps_free(a); a = NULL;
+    }
 #else
     allocation_t *a = malloc(need);
 #endif
@@ -50,7 +59,11 @@ void muse_webp_free(void *p) {
     if (!p) return;
     allocation_t *a = (allocation_t *)p - 1;
     atomic_fetch_sub(&s_live, a->bytes);
+#ifdef ESP_PLATFORM
+    heap_caps_free(a);
+#else
     free(a);
+#endif
 }
 
 bool avatar_webp_decode(const uint8_t *bytes, size_t len, int max_edge,

@@ -86,6 +86,9 @@ void muse_pixel_avatar_source_changed(void) {pixel_visible=false;}
 static void motion_binding(const avatar_identity_t *id);
 static void *heap_caps_calloc(size_t n,size_t size,unsigned caps) {(void)caps;return calloc(n,size);}
 static void heap_caps_free(void *p) {free(p);}
+static void *request_alloc(size_t n) {return heap_caps_calloc(1,n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
+#define AVATAR_WORKSPACE (16u*1024u)
+static size_t allocation_budget(size_t pending) {(void)pending;return AVATAR_PEAK;}
 void *muse_webp_malloc(size_t size) {if(fail_alloc){fail_alloc--;return NULL;}return malloc(size);}
 void muse_webp_free(void *p) {free(p);}
 bool muse_avatar_files_mount(void) {if(fail_mount){fail_mount--;return false;}return true;}
@@ -95,7 +98,7 @@ static avatar_response_t response={(uint8_t *)"identity-B",10,200,false};
 static avatar_response_t *get(const char *path,const char *const *headers,size_t cap,unsigned gen) {(void)headers;(void)cap;(void)gen;assert(!strcmp(path,"/identity"));return &response;}
 void avatar_request_release(avatar_response_t *r) {assert(r==&response);}
 int avatar_identity_parse(const char *json,size_t len,avatar_identity_t *out) {assert(len==10 && !memcmp(json,"identity-B",10));*out=id_b;return 1;}
-static uint8_t *fetch_webp(const char *path,unsigned gen,size_t *len) {(void)gen;(void)len;assert(!strcmp(path,id_b.path));downloads++;return NULL;}
+static uint8_t *fetch_webp(const char *path,unsigned gen,size_t *len,size_t *budget) {(void)gen;(void)len;(void)budget;assert(!strcmp(path,id_b.path));downloads++;return NULL;}
 bool avatar_webp_decode(const uint8_t *b,size_t n,int max,size_t budget,avatar_webp_result_t *out) {(void)b;(void)n;(void)max;(void)budget;(void)out;assert(!"download failed before decoding");return false;}
 static bool cache_save(void *image,const avatar_identity_t *id,unsigned gen) {(void)image;(void)id;(void)gen;assert(!"download failed before save");return false;}
 static void cached_identity(const avatar_identity_t *id) {(void)id;}

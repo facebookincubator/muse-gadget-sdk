@@ -184,7 +184,26 @@ static bool s_image_saved;
 #else
 #define AVATAR_PEAK (1536 * 1024)
 #endif
-#define AVATAR_RESERVE (1024 * 1024)
+#define AVATAR_RESERVE AVATAR_WEBP_RESERVE_BYTES
+/* Request chunks, URL/control objects and the image owner are outside the
+ * WebP allocator. Keep their existing 16 KiB allowance for every attempt. */
+#define AVATAR_WORKSPACE (16u * 1024u)
+
+static size_t allocation_budget(size_t pending) {
+    /* Only the worker allocates WebP/matte buffers; UI readers may free old
+     * pinned images. Read free BEFORE live so a concurrent release cannot be
+     * counted once as retained bytes and again as newly free PSRAM. */
+    size_t free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t live = avatar_webp_live_bytes(), budget = 0;
+    if (pending < AVATAR_PEAK && live < AVATAR_PEAK - pending &&
+        free > AVATAR_RESERVE && pending < free - AVATAR_RESERVE) {
+        size_t additional = free - AVATAR_RESERVE - pending;
+        size_t room = AVATAR_PEAK - pending - live;
+        budget = live + (additional < room ? additional : room);
+    }
+    avatar_webp_set_budget(budget); /* zero fails closed, never an unlimited limit */
+    return budget;
+}
 #if CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
 #define AVATAR_TASK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #else
@@ -327,8 +346,9 @@ const uint8_t *muse_avatar_image_alpha(const muse_avatar_image_t *view) {
 #endif
 static image_t *new_image(uint16_t *pixels, int w, int h, uint32_t content_epoch) {
     if(!pixels || w<1 || h<1 || w>MUSE_AVATAR_MAX_EDGE || h>MUSE_AVATAR_MAX_EDGE) {muse_webp_free(pixels);return NULL;}
-    image_t *image = heap_caps_calloc(1, sizeof(*image), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    image_t *image = request_alloc(sizeof(*image));
     if (!image) { muse_webp_free(pixels); return NULL; }
+    memset(image, 0, sizeof(*image));
     image->view = (muse_avatar_image_t){.data={pixels, w, h}, .revision=++s_revision};
     image->refs = 1;image->raw_pixels=pixels;
     image->content_epoch = content_epoch;
@@ -370,7 +390,15 @@ static bool cancelled(unsigned generation) {
     return generation != atomic_load(&s_generation) || atomic_load(&s_source) != MUSE_AVATAR_PERSONAL;
 }
 
-static void *request_alloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
+static void *request_alloc(size_t n) {
+    size_t free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (!n || free <= AVATAR_RESERVE || n > free - AVATAR_RESERVE) return NULL;
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p && heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < AVATAR_RESERVE) {
+        heap_caps_free(p); p = NULL;
+    }
+    return p;
+}
 static bool request_stop(uintptr_t generation) { return cancelled((unsigned)generation) || muse_state_asleep() || busy(); }
 static void request_yield(void) { vTaskDelay(pdMS_TO_TICKS(20)); }
 static avatar_response_t *get(const char *path, const char *const *headers, size_t cap, unsigned generation) {
@@ -378,7 +406,7 @@ static avatar_response_t *get(const char *path, const char *const *headers, size
                                       heap_caps_free, esp_timer_get_time, request_yield, request_stop};
     return avatar_request_get(path, headers, cap, generation, &ops);
 }
-static uint8_t *fetch_webp(const char *path, unsigned generation, size_t *len) {
+static uint8_t *fetch_webp(const char *path, unsigned generation, size_t *len, size_t *budget) {
     char *url = vm_file_request_path(path);
     if (!url) return NULL;
     size_t chunk = noise_ctrl_req_max_body(); if (chunk > 4096) chunk = 4096;
@@ -400,9 +428,10 @@ static uint8_t *fetch_webp(const char *path, unsigned generation, size_t *len) {
                              (uint32_t)r->body[6] << 16 | (uint32_t)r->body[7] << 24;
                 ok = n >= 4 && n <= 512 * 1024 - 8;
                 total = (size_t)n + 8;
-                size_t live = avatar_webp_live_bytes();
-                if (ok && live < AVATAR_PEAK && heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > AVATAR_PEAK - live + AVATAR_RESERVE)
-                    encoded = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (ok) {
+                    *budget = allocation_budget(total + AVATAR_WORKSPACE);
+                    if (*budget) encoded = request_alloc(total);
+                }
                 if (!encoded) ok = false;
             }
         }
@@ -458,6 +487,7 @@ static bool cache_load(void) {
     unsigned generation=atomic_load(&s_generation);
 #endif
     if (!muse_avatar_files_mount()) return false;
+    if (!allocation_budget(AVATAR_WORKSPACE)) return false;
     avatar_cache_header_t a, b, h;
     bool av = avatar_cache_read(CACHE_A, s_binding, &a, NULL, 0);
     bool bv = avatar_cache_read(CACHE_B, s_binding, &b, NULL, 0);
@@ -532,11 +562,11 @@ static bool sync_once(unsigned generation) {
     if (s_image && identity.revision[0] && !strcmp(identity.path, s_identity.path) && !strcmp(identity.revision, s_identity.revision)) {
         atomic_store(&s_status, "Up to date"); return true;
     }
-    size_t len = 0;
-    uint8_t *bytes = fetch_webp(identity.path, generation, &len);
+    size_t len = 0, budget = 0;
+    uint8_t *bytes = fetch_webp(identity.path, generation, &len, &budget);
     if (!bytes) return false;
     avatar_webp_result_t decoded;
-    bool ok = avatar_webp_decode(bytes, len, 466, AVATAR_PEAK - len - 16 * 1024, &decoded);
+    bool ok = avatar_webp_decode(bytes, len, 466, budget, &decoded);
     heap_caps_free(bytes);
     atomic_store(&s_last_peak, decoded.peak_bytes + len + 16 * 1024);
     if (!ok) {
@@ -546,6 +576,12 @@ static bool sync_once(unsigned generation) {
     if (cancelled(generation)) { muse_webp_free(decoded.pixels); return false; }
     image_t *image = new_image(decoded.pixels, decoded.width, decoded.height, content_epoch);
     if (!image) return false;
+#if CONFIG_MUSE_AVATAR_WHITE_MATTE
+    /* Cold boot may show an original still while its matte retries. A failed
+     * replacement must not discard a previous valid display/cache merely
+     * because this attempt could not allocate the derived planes/queue. */
+    if (image->matte_pending && s_image) { muse_avatar_release(&image->view); return false; }
+#endif
 #if CONFIG_MUSE_PIXEL_AVATAR
     if(!set_image_pixel_key(image,&identity)) {muse_avatar_release(&image->view);return false;}
 #endif
@@ -585,6 +621,7 @@ static bool retry_matte(unsigned generation) {
     if(!held)return false;
     const image_t *old=(const image_t *)held;
     if(!old->matte_pending) {muse_avatar_release(held);return true;}
+    if(!allocation_budget(AVATAR_WORKSPACE)) {muse_avatar_release(held);return false;}
     size_t count=(size_t)held->data.width*held->data.height;
     uint16_t *pixels=muse_webp_malloc(count*2);
     if(!pixels) {muse_avatar_release(held);return false;}
@@ -608,7 +645,7 @@ static void worker_task(void *arg) {
     int64_t next_matte=0;unsigned matte_retry=1;
 #endif
     bool loaded = false, connected = false;
-    avatar_webp_set_budget(AVATAR_PEAK);
+    avatar_webp_set_budget(0); /* only an admitted refresh/cache/matte attempt may allocate */
     for (;;) {
         unsigned jobs = atomic_exchange(&s_jobs, 0);
         unsigned generation = atomic_load(&s_generation);

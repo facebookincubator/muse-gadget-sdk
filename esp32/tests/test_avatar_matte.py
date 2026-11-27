@@ -102,6 +102,9 @@ static void motion_binding(const void *p) {(void)p;}
 muse_avatar_source_t muse_avatar_source(void) {return (muse_avatar_source_t)atomic_load(&s_source);}
 static void *heap_caps_calloc(size_t n,size_t size,unsigned caps) {(void)caps;if(fail_object){fail_object=false;return NULL;}objects++;return calloc(n,size);}
 static void heap_caps_free(void *p) {if(p){assert(objects);objects--;free(p);}}
+static void *request_alloc(size_t n) {return heap_caps_calloc(1,n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
+#define AVATAR_WORKSPACE (16u*1024u)
+static size_t allocation_budget(size_t pending) {(void)pending;return 4u*1024u*1024u;}
 static void *muse_webp_malloc(size_t n) {
  calls++;if(calls==fail_at)return NULL;
  if(calls==invalidate_at){atomic_fetch_add(&s_generation,1);atomic_fetch_add(&s_content_epoch,1);atomic_store(&s_binding_blocked,true);}

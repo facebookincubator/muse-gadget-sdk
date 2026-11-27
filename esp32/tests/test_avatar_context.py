@@ -39,6 +39,7 @@ class AvatarContext(unittest.TestCase):
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <string.h>
 #include "muse_avatar.h"
 #define portENTER_CRITICAL(guard) ((void)0)
 #define portEXIT_CRITICAL(guard) ((void)0)
@@ -55,6 +56,7 @@ static void motion_binding(const void *identity) {(void)identity;}
 muse_avatar_source_t muse_avatar_source(void) {return (muse_avatar_source_t)atomic_load(&s_source);}
 static void *heap_caps_calloc(size_t n,size_t size,unsigned caps) {(void)caps;return calloc(n,size);}
 static void heap_caps_free(void *p) {free(p);}
+static void *request_alloc(size_t n) {return heap_caps_calloc(1,n,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);}
 static void muse_webp_free(void *p) {free(p);}
 static uint32_t avatar_cache_crc(const void *p,size_t bytes) {(void)p;(void)bytes;return 1;}
 '''
