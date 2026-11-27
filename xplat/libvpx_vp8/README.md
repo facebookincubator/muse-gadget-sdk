@@ -100,6 +100,14 @@ segmentation, 240 to 480 px).
   three: at 180 px, 157 KB -> 111 KB and 222 KB -> 176 KB. The shown
   picture is valid only until the next decode starts, which the caller must
   allow for (muse_vdec does not turn it on).
+- Off by default, for RISC-V cores with Xpulp (`VPX_XPULP=1`): the 0..255
+  clamps of the sub-pixel filters, inverse transforms and TM prediction,
+  and the loop filters' signed clamps, abs and edge mask, become clipu,
+  clip, abs and max from `xplat/include/rv_xpulp.h` (build with
+  `-DRV_XPULP=1` and `xplat/include` on the include path; without
+  `RV_XPULP=1` that header's plain-C twins run). Bit-exact. Experimental
+  with `RV_XPULP=1`: the instructions have run on QEMU, not on hardware.
+  Porting notes: `xplat/PORTING-PERF.md`.
 - Bench builds (`CONFIG_MUSE_VIDEO_VP8_PROF`, `MGX_PROF`) time each stage
   with the cycle counter; `mg.video` logs them.
 - Progress (`vp8dx_mgx_set_progress()`, `vpx/vp8dx.h`): the decoder reports

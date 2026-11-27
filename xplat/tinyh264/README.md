@@ -104,6 +104,14 @@ them on the 256-stream corpus of "Checking a change" below):
   byte for byte as with the C. It passes its check on the board but is
   slower there than the C (480 px in two bands: 40 ms a frame against 28),
   hence off.
+- Off by default, for RISC-V cores with Xpulp (`TINYH264_XPULP=1`):
+  `ABS`, `CLIP3`, `CLIP1` and the clip table lookups (`H264BSD_CLP`: the
+  6-tap interpolation, deblocking, intra prediction and the residual add)
+  become abs, min/max and clipu from `xplat/include/rv_xpulp.h` (build with
+  `-DRV_XPULP=1` and `xplat/include` on the include path; without
+  `RV_XPULP=1` that header's plain-C twins run). Same pictures, byte for
+  byte. Experimental with `RV_XPULP=1`: the instructions have run on QEMU,
+  not on hardware. Porting notes: `xplat/PORTING-PERF.md`.
 
 One `OPT:` change is a behaviour change, for input from the network:
 `h264bsdDecode` takes one whole access unit per call and starts each call

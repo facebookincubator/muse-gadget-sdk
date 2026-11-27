@@ -966,18 +966,18 @@ void h264bsdAddResidual(u8 *data, i32 *residual, u32 blockNum)
         tmp3 = *residual++;
         tmp4 = tmp[1];
 
-        tmp[0] = clp[tmp1 + tmp2];
+        tmp[0] = H264BSD_CLP(clp, tmp1 + tmp2);
 
         tmp1 = *residual++;
         tmp2 = tmp[2];
 
-        tmp[1] = clp[tmp3 + tmp4];
+        tmp[1] = H264BSD_CLP(clp, tmp3 + tmp4);
 
         tmp3 = *residual++;
         tmp4 = tmp[3];
 
-        tmp1 = clp[tmp1 + tmp2];
-        tmp3 = clp[tmp3 + tmp4];
+        tmp1 = H264BSD_CLP(clp, tmp1 + tmp2);
+        tmp3 = H264BSD_CLP(clp, tmp3 + tmp4);
         tmp[2] = (u8)tmp1;
         tmp[3] = (u8)tmp3;
 
@@ -1355,21 +1355,21 @@ void IntraChromaPlanePrediction(u8 *data, u8 *above, u8 *left)
     for (i = 8; i--; a += c)
     {
         tmp = (a - 3 * b);
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
         tmp += b;
-        *data++ = clp[tmp>>5];
+        *data++ = H264BSD_CLP(clp, tmp>>5);
     }
 
 }

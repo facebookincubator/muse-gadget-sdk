@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Host tests for the codecs in xplat/: liblc3, lc3fx and libsbc built as the
-SDKs build them.
+SDKs build them, and include/rv_xpulp.h.
 
     python3 xplat/tests/run_tests.py                 build and test
     python3 xplat/tests/run_tests.py --sanitize      the same under ASan + UBSan
@@ -26,6 +26,8 @@ SDKs build them.
   the codec's output.
 - Both LC3 builds refuse the rates and arguments they don't support, and a
   liblc3 mask beyond its trimmed tables doesn't compile.
+- rv_xpulp.h's plain-C twins match a model of the Xpulp instructions' definitions
+  across edge values (tests/test_rv_xpulp.c).
 - SBC encodes and decodes back (16 and 15 blocks, mSBC), and the SDKs' mono
   8-subband build refuses other frames; the full build encodes and decodes a
   dual-channel frame and conceals by the last good frame's channel count.
@@ -399,6 +401,15 @@ def test_sbc(tmp, flags):
     compare_digests("libsbc", a, SBC_DIGEST)
 
 
+def test_rv_xpulp(tmp, flags):
+    exe = build(tmp / "rv_xpulp", [HERE / "test_rv_xpulp.c"], [*flags, "-Wextra"],
+                ["-I", str(XPLAT / "include")])
+    r = subprocess.run([str(exe)], capture_output=True, text=True)
+    check(r.returncode == 0, f"{r.stdout.strip().splitlines()[-1] if r.stdout.strip() else 'rv_xpulp: no output'}")
+    if r.returncode:
+        print(r.stdout[-4000:])
+
+
 def fuzz(tmp, seconds):
     ssrcs, sinc = sbc_srcs()
     san = ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
@@ -445,6 +456,7 @@ def main():
         else:
             test_lc3(tmp, flags)
             test_sbc(tmp, flags)
+            test_rv_xpulp(tmp, flags)
     print(f"{len(failures)} failed" if failures else "all passed")
     return 1 if failures else 0
 

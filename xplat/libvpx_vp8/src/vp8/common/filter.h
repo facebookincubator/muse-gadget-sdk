@@ -21,6 +21,22 @@ extern "C" {
 #define VP8_FILTER_WEIGHT 128
 #define VP8_FILTER_SHIFT 7
 
+/* Muse gadget port: the filters' 0..255 clamp (filter.c). VPX_XPULP=1, on
+ * RISC-V cores with Xpulp: one clipu (xplat/include/rv_xpulp.h; build with
+ * -DRV_XPULP=1 and xplat/include on the include path, or its plain-C twins
+ * run, with the same results). Here, not in filter.c, so that file's line
+ * numbers (its asserts) stay as they were. */
+#if defined(VPX_XPULP) && VPX_XPULP
+#include "rv_xpulp.h"
+#define VP8_CLAMP255(v) ((unsigned char)rv_xpulp_clipu8(v))
+#else
+static inline unsigned char vp8_clamp255_c(int v) {
+  if ((unsigned)v > 255u) v = ~v >> 31 & 255; /* rarely taken */
+  return (unsigned char)v;
+}
+#define VP8_CLAMP255(v) vp8_clamp255_c(v)
+#endif
+
 extern DECLARE_ALIGNED(16, const short, vp8_bilinear_filters[8][2]);
 extern DECLARE_ALIGNED(16, const short, vp8_sub_pel_filters[8][6]);
 

@@ -53,8 +53,8 @@ DECLARE_ALIGNED(16, const short, vp8_sub_pel_filters[8][6]) = {
 #endif
 
 static inline unsigned char clamp255(int v) {
-  if ((unsigned)v > 255u) v = ~v >> 31 & 255; /* rarely taken */
-  return (unsigned char)v;
+  /* one rarely taken branch, or VPX_XPULP's clipu (filter.h) */
+  return VP8_CLAMP255(v);
 }
 
 /* 6-tap along step (1: horizontal, stride: vertical), w x h, into dst.

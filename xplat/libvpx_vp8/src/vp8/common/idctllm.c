@@ -9,6 +9,13 @@
  */
 
 #include "./vp8_rtcd.h"
+#if defined(VPX_XPULP) && VPX_XPULP
+/* Muse gadget port: VPX_XPULP=1, on RISC-V cores with Xpulp, clamps and
+ * abs in one instruction (xplat/include/rv_xpulp.h; build with
+ * -DRV_XPULP=1 and xplat/include on the include path, or its plain-C
+ * twins run, with the same results) */
+#include "rv_xpulp.h"
+#endif
 
 /****************************************************************************
  * Notes:
@@ -90,8 +97,12 @@ void vp8_short_idct4x4llm_c(short *input, unsigned char *pred_ptr,
     for (c = 0; c < 4; ++c) {
       int a = ip[c] + pred_ptr[c];
 
+#if defined(VPX_XPULP) && VPX_XPULP
+      a = rv_xpulp_clipu8(a);
+#else
       /* Muse gadget port: one rarely taken branch for the clamp */
       if ((unsigned)a > 255u) a = ~a >> 31 & 255;
+#endif
 
       dst_ptr[c] = (unsigned char)a;
     }
@@ -111,9 +122,13 @@ void vp8_dc_only_idct_add_c(short input_dc, unsigned char *pred_ptr,
     for (c = 0; c < 4; ++c) {
       int a = a1 + pred_ptr[c];
 
+#if defined(VPX_XPULP) && VPX_XPULP
+      a = rv_xpulp_clipu8(a);
+#else
       if (a < 0) a = 0;
 
       if (a > 255) a = 255;
+#endif
 
       dst_ptr[c] = (unsigned char)a;
     }

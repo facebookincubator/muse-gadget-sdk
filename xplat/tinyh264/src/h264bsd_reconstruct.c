@@ -636,7 +636,7 @@ void h264bsdInterpolateVerHalf(
             tmp2 += (tmp7 << 4);
             tmp2 += (tmp7 << 2);
             tmp2 += tmp3;
-            tmp2 = clp[tmp2>>5];
+            tmp2 = H264BSD_CLP(clp, tmp2>>5);
             tmp1 += 16;
             mb[48] = (u8)tmp2;
 
@@ -648,7 +648,7 @@ void h264bsdInterpolateVerHalf(
             tmp1 += (tmp7 << 4);
             tmp1 += (tmp7 << 2);
             tmp1 += tmp2;
-            tmp1 = clp[tmp1>>5];
+            tmp1 = H264BSD_CLP(clp, tmp1>>5);
             tmp6 += 16;
             mb[32] = (u8)tmp1;
 
@@ -660,7 +660,7 @@ void h264bsdInterpolateVerHalf(
             tmp6 += (tmp7 << 4);
             tmp6 += (tmp7 << 2);
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>5];
+            tmp6 = H264BSD_CLP(clp, tmp6>>5);
             tmp5 += 16;
             mb[16] = (u8)tmp6;
 
@@ -672,7 +672,7 @@ void h264bsdInterpolateVerHalf(
             tmp5 += (tmp3 << 4);
             tmp5 += (tmp3 << 2);
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>5];
+            tmp5 = H264BSD_CLP(clp, tmp5>>5);
             *mb++ = (u8)tmp5;
             ptrC++;
         }
@@ -761,7 +761,7 @@ void h264bsdInterpolateVerQuarter(
             tmp2 += (tmp7 << 4);
             tmp2 += (tmp7 << 2);
             tmp2 += tmp3;
-            tmp2 = clp[tmp2>>5];
+            tmp2 = H264BSD_CLP(clp, tmp2>>5);
             tmp7 = ptrInt[width*2];
             tmp1 += 16;
             tmp2++;
@@ -775,7 +775,7 @@ void h264bsdInterpolateVerQuarter(
             tmp1 += (tmp7 << 4);
             tmp1 += (tmp7 << 2);
             tmp1 += tmp2;
-            tmp1 = clp[tmp1>>5];
+            tmp1 = H264BSD_CLP(clp, tmp1>>5);
             tmp7 = ptrInt[width];
             tmp6 += 16;
             tmp1++;
@@ -789,7 +789,7 @@ void h264bsdInterpolateVerQuarter(
             tmp6 += (tmp7 << 4);
             tmp6 += (tmp7 << 2);
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>5];
+            tmp6 = H264BSD_CLP(clp, tmp6>>5);
             tmp7 = *ptrInt;
             tmp5 += 16;
             tmp6++;
@@ -803,7 +803,7 @@ void h264bsdInterpolateVerQuarter(
             tmp5 += (tmp3 << 4);
             tmp5 += (tmp3 << 2);
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>5];
+            tmp5 = H264BSD_CLP(clp, tmp5>>5);
             tmp7 = ptrInt[-(i32)width];
             tmp5++;
             *mb++ = (u8)((tmp5 + tmp7) >> 1);
@@ -891,7 +891,7 @@ void h264bsdInterpolateHorHalf(
             tmp6 -= (tmp7 << 2);
             tmp6 -= tmp7;
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>5];
+            tmp6 = H264BSD_CLP(clp, tmp6>>5);
             /* Second pixel */
             tmp5 += 16;
             tmp7 = tmp2 + tmp3;
@@ -903,7 +903,7 @@ void h264bsdInterpolateHorHalf(
             tmp5 -= (tmp7 << 2);
             tmp5 -= tmp7;
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>5];
+            tmp5 = H264BSD_CLP(clp, tmp5>>5);
             /* Third pixel */
             tmp4 += 16;
             tmp7 = tmp1 + tmp2;
@@ -915,7 +915,7 @@ void h264bsdInterpolateHorHalf(
             tmp4 -= (tmp7 << 2);
             tmp4 -= tmp7;
             tmp4 += tmp5;
-            tmp4 = clp[tmp4>>5];
+            tmp4 = H264BSD_CLP(clp, tmp4>>5);
             /* Fourth pixel */
             tmp3 += 16;
             tmp7 = tmp6 + tmp1;
@@ -927,7 +927,7 @@ void h264bsdInterpolateHorHalf(
             tmp3 -= (tmp7 << 2);
             tmp3 -= tmp7;
             tmp3 += tmp4;
-            tmp3 = clp[tmp3>>5];
+            tmp3 = H264BSD_CLP(clp, tmp3>>5);
             tmp7 = tmp4;
             tmp4 = tmp6;
             tmp6 = tmp2;
@@ -1014,7 +1014,7 @@ void h264bsdInterpolateHorQuarter(
             tmp6 -= (tmp7 << 2);
             tmp6 -= tmp7;
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>5];
+            tmp6 = H264BSD_CLP(clp, tmp6>>5);
             tmp5 += 16;
             if (!horOffset)
                 tmp6 += tmp4;
@@ -1030,7 +1030,7 @@ void h264bsdInterpolateHorQuarter(
             tmp5 -= (tmp7 << 2);
             tmp5 -= tmp7;
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>5];
+            tmp5 = H264BSD_CLP(clp, tmp5>>5);
             tmp4 += 16;
             if (!horOffset)
                 tmp5 += tmp3;
@@ -1046,7 +1046,7 @@ void h264bsdInterpolateHorQuarter(
             tmp4 -= (tmp7 << 2);
             tmp4 -= tmp7;
             tmp4 += tmp5;
-            tmp4 = clp[tmp4>>5];
+            tmp4 = H264BSD_CLP(clp, tmp4>>5);
             tmp3 += 16;
             if (!horOffset)
                 tmp4 += tmp2;
@@ -1062,7 +1062,7 @@ void h264bsdInterpolateHorQuarter(
             tmp3 -= (tmp7 << 2);
             tmp3 -= tmp7;
             tmp3 += tmp4;
-            tmp3 = clp[tmp3>>5];
+            tmp3 = H264BSD_CLP(clp, tmp3>>5);
             if (!horOffset)
                 tmp3 += tmp1;
             else
@@ -1159,7 +1159,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp6 -= (tmp7 << 2);
             tmp6 -= tmp7;
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>5];
+            tmp6 = H264BSD_CLP(clp, tmp6>>5);
             /* Second pixel */
             tmp5 += 16;
             tmp7 = tmp2 + tmp3;
@@ -1171,7 +1171,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp5 -= (tmp7 << 2);
             tmp5 -= tmp7;
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>5];
+            tmp5 = H264BSD_CLP(clp, tmp5>>5);
             /* Third pixel */
             tmp4 += 16;
             tmp7 = tmp1 + tmp2;
@@ -1183,7 +1183,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp4 -= (tmp7 << 2);
             tmp4 -= tmp7;
             tmp4 += tmp5;
-            tmp4 = clp[tmp4>>5];
+            tmp4 = H264BSD_CLP(clp, tmp4>>5);
             /* Fourth pixel */
             tmp3 += 16;
             tmp7 = tmp6 + tmp1;
@@ -1195,7 +1195,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp3 -= (tmp7 << 2);
             tmp3 -= tmp7;
             tmp3 += tmp4;
-            tmp3 = clp[tmp3>>5];
+            tmp3 = H264BSD_CLP(clp, tmp3>>5);
             tmp7 = tmp4;
             tmp4 = tmp6;
             tmp6 = tmp2;
@@ -1231,7 +1231,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp2 += (tmp7 << 4);
             tmp2 += (tmp7 << 2);
             tmp2 += tmp3;
-            tmp7 = clp[tmp2>>5];
+            tmp7 = H264BSD_CLP(clp, tmp2>>5);
             tmp2 = mb[48];
             tmp1 += 16;
             tmp7++;
@@ -1245,7 +1245,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp1 += (tmp7 << 4);
             tmp1 += (tmp7 << 2);
             tmp1 += tmp2;
-            tmp7 = clp[tmp1>>5];
+            tmp7 = H264BSD_CLP(clp, tmp1>>5);
             tmp1 = mb[32];
             tmp6 += 16;
             tmp7++;
@@ -1259,7 +1259,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp6 += (tmp7 << 4);
             tmp6 += (tmp7 << 2);
             tmp6 += tmp1;
-            tmp7 = clp[tmp6>>5];
+            tmp7 = H264BSD_CLP(clp, tmp6>>5);
             tmp6 = mb[16];
             tmp5 += 16;
             tmp7++;
@@ -1273,7 +1273,7 @@ void h264bsdInterpolateHorVerQuarter(
             tmp5 += (tmp3 << 4);
             tmp5 += (tmp3 << 2);
             tmp5 += tmp6;
-            tmp7 = clp[tmp5>>5];
+            tmp7 = H264BSD_CLP(clp, tmp5>>5);
             tmp5 = *mb;
             tmp7++;
             *mb++ = (u8)((tmp5 + tmp7) >> 1);
@@ -1426,7 +1426,7 @@ void h264bsdInterpolateMidHalf(
             tmp2 += (tmp7 << 4);
             tmp2 += (tmp7 << 2);
             tmp2 += tmp3;
-            tmp7 = clp[tmp2>>10];
+            tmp7 = H264BSD_CLP(clp, tmp2>>10);
             tmp1 += 512;
             mb[48] = (u8)tmp7;
 
@@ -1438,7 +1438,7 @@ void h264bsdInterpolateMidHalf(
             tmp1 += (tmp7 << 4);
             tmp1 += (tmp7 << 2);
             tmp1 += tmp2;
-            tmp7 = clp[tmp1>>10];
+            tmp7 = H264BSD_CLP(clp, tmp1>>10);
             tmp6 += 512;
             mb[32] = (u8)tmp7;
 
@@ -1450,7 +1450,7 @@ void h264bsdInterpolateMidHalf(
             tmp6 += (tmp7 << 4);
             tmp6 += (tmp7 << 2);
             tmp6 += tmp1;
-            tmp7 = clp[tmp6>>10];
+            tmp7 = H264BSD_CLP(clp, tmp6>>10);
             tmp5 += 512;
             mb[16] = (u8)tmp7;
 
@@ -1462,7 +1462,7 @@ void h264bsdInterpolateMidHalf(
             tmp5 += (tmp3 << 4);
             tmp5 += (tmp3 << 2);
             tmp5 += tmp6;
-            tmp7 = clp[tmp5>>10];
+            tmp7 = H264BSD_CLP(clp, tmp5>>10);
             *mb++ = (u8)tmp7;
             ptrC++;
         }
@@ -1613,9 +1613,9 @@ void h264bsdInterpolateMidVerQuarter(
             tmp2 += (tmp7 << 2);
             tmp7 = ptrInt[partWidth*2];
             tmp2 += tmp3;
-            tmp2 = clp[tmp2>>10];
+            tmp2 = H264BSD_CLP(clp, tmp2>>10);
             tmp7 += 16;
-            tmp7 = clp[tmp7>>5];
+            tmp7 = H264BSD_CLP(clp, tmp7>>5);
             tmp1 += 512;
             tmp2++;
             mb[48] = (u8)((tmp7 + tmp2) >> 1);
@@ -1629,9 +1629,9 @@ void h264bsdInterpolateMidVerQuarter(
             tmp1 += (tmp7 << 2);
             tmp7 = ptrInt[partWidth];
             tmp1 += tmp2;
-            tmp1 = clp[tmp1>>10];
+            tmp1 = H264BSD_CLP(clp, tmp1>>10);
             tmp7 += 16;
-            tmp7 = clp[tmp7>>5];
+            tmp7 = H264BSD_CLP(clp, tmp7>>5);
             tmp6 += 512;
             tmp1++;
             mb[32] = (u8)((tmp7 + tmp1) >> 1);
@@ -1645,9 +1645,9 @@ void h264bsdInterpolateMidVerQuarter(
             tmp6 += (tmp7 << 2);
             tmp7 = *ptrInt;
             tmp6 += tmp1;
-            tmp6 = clp[tmp6>>10];
+            tmp6 = H264BSD_CLP(clp, tmp6>>10);
             tmp7 += 16;
-            tmp7 = clp[tmp7>>5];
+            tmp7 = H264BSD_CLP(clp, tmp7>>5);
             tmp5 += 512;
             tmp6++;
             mb[16] = (u8)((tmp7 + tmp6) >> 1);
@@ -1661,9 +1661,9 @@ void h264bsdInterpolateMidVerQuarter(
             tmp5 += (tmp3 << 2);
             tmp7 = ptrInt[-(i32)partWidth];
             tmp5 += tmp6;
-            tmp5 = clp[tmp5>>10];
+            tmp5 = H264BSD_CLP(clp, tmp5>>10);
             tmp7 += 16;
-            tmp7 = clp[tmp7>>5];
+            tmp7 = H264BSD_CLP(clp, tmp7>>5);
             tmp5++;
             *mb++ = (u8)((tmp7 + tmp5) >> 1);
             ptrC++;
@@ -1816,9 +1816,9 @@ void h264bsdInterpolateMidHorQuarter(
             tmp6 -= tmp7;
             tmp7 = *ptrInt++;
             tmp6 += tmp1;
-            tmp6 = clp[tmp6 >> 10];
+            tmp6 = H264BSD_CLP(clp, tmp6 >> 10);
             tmp7 += 16;
-            tmp7 = clp[tmp7 >> 5];
+            tmp7 = H264BSD_CLP(clp, tmp7 >> 5);
             tmp5 += 512;
             tmp6++;
             *mb++ = (u8)((tmp6 + tmp7) >> 1);
@@ -1832,9 +1832,9 @@ void h264bsdInterpolateMidHorQuarter(
             tmp5 -= tmp7;
             tmp7 = *ptrInt++;
             tmp5 += tmp6;
-            tmp5 = clp[tmp5 >> 10];
+            tmp5 = H264BSD_CLP(clp, tmp5 >> 10);
             tmp7 += 16;
-            tmp7 = clp[tmp7 >> 5];
+            tmp7 = H264BSD_CLP(clp, tmp7 >> 5);
             tmp4 += 512;
             tmp5++;
             *mb++ = (u8)((tmp5 + tmp7) >> 1);
@@ -1848,9 +1848,9 @@ void h264bsdInterpolateMidHorQuarter(
             tmp4 -= tmp7;
             tmp7 = *ptrInt++;
             tmp4 += tmp5;
-            tmp4 = clp[tmp4 >> 10];
+            tmp4 = H264BSD_CLP(clp, tmp4 >> 10);
             tmp7 += 16;
-            tmp7 = clp[tmp7 >> 5];
+            tmp7 = H264BSD_CLP(clp, tmp7 >> 5);
             tmp3 += 512;
             tmp4++;
             *mb++ = (u8)((tmp4 + tmp7) >> 1);
@@ -1864,9 +1864,9 @@ void h264bsdInterpolateMidHorQuarter(
             tmp3 -= tmp7;
             tmp7 = *ptrInt++;
             tmp3 += tmp4;
-            tmp3 = clp[tmp3 >> 10];
+            tmp3 = H264BSD_CLP(clp, tmp3 >> 10);
             tmp7 += 16;
-            tmp7 = clp[tmp7 >> 5];
+            tmp7 = H264BSD_CLP(clp, tmp7 >> 5);
             tmp3++;
             *mb++ = (u8)((tmp3 + tmp7) >> 1);
             tmp3 = tmp5;

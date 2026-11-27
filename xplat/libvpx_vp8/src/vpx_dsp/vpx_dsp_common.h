@@ -56,6 +56,13 @@ typedef int16_t tran_coef_t;
 static INLINE int clip_pixel(int val) {
   return (val > 255) ? 255 : (val < 0) ? 0 : val;
 }
+#elif defined(VPX_XPULP) && VPX_XPULP
+/* Muse gadget port: VPX_XPULP=1, on RISC-V cores with Xpulp, one clipu
+ * (xplat/include/rv_xpulp.h, plain-C twins without RV_XPULP=1) */
+#include "rv_xpulp.h"
+static INLINE uint8_t clip_pixel(int val) {
+  return (uint8_t)rv_xpulp_clipu8(val);
+}
 #else
 static INLINE uint8_t clip_pixel(int val) {
   return (val > 255) ? 255 : (val < 0) ? 0 : val;

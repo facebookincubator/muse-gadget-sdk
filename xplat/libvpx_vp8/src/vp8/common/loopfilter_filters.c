@@ -11,6 +11,13 @@
 #include <stdlib.h>
 #include "loopfilter.h"
 #include "onyxc_int.h"
+#if defined(VPX_XPULP) && VPX_XPULP
+/* Muse gadget port: VPX_XPULP=1, on RISC-V cores with Xpulp, clamps and
+ * abs in one instruction (xplat/include/rv_xpulp.h; build with
+ * -DRV_XPULP=1 and xplat/include on the include path, or its plain-C
+ * twins run, with the same results) */
+#include "rv_xpulp.h"
+#endif
 
 typedef unsigned char uc;
 
@@ -20,14 +27,25 @@ typedef unsigned char uc;
 /* one rarely taken branch for the clamp (forward taken branches cost the
  * C6 four cycles) */
 static inline int sclamp(int t) {
-#if defined(__riscv_zbb)
+#if defined(VPX_XPULP) && VPX_XPULP
+  return rv_xpulp_clip8(t);
+#elif defined(__riscv_zbb)
   return t < -128 ? -128 : t > 127 ? 127 : t; /* min and max instructions */
 #else
   if ((unsigned)(t + 128) > 255u) t = (t >> 31) ^ 127;
   return t;
 #endif
 }
+#if defined(VPX_XPULP) && VPX_XPULP
+static inline int iabs(int v) { return rv_xpulp_abs(v); }
+/* the edge mask without branches: the largest step against the limit */
+static inline int max6(int a, int b, int c, int d, int e, int f) {
+  return rv_xpulp_max(rv_xpulp_max(rv_xpulp_max(a, b), rv_xpulp_max(c, d)),
+                      rv_xpulp_max(e, f));
+}
+#else
 static inline int iabs(int v) { return v < 0 ? -v : v; }
+#endif
 
 /* one pixel across an inner (block) edge; s points at q0, d is the step across */
 static inline void filter_px(uc *s, int d, int blimit, int limit, int thresh) {
@@ -35,9 +53,15 @@ static inline void filter_px(uc *s, int d, int blimit, int limit, int thresh) {
   const int q0 = s[0], q1 = s[d], q2 = s[2 * d], q3 = s[3 * d];
   int fv, f1, f2, a, ps1, ps0, qs0, qs1, hev;
   if (iabs(p0 - q0) * 2 + iabs(p1 - q1) / 2 > blimit) return;
+#if defined(VPX_XPULP) && VPX_XPULP
+  if (max6(iabs(p3 - p2), iabs(p2 - p1), iabs(p1 - p0), iabs(q1 - q0),
+           iabs(q2 - q1), iabs(q3 - q2)) > limit)
+    return;
+#else
   if (iabs(p3 - p2) > limit || iabs(p2 - p1) > limit || iabs(p1 - p0) > limit ||
       iabs(q1 - q0) > limit || iabs(q2 - q1) > limit || iabs(q3 - q2) > limit)
     return;
+#endif
   hev = iabs(p1 - p0) > thresh || iabs(q1 - q0) > thresh;
   ps1 = p1 - 128; ps0 = p0 - 128; qs0 = q0 - 128; qs1 = q1 - 128;
   fv = (hev ? sclamp(ps1 - qs1) : 0) + 3 * (qs0 - ps0);
@@ -61,9 +85,15 @@ static inline void mbfilter_px(uc *s, int d, int blimit, int limit,
   const int q0 = s[0], q1 = s[d], q2 = s[2 * d], q3 = s[3 * d];
   int fv, f1, f2, u, w, ps2, ps1, ps0, qs0, qs1, qs2;
   if (iabs(p0 - q0) * 2 + iabs(p1 - q1) / 2 > blimit) return;
+#if defined(VPX_XPULP) && VPX_XPULP
+  if (max6(iabs(p3 - p2), iabs(p2 - p1), iabs(p1 - p0), iabs(q1 - q0),
+           iabs(q2 - q1), iabs(q3 - q2)) > limit)
+    return;
+#else
   if (iabs(p3 - p2) > limit || iabs(p2 - p1) > limit || iabs(p1 - p0) > limit ||
       iabs(q1 - q0) > limit || iabs(q2 - q1) > limit || iabs(q3 - q2) > limit)
     return;
+#endif
   ps2 = p2 - 128; ps1 = p1 - 128; ps0 = p0 - 128;
   qs0 = q0 - 128; qs1 = q1 - 128; qs2 = q2 - 128;
   fv = sclamp(ps1 - qs1);

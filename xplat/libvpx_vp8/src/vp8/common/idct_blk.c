@@ -11,10 +11,21 @@
 #include "vpx_config.h"
 #include "vp8_rtcd.h"
 #include "vpx_mem/vpx_mem.h"
+#if defined(VPX_XPULP) && VPX_XPULP
+/* Muse gadget port: VPX_XPULP=1, on RISC-V cores with Xpulp, clamps and
+ * abs in one instruction (xplat/include/rv_xpulp.h; build with
+ * -DRV_XPULP=1 and xplat/include on the include path, or its plain-C
+ * twins run, with the same results) */
+#include "rv_xpulp.h"
+#endif
 
 static inline unsigned char clamp255(int a) {
+#if defined(VPX_XPULP) && VPX_XPULP
+  return (unsigned char)rv_xpulp_clipu8(a);
+#else
   if ((unsigned)a > 255u) a = ~a >> 31 & 255; /* rarely taken */
   return (unsigned char)a;
+#endif
 }
 
 /* Muse gadget port: a DC-only block whose DC rounds to zero adds nothing

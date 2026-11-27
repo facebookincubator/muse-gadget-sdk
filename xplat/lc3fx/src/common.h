@@ -60,21 +60,41 @@
  * Selectively disable sanitizer
  */
 
+/* OPT: LC3_HOT_SECTION, a section name the port defines
+ * (-DLC3_HOT_SECTION='".ram_text.lc3"'): the hot functions go there, for a
+ * linker script that runs that section from RAM. Not with a build's own
+ * LC3_HOT. */
+#ifdef LC3_HOT_SECTION
+#define LC3_HOT_SECTION_ __attribute__((section(LC3_HOT_SECTION)))
+#else
+#define LC3_HOT_SECTION_
+#endif
+
 #ifdef LC3_HOT
 /* defined by the build (an empty LC3_HOT sanitizes the hot functions too) */
 #elif defined(__clang__)
 
 #define LC3_HOT \
     __attribute__((no_sanitize("bounds"))) \
-    __attribute__((no_sanitize("integer")))
+    __attribute__((no_sanitize("integer"))) LC3_HOT_SECTION_
 
 #else /* __clang__ */
-#define LC3_HOT
+#define LC3_HOT LC3_HOT_SECTION_
 #endif /* __clang__ */
 
 #ifdef LC3FX_PROFILE  /* keep the functions apart in profiles */
 #undef  LC3_HOT
-#define LC3_HOT __attribute__((noinline))
+#define LC3_HOT __attribute__((noinline)) LC3_HOT_SECTION_
+#endif
+
+/* OPT: LC3_TABLES_IN_RAM, a section name the port defines
+ * (-DLC3_TABLES_IN_RAM='".ram_rodata.lc3"'): the constant data tables of
+ * tables.c go there (tables.c, LC3_TABLE); the small descriptors and pointer
+ * tables that index them stay in .rodata, read-only. */
+#ifdef LC3_TABLES_IN_RAM
+#define LC3_TABLE __attribute__((section(LC3_TABLES_IN_RAM)))
+#else
+#define LC3_TABLE
 #endif
 
 /* Optional per-stage accounting (LC3FX_STAGES): the platform supplies

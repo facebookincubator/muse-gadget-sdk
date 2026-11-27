@@ -40,7 +40,7 @@ jobs:
   tests:
     # liblc3, lc3fx and libsbc as the SDKs build them: interop, bit-exactness
     # and refusals (xplat/tests/run_tests.py), plain and under ASan + UBSan.
-    name: Host tests (${{ matrix.cc }}${{ matrix.sanitize && ', sanitizers' || '' }})
+    name: Host tests (${{ matrix.cc }}${{ matrix.sanitize && ', sanitizers' || '' }}${{ matrix.knobs && ', switches on' || '' }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -52,13 +52,20 @@ jobs:
             sanitize: true
           - cc: clang
             sanitize: true
+          # The optimization switches on (the Xpulp ones with rv_xpulp.h's
+          # plain-C twins): the same recorded hashes.
+          - cc: gcc
+            sanitize: false
+            knobs: >-
+              -DLC3FX_XPULP=1 -DLC3FX_MERGE_TABLES=1 -DSBC_MERGE_TABLES=1
+              -DLC3_HOT_SECTION='".text.lc3hot"' -DLC3_TABLES_IN_RAM='".rodata.lc3tab"'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Run tests
         env:
-          CC: ${{ matrix.cc }}
+          CC: ${{ matrix.cc }}${{ matrix.knobs && format(' -Ixplat/include {0}', matrix.knobs) || '' }}
           SANITIZE: ${{ matrix.sanitize && '--sanitize' || '' }}
         run: python3 xplat/tests/run_tests.py $SANITIZE
 

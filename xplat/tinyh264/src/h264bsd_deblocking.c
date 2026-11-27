@@ -691,8 +691,8 @@ void FilterVerLumaEdge(
                 val = (((q0 - p0) * 4) + (p1 - q1) + 4) >> 3;
                 delta = CLIP3(-tmp, tmp, val);
 
-                p0 = clp[p0 + delta];
-                q0 = clp[q0 - delta];
+                p0 = H264BSD_CLP(clp, p0 + delta);
+                q0 = H264BSD_CLP(clp, q0 - delta);
                 tmp = tc;
                 data[-1] = p0;
                 data[ 0] = q0;
@@ -805,8 +805,8 @@ void FilterHorLumaEdge(
             val = ((((q0 - p0) * 4) + (p1 - q1) + 4) >> 3);
             delta = CLIP3(-tmp, tmp, val);
 
-            p0 = clp[p0 + delta];
-            q0 = clp[q0 - delta];
+            p0 = H264BSD_CLP(clp, p0 + delta);
+            q0 = H264BSD_CLP(clp, q0 - delta);
             tmp = tc;
             data[-imageWidth] = p0;
             data[  0] = q0;
@@ -885,8 +885,8 @@ void FilterHorLuma(
                 val = ((((q0 - p0) * 4) + (p1 - q1) + 4) >> 3);
                 delta = CLIP3(-tmp, tmp, val);
 
-                p0 = clp[p0 + delta];
-                q0 = clp[q0 - delta];
+                p0 = H264BSD_CLP(clp, p0 + delta);
+                q0 = H264BSD_CLP(clp, q0 - delta);
                 tmp = tc;
                 data[-imageWidth] = p0;
                 data[  0] = q0;
@@ -976,8 +976,8 @@ void FilterVerChromaEdge(
             tc = thresholds->tc0[bS-1] + 1;
             delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
-            p0 = clp[p0 + delta];
-            q0 = clp[q0 - delta];
+            p0 = H264BSD_CLP(clp, p0 + delta);
+            q0 = H264BSD_CLP(clp, q0 - delta);
             data[-1] = p0;
             data[ 0] = q0;
         }
@@ -999,8 +999,8 @@ void FilterVerChromaEdge(
             tc = thresholds->tc0[bS-1] + 1;
             delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
-            p0 = clp[p0 + delta];
-            q0 = clp[q0 - delta];
+            p0 = H264BSD_CLP(clp, p0 + delta);
+            q0 = H264BSD_CLP(clp, q0 - delta);
             data[-1] = p0;
             data[ 0] = q0;
         }
@@ -1052,8 +1052,8 @@ void FilterHorChromaEdge(
         {
             delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                       (p1 - q1) + 4) >> 3));
-            p0 = clp[p0 + delta];
-            q0 = clp[q0 - delta];
+            p0 = H264BSD_CLP(clp, p0 + delta);
+            q0 = H264BSD_CLP(clp, q0 - delta);
             data[-width] = p0;
             data[  0] = q0;
         }
@@ -1102,8 +1102,8 @@ void FilterHorChroma(
             {
                 delta = CLIP3(-tc, tc, ((((q0 - p0) * 4) +
                           (p1 - q1) + 4) >> 3));
-                p0 = clp[p0 + delta];
-                q0 = clp[q0 - delta];
+                p0 = H264BSD_CLP(clp, p0 + delta);
+                q0 = H264BSD_CLP(clp, q0 - delta);
                 data[-width] = p0;
                 data[  0] = q0;
             }

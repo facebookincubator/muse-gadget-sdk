@@ -138,6 +138,26 @@
 /* macro to clip a value z, so that 0 <= z =< 255 */
 #define CLIP1(z) (((z) < 0) ? 0 : (((z) > 255) ? 255 : (z)))
 
+/* clp[v] through the clip table h264bsdClip (+512), for v in -512..767 */
+#define H264BSD_CLP(clp, v) (clp)[v]
+
+/* OPT: TINYH264_XPULP=1, on RISC-V cores with Xpulp: ABS, CLIP3, CLIP1
+ * and the clip table lookups become abs, min/max and clipu (xplat/include/
+ * rv_xpulp.h; build with -DRV_XPULP=1 and xplat/include on the include
+ * path, or the header's plain-C twins run, with the same results). The
+ * arguments are i32 values; CLIP3's bounds have x <= y. */
+#if defined(TINYH264_XPULP) && TINYH264_XPULP
+#include "rv_xpulp.h"
+#undef ABS
+#undef CLIP3
+#undef CLIP1
+#undef H264BSD_CLP
+#define ABS(a) rv_xpulp_abs((i32)(a))
+#define CLIP3(x,y,z) rv_xpulp_min(rv_xpulp_max((i32)(z), (i32)(x)), (i32)(y))
+#define CLIP1(z) rv_xpulp_clipu8((i32)(z))
+#define H264BSD_CLP(clp, v) ((void)(clp), (u8)rv_xpulp_clipu8(v))
+#endif
+
 /* Muse gadget port: where the decoder's memory comes from. On ESP-IDF boards
  * with PSRAM every block goes to PSRAM (behind the data cache). Through plain
  * malloc the small ones would go to internal RAM (CONFIG_SPIRAM_MALLOC_
