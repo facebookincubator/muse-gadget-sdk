@@ -55,5 +55,33 @@ u32 h264bsdDecodeResidualBlockCavlc(
   i32 nc,
   u32 maxNumCoeff);
 
+/* OPT: the 32-bit stream cache kept across a macroblock's residual blocks, so a block
+ * neither re-reads the stream position at its start nor writes it back at its end (DecodeResidual:
+ * h264bsdCavlcBitsInit once, h264bsdDecodeResidualBlockCavlcC per block, h264bsdCavlcBitsDone at
+ * the end). The same bits are read in the same order: bit-exact. */
+typedef struct
+{
+    u32 value; /* the next bits, MSB first */
+    u32 bits;  /* how many of them are valid */
+} cavlcBits_t;
+
+static inline void h264bsdCavlcBitsInit(strmData_t *pStrmData, cavlcBits_t *c)
+{
+    c->value = h264bsdShowBits32(pStrmData);
+    c->bits = 32;
+}
+
+static inline u32 h264bsdCavlcBitsDone(strmData_t *pStrmData, cavlcBits_t *c)
+{
+    return h264bsdFlushBits(pStrmData, 32 - c->bits);
+}
+
+u32 h264bsdDecodeResidualBlockCavlcC(
+  strmData_t *pStrmData,
+  cavlcBits_t *c,
+  i32 *coeffLevel,
+  i32 nc,
+  u32 maxNumCoeff);
+
 #endif /* #ifdef H264SWDEC_CAVLC_H */
 

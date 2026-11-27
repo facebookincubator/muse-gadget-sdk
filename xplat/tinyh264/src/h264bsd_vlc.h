@@ -36,6 +36,7 @@
 #include "basetype.h"
 #include "h264bsd_stream.h"
 #include "h264bsd_transform.h"
+#include "h264bsd_util.h"
 
 /*------------------------------------------------------------------------------
     2. Module defines
@@ -53,6 +54,44 @@
 u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *value);
 
 u32 h264bsdDecodeExpGolombSigned(strmData_t *pStrmData, i32 *value);
+
+/* OPT: the codes of 1 .. 31 bits inline (one window, the leading zeros counted at once:
+ * the same values and end-of-stream errors as the functions); longer ones through them */
+#if H264BSD_CLZ
+static inline u32 h264bsdExpGolombU(strmData_t *pStrmData, u32 *value)
+{
+    u32 bits = h264bsdShowBits32(pStrmData);
+
+    if (bits >= 0x00010000)
+    {
+        u32 len = 2 * (u32)__builtin_clz(bits) + 1;
+        if (h264bsdFlushBits(pStrmData, len) == END_OF_STREAM)
+            return(HANTRO_NOK);
+        *value = (bits >> (32 - len)) - 1;
+        return(HANTRO_OK);
+    }
+    return h264bsdDecodeExpGolombUnsigned(pStrmData, value);
+}
+
+static inline u32 h264bsdExpGolombS(strmData_t *pStrmData, i32 *value)
+{
+    u32 bits = h264bsdShowBits32(pStrmData);
+
+    if (bits >= 0x00010000)
+    {
+        u32 len = 2 * (u32)__builtin_clz(bits) + 1, codeNum;
+        if (h264bsdFlushBits(pStrmData, len) == END_OF_STREAM)
+            return(HANTRO_NOK);
+        codeNum = (bits >> (32 - len)) - 1;
+        *value = (codeNum & 0x1) ? (i32)((codeNum + 1) >> 1) : -(i32)((codeNum + 1) >> 1);
+        return(HANTRO_OK);
+    }
+    return h264bsdDecodeExpGolombSigned(pStrmData, value);
+}
+#else
+#define h264bsdExpGolombU h264bsdDecodeExpGolombUnsigned
+#define h264bsdExpGolombS h264bsdDecodeExpGolombSigned
+#endif
 
 u32 h264bsdDecodeExpGolombMapped(strmData_t *pStrmData, u32 *value,
     u32 isIntra);

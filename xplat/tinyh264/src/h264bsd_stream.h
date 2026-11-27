@@ -33,7 +33,26 @@
     1. Include headers
 ------------------------------------------------------------------------------*/
 
+#include <string.h>
+
 #include "basetype.h"
+
+/* OPT: H264BSD_WORD_LOADS reads the stream a 32-bit word at a time (byte-swapped)
+ * where unaligned loads are cheap and the core is little-endian; elsewhere four
+ * byte loads, as upstream. Either way the same bits. A port can set it to 0, or
+ * to 1 on a little-endian core (the swap assumes one). */
+#ifndef H264BSD_WORD_LOADS
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && \
+    (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__) || \
+     defined(__ARM_FEATURE_UNALIGNED) || defined(__riscv_misaligned_fast))
+#define H264BSD_WORD_LOADS 1
+#else
+#define H264BSD_WORD_LOADS 0
+#endif
+#endif
+#if H264BSD_WORD_LOADS && defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "H264BSD_WORD_LOADS needs a little-endian target"
+#endif
 
 /*------------------------------------------------------------------------------
     2. Module defines
@@ -65,8 +84,15 @@ static inline u32 h264bsdShowBits32(strmData_t *pStrmData)
     if (bits >= 32)
     {
         u32 bitPosInWord = pStrmData->bitPosInWord;
+#if H264BSD_WORD_LOADS
+        u32 out;
+        /* OPT: one (unaligned) word, byte-swapped: the big-endian 32 bits */
+        memcpy(&out, pStrm, 4);
+        out = __builtin_bswap32(out);
+#else
         u32 out = ((u32)pStrm[0] << 24) | ((u32)pStrm[1] << 16) |
                   ((u32)pStrm[2] <<  8) | ((u32)pStrm[3]);
+#endif
         if (bitPosInWord)
         {
             out <<= bitPosInWord;

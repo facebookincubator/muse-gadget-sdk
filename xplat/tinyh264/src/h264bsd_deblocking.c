@@ -120,19 +120,16 @@ static const u8 tc0[52][5] = {
 
 
 #ifndef H264DEC_OMXDL
-/* mapping of raster scan block index to 4x4 block index */
-static const u32 mb4x4Index[16] =
-    {0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15};
-
 typedef struct {
     const u8 *tc0;
     u32 alpha;
     u32 beta;
 } edgeThreshold_t;
 
+/* OPT: bytes (bS is 0..4): 32 bytes a macroblock instead of 128 */
 typedef struct {
-    u32 top;
-    u32 left;
+    u8 top;
+    u8 left;
 } bS_t;
 
 enum { TOP = 0, LEFT = 1, INNER = 2 };
@@ -150,12 +147,8 @@ extern const u8 h264bsdClip[];
     4. Local function prototypes
 ------------------------------------------------------------------------------*/
 
+#ifdef H264DEC_OMXDL
 static u32 InnerBoundaryStrength(mbStorage_t *mb1, u32 i1, u32 i2);
-
-#ifndef H264DEC_OMXDL
-static u32 EdgeBoundaryStrength(mbStorage_t *mb1, mbStorage_t *mb2,
-    u32 i1, u32 i2);
-#else
 static u32 InnerBoundaryStrength2(mbStorage_t *mb1, u32 i1, u32 i2);
 static u32 EdgeBoundaryStrengthLeft(mbStorage_t *mb1, mbStorage_t *mb2);
 static u32 EdgeBoundaryStrengthTop(mbStorage_t *mb1, mbStorage_t *mb2);
@@ -319,6 +312,7 @@ u32 GetMbFilteringFlags(mbStorage_t *mb)
 
 }
 
+#ifdef H264DEC_OMXDL
 /*------------------------------------------------------------------------------
 
     Function: InnerBoundaryStrength
@@ -353,6 +347,7 @@ u32 InnerBoundaryStrength(mbStorage_t *mb1, u32 ind1, u32 ind2)
     else
         return 0;
 }
+#endif /* H264DEC_OMXDL */
 
 /*------------------------------------------------------------------------------
 
@@ -381,37 +376,8 @@ u32 InnerBoundaryStrength2(mbStorage_t *mb1, u32 ind1, u32 ind2)
     else
         return 0;
 }
-#ifndef H264DEC_OMXDL
-/*------------------------------------------------------------------------------
 
-    Function: EdgeBoundaryStrength
-
-        Functional description:
-            Function to calculate boundary strength value bs for left- or
-            top-most edge of a macroblock. Macroblock types are checked
-            before this is called -> no intra mb conditions here.
-
-------------------------------------------------------------------------------*/
-u32 EdgeBoundaryStrength(mbStorage_t *mb1, mbStorage_t *mb2,
-    u32 ind1, u32 ind2)
-{
-
-    if (mb1->totalCoeff[ind1] || mb2->totalCoeff[ind2])
-    {
-        return 2;
-    }
-    else if ((mb1->refAddr[ind1 >> 2] != mb2->refAddr[ind2 >> 2]) ||
-             ((u32)ABS(mb1->mv[ind1].hor - mb2->mv[ind2].hor) >= 4) ||
-             ((u32)ABS(mb1->mv[ind1].ver - mb2->mv[ind2].ver) >= 4))
-    {
-        return 1;
-    }
-    else
-        return 0;
-}
-
-#else /* H264DEC_OMXDL */
-
+#ifdef H264DEC_OMXDL
 /*------------------------------------------------------------------------------
 
     Function: EdgeBoundaryStrengthTop
@@ -584,7 +550,7 @@ void h264bsdFilterMbRange(
     u32 picWidthInMbs;
     u8 *data;
     mbStorage_t *pMb;
-    bS_t bS[16];
+    bS_t bS[16] __attribute__((aligned(4)));
     edgeThreshold_t thresholds[3];
 
 /* Code */
@@ -655,6 +621,7 @@ unsigned int hashB = 0;
 unsigned int hashC = 0;
 unsigned int hashD = 0;
 
+
 /*------------------------------------------------------------------------------
 
     Function: FilterVerLumaEdge
@@ -687,6 +654,7 @@ void FilterVerLumaEdge(
     ASSERT(data);
     ASSERT(bS && bS <= 4);
     ASSERT(thresholds);
+
 
     if (bS < 4)
     {
@@ -801,6 +769,7 @@ void FilterHorLumaEdge(
     ASSERT(bS < 4);
     ASSERT(thresholds);
 
+
 //    if (sample ++ % (1024 * 128) == 0) {
 //        printf("Hash A: %d, Hash B: %d\n", hashA, hashB);
 //    }
@@ -877,6 +846,7 @@ void FilterHorLuma(
     ASSERT(data);
     ASSERT(bS <= 4);
     ASSERT(thresholds);
+
 
 //    if (sample ++ % (1024 * 64) == 0) {
 //        printf("Hash A: %d, Hash B: %d\n", hashA, hashB);
@@ -1158,34 +1128,6 @@ void FilterHorChroma(
 }
 
 
-void GetBoundaryStrengthsA(mbStorage_t *mb, bS_t *bS) {
-    bS[4].top = mb->totalCoeff[2] || mb->totalCoeff[0] ? 2 : 0;
-    bS[5].top = mb->totalCoeff[3] || mb->totalCoeff[1] ? 2 : 0;
-    bS[6].top = mb->totalCoeff[6] || mb->totalCoeff[4] ? 2 : 0;
-    bS[7].top = mb->totalCoeff[7] || mb->totalCoeff[5] ? 2 : 0;
-    bS[8].top = mb->totalCoeff[8] || mb->totalCoeff[2] ? 2 : 0;
-    bS[9].top = mb->totalCoeff[9] || mb->totalCoeff[3] ? 2 : 0;
-    bS[10].top = mb->totalCoeff[12] || mb->totalCoeff[6] ? 2 : 0;
-    bS[11].top = mb->totalCoeff[13] || mb->totalCoeff[7] ? 2 : 0;
-    bS[12].top = mb->totalCoeff[10] || mb->totalCoeff[8] ? 2 : 0;
-    bS[13].top = mb->totalCoeff[11] || mb->totalCoeff[9] ? 2 : 0;
-    bS[14].top = mb->totalCoeff[14] || mb->totalCoeff[12] ? 2 : 0;
-    bS[15].top = mb->totalCoeff[15] || mb->totalCoeff[13] ? 2 : 0;
-
-    bS[1].left = mb->totalCoeff[1] || mb->totalCoeff[0] ? 2 : 0;
-    bS[2].left = mb->totalCoeff[4] || mb->totalCoeff[1] ? 2 : 0;
-    bS[3].left = mb->totalCoeff[5] || mb->totalCoeff[4] ? 2 : 0;
-    bS[5].left = mb->totalCoeff[3] || mb->totalCoeff[2] ? 2 : 0;
-    bS[6].left = mb->totalCoeff[6] || mb->totalCoeff[3] ? 2 : 0;
-    bS[7].left = mb->totalCoeff[7] || mb->totalCoeff[6] ? 2 : 0;
-    bS[9].left = mb->totalCoeff[9] || mb->totalCoeff[8] ? 2 : 0;
-    bS[10].left = mb->totalCoeff[12] || mb->totalCoeff[9] ? 2 : 0;
-    bS[11].left = mb->totalCoeff[13] || mb->totalCoeff[12] ? 2 : 0;
-    bS[13].left = mb->totalCoeff[11] || mb->totalCoeff[10] ? 2 : 0;
-    bS[14].left = mb->totalCoeff[14] || mb->totalCoeff[11] ? 2 : 0;
-    bS[15].left = mb->totalCoeff[15] || mb->totalCoeff[14] ? 2 : 0;
-}
-
 /*------------------------------------------------------------------------------
 
     Function: GetBoundaryStrengths
@@ -1196,41 +1138,67 @@ void GetBoundaryStrengthsA(mbStorage_t *mb, bS_t *bS) {
             the macroblock had non-zero value, HANTRO_FALSE otherwise.
 
 ------------------------------------------------------------------------------*/
+/* OPT: the luma blocks with coefficients as a mask (bit i: totalCoeff[i] != 0, block
+ * scan order; h264bsdDecodeMacroblock keeps it), so every bS test of "either block has
+ * coefficients" is a bit test */
+#define NzMask(mb) ((mb)->nzMask)
+
+/* 1 if the two blocks' references or motion vectors differ (by 4 quarter samples or more) */
+static inline u32 MvRefDiffer(const mbStorage_t *m1, u32 i1, const mbStorage_t *m2, u32 i2)
+{
+    return (m1->refAddr[i1 >> 2] != m2->refAddr[i2 >> 2]) ||
+           ((u32)ABS(m1->mv[i1].hor - m2->mv[i2].hor) >= 4) ||
+           ((u32)ABS(m1->mv[i1].ver - m2->mv[i2].ver) >= 4);
+}
+
+/* EdgeBoundaryStrength / InnerBoundaryStrength with the masks */
+#define NZ2(n1, i1, n2, i2) ((((n1) >> (i1)) | ((n2) >> (i2))) & 1)
+#define BS_PAIR(m1, n1, i1, m2, n2, i2) (NZ2(n1, i1, n2, i2) ? 2 : MvRefDiffer(m1, i1, m2, i2))
+#define BS_COEF(n, i1, i2) (NZ2(n, i1, n, i2) ? 2 : 0)
+
+/* OPT: the same bS as upstream's GetBoundaryStrengths, fewer loads:
+ * the coefficient tests on the masks; between two macroblocks of one motion vector each
+ * (16x16, skipped) the references and vectors are compared once; a 16x16 inter macroblock
+ * without coefficients has every inner bS 0. */
 u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
 {
-
-/* Variables */
-
-    /* this flag is set HANTRO_TRUE as soon as any boundary strength value is
-     * non-zero */
-    u32 nonZeroBs = HANTRO_FALSE;
-
-/* Code */
+    u32 nz, any = 0, intra = IS_INTRA_MB(*mb), one;
 
     ASSERT(mb);
     ASSERT(bS);
     ASSERT(flags);
 
-//    if (sample ++ % (1024 * 128) == 0) {
-//        printf("Hash A: %d, Hash B: %d, Hash C: %d, Hash D: %d\n", hashA, hashB, hashC, hashD);
-//    }
+    nz = intra ? 0 : NzMask(mb);
+    one = !intra && h264bsdNumMbPart(mb->mbType) == 1;
 
     /* top edges */
     if (flags & FILTER_TOP_EDGE)
     {
-        if (IS_INTRA_MB(*mb) || IS_INTRA_MB(*mb->mbB))
+        mbStorage_t *n = mb->mbB;
+        if (intra || IS_INTRA_MB(*n))
         {
             bS[0].top = bS[1].top = bS[2].top = bS[3].top = 4;
-            nonZeroBs = HANTRO_TRUE;
+            any = 1;
         }
         else
         {
-            bS[0].top = EdgeBoundaryStrength(mb, mb->mbB, 0, 10);
-            bS[1].top = EdgeBoundaryStrength(mb, mb->mbB, 1, 11);
-            bS[2].top = EdgeBoundaryStrength(mb, mb->mbB, 4, 14);
-            bS[3].top = EdgeBoundaryStrength(mb, mb->mbB, 5, 15);
-            if (bS[0].top || bS[1].top || bS[2].top || bS[3].top)
-                nonZeroBs = HANTRO_TRUE;
+            u32 nzn = NzMask(n);
+            if (one && h264bsdNumMbPart(n->mbType) == 1)
+            {
+                u32 d = MvRefDiffer(mb, 0, n, 0);
+                bS[0].top = NZ2(nz, 0, nzn, 10) ? 2 : d;
+                bS[1].top = NZ2(nz, 1, nzn, 11) ? 2 : d;
+                bS[2].top = NZ2(nz, 4, nzn, 14) ? 2 : d;
+                bS[3].top = NZ2(nz, 5, nzn, 15) ? 2 : d;
+            }
+            else
+            {
+                bS[0].top = BS_PAIR(mb, nz, 0, n, nzn, 10);
+                bS[1].top = BS_PAIR(mb, nz, 1, n, nzn, 11);
+                bS[2].top = BS_PAIR(mb, nz, 4, n, nzn, 14);
+                bS[3].top = BS_PAIR(mb, nz, 5, n, nzn, 15);
+            }
+            any = bS[0].top | bS[1].top | bS[2].top | bS[3].top;
         }
     }
     else
@@ -1241,20 +1209,31 @@ u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
     /* left edges */
     if (flags & FILTER_LEFT_EDGE)
     {
-        if (IS_INTRA_MB(*mb) || IS_INTRA_MB(*mb->mbA))
+        mbStorage_t *n = mb->mbA;
+        if (intra || IS_INTRA_MB(*n))
         {
             bS[0].left = bS[4].left = bS[8].left = bS[12].left = 4;
-            nonZeroBs = HANTRO_TRUE;
+            any = 1;
         }
         else
         {
-            bS[0].left = EdgeBoundaryStrength(mb, mb->mbA, 0, 5);
-            bS[4].left = EdgeBoundaryStrength(mb, mb->mbA, 2, 7);
-            bS[8].left = EdgeBoundaryStrength(mb, mb->mbA, 8, 13);
-            bS[12].left = EdgeBoundaryStrength(mb, mb->mbA, 10, 15);
-            if (!nonZeroBs &&
-                (bS[0].left || bS[4].left || bS[8].left || bS[12].left))
-                nonZeroBs = HANTRO_TRUE;
+            u32 nzn = NzMask(n);
+            if (one && h264bsdNumMbPart(n->mbType) == 1)
+            {
+                u32 d = MvRefDiffer(mb, 0, n, 0);
+                bS[0].left = NZ2(nz, 0, nzn, 5) ? 2 : d;
+                bS[4].left = NZ2(nz, 2, nzn, 7) ? 2 : d;
+                bS[8].left = NZ2(nz, 8, nzn, 13) ? 2 : d;
+                bS[12].left = NZ2(nz, 10, nzn, 15) ? 2 : d;
+            }
+            else
+            {
+                bS[0].left = BS_PAIR(mb, nz, 0, n, nzn, 5);
+                bS[4].left = BS_PAIR(mb, nz, 2, n, nzn, 7);
+                bS[8].left = BS_PAIR(mb, nz, 8, n, nzn, 13);
+                bS[12].left = BS_PAIR(mb, nz, 10, n, nzn, 15);
+            }
+            any |= bS[0].left | bS[4].left | bS[8].left | bS[12].left;
         }
     }
     else
@@ -1263,7 +1242,7 @@ u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
     }
 
     /* inner edges */
-    if (IS_INTRA_MB(*mb))
+    if (intra)
     {
         bS[4].top  = bS[5].top  = bS[6].top  = bS[7].top  =
         bS[8].top  = bS[9].top  = bS[10].top = bS[11].top =
@@ -1273,122 +1252,96 @@ u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
         bS[5].left  = bS[6].left  = bS[7].left  =
         bS[9].left  = bS[10].left = bS[11].left =
         bS[13].left = bS[14].left = bS[15].left = 3;
-        nonZeroBs = HANTRO_TRUE;
+        return HANTRO_TRUE;
+    }
+    if (one && nz == 0)
+    {
+        bS[4].top  = bS[5].top  = bS[6].top  = bS[7].top  =
+        bS[8].top  = bS[9].top  = bS[10].top = bS[11].top =
+        bS[12].top = bS[13].top = bS[14].top = bS[15].top = 0;
+
+        bS[1].left  = bS[2].left  = bS[3].left  =
+        bS[5].left  = bS[6].left  = bS[7].left  =
+        bS[9].left  = bS[10].left = bS[11].left =
+        bS[13].left = bS[14].left = bS[15].left = 0;
+        return any ? HANTRO_TRUE : HANTRO_FALSE;
+    }
+    /* the coefficient-only edges of 16x16 (all), 16x8 (all but the middle row) and 8x16
+     * (all but the middle column); then the motion edges of the partitioned types */
+    bS[4].top = BS_COEF(nz, 2, 0);
+    bS[5].top = BS_COEF(nz, 3, 1);
+    bS[6].top = BS_COEF(nz, 6, 4);
+    bS[7].top = BS_COEF(nz, 7, 5);
+    bS[12].top = BS_COEF(nz, 10, 8);
+    bS[13].top = BS_COEF(nz, 11, 9);
+    bS[14].top = BS_COEF(nz, 14, 12);
+    bS[15].top = BS_COEF(nz, 15, 13);
+    bS[1].left = BS_COEF(nz, 1, 0);
+    bS[3].left = BS_COEF(nz, 5, 4);
+    bS[5].left = BS_COEF(nz, 3, 2);
+    bS[7].left = BS_COEF(nz, 7, 6);
+    bS[9].left = BS_COEF(nz, 9, 8);
+    bS[11].left = BS_COEF(nz, 13, 12);
+    bS[13].left = BS_COEF(nz, 11, 10);
+    bS[15].left = BS_COEF(nz, 15, 14);
+    if (one || mb->mbType == P_L0_L0_8x16)
+    {
+        bS[8].top = BS_COEF(nz, 8, 2);
+        bS[9].top = BS_COEF(nz, 9, 3);
+        bS[10].top = BS_COEF(nz, 12, 6);
+        bS[11].top = BS_COEF(nz, 13, 7);
     }
     else
     {
-        /* 16x16 inter mb -> ref addresses or motion vectors cannot differ,
-         * only check if either of the blocks contain coefficients */
-        if (h264bsdNumMbPart(mb->mbType) == 1)
-        {
-            GetBoundaryStrengthsA(mb, bS);
-        }
-        /* 16x8 inter mb -> ref addresses and motion vectors can be different
-         * only for the middle horizontal edge, for the other top edges it is
-         * enough to check whether the blocks contain coefficients or not. The
-         * same applies to all internal left edges. */
-        else if (mb->mbType == P_L0_L0_16x8)
-        {
-            bS[4].top = mb->totalCoeff[2] || mb->totalCoeff[0] ? 2 : 0;
-            bS[5].top = mb->totalCoeff[3] || mb->totalCoeff[1] ? 2 : 0;
-            bS[6].top = mb->totalCoeff[6] || mb->totalCoeff[4] ? 2 : 0;
-            bS[7].top = mb->totalCoeff[7] || mb->totalCoeff[5] ? 2 : 0;
-            bS[12].top = mb->totalCoeff[10] || mb->totalCoeff[8] ? 2 : 0;
-            bS[13].top = mb->totalCoeff[11] || mb->totalCoeff[9] ? 2 : 0;
-            bS[14].top = mb->totalCoeff[14] || mb->totalCoeff[12] ? 2 : 0;
-            bS[15].top = mb->totalCoeff[15] || mb->totalCoeff[13] ? 2 : 0;
-            bS[8].top = InnerBoundaryStrength(mb, 8, 2);
-            bS[9].top = InnerBoundaryStrength(mb, 9, 3);
-            bS[10].top = InnerBoundaryStrength(mb, 12, 6);
-            bS[11].top = InnerBoundaryStrength(mb, 13, 7);
-
-            bS[1].left = mb->totalCoeff[1] || mb->totalCoeff[0] ? 2 : 0;
-            bS[2].left = mb->totalCoeff[4] || mb->totalCoeff[1] ? 2 : 0;
-            bS[3].left = mb->totalCoeff[5] || mb->totalCoeff[4] ? 2 : 0;
-            bS[5].left = mb->totalCoeff[3] || mb->totalCoeff[2] ? 2 : 0;
-            bS[6].left = mb->totalCoeff[6] || mb->totalCoeff[3] ? 2 : 0;
-            bS[7].left = mb->totalCoeff[7] || mb->totalCoeff[6] ? 2 : 0;
-            bS[9].left = mb->totalCoeff[9] || mb->totalCoeff[8] ? 2 : 0;
-            bS[10].left = mb->totalCoeff[12] || mb->totalCoeff[9] ? 2 : 0;
-            bS[11].left = mb->totalCoeff[13] || mb->totalCoeff[12] ? 2 : 0;
-            bS[13].left = mb->totalCoeff[11] || mb->totalCoeff[10] ? 2 : 0;
-            bS[14].left = mb->totalCoeff[14] || mb->totalCoeff[11] ? 2 : 0;
-            bS[15].left = mb->totalCoeff[15] || mb->totalCoeff[14] ? 2 : 0;
-        }
-        /* 8x16 inter mb -> ref addresses and motion vectors can be different
-         * only for the middle vertical edge, for the other left edges it is
-         * enough to check whether the blocks contain coefficients or not. The
-         * same applies to all internal top edges. */
-        else if (mb->mbType == P_L0_L0_8x16)
-        {
-            bS[4].top = mb->totalCoeff[2] || mb->totalCoeff[0] ? 2 : 0;
-            bS[5].top = mb->totalCoeff[3] || mb->totalCoeff[1] ? 2 : 0;
-            bS[6].top = mb->totalCoeff[6] || mb->totalCoeff[4] ? 2 : 0;
-            bS[7].top = mb->totalCoeff[7] || mb->totalCoeff[5] ? 2 : 0;
-            bS[8].top = mb->totalCoeff[8] || mb->totalCoeff[2] ? 2 : 0;
-            bS[9].top = mb->totalCoeff[9] || mb->totalCoeff[3] ? 2 : 0;
-            bS[10].top = mb->totalCoeff[12] || mb->totalCoeff[6] ? 2 : 0;
-            bS[11].top = mb->totalCoeff[13] || mb->totalCoeff[7] ? 2 : 0;
-            bS[12].top = mb->totalCoeff[10] || mb->totalCoeff[8] ? 2 : 0;
-            bS[13].top = mb->totalCoeff[11] || mb->totalCoeff[9] ? 2 : 0;
-            bS[14].top = mb->totalCoeff[14] || mb->totalCoeff[12] ? 2 : 0;
-            bS[15].top = mb->totalCoeff[15] || mb->totalCoeff[13] ? 2 : 0;
-
-            bS[1].left = mb->totalCoeff[1] || mb->totalCoeff[0] ? 2 : 0;
-            bS[3].left = mb->totalCoeff[5] || mb->totalCoeff[4] ? 2 : 0;
-            bS[5].left = mb->totalCoeff[3] || mb->totalCoeff[2] ? 2 : 0;
-            bS[7].left = mb->totalCoeff[7] || mb->totalCoeff[6] ? 2 : 0;
-            bS[9].left = mb->totalCoeff[9] || mb->totalCoeff[8] ? 2 : 0;
-            bS[11].left = mb->totalCoeff[13] || mb->totalCoeff[12] ? 2 : 0;
-            bS[13].left = mb->totalCoeff[11] || mb->totalCoeff[10] ? 2 : 0;
-            bS[15].left = mb->totalCoeff[15] || mb->totalCoeff[14] ? 2 : 0;
-            bS[2].left = InnerBoundaryStrength(mb, 4, 1);
-            bS[6].left = InnerBoundaryStrength(mb, 6, 3);
-            bS[10].left = InnerBoundaryStrength(mb, 12, 9);
-            bS[14].left = InnerBoundaryStrength(mb, 14, 11);
-        }
-        else
-        {
-            bS[4].top = InnerBoundaryStrength(mb, mb4x4Index[4], mb4x4Index[0]);
-            bS[5].top = InnerBoundaryStrength(mb, mb4x4Index[5], mb4x4Index[1]);
-            bS[6].top = InnerBoundaryStrength(mb, mb4x4Index[6], mb4x4Index[2]);
-            bS[7].top = InnerBoundaryStrength(mb, mb4x4Index[7], mb4x4Index[3]);
-            bS[8].top = InnerBoundaryStrength(mb, mb4x4Index[8], mb4x4Index[4]);
-            bS[9].top = InnerBoundaryStrength(mb, mb4x4Index[9], mb4x4Index[5]);
-            bS[10].top = InnerBoundaryStrength(mb, mb4x4Index[10], mb4x4Index[6]);
-            bS[11].top = InnerBoundaryStrength(mb, mb4x4Index[11], mb4x4Index[7]);
-            bS[12].top = InnerBoundaryStrength(mb, mb4x4Index[12], mb4x4Index[8]);
-            bS[13].top = InnerBoundaryStrength(mb, mb4x4Index[13], mb4x4Index[9]);
-            bS[14].top = InnerBoundaryStrength(mb, mb4x4Index[14], mb4x4Index[10]);
-            bS[15].top = InnerBoundaryStrength(mb, mb4x4Index[15], mb4x4Index[11]);
-
-            bS[1].left = InnerBoundaryStrength(mb, mb4x4Index[1], mb4x4Index[0]);
-            bS[2].left = InnerBoundaryStrength(mb, mb4x4Index[2], mb4x4Index[1]);
-            bS[3].left = InnerBoundaryStrength(mb, mb4x4Index[3], mb4x4Index[2]);
-            bS[5].left = InnerBoundaryStrength(mb, mb4x4Index[5], mb4x4Index[4]);
-            bS[6].left = InnerBoundaryStrength(mb, mb4x4Index[6], mb4x4Index[5]);
-            bS[7].left = InnerBoundaryStrength(mb, mb4x4Index[7], mb4x4Index[6]);
-            bS[9].left = InnerBoundaryStrength(mb, mb4x4Index[9], mb4x4Index[8]);
-            bS[10].left = InnerBoundaryStrength(mb, mb4x4Index[10], mb4x4Index[9]);
-            bS[11].left = InnerBoundaryStrength(mb, mb4x4Index[11], mb4x4Index[10]);
-            bS[13].left = InnerBoundaryStrength(mb, mb4x4Index[13], mb4x4Index[12]);
-            bS[14].left = InnerBoundaryStrength(mb, mb4x4Index[14], mb4x4Index[13]);
-            bS[15].left = InnerBoundaryStrength(mb, mb4x4Index[15], mb4x4Index[14]);
-        }
-        if (!nonZeroBs &&
-            (bS[4].top || bS[5].top || bS[6].top || bS[7].top ||
-             bS[8].top || bS[9].top || bS[10].top || bS[11].top ||
-             bS[12].top || bS[13].top || bS[14].top || bS[15].top ||
-             bS[1].left || bS[2].left || bS[3].left ||
-             bS[5].left || bS[6].left || bS[7].left ||
-             bS[9].left || bS[10].left || bS[11].left ||
-             bS[13].left || bS[14].left || bS[15].left))
-            nonZeroBs = HANTRO_TRUE;
+        bS[8].top = BS_PAIR(mb, nz, 8, mb, nz, 2);
+        bS[9].top = BS_PAIR(mb, nz, 9, mb, nz, 3);
+        bS[10].top = BS_PAIR(mb, nz, 12, mb, nz, 6);
+        bS[11].top = BS_PAIR(mb, nz, 13, mb, nz, 7);
     }
-
-    return(nonZeroBs);
-
+    if (one || mb->mbType == P_L0_L0_16x8)
+    {
+        bS[2].left = BS_COEF(nz, 4, 1);
+        bS[6].left = BS_COEF(nz, 6, 3);
+        bS[10].left = BS_COEF(nz, 12, 9);
+        bS[14].left = BS_COEF(nz, 14, 11);
+    }
+    else
+    {
+        bS[2].left = BS_PAIR(mb, nz, 4, mb, nz, 1);
+        bS[6].left = BS_PAIR(mb, nz, 6, mb, nz, 3);
+        bS[10].left = BS_PAIR(mb, nz, 12, mb, nz, 9);
+        bS[14].left = BS_PAIR(mb, nz, 14, mb, nz, 11);
+    }
+    if (!one && mb->mbType != P_L0_L0_16x8 && mb->mbType != P_L0_L0_8x16)
+    {
+        /* 8x8 and smaller: every inner edge may differ in motion */
+        bS[4].top = BS_PAIR(mb, nz, 2, mb, nz, 0);
+        bS[5].top = BS_PAIR(mb, nz, 3, mb, nz, 1);
+        bS[6].top = BS_PAIR(mb, nz, 6, mb, nz, 4);
+        bS[7].top = BS_PAIR(mb, nz, 7, mb, nz, 5);
+        bS[12].top = BS_PAIR(mb, nz, 10, mb, nz, 8);
+        bS[13].top = BS_PAIR(mb, nz, 11, mb, nz, 9);
+        bS[14].top = BS_PAIR(mb, nz, 14, mb, nz, 12);
+        bS[15].top = BS_PAIR(mb, nz, 15, mb, nz, 13);
+        bS[1].left = BS_PAIR(mb, nz, 1, mb, nz, 0);
+        bS[3].left = BS_PAIR(mb, nz, 5, mb, nz, 4);
+        bS[5].left = BS_PAIR(mb, nz, 3, mb, nz, 2);
+        bS[7].left = BS_PAIR(mb, nz, 7, mb, nz, 6);
+        bS[9].left = BS_PAIR(mb, nz, 9, mb, nz, 8);
+        bS[11].left = BS_PAIR(mb, nz, 13, mb, nz, 12);
+        bS[13].left = BS_PAIR(mb, nz, 11, mb, nz, 10);
+        bS[15].left = BS_PAIR(mb, nz, 15, mb, nz, 14);
+    }
+    any |= bS[4].top | bS[5].top | bS[6].top | bS[7].top |
+           bS[8].top | bS[9].top | bS[10].top | bS[11].top |
+           bS[12].top | bS[13].top | bS[14].top | bS[15].top |
+           bS[1].left | bS[2].left | bS[3].left |
+           bS[5].left | bS[6].left | bS[7].left |
+           bS[9].left | bS[10].left | bS[11].left |
+           bS[13].left | bS[14].left | bS[15].left;
+    return any ? HANTRO_TRUE : HANTRO_FALSE;
 }
+
 
 /*------------------------------------------------------------------------------
 

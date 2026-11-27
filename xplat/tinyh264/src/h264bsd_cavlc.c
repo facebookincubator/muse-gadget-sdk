@@ -472,6 +472,12 @@ u32 DecodeCoeffToken(u32 bits, u32 nc)
 
 u32 DecodeLevelPrefix(u32 bits)
 {
+#if H264BSD_CLZ
+    /* OPT: the leading zeros of the 16 bits in one count (bits < 2^16) */
+    if (!bits) /* more than 15 zeros encountered which is an error */
+        return(VLC_NOT_FOUND);
+    return((u32)__builtin_clz(bits) - 16);
+#else
 
 /* Variables */
 
@@ -515,7 +521,7 @@ u32 DecodeLevelPrefix(u32 bits)
         return(VLC_NOT_FOUND);
 
     return(numZeros);
-
+#endif
 }
 
 /*------------------------------------------------------------------------------
@@ -696,6 +702,15 @@ u32 DecodeRunBefore(u32 bits, u32 zerosLeft)
         default:
             if (bits >= 0x100)
                 value = ((7-(bits>>8))<<4)+0x3;
+#if H264BSD_CLZ
+            else if (bits)
+            {
+                /* OPT: 0001 .. 00000000001: run 7 + n, length 4 + n for n
+                 * more zeros (one count of the 11 bits' leading zeros) */
+                u32 lz = (u32)__builtin_clz(bits) - 21;
+                value = ((lz + 4) << 4) | (lz + 1);
+            }
+#else
             else if (bits >= 0x80)
                 value = 0x74;
             else if (bits >= 0x40)
@@ -712,6 +727,7 @@ u32 DecodeRunBefore(u32 bits, u32 zerosLeft)
                 value = 0xdA;
             else if (bits)
                 value = 0xeB;
+#endif
             if (INFO(value) > zerosLeft)
                 value = 0;
             break;
@@ -752,13 +768,31 @@ u32 h264bsdDecodeResidualBlockCavlc(
   i32 nc,
   u32 maxNumCoeff)
 {
+    cavlcBits_t c;
+    u32 r;
+
+    h264bsdCavlcBitsInit(pStrmData, &c);
+    r = h264bsdDecodeResidualBlockCavlcC(pStrmData, &c, coeffLevel, nc, maxNumCoeff);
+    if ((r & 0xF) != HANTRO_OK)
+        return(r);
+    if (h264bsdCavlcBitsDone(pStrmData, &c) != HANTRO_OK)
+        return(HANTRO_NOK);
+    return(r);
+}
+
+u32 h264bsdDecodeResidualBlockCavlcC(
+  strmData_t *pStrmData,
+  cavlcBits_t *c,
+  i32 *coeffLevel,
+  i32 nc,
+  u32 maxNumCoeff)
+{
 
 /* Variables */
 
     u32 i, tmp, totalCoeff, trailingOnes, suffixLength, levelPrefix;
     u32 levelSuffix, zerosLeft, bit;
     i32 level[16];
-    u32 run[16];
     /* stream "cache" */
     u32 bufferValue;
     u32 bufferBits;
@@ -773,7 +807,8 @@ u32 h264bsdDecodeResidualBlockCavlc(
 
     /* assume that coeffLevel array has been "cleaned" by caller */
 
-    BUFFER_INIT(bufferValue, bufferBits);
+    bufferValue = c->value;
+    bufferBits = c->bits;
 
     /*lint -e774 disable lint warning on always false comparison */
     BUFFER_SHOW(bufferValue, bufferBits, bit, 16);
@@ -795,12 +830,9 @@ u32 h264bsdDecodeResidualBlockCavlc(
         if (trailingOnes)
         {
             BUFFER_GET(bufferValue, bufferBits, bit, trailingOnes);
-            tmp = 1 << (trailingOnes - 1);
-            for (; tmp; i++)
-            {
-                level[i] = bit & tmp ? -1 : 1;
-                tmp >>= 1;
-            }
+            /* OPT: +1 / -1 from each sign bit, first bit first */
+            for (; i < trailingOnes; i++)
+                level[i] = 1 - 2 * (i32)((bit >> (trailingOnes - 1 - i)) & 1);
         }
 
         /* other levels */
@@ -869,48 +901,50 @@ u32 h264bsdDecodeResidualBlockCavlc(
                 return(HANTRO_NOK);
             BUFFER_FLUSH(bufferValue, bufferBits, LENGTH(zerosLeft));
             zerosLeft = INFO(zerosLeft);
+            /* OPT: the 4x4 tables serve 15-coefficient AC blocks too: a
+             * total_zeros that puts a level past the block is an error
+             * (upstream wrote it into the next block) */
+            if (zerosLeft > maxNumCoeff - totalCoeff)
+                return(HANTRO_NOK);
         }
         else
             zerosLeft = 0;
 
+        /* OPT: runs and placement in one pass. The first level decoded (the
+         * highest frequency) sits at totalCoeff - 1 + total_zeros, each next
+         * one run_before + 1 lower; the last one at the zeros left (as
+         * upstream's second pass from the lowest up: the same positions).
+         * levelSuffix holds coeffMap, the bit map of the non-zero
+         * coefficients. */
+        tmp = totalCoeff - 1 + zerosLeft;
+        levelSuffix = 0;
         for (i = 0; i < totalCoeff - 1; i++)
         {
+            coeffLevel[tmp] = level[i];
+            levelSuffix |= 1u << tmp;
             if (zerosLeft > 0)
             {
+                u32 rb;
                 BUFFER_SHOW(bufferValue, bufferBits, bit,11);
-                tmp = DecodeRunBefore(bit, zerosLeft);
-                if (!tmp)
+                rb = DecodeRunBefore(bit, zerosLeft);
+                if (!rb)
                     return(HANTRO_NOK);
-                BUFFER_FLUSH(bufferValue, bufferBits, LENGTH(tmp));
-                run[i] = INFO(tmp);
-                zerosLeft -= run[i]++;
+                BUFFER_FLUSH(bufferValue, bufferBits, LENGTH(rb));
+                zerosLeft -= INFO(rb);
+                tmp -= INFO(rb) + 1;
             }
             else
-            {
-                run[i] = 1;
-            }
+                tmp--;
         }
-
-        /* combining level and run, levelSuffix variable used to hold coeffMap,
-         * i.e. bit map indicating which coefficients had non-zero value. */
-
-        /*lint -esym(771,level,run) level and run are always initialized */
-        tmp = zerosLeft;
         coeffLevel[tmp] = level[totalCoeff-1];
-        levelSuffix = 1 << tmp;
-        for (i = totalCoeff-1; i--;)
-        {
-            tmp += run[i];
-            levelSuffix |= 1 << tmp;
-            coeffLevel[tmp] = level[i];
-        }
+        levelSuffix |= 1u << tmp;
 
     }
     else
         levelSuffix = 0;
 
-    if (h264bsdFlushBits(pStrmData, 32-bufferBits) != HANTRO_OK)
-        return(HANTRO_NOK);
+    c->value = bufferValue;
+    c->bits = bufferBits;
 
     return((totalCoeff << 4) | (levelSuffix << 16));
 }

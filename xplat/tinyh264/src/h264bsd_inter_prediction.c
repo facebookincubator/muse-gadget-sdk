@@ -331,6 +331,38 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 
 #else /* H264DEC_OMXDL */
 
+/* OPT: see the P_Skip case of h264bsdInterPrediction. currImage's macroblock
+ * pointers (luma, cb, cr) are set and ref has the same layout; rows are 4-byte
+ * aligned (widths are multiples of 16 luma and 8 chroma pixels). */
+static void CopySkipMb(image_t *currImage, const u8 *ref)
+{
+    u32 w = currImage->width * 16, i;
+    const u32 *s;
+    u32 *d;
+    s = (const u32 *)(ref + (currImage->luma - currImage->data));
+    d = (u32 *)currImage->luma;
+    for (i = 16; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+        s += w / 4; d += w / 4;
+    }
+    w /= 2;
+    s = (const u32 *)(ref + (currImage->cb - currImage->data));
+    d = (u32 *)currImage->cb;
+    for (i = 8; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1];
+        s += w / 4; d += w / 4;
+    }
+    s = (const u32 *)(ref + (currImage->cr - currImage->data));
+    d = (u32 *)currImage->cr;
+    for (i = 8; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1];
+        s += w / 4; d += w / 4;
+    }
+}
+
 /*------------------------------------------------------------------------------
 
     Function: h264bsdInterPrediction
@@ -391,6 +423,17 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
             if (MvPrediction16x16(pMb, &pMbLayer->mbPred, dpb) != HANTRO_OK)
                 return(HANTRO_NOK);
             refImage.data = pMb->refAddr[0];
+            /* OPT: a P_Skip macroblock with a zero motion vector is the
+             * reference picture's co-located macroblock: copy it straight
+             * into the picture instead of predicting into data[] and writing
+             * that out (one 384-byte copy instead of two, no interpolation
+             * set-up). Static backgrounds are mostly such macroblocks. */
+            if (pMb->mbType == P_Skip && !pMb->mv[0].hor && !pMb->mv[0].ver &&
+                pMb->decoded <= 1)
+            {
+                CopySkipMb(currImage, refImage.data);
+                return(HANTRO_OK);
+            }
             h264bsdPredictSamples(data, pMb->mv, &refImage, col, row, 0, 0,
                 16, 16);
             break;

@@ -93,8 +93,6 @@ static u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
 
 #ifdef H264DEC_OMXDL
 static u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, u8 *pTotalCoeff);
-#else
-static u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, i16 *pTotalCoeff);
 #endif
 
 static u32 CbpIntra16x16(mbType_e mbType);
@@ -155,7 +153,7 @@ u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
     memset(pMbLayer->residual.coeffMap, 0, sizeof(pMbLayer->residual.coeffMap));
     memset(pMbLayer->residual.level[25], 0, 8 * sizeof(i32));
 
-    tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
+    tmp = h264bsdExpGolombU(pStrmData, &value);
 
     if (IS_I_SLICE(sliceType))
     {
@@ -241,7 +239,7 @@ u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
             if (cbp >> 4)
                 memset(lv[16], 0, 8 * 16 * sizeof(i32));
 
-            tmp = h264bsdDecodeExpGolombSigned(pStrmData, &itmp);
+            tmp = h264bsdExpGolombS(pStrmData, &itmp);
             if (tmp != HANTRO_OK || (itmp < -26) || (itmp > 25) )
                 return(HANTRO_NOK);
             pMbLayer->mbQpDelta = itmp;
@@ -403,12 +401,12 @@ u32 DecodeMbPred(strmData_t *pStrmData, mbPred_t *pMbPred, mbType_e mbType,
 
             for (i = h264bsdNumMbPart(mbType), j = 0; i--;  j++)
             {
-                tmp = h264bsdDecodeExpGolombSigned(pStrmData, &itmp);
+                tmp = h264bsdExpGolombS(pStrmData, &itmp);
                 if (tmp != HANTRO_OK)
                     return(tmp);
                 pMbPred->mvdL0[j].hor = (i16)itmp;
 
-                tmp = h264bsdDecodeExpGolombSigned(pStrmData, &itmp);
+                tmp = h264bsdExpGolombS(pStrmData, &itmp);
                 if (tmp != HANTRO_OK)
                     return(tmp);
                 pMbPred->mvdL0[j].ver = (i16)itmp;
@@ -438,7 +436,7 @@ u32 DecodeMbPred(strmData_t *pStrmData, mbPred_t *pMbPred, mbType_e mbType,
             /* fall-through */
 
         case PRED_MODE_INTRA16x16:
-            tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
+            tmp = h264bsdExpGolombU(pStrmData, &value);
             if (tmp != HANTRO_OK || value > 3)
                 return(HANTRO_NOK);
             pMbPred->intraChromaPredMode = value;
@@ -476,7 +474,7 @@ u32 DecodeSubMbPred(strmData_t *pStrmData, subMbPred_t *pSubMbPred,
 
     for (i = 0; i < 4; i++)
     {
-        tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &value);
+        tmp = h264bsdExpGolombU(pStrmData, &value);
         if (tmp != HANTRO_OK || value > 3)
             return(HANTRO_NOK);
         pSubMbPred->subMbType[i] = (subMbType_e)value;
@@ -500,12 +498,12 @@ u32 DecodeSubMbPred(strmData_t *pStrmData, subMbPred_t *pSubMbPred,
         for (value = h264bsdNumSubMbPart(pSubMbPred->subMbType[i]);
              value--; j++)
         {
-            tmp = h264bsdDecodeExpGolombSigned(pStrmData, &itmp);
+            tmp = h264bsdExpGolombS(pStrmData, &itmp);
             if (tmp != HANTRO_OK)
                 return(tmp);
             pSubMbPred->mvdL0[i][j].hor = (i16)itmp;
 
-            tmp = h264bsdDecodeExpGolombSigned(pStrmData, &itmp);
+            tmp = h264bsdExpGolombS(pStrmData, &itmp);
             if (tmp != HANTRO_OK)
                 return(tmp);
             pSubMbPred->mvdL0[i][j].ver = (i16)itmp;
@@ -717,6 +715,33 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
 
 ------------------------------------------------------------------------------*/
 
+/* OPT: DetermineNc with the left (A) and above (B) neighbours' totalCoeff arrays found once
+ * per macroblock (NULL: not available) and the neighbour blocks inline: each entry the
+ * neighbour block's index, 0x80 set when it is in the current macroblock (whose counts are
+ * still in pTotalCoeff). The same nC (9.2.1). */
+static const u8 ncNbA[24] = {
+    5, 0x80|0, 7, 0x80|2, 0x80|1, 0x80|4, 0x80|3, 0x80|6,
+    13, 0x80|8, 15, 0x80|10, 0x80|9, 0x80|12, 0x80|11, 0x80|14,
+    17, 0x80|16, 19, 0x80|18, 21, 0x80|20, 23, 0x80|22 };
+static const u8 ncNbB[24] = {
+    10, 11, 0x80|0, 0x80|1, 14, 15, 0x80|4, 0x80|5,
+    0x80|2, 0x80|3, 0x80|8, 0x80|9, 0x80|6, 0x80|7, 0x80|12, 0x80|13,
+    18, 19, 0x80|16, 0x80|17, 22, 23, 0x80|20, 0x80|21 };
+
+static inline u32 NcFast(u32 blockIndex, const i16 *cur, const i16 *tcA, const i16 *tcB)
+{
+    u32 a = ncNbA[blockIndex], b = ncNbB[blockIndex];
+    const i16 *pa = (a & 0x80) ? cur : tcA, *pb = (b & 0x80) ? cur : tcB;
+
+    if (pa && pb)
+        return (u32)((pa[a & 0x1F] + pb[b & 0x1F] + 1) >> 1);
+    if (pa)
+        return (u32)pa[a & 0x1F];
+    if (pb)
+        return (u32)pb[b & 0x1F];
+    return 0;
+}
+
 u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     mbStorage_t *pMb, mbType_e mbType, u32 codedBlockPattern)
 {
@@ -728,7 +753,11 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     u32 blockCoded;
     u32 blockIndex;
     u32 is16x16;
+    cavlcBits_t cb;
     i32 (*level)[16];
+    /* OPT: the neighbours' availability once per macroblock (NcFast) */
+    const i16 *tcA = h264bsdIsNeighbourAvailable(pMb, pMb->mbA) ? pMb->mbA->totalCoeff : NULL;
+    const i16 *tcB = h264bsdIsNeighbourAvailable(pMb, pMb->mbB) ? pMb->mbB->totalCoeff : NULL;
 
 /* Code */
 
@@ -736,12 +765,13 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     ASSERT(pResidual);
 
     level = pResidual->level;
+    h264bsdCavlcBitsInit(pStrmData, &cb);
 
     /* luma DC is at index 24 */
     if (h264bsdMbPartPredMode(mbType) == PRED_MODE_INTRA16x16)
     {
-        nc = (i32)DetermineNc(pMb, 0, pResidual->totalCoeff);
-        tmp = h264bsdDecodeResidualBlockCavlc(pStrmData, level[24], nc, 16);
+        nc = (i32)NcFast(0, pResidual->totalCoeff, tcA, tcB);
+        tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb, level[24], nc, 16);
         if ((tmp & 0xF) != HANTRO_OK)
             return(tmp);
         pResidual->totalCoeff[24] = (tmp >> 4) & 0xFF;
@@ -759,16 +789,16 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
         {
             for (j = 4; j--; blockIndex++)
             {
-                nc = (i32)DetermineNc(pMb, blockIndex, pResidual->totalCoeff);
+                nc = (i32)NcFast(blockIndex, pResidual->totalCoeff, tcA, tcB);
                 if (is16x16)
                 {
-                    tmp = h264bsdDecodeResidualBlockCavlc(pStrmData,
+                    tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb,
                         level[blockIndex] + 1, nc, 15);
                     pResidual->coeffMap[blockIndex] = tmp >> 15;
                 }
                 else
                 {
-                    tmp = h264bsdDecodeResidualBlockCavlc(pStrmData,
+                    tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb,
                         level[blockIndex], nc, 16);
                     pResidual->coeffMap[blockIndex] = tmp >> 16;
                 }
@@ -785,11 +815,11 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     blockCoded = codedBlockPattern & 0x3;
     if (blockCoded)
     {
-        tmp = h264bsdDecodeResidualBlockCavlc(pStrmData, level[25], -1, 4);
+        tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb, level[25], -1, 4);
         if ((tmp & 0xF) != HANTRO_OK)
             return(tmp);
         pResidual->totalCoeff[25] = (tmp >> 4) & 0xFF;
-        tmp = h264bsdDecodeResidualBlockCavlc(pStrmData, level[25]+4, -1, 4);
+        tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb, level[25]+4, -1, 4);
         if ((tmp & 0xF) != HANTRO_OK)
             return(tmp);
         pResidual->totalCoeff[26] = (tmp >> 4) & 0xFF;
@@ -801,8 +831,8 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     {
         for (i = 8; i--;blockIndex++)
         {
-            nc = (i32)DetermineNc(pMb, blockIndex, pResidual->totalCoeff);
-            tmp = h264bsdDecodeResidualBlockCavlc(pStrmData,
+            nc = (i32)NcFast(blockIndex, pResidual->totalCoeff, tcA, tcB);
+            tmp = h264bsdDecodeResidualBlockCavlcC(pStrmData, &cb,
                 level[blockIndex] + 1, nc, 15);
             if ((tmp & 0xF) != HANTRO_OK)
                 return(tmp);
@@ -811,6 +841,8 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
         }
     }
 
+    if (h264bsdCavlcBitsDone(pStrmData, &cb) != HANTRO_OK)
+        return(HANTRO_NOK);
     return(HANTRO_OK);
 
 }
@@ -826,9 +858,6 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
 ------------------------------------------------------------------------------*/
 #ifdef H264DEC_OMXDL
 u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, u8 *pTotalCoeff)
-#else
-u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, i16 *pTotalCoeff)
-#endif
 {
 /*lint -e702 */
 /* Variables */
@@ -888,6 +917,7 @@ u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, i16 *pTotalCoeff)
     return((u32)n);
 /*lint +e702 */
 }
+#endif /* H264DEC_OMXDL */
 
 /*------------------------------------------------------------------------------
 
@@ -982,6 +1012,20 @@ u32 h264bsdPredModeIntra16x16(mbType_e mbType)
 
 ------------------------------------------------------------------------------*/
 
+/* OPT: the luma blocks with coefficients as a mask (mbStorage_t nzMask, read by the
+ * deblocking's boundary strengths): bit i for totalCoeff[i] != 0 */
+#ifdef H264DEC_OMXDL
+static inline u32 NzMask16(const u8 *tc)
+#else
+static inline u32 NzMask16(const i16 *tc)
+#endif
+{
+    u32 m = 0, i;
+    for (i = 0; i < 16; i++)
+        m |= (u32)(tc[i] != 0) << i;
+    return m;
+}
+
 u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     image_t *currImage, dpbStorage_t *dpb, i32 *qpY, u32 mbNum,
     u32 constrainedIntraPredFlag, u8* data)
@@ -1023,6 +1067,7 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 
         /* if decoded flag > 1 -> mb has already been successfully decoded and
          * written to output -> do not write again */
+        pMb->nzMask = 0xFFFF;
         if (pMb->decoded > 1)
         {
             for (i = 24; i--;)
@@ -1055,6 +1100,7 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
             memcpy(pMb->totalCoeff,
                             pMbLayer->residual.totalCoeff,
                             27*sizeof(*pMb->totalCoeff));
+            pMb->nzMask = NzMask16(pMb->totalCoeff);
 
             /* update qpY */
             if (pMbLayer->mbQpDelta)
@@ -1122,6 +1168,7 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
         else
         {
             memset(pMb->totalCoeff, 0, 27*sizeof(*pMb->totalCoeff));
+            pMb->nzMask = 0;
             pMb->qpY = (u32)*qpY;
         }
 #ifdef H264DEC_OMXDL

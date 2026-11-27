@@ -145,7 +145,7 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
         {
             if (!prevSkipped)
             {
-                tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, &skipRun);
+                tmp = h264bsdExpGolombU(pStrmData, &skipRun);
                 if (tmp != HANTRO_OK)
                     return(tmp);
                 /* skip_run shall be less than or equal to number of

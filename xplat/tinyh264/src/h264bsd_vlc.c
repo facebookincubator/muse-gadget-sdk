@@ -123,6 +123,20 @@ u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
         *codeNum = 0;
         return(HANTRO_OK);
     }
+#if H264BSD_CLZ
+    /* OPT: codes of 3 .. 31 bits (1 .. 15 leading zeros) from the one
+     * window: codeNum = (the 2n + 1 bits) - 1, n the leading zeros counted
+     * at once (the same results and end-of-stream errors as decoding them
+     * zero by zero) */
+    else if (bits >= 0x00010000)
+    {
+        u32 n = (u32)__builtin_clz(bits), len = 2 * n + 1;
+        if (h264bsdFlushBits(pStrmData, len) == END_OF_STREAM)
+            return(HANTRO_NOK);
+        *codeNum = (bits >> (32 - len)) - 1;
+        return(HANTRO_OK);
+    }
+#else
     /* second bit is 1 -> code length 3 */
     else if (bits >= 0x40000000)
     {
@@ -147,6 +161,7 @@ u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
         *codeNum = 7 + ((bits >> 25) & 0x7);
         return(HANTRO_OK);
     }
+#endif
     /* other code lengths */
     else
     {

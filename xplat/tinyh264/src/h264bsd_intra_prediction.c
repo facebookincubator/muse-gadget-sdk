@@ -705,13 +705,19 @@ u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
 
 /* Variables */
 
-    u32 block;
+    u32 block, k;
     u32 mode;
     neighbour_t neighbour, neighbourB;
     mbStorage_t *nMb, *nMb2;
     u8 a[1 + 4 + 4], l[1 + 4];
     u32 data4x4[4];
     u32 availableA, availableB, availableC, availableD;
+    /* OPT: the neighbour macroblocks (A, B, C, D, the current one: neighbourMb_e order)
+     * and whether intra prediction may use them, found once per macroblock instead of per
+     * block and neighbour (h264bsdGetNeighbourMb, h264bsdIsNeighbourAvailable, the
+     * constrained intra check): the same values */
+    mbStorage_t *nmb[5];
+    u32 avail[5];
 
 /* Code */
 
@@ -720,51 +726,41 @@ u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
     ASSERT(above);
     ASSERT(left);
 
+    nmb[MB_A] = pMb->mbA;
+    nmb[MB_B] = pMb->mbB;
+    nmb[MB_C] = pMb->mbC;
+    nmb[MB_D] = pMb->mbD;
+    nmb[MB_CURR] = pMb;
+    for (k = 0; k <= MB_CURR; k++)
+    {
+        avail[k] = h264bsdIsNeighbourAvailable(pMb, nmb[k]);
+        if (avail[k] && constrainedIntraPred &&
+           ( h264bsdMbPartPredMode(nmb[k]->mbType) == PRED_MODE_INTER) )
+            avail[k] = HANTRO_FALSE;
+    }
+#define NB_MB(n) ((n).mb == MB_NA ? NULL : nmb[(n).mb])
+#define NB_AVAIL(n) ((n).mb == MB_NA ? HANTRO_FALSE : avail[(n).mb])
+
     for (block = 0; block < 16; block++)
     {
 
         ASSERT(pMb->intra4x4PredMode[block] < 9);
 
         neighbour = *h264bsdNeighbour4x4BlockA(block);
-        nMb = h264bsdGetNeighbourMb(pMb, neighbour.mb);
-        availableA = h264bsdIsNeighbourAvailable(pMb, nMb);
-        if (availableA && constrainedIntraPred &&
-           ( h264bsdMbPartPredMode(nMb->mbType) == PRED_MODE_INTER) )
-        {
-            availableA = HANTRO_FALSE;
-        }
+        nMb = NB_MB(neighbour);
+        availableA = NB_AVAIL(neighbour);
 
         neighbourB = *h264bsdNeighbour4x4BlockB(block);
-        nMb2 = h264bsdGetNeighbourMb(pMb, neighbourB.mb);
-        availableB = h264bsdIsNeighbourAvailable(pMb, nMb2);
-        if (availableB && constrainedIntraPred &&
-           ( h264bsdMbPartPredMode(nMb2->mbType) == PRED_MODE_INTER) )
-        {
-            availableB = HANTRO_FALSE;
-        }
+        nMb2 = NB_MB(neighbourB);
+        availableB = NB_AVAIL(neighbourB);
 
         mode = DetermineIntra4x4PredMode(mbLayer,
             (u32)(availableA && availableB),
             &neighbour, &neighbourB, block, nMb, nMb2);
         pMb->intra4x4PredMode[block] = (u8)mode;
 
-        neighbour = *h264bsdNeighbour4x4BlockC(block);
-        nMb = h264bsdGetNeighbourMb(pMb, neighbour.mb);
-        availableC = h264bsdIsNeighbourAvailable(pMb, nMb);
-        if (availableC && constrainedIntraPred &&
-           ( h264bsdMbPartPredMode(nMb->mbType) == PRED_MODE_INTER) )
-        {
-            availableC = HANTRO_FALSE;
-        }
-
-        neighbour = *h264bsdNeighbour4x4BlockD(block);
-        nMb = h264bsdGetNeighbourMb(pMb, neighbour.mb);
-        availableD = h264bsdIsNeighbourAvailable(pMb, nMb);
-        if (availableD && constrainedIntraPred &&
-           ( h264bsdMbPartPredMode(nMb->mbType) == PRED_MODE_INTER) )
-        {
-            availableD = HANTRO_FALSE;
-        }
+        availableC = NB_AVAIL(*h264bsdNeighbour4x4BlockC(block));
+        availableD = NB_AVAIL(*h264bsdNeighbour4x4BlockD(block));
 
         Get4x4NeighbourPels(a, l, data, above, left, block);
 
@@ -831,6 +827,8 @@ u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
     return(HANTRO_OK);
 
 }
+#undef NB_MB
+#undef NB_AVAIL
 
 /*------------------------------------------------------------------------------
 

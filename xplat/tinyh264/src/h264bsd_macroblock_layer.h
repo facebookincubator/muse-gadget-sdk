@@ -174,6 +174,9 @@ typedef struct mbStorage
     i16 totalCoeff[27];
 #endif
     u8 intra4x4PredMode[16];
+    /* OPT (deblocking): bit i set when totalCoeff[i] != 0, luma blocks 0..15;
+     * in the padding before refPic, so the entry keeps its size */
+    u16 nzMask;
     u32 refPic[4];
     u8* refAddr[4];
     mv_t mv[16];

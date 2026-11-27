@@ -50,4 +50,18 @@ typedef signed int      i16x;
 #endif
 #endif
 
+/* OPT: H264BSD_CLZ counts leading zeros with __builtin_clz and decodes
+ * Exp-Golomb codes inline. On unless the target is known to lack an
+ * instruction for it (RISC-V without Zbb, Arm cores without CLZ), where
+ * __builtin_clz is a library call and the upstream code stays; a port whose
+ * core has none sets it to 0. The same results either way. */
+#ifndef H264BSD_CLZ
+#if (defined(__riscv) && !defined(__riscv_zbb)) || \
+    (defined(__arm__) && !defined(__ARM_FEATURE_CLZ))
+#define H264BSD_CLZ 0
+#else
+#define H264BSD_CLZ 1
+#endif
+#endif
+
 #endif  /* BASETYPE_H_INCLUDED */

@@ -359,6 +359,32 @@ class UntrustedVideoTest(unittest.TestCase):
         tiny = (TINY / "h264bsd_pic_param_set.c").read_text()
         self.assertIn("slice groups unsupported", tiny)
 
+    def test_total_zeros_past_an_ac_block_is_an_error(self):
+        # One Intra 16x16 macroblock whose first AC block (15 coefficients)
+        # has one trailing one and total_zeros 15, which would place it past
+        # the block (into the next one); total_zeros 14 is its last place.
+        def mb(total_zeros_code):
+            b = Bits()
+            for v in (0, 7, 0):   # first_mb_in_slice, slice_type I, pic_parameter_set_id
+                b.ue(v)
+            b.u(4, 0)        # frame_num
+            b.ue(0)          # idr_pic_id
+            b.u(2, 0)        # no_output_of_prior_pics_flag, long_term_reference_flag
+            b.ue(0)          # slice_qp_delta
+            b.ue(1)          # disable_deblocking_filter_idc
+            b.ue(15)         # mb_type: I_16x16, DC prediction, chroma cbp 0, luma cbp 15
+            b.ue(0)          # intra_chroma_pred_mode: DC
+            b.ue(0)          # mb_qp_delta
+            b.u(1, 1)        # DC block: no coefficients
+            b.u(2, 1)        # AC block 0: TotalCoeff 1, TrailingOnes 1 (nC 0)
+            b.u(1, 0)        # its sign: +1
+            b.u(9, total_zeros_code)
+            for _ in range(15):
+                b.u(1, 1)    # AC blocks 1-15: no coefficients (nC 0 or 1)
+            return sps(1, 1) + pps() + nal(0x65, b)
+        self.assertEqual(self.decode(mb(0b000000010), 1, 1), (16, 16))   # total_zeros 14
+        self.assertIsNone(self.decode(mb(0b000000001), 1, 1))           # total_zeros 15
+
     def test_vp8_keyframes_larger_than_the_stream(self):
         vdec = (MUSE / "muse_vdec.c").read_text()
         self.assertIn("kw > d->max_w || kh > d->max_h", vdec)

@@ -27,13 +27,32 @@ component, `../../esp32/components/tinyh264` (`CMakeLists.txt`, `linker.lf`).
 Changes from upstream, each marked `OPT:` in the source, all bit-exact (the
 decoded pictures match upstream and ffmpeg byte for byte on 406 test
 streams, among them QP 4 intra-only, four slices, four reference frames,
-deblocking off and 2 Mb/s VGA):
+deblocking off and 2 Mb/s VGA; the zero-motion skip copy and the parsing
+and boundary strength changes give the same pictures as the decoder before
+them on the 256-stream corpus of "Checking a change" below):
 
 - The bit reader (`h264bsdShowBits32`, `h264bsdFlushBits`,
   `h264bsdGetBits`) is inlined into its callers.
 - A macroblock's 1.6 KB of coefficients are cleared only for the blocks its
   coded block pattern says will be read.
 - The start code search skips four bytes at a time while none can start one.
+- A P_Skip macroblock with a zero motion vector is copied straight from the
+  reference picture into the picture, instead of being predicted into a
+  scratch block and written out from there.
+- Parsing: nC and the intra 4x4 neighbours are found once per macroblock
+  instead of per block; CAVLC places the runs and levels in one pass and
+  keeps its 32-bit stream cache across a macroblock's blocks; with
+  `H264BSD_CLZ`, leading zeros are counted with `__builtin_clz` and
+  Exp-Golomb codes of up to 31 bits are decoded inline (on unless the
+  target is known to lack an instruction for it: RISC-V without Zbb, Arm
+  without CLZ; a port whose core has none sets it to 0, or `__builtin_clz`
+  becomes a library call); the bit reader loads a byte-swapped word where
+  unaligned loads are cheap on a little-endian core (`H264BSD_WORD_LOADS`,
+  auto; a port can set it to 0, or to 1 on a little-endian core only: a
+  big-endian one is refused at compile time).
+- Deblocking: the boundary strengths test a 16-bit mask of the luma blocks
+  with coefficients (`nzMask`), compare two single-vector macroblocks' motion
+  once, and are stored as bytes.
 - Deblocking runs macroblock by macroblock, as soon as the last macroblock
   that predicts from a block unfiltered has been decoded, instead of in a
   pass over the whole picture: the pixels are still in the data cache, which
@@ -98,9 +117,39 @@ nothing to output: it isn't reported as decoding progress either, and the
 call goes on with the rest of the access unit instead of returning a
 picture that isn't there.
 
+A residual block whose total_zeros would put a coefficient past a
+15-coefficient AC block is a decode error too; upstream wrote that
+coefficient into the next block. No valid stream has one, so only damaged
+streams decode differently.
+
 On the S3 at 240 MHz a 232 px picture decodes in about 21 ms at 600 kb/s and
 25 ms at 1000 (x264, no deblocking), with the code running from cache.
 `CONFIG_MUSE_VIDEO_DECODER_IRAM` puts the per-macroblock code and its tables
 in IRAM instead (the component's `linker.lf`, about 44 KB at -O2; -O3 would more than double
 it): on the S3 that comes out of the heap, which a board running Wi-Fi, BLE
 and the UI can't spare, so it's off by default.
+
+## Checking a change
+
+A change that claims to be bit-exact decodes a stream corpus to the same
+pictures as the decoder before it. `../tests/h264_corpus.py` makes a corpus
+with ffmpeg and libx264 (`gen`: 96 to 480 px, intra-only and I/P, 1 to 4
+references, deblocking on, off and offset, several slices, low and high QP,
+damaged copies), decodes it to one MD5 per picture with `../tests/h264_tool.c`
+(`hash`, optionally under ASan and UBSan or with extra `-D` flags) and
+compares two runs (`compare`):
+
+```sh
+mkdir -p ../h264-check/base && git archive BASE xplat/tinyh264/src | tar -x -C ../h264-check/base
+python3 xplat/tests/h264_corpus.py gen ../h264-check/corpus
+python3 xplat/tests/h264_corpus.py hash --src ../h264-check/base/xplat/tinyh264/src -o base.txt ../h264-check/corpus esp32/tests/vectors/h264
+python3 xplat/tests/h264_corpus.py hash --sanitize -o new.txt ../h264-check/corpus esp32/tests/vectors/h264
+python3 xplat/tests/h264_corpus.py compare base.txt new.txt
+```
+
+For a base from before the decoder moved to `xplat/`, its sources are in
+`esp32/components/tinyh264/src`: archive that path and pass
+`--src ../h264-check/base/esp32/components/tinyh264/src`.
+
+`hash --crop` and `ffmpeg` give lines to compare with ffmpeg's own decode of
+the undamaged streams.
