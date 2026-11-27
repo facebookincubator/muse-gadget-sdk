@@ -857,39 +857,158 @@ class WakeWordRunner(unittest.TestCase):
         jobs.append((cxx, cxx_flags + [*strict, *ww_inc, *et_system, *et_defs], WW / 'ww_runner_espnn.cpp'))
         pte = WW / 'models/hey_muse.pte'
         asm = tmp / 'hey_muse_pte.S'
-        asm.write_text((WW / 'hey_muse_pte.S.in').read_text()
-                       .replace('@HEY_MUSE_PTE_PATH@', str(pte))
-                       .replace('@HEY_MUSE_PTE_LEN@', str(pte.stat().st_size)))
+        asm_text = ((WW / 'hey_muse_pte.S.in').read_text()
+                    .replace('@HEY_MUSE_PTE_PATH@', str(pte))
+                    .replace('@HEY_MUSE_PTE_LEN@', str(pte.stat().st_size)))
+        if sys.platform == 'darwin':
+            # The firmware template is ELF. Mach-O C symbols have one extra
+            # leading underscore; keep its identical incbin bytes/alignment.
+            asm_text = asm_text.replace('.section .rodata.embedded, "a"', '.section __TEXT,__const')
+            asm_text = re.sub(r'\b(hey_muse_pte(?:_length)?|_binary_hey_muse_pte_(?:start|end))\b',
+                              r'_\1', asm_text)
+        asm.write_text(asm_text)
         jobs.append((cc, [], asm))
         harness = tmp / 'runner.c'
         harness.write_text(RUNNER_HARNESS)
+        redirect = tmp / 'count_allocations.h'
+        real_allocators = tmp / 'real_allocators.c'
+        if sys.platform == 'darwin':
+            # Apple ld has no --wrap. Read the system declarations first, then
+            # redirect allocation calls in every counted TU. Explicit std::
+            # aliases cover libc++'s using-declarations as well as C callers;
+            # assembly-name redeclarations alone miss std::malloc on Darwin.
+            redirect.write_text('''#pragma once
+#ifdef __cplusplus
+#include <cstdlib>
+extern "C" {
+#else
+#include <stdlib.h>
+#endif
+void *__wrap_malloc(size_t n);
+void *__wrap_calloc(size_t a, size_t b);
+void *__wrap_realloc(void *p, size_t n);
+void *__wrap_aligned_alloc(size_t a, size_t n);
+#ifdef __cplusplus
+}
+namespace std {
+using ::__wrap_malloc;
+using ::__wrap_calloc;
+using ::__wrap_realloc;
+using ::__wrap_aligned_alloc;
+}
+#endif
+#define malloc __wrap_malloc
+#define calloc __wrap_calloc
+#define realloc __wrap_realloc
+#define aligned_alloc __wrap_aligned_alloc
+''')
+            # Deliberately compiled WITHOUT the redirects: __real_* must call
+            # actual libc, not recurse through __wrap_* or reset the counter.
+            real_allocators.write_text('''#include <stdlib.h>
+void *__real_malloc(size_t n) { return malloc(n); }
+void *__real_calloc(size_t a, size_t b) { return calloc(a, b); }
+void *__real_realloc(void *p, size_t n) { return realloc(p, n); }
+void *__real_aligned_alloc(size_t a, size_t n) { return aligned_alloc(a, n); }
+''')
 
         def build(variant, extra, link_extra, harness_defs):
             out = tmp / variant
             out.mkdir()
 
+            counted = sys.platform == 'darwin' and '-DCOUNT_ALLOCS' in harness_defs
+
             def one(job):
                 tool, flags, src = job
                 obj = out / (hashlib.sha256(str(src).encode()).hexdigest()[:12] + '.o')
-                ran = subprocess.run([*tool, *extra, *flags, '-c', str(src), '-o', str(obj)],
+                allocation_flags = []
+                if counted and src.suffix != '.S' and src != real_allocators:
+                    allocation_flags = ['-include', str(redirect), '-fno-builtin-malloc',
+                                        '-fno-builtin-calloc', '-fno-builtin-realloc',
+                                        '-fno-builtin-aligned_alloc']
+                ran = subprocess.run([*tool, *extra, *flags, *allocation_flags, '-c', str(src), '-o', str(obj)],
                                      capture_output=True, text=True)
                 if ran.returncode:
                     raise AssertionError(f'{src}: {ran.stderr}')
                 return str(obj)
 
+            build_jobs = jobs + [(cc, ['-std=gnu11', *strict, *harness_defs,
+                                      '-I', str(WW / 'include')], harness)]
+            if counted:
+                build_jobs.append((cc, ['-std=gnu11', *strict], real_allocators))
             with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 2) as pool:
-                objs = list(pool.map(one, jobs + [(cc, ['-std=gnu11', *strict, *harness_defs,
-                                                         '-I', str(WW / 'include')], harness)]))
+                objs = list(pool.map(one, build_jobs))
             binary = out / 'runner'
             ran = subprocess.run([*cxx, *extra, *objs, *link_extra, '-lm', '-o', str(binary)],
                                  capture_output=True, text=True)
             if ran.returncode:
                 raise AssertionError(ran.stderr)
+            if counted:
+                # A zero-count runner is meaningful only if the redirects
+                # really catch C, std:: and ExecuTorch PAL allocations. Link a
+                # positive control to the SAME wrapper/PAL/real-libc objects.
+                # Keep the existing runner assertions and expected counts intact.
+                wrappers = tmp / 'allocation_wrappers.c'
+                wrappers.write_text('#include <stdlib.h>\n' +
+                                    RUNNER_HARNESS.split('#ifdef COUNT_ALLOCS', 1)[1].split('#endif', 1)[0])
+                probe_c = tmp / 'allocation_probe.c'
+                probe_c.write_text('''#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+void allocation_probe_c(void) {
+    unsigned char *p = malloc(16);
+    assert(p); memset(p, 0x5a, 16);
+    p = realloc(p, 32);
+    assert(p && p[0] == 0x5a); free(p);
+    p = calloc(16, 1);
+    assert(p && p[0] == 0); free(p);
+    p = aligned_alloc(16, 32);
+    assert(p && (uintptr_t)p % 16 == 0); free(p);
+}
+''')
+                probe_cpp = tmp / 'allocation_probe.cpp'
+                probe_cpp.write_text('''#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+extern "C" { void allocation_probe_c(void); void *et_pal_allocate(size_t);
+             void et_pal_free(void *); extern int g_counting, g_allocs; }
+int main() {
+    g_counting = 1;
+    allocation_probe_c(); assert(g_allocs == 4);
+    auto *p = static_cast<unsigned char *>(std::malloc(16));
+    assert(p); std::memset(p, 0x5a, 16);
+    p = static_cast<unsigned char *>(std::realloc(p, 32));
+    assert(p && p[0] == 0x5a); std::free(p);
+    p = static_cast<unsigned char *>(std::calloc(16, 1));
+    assert(p && p[0] == 0); std::free(p);
+    p = static_cast<unsigned char *>(std::aligned_alloc(16, 32));
+    assert(p && reinterpret_cast<uintptr_t>(p) % 16 == 0); std::free(p);
+    assert(g_allocs == 8);
+    p = static_cast<unsigned char *>(et_pal_allocate(16));
+    assert(p); et_pal_free(p); assert(g_allocs == 9);
+    g_counting = 0;
+}
+''')
+                probe_objs = [one((cc, ['-std=gnu11', *strict], src))
+                              for src in (wrappers, probe_c)]
+                probe_objs += [one((cxx, [*cxx_flags, *strict], probe_cpp)),
+                               one((cxx, cxx_flags + ['-w', *et_inc, *et_defs], WW / 'host/et_pal.cpp')),
+                               one((cc, ['-std=gnu11', *strict], real_allocators))]
+                probe = out / 'allocation_probe'
+                linked = subprocess.run([*cxx, *extra, *probe_objs, '-o', str(probe)],
+                                        capture_output=True, text=True)
+                if linked.returncode:
+                    raise AssertionError(linked.stderr)
+                checked = subprocess.run([str(probe)], capture_output=True, text=True, env=ENV)
+                if checked.returncode:
+                    raise AssertionError('Darwin allocation-counting positive control: ' + checked.stderr)
             return binary
 
         cls.binary = build('asan', SANITIZE, [], [])
-        cls.counting = build('plain', ['-O1'], ['-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,'
-                                                '--wrap=aligned_alloc'], ['-DCOUNT_ALLOCS'])
+        allocation_link = [] if sys.platform == 'darwin' else [
+            '-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=aligned_alloc']
+        cls.counting = build('plain', ['-O1'], allocation_link, ['-DCOUNT_ALLOCS'])
         cls.speech = tmp / 'speech.raw'
         cls.speech.write_bytes(synthetic_speech())
 
