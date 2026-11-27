@@ -686,7 +686,7 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdResetStorage(storage_t *pStorage)
+H264BSD_HOT void h264bsdResetStorage(storage_t *pStorage)
 {
 
 /* Variables */

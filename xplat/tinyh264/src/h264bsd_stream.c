@@ -91,7 +91,7 @@
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdIsByteAligned(strmData_t *pStrmData)
+H264BSD_HOT u32 h264bsdIsByteAligned(strmData_t *pStrmData)
 {
 
 /* Variables */

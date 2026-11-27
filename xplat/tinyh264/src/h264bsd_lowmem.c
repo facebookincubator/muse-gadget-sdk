@@ -113,7 +113,7 @@ void h264bsdLowMemBeginPicture(storage_t *s)
 
 /* The entry of macroblock currMbAddr, setting up the rows it skips to;
  * NULL when its row has left the ring (out of order). */
-mbStorage_t *h264bsdLowMemMb(storage_t *s, u32 currMbAddr)
+H264BSD_HOT mbStorage_t *h264bsdLowMemMb(storage_t *s, u32 currMbAddr)
 {
     u32 w = s->activeSps->picWidthInMbs, row = currMbAddr / w;
     if (row > s->lmTop)

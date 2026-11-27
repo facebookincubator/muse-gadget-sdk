@@ -70,14 +70,14 @@
     3. Module defines
 ------------------------------------------------------------------------------*/
 #ifdef H264DEC_OMXDL
-static const u32 chromaIndex[8] = { 256, 260, 288, 292, 320, 324, 352, 356 };
-static const u32 lumaIndex[16] = {   0,   4,  64,  68,
+static const u32 chromaIndex[8] H264BSD_HOT_DATA = { 256, 260, 288, 292, 320, 324, 352, 356 };
+static const u32 lumaIndex[16] H264BSD_HOT_DATA = {   0,   4,  64,  68,
                                      8,  12,  72,  76,
                                    128, 132, 192, 196,
                                    136, 140, 200, 204 };
 #endif
 /* mapping of dc coefficients array to luma blocks */
-static const u32 dcCoeffIndex[16] =
+static const u32 dcCoeffIndex[16] H264BSD_HOT_DATA =
     {0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15};
 
 /*------------------------------------------------------------------------------
@@ -133,7 +133,7 @@ static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
+H264BSD_HOT u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
     macroblockLayer_t *pMbLayer, mbStorage_t *pMb, u32 sliceType,
     u32 numRefIdxActive)
 {
@@ -272,7 +272,7 @@ u32 h264bsdDecodeMacroblockLayer(strmData_t *pStrmData,
 
 ------------------------------------------------------------------------------*/
 
-mbPartPredMode_e h264bsdMbPartPredMode(mbType_e mbType)
+H264BSD_HOT mbPartPredMode_e h264bsdMbPartPredMode(mbType_e mbType)
 {
 
 /* Variables */
@@ -300,7 +300,7 @@ mbPartPredMode_e h264bsdMbPartPredMode(mbType_e mbType)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdNumMbPart(mbType_e mbType)
+H264BSD_HOT u32 h264bsdNumMbPart(mbType_e mbType)
 {
 
 /* Variables */
@@ -336,7 +336,7 @@ u32 h264bsdNumMbPart(mbType_e mbType)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdNumSubMbPart(subMbType_e subMbType)
+H264BSD_HOT u32 h264bsdNumSubMbPart(subMbType_e subMbType)
 {
 
 /* Variables */
@@ -372,7 +372,7 @@ u32 h264bsdNumSubMbPart(subMbType_e subMbType)
 
 ------------------------------------------------------------------------------*/
 
-u32 DecodeMbPred(strmData_t *pStrmData, mbPred_t *pMbPred, mbType_e mbType,
+H264BSD_HOT u32 DecodeMbPred(strmData_t *pStrmData, mbPred_t *pMbPred, mbType_e mbType,
     u32 numRefIdxActive)
 {
 
@@ -460,7 +460,7 @@ u32 DecodeMbPred(strmData_t *pStrmData, mbPred_t *pMbPred, mbType_e mbType,
 
 ------------------------------------------------------------------------------*/
 
-u32 DecodeSubMbPred(strmData_t *pStrmData, subMbPred_t *pSubMbPred,
+H264BSD_HOT u32 DecodeSubMbPred(strmData_t *pStrmData, subMbPred_t *pSubMbPred,
     mbType_e mbType, u32 numRefIdxActive)
 {
 
@@ -527,7 +527,7 @@ u32 DecodeSubMbPred(strmData_t *pStrmData, subMbPred_t *pSubMbPred,
 
 ------------------------------------------------------------------------------*/
 
-u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
+H264BSD_HOT u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     mbStorage_t *pMb, mbType_e mbType, u32 codedBlockPattern)
 {
 
@@ -722,16 +722,16 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
  * per macroblock (NULL: not available) and the neighbour blocks inline: each entry the
  * neighbour block's index, 0x80 set when it is in the current macroblock (whose counts are
  * still in pTotalCoeff). The same nC (9.2.1). */
-static const u8 ncNbA[24] = {
+static const u8 ncNbA[24] H264BSD_HOT_DATA = {
     5, 0x80|0, 7, 0x80|2, 0x80|1, 0x80|4, 0x80|3, 0x80|6,
     13, 0x80|8, 15, 0x80|10, 0x80|9, 0x80|12, 0x80|11, 0x80|14,
     17, 0x80|16, 19, 0x80|18, 21, 0x80|20, 23, 0x80|22 };
-static const u8 ncNbB[24] = {
+static const u8 ncNbB[24] H264BSD_HOT_DATA = {
     10, 11, 0x80|0, 0x80|1, 14, 15, 0x80|4, 0x80|5,
     0x80|2, 0x80|3, 0x80|8, 0x80|9, 0x80|6, 0x80|7, 0x80|12, 0x80|13,
     18, 19, 0x80|16, 0x80|17, 22, 23, 0x80|20, 0x80|21 };
 
-static inline u32 NcFast(u32 blockIndex, const tcoeff_t *cur, const tcoeff_t *tcA, const tcoeff_t *tcB)
+H264BSD_HOT static inline u32 NcFast(u32 blockIndex, const tcoeff_t *cur, const tcoeff_t *tcA, const tcoeff_t *tcB)
 {
     u32 a = ncNbA[blockIndex], b = ncNbB[blockIndex];
     const tcoeff_t *pa = (a & 0x80) ? cur : tcA, *pb = (b & 0x80) ? cur : tcB;
@@ -745,7 +745,7 @@ static inline u32 NcFast(u32 blockIndex, const tcoeff_t *cur, const tcoeff_t *tc
     return 0;
 }
 
-u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
+H264BSD_HOT u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     mbStorage_t *pMb, mbType_e mbType, u32 codedBlockPattern)
 {
 
@@ -860,7 +860,7 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
 
 ------------------------------------------------------------------------------*/
 #ifdef H264DEC_OMXDL
-u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, u8 *pTotalCoeff)
+H264BSD_HOT u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, u8 *pTotalCoeff)
 {
 /*lint -e702 */
 /* Variables */
@@ -931,7 +931,7 @@ u32 DetermineNc(mbStorage_t *pMb, u32 blockIndex, u8 *pTotalCoeff)
 
 ------------------------------------------------------------------------------*/
 
-u32 CbpIntra16x16(mbType_e mbType)
+H264BSD_HOT u32 CbpIntra16x16(mbType_e mbType)
 {
 
 /* Variables */
@@ -969,7 +969,7 @@ u32 CbpIntra16x16(mbType_e mbType)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdPredModeIntra16x16(mbType_e mbType)
+H264BSD_HOT u32 h264bsdPredModeIntra16x16(mbType_e mbType)
 {
 
 /* Variables */
@@ -1018,9 +1018,9 @@ u32 h264bsdPredModeIntra16x16(mbType_e mbType)
 /* OPT: the luma blocks with coefficients as a mask (mbStorage_t nzMask, read by the
  * deblocking's boundary strengths): bit i for totalCoeff[i] != 0 */
 #ifdef H264DEC_OMXDL
-static inline u32 NzMask16(const u8 *tc)
+H264BSD_HOT static inline u32 NzMask16(const u8 *tc)
 #else
-static inline u32 NzMask16(const tcoeff_t *tc)
+H264BSD_HOT static inline u32 NzMask16(const tcoeff_t *tc)
 #endif
 {
     u32 m = 0, i;
@@ -1029,7 +1029,7 @@ static inline u32 NzMask16(const tcoeff_t *tc)
     return m;
 }
 
-u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
+H264BSD_HOT u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     image_t *currImage, dpbStorage_t *dpb, i32 *qpY, u32 mbNum,
     u32 constrainedIntraPredFlag, u8* data)
 {
@@ -1219,7 +1219,7 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
           inverse quantization and inverse transform.
 
 ------------------------------------------------------------------------------*/
-u32 ProcessChromaResidual(mbStorage_t *pMb, u8 *data, const u8 **pSrc )
+H264BSD_HOT u32 ProcessChromaResidual(mbStorage_t *pMb, u8 *data, const u8 **pSrc )
 {
     u32 i;
     u32 chromaQp;
@@ -1288,7 +1288,7 @@ u32 ProcessChromaResidual(mbStorage_t *pMb, u8 *data, const u8 **pSrc )
           inverse quantization and inverse transform.
 
 ------------------------------------------------------------------------------*/
-u32 ProcessIntra16x16Residual(mbStorage_t *pMb,
+H264BSD_HOT u32 ProcessIntra16x16Residual(mbStorage_t *pMb,
                               u8 *data,
                               u32 constrainedIntraPred,
                               u32 intraChromaPredMode,
@@ -1356,7 +1356,7 @@ u32 ProcessIntra16x16Residual(mbStorage_t *pMb,
           inverse quantization and inverse transform.
 
 ------------------------------------------------------------------------------*/
-u32 ProcessIntra4x4Residual(mbStorage_t *pMb,
+H264BSD_HOT u32 ProcessIntra4x4Residual(mbStorage_t *pMb,
                             u8 *data,
                             u32 constrainedIntraPred,
                             macroblockLayer_t *mbLayer,
@@ -1414,7 +1414,7 @@ u32 ProcessIntra4x4Residual(mbStorage_t *pMb,
 
 ------------------------------------------------------------------------------*/
 
-u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap)
+H264BSD_HOT u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap)
 {
 
 /* Variables */
@@ -1503,7 +1503,7 @@ u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap)
  * non-zero), no empty marks: their mask goes to h264bsdAddResidualMb, which
  * adds just those to the prediction already in the picture. The same
  * transforms and errors as ProcessResidual's inter case. */
-static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap, u32 *pMask)
+H264BSD_HOT static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap, u32 *pMask)
 {
     u32 m = pMb->nzMask, mask = m, qp = pMb->qpY, chromaQp, i;   /* the luma blocks with coefficients */
     i32 *chromaDc;
@@ -1545,7 +1545,7 @@ static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *
 
 ------------------------------------------------------------------------------*/
 
-subMbPartMode_e h264bsdSubMbPartMode(subMbType_e subMbType)
+H264BSD_HOT subMbPartMode_e h264bsdSubMbPartMode(subMbType_e subMbType)
 {
 
 /* Variables */

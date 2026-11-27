@@ -56,11 +56,11 @@
 
 /* Mapping tables for coded_block_pattern, used for decoding of mapped
  * Exp-Golomb codes */
-static const u8 codedBlockPatternIntra4x4[48] = {
+static const u8 codedBlockPatternIntra4x4[48] H264BSD_HOT_DATA = {
     47,31,15,0,23,27,29,30,7,11,13,14,39,43,45,46,16,3,5,10,12,19,21,26,28,35,
     37,42,44,1,2,4,8,17,18,20,24,6,9,22,25,32,33,34,36,40,38,41};
 
-static const u8 codedBlockPatternInter[48] = {
+static const u8 codedBlockPatternInter[48] H264BSD_HOT_DATA = {
     0,16,1,2,4,8,32,3,5,10,12,15,47,7,11,13,14,6,9,31,35,37,42,44,33,34,36,40,
     39,43,45,46,17,18,20,24,19,21,26,28,23,27,29,30,22,25,38,41};
 
@@ -102,7 +102,7 @@ static const u8 codedBlockPatternInter[48] = {
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
+H264BSD_HOT u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
 {
 
 /* Variables */
@@ -245,7 +245,7 @@ u32 h264bsdDecodeExpGolombUnsigned(strmData_t *pStrmData, u32 *codeNum)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeExpGolombSigned(strmData_t *pStrmData, i32 *value)
+H264BSD_HOT u32 h264bsdDecodeExpGolombSigned(strmData_t *pStrmData, i32 *value)
 {
 
 /* Variables */
@@ -315,7 +315,7 @@ u32 h264bsdDecodeExpGolombSigned(strmData_t *pStrmData, i32 *value)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeExpGolombMapped(strmData_t *pStrmData, u32 *value,
+H264BSD_HOT u32 h264bsdDecodeExpGolombMapped(strmData_t *pStrmData, u32 *value,
     u32 isIntra)
 {
 
@@ -378,7 +378,7 @@ u32 h264bsdDecodeExpGolombMapped(strmData_t *pStrmData, u32 *value,
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeExpGolombTruncated(
+H264BSD_HOT u32 h264bsdDecodeExpGolombTruncated(
   strmData_t *pStrmData,
   u32 *value,
   u32 greaterThanOne)

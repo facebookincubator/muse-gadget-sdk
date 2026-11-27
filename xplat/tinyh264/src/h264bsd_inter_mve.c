@@ -122,7 +122,7 @@ MVE_AI v16 vcol(const u8 *s, u32 st, mve_pred16_t m, int F)
 /* ---- luma: g points at the integer sample G of the block's first pixel ------------------ */
 
 /* G: the block itself */
-static void McCopy(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h)
+H264BSD_HOT static void McCopy(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h)
 {
     u32 y;
 
@@ -152,7 +152,7 @@ MVE_AI void McHorChunk(const u8 *s, u32 st, u8 *o, u32 os, u32 h, u32 avg, mve_p
     }
 }
 
-static void McHor(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 avg)
+H264BSD_HOT static void McHor(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 avg)
 {
 #define CALL(F) McHorChunk(g + x - 2, st, mb + x, os, h, avg, m, F)
     CHUNKS(w, CALL)
@@ -172,7 +172,7 @@ MVE_AI void McVerChunk(const u8 *s, u32 st, u8 *o, u32 os, u32 h, u32 avg, mve_p
     }
 }
 
-static void McVer(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 avg)
+H264BSD_HOT static void McVer(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 avg)
 {
 #define CALL(F) McVerChunk(g + x - 2 * st, st, mb + x, os, h, avg, m, F)
     CHUNKS(w, CALL)
@@ -187,7 +187,7 @@ MVE_AI void McHorVerChunk(const u8 *sh, const u8 *sv, u32 st, u8 *o, u32 os, u32
         stu(o, vrhaddq_u16(rnd5(hrow(sh, m, F)), rnd5(vcol(sv, st, m, F))), m, F);
 }
 
-static void McHorVer(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 roff, u32 coff)
+H264BSD_HOT static void McHorVer(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 roff, u32 coff)
 {
 #define CALL(F) McHorVerChunk(g + x - 2 + roff * st, g + x + coff - 2 * st, st, mb + x, os, h, m, F)
     CHUNKS(w, CALL)
@@ -223,7 +223,7 @@ MVE_AI void McMidChunk(const u8 *s, const u8 *sv, u32 st, u8 *o, u32 os, u32 h, 
     }
 }
 
-static void McMid(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 mode)
+H264BSD_HOT static void McMid(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 mode)
 {
     v16 hb[21];
 
@@ -232,7 +232,7 @@ static void McMid(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 mode)
 #undef CALL
 }
 
-static void McLuma(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 xf, u32 yf)
+H264BSD_HOT static void McLuma(const u8 *g, u32 st, u8 *mb, u32 os, u32 w, u32 h, u32 xf, u32 yf)
 {
     switch (xf | yf << 2) {
     case 0: McCopy(g, st, mb, os, w, h); break;
@@ -300,7 +300,7 @@ MVE_AI void McChromaW(const u8 *cb, const u8 *cr, u32 st, u8 *ocb, u8 *ocr, u32 
     }
 }
 
-static void McChroma(const u8 *cb, const u8 *cr, u32 st, u8 *ocb, u8 *ocr, u32 os, u32 w, u32 h, u32 xf, u32 yf)
+H264BSD_HOT static void McChroma(const u8 *cb, const u8 *cr, u32 st, u8 *ocb, u8 *ocr, u32 os, u32 w, u32 h, u32 xf, u32 yf)
 {
     mve_pred16_t m = vctp16q(w);
 
@@ -319,7 +319,7 @@ typedef struct {
     u32 ls, cs;
 } mcDst_t;
 
-static void PredictMve(const mcDst_t *dst, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX,
+H264BSD_HOT static void PredictMve(const mcDst_t *dst, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX,
                                    u32 partY, u32 partWidth, u32 partHeight)
 {
     /* luma: the window the taps read (2 left/up, 3 right/down where fractional) */
@@ -379,20 +379,20 @@ static i32 mcState = -1;
 
 static void McSelftest(void);
 
-static inline i32 McOk(void)
+H264BSD_HOT static inline i32 McOk(void)
 {
     if (__atomic_load_n(&mcState, __ATOMIC_ACQUIRE) == -1)
         McSelftest();
     return __atomic_load_n(&mcState, __ATOMIC_ACQUIRE) == 1;
 }
 
-static inline mcDst_t MbArray(u8 *data)
+H264BSD_HOT static inline mcDst_t MbArray(u8 *data)
 {
     mcDst_t d = {data, data + 256, data + 320, 16, 8};
     return d;
 }
 
-void h264bsdPredictSamples(u8 *data, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX, u32 partY,
+H264BSD_HOT void h264bsdPredictSamples(u8 *data, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX, u32 partY,
                                        u32 partWidth, u32 partHeight)
 {
     if (McOk()) {
@@ -406,7 +406,7 @@ void h264bsdPredictSamples(u8 *data, mv_t *mv, image_t *refPic, u32 xA, u32 yA, 
 /* The same, straight into the current picture's macroblock (image->luma / cb / cr, set by
  * h264bsdSetCurrImageMbPointers): h264bsdInterPrediction then adds the residual in place
  * (h264bsdAddResidualMb) instead of copying the macroblock array out. */
-void h264bsdPredictSamplesPic(image_t *image, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX,
+H264BSD_HOT void h264bsdPredictSamplesPic(image_t *image, mv_t *mv, image_t *refPic, u32 xA, u32 yA, u32 partX,
                                           u32 partY, u32 partWidth, u32 partHeight)
 {
     u32 w = image->width * 16;
@@ -432,7 +432,7 @@ void h264bsdPredictSamplesPic(image_t *image, mv_t *mv, image_t *refPic, u32 xA,
 }
 
 /* A 4x4 block's residual (-512 .. 511) added to the picture in place, clipped to 0..255 */
-static inline void AddBlock4(u8 *p, u32 st, const i32 *r)
+H264BSD_HOT static inline void AddBlock4(u8 *p, u32 st, const i32 *r)
 {
     const int32x4_t lo = vdupq_n_s32(0), hi = vdupq_n_s32(255);
 
@@ -446,7 +446,7 @@ static inline void AddBlock4(u8 *p, u32 st, const i32 *r)
 /* An inter macroblock's residual (ProcessResidual's 24 blocks: 16 luma, 4 Cb, 4 Cr; mask: the
  * ones with a residual, ProcessResidualInter's) added to its prediction, already in the
  * picture: what h264bsdWriteOutputBlocks does from the macroblock array. */
-void h264bsdAddResidualMb(image_t *image, i32 residual[][16], u32 mask)
+H264BSD_HOT void h264bsdAddResidualMb(image_t *image, i32 residual[][16], u32 mask)
 {
     extern const u32 h264bsdBlockX[], h264bsdBlockY[];
     u32 w = image->width * 16, m = mask & 0xFFFF;

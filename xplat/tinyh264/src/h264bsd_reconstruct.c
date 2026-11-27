@@ -74,6 +74,23 @@ static const u32 lumaFracPos[4][4] = {
     {0, 1, 2, 3}, {4, 5, 6, 7}, {8, 9, 10, 11}, {12, 13, 14, 15}};
 #endif /* H264DEC_OMXDL */
 
+/* OPT: with a backend that replaces them the C here is only its check and
+ * fallback, so it stays out of the hot section (H264BSD_HOT): the luma
+ * interpolation with Helium or the packed 4-lane ops (H264BSD_HOT_C), the
+ * prediction and chroma interpolation with Helium only (H264BSD_HOT_PRED:
+ * the packed ops leave 2-wide chroma to the C, and the prediction calls
+ * them). The edge fill all use stays in. */
+#if defined(H264BSD_MVE) || (defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC)
+#define H264BSD_HOT_C
+#else
+#define H264BSD_HOT_C H264BSD_HOT
+#endif
+#if defined(H264BSD_MVE)
+#define H264BSD_HOT_PRED
+#else
+#define H264BSD_HOT_PRED H264BSD_HOT
+#endif
+
 /* clipping table, defined in h264bsd_intra_prediction.c */
 extern const u8 h264bsdClip[];
 
@@ -256,7 +273,7 @@ void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows
 static i32 pieState = -1;
 static PIE_TLS u8 pieTesting;
 static void PieSelftest(void);
-static inline i32 PieOk(void)
+H264BSD_HOT_C static inline i32 PieOk(void)
 {
     if (__atomic_load_n(&pieState, __ATOMIC_ACQUIRE) == -1)
         PieSelftest();
@@ -265,7 +282,7 @@ static inline i32 PieOk(void)
 #endif
 
 #if !defined(H264BSD_MVE)   /* else h264bsd_inter_mve.c's */
-i32 h264bsdPieState(void)
+H264BSD_HOT_C i32 h264bsdPieState(void)
 {
 #ifdef TINYH264_PIE
     return __atomic_load_n(&pieState, __ATOMIC_ACQUIRE);
@@ -304,7 +321,7 @@ i32 h264bsdPieState(void)
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_ARM11
-void h264bsdInterpolateChromaHor(
+H264BSD_HOT_PRED void h264bsdInterpolateChromaHor(
   u8 *pRef,
   u8 *predPartChroma,
   i32 x0,
@@ -415,7 +432,7 @@ void h264bsdInterpolateChromaHor(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateChromaVer(
+H264BSD_HOT_PRED void h264bsdInterpolateChromaVer(
   u8 *pRef,
   u8 *predPartChroma,
   i32 x0,
@@ -526,7 +543,7 @@ void h264bsdInterpolateChromaVer(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateChromaHorVer(
+H264BSD_HOT_PRED void h264bsdInterpolateChromaHorVer(
   u8 *ref,
   u8 *predPartChroma,
   i32 x0,
@@ -661,7 +678,7 @@ void h264bsdInterpolateChromaHorVer(
 
 ------------------------------------------------------------------------------*/
 
-static void PredictChroma(
+H264BSD_HOT_PRED static void PredictChroma(
   u8 *mbPartChroma,
   u32 xAL,
   u32 yAL,
@@ -748,7 +765,7 @@ static void PredictChroma(
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_ARM11
-void h264bsdInterpolateVerHalf(
+H264BSD_HOT_C void h264bsdInterpolateVerHalf(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -867,7 +884,7 @@ void h264bsdInterpolateVerHalf(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateVerQuarter(
+H264BSD_HOT_C void h264bsdInterpolateVerQuarter(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1002,7 +1019,7 @@ void h264bsdInterpolateVerQuarter(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateHorHalf(
+H264BSD_HOT_C void h264bsdInterpolateHorHalf(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1126,7 +1143,7 @@ void h264bsdInterpolateHorHalf(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateHorQuarter(
+H264BSD_HOT_C void h264bsdInterpolateHorQuarter(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1265,7 +1282,7 @@ void h264bsdInterpolateHorQuarter(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateHorVerQuarter(
+H264BSD_HOT_C void h264bsdInterpolateHorVerQuarter(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1472,7 +1489,7 @@ void h264bsdInterpolateHorVerQuarter(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateMidHalf(
+H264BSD_HOT_C void h264bsdInterpolateMidHalf(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1658,7 +1675,7 @@ void h264bsdInterpolateMidHalf(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateMidVerQuarter(
+H264BSD_HOT_C void h264bsdInterpolateMidVerQuarter(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -1862,7 +1879,7 @@ void h264bsdInterpolateMidVerQuarter(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInterpolateMidHorQuarter(
+H264BSD_HOT_C void h264bsdInterpolateMidHorQuarter(
   u8 *ref,
   u8 *mb,
   i32 x0,
@@ -2099,7 +2116,7 @@ void h264bsdInterpolateMidHorQuarter(
 void h264bsdPredictSamplesC(u8 *data, mv_t *mv, image_t *refPic, u32 xA, u32 yA,
     u32 partX, u32 partY, u32 partWidth, u32 partHeight);
 #endif
-void h264bsdPredictSamples(
+H264BSD_HOT_PRED void h264bsdPredictSamples(
   u8 *data,
   mv_t *mv,
   image_t *refPic,
@@ -2263,7 +2280,7 @@ void h264bsdPredictSamples(
 ------------------------------------------------------------------------------*/
 
 /*lint -e{550} Symbol 'res' not accessed */
-void h264bsdPredictSamples(
+H264BSD_HOT_PRED void h264bsdPredictSamples(
   u8 *data,
   mv_t *mv,
   image_t *refPic,
@@ -2427,7 +2444,7 @@ void h264bsdPredictSamples(
 
 ------------------------------------------------------------------------------*/
 
-static void FillRow1(
+H264BSD_HOT static void FillRow1(
   u8 *ref,
   u8 *fill,
   i32 left,
@@ -2486,7 +2503,7 @@ static void FillRow1(
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_NEON
-void h264bsdFillRow7(
+H264BSD_HOT void h264bsdFillRow7(
   u8 *ref,
   u8 *fill,
   i32 left,
@@ -2538,7 +2555,7 @@ void h264bsdFillRow7(
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdFillBlock(
+H264BSD_HOT void h264bsdFillBlock(
   u8 *ref,
   u8 *fill,
   i32 x0,

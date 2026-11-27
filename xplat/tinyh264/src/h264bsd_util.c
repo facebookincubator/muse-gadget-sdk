@@ -50,7 +50,7 @@
 static const u32 stuffingTable[8] = {0x1,0x2,0x4,0x8,0x10,0x20,0x40,0x80};
 
 /* look-up table for chroma quantization parameter as a function of luma QP */
-const u32 h264bsdQpC[52] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,
+const u32 h264bsdQpC[52] H264BSD_HOT_DATA = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,
     20,21,22,23,24,25,26,27,28,29,29,30,31,32,32,33,34,34,35,35,36,36,37,37,37,
     38,38,38,39,39,39,39};
 
@@ -78,7 +78,7 @@ const u32 h264bsdQpC[52] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_NEON
-u32 h264bsdCountLeadingZeros(u32 value, u32 length)
+H264BSD_HOT u32 h264bsdCountLeadingZeros(u32 value, u32 length)
 {
 
 /* Variables */
@@ -121,7 +121,7 @@ u32 h264bsdCountLeadingZeros(u32 value, u32 length)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdRbspTrailingBits(strmData_t *pStrmData)
+H264BSD_HOT u32 h264bsdRbspTrailingBits(strmData_t *pStrmData)
 {
 
 /* Variables */
@@ -169,7 +169,7 @@ u32 h264bsdRbspTrailingBits(strmData_t *pStrmData)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdMoreRbspData(strmData_t *pStrmData)
+H264BSD_HOT u32 h264bsdMoreRbspData(strmData_t *pStrmData)
 {
 
 /* Variables */
@@ -216,7 +216,7 @@ u32 h264bsdMoreRbspData(strmData_t *pStrmData)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdNextMbAddress(u32 *pSliceGroupMap, u32 picSizeInMbs, u32 currMbAddr)
+H264BSD_HOT u32 h264bsdNextMbAddress(u32 *pSliceGroupMap, u32 picSizeInMbs, u32 currMbAddr)
 {
 
 /* Variables */
@@ -262,7 +262,7 @@ u32 h264bsdNextMbAddress(u32 *pSliceGroupMap, u32 picSizeInMbs, u32 currMbAddr)
         Returns:
             none
 ------------------------------------------------------------------------------*/
-void h264bsdSetCurrImageMbPointers(image_t *image, u32 mbNum)
+H264BSD_HOT void h264bsdSetCurrImageMbPointers(image_t *image, u32 mbNum)
 {
     u32 width, height;
     u32 picSize;

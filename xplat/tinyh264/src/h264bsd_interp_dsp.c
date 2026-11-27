@@ -164,7 +164,7 @@ static inline u32 six(u32 t0, u32 t1, u32 t2, u32 t3, u32 t4, u32 t5, u32 kb, u3
         } \
     } while (0)
 
-void h264bsdDspHor(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
+H264BSD_HOT void h264bsdDspHor(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
 {
     u32 kb = KREG(0x0a300a30u), k81 = KREG(0x00510051u);
     if (off < 0) {
@@ -205,7 +205,7 @@ void h264bsdDspHor(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
         } \
     } while (0)
 
-void h264bsdDspVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
+H264BSD_HOT void h264bsdDspVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
 {
     u32 kb = KREG(0x0a300a30u), k81 = KREG(0x00510051u);
     for (u32 x = 0; x < w; x += 4) {
@@ -223,7 +223,7 @@ void h264bsdDspVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off)
  * right. rows == h: wc and wd are 0 and the row below isn't read (it may be
  * past the block); wb and wd 0 (vertical only): B and D are A and C, so the
  * column right of the block isn't read either. */
-void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows,
+H264BSD_HOT void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows,
                       u32 wa, u32 wb, u32 wc, u32 wd)
 {
     u32 k32 = KREG(0x00200020u);

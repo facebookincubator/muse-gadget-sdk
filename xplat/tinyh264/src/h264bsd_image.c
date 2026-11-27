@@ -81,7 +81,7 @@ extern const u8 h264bsdClip[];
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_NEON
-void h264bsdWriteMacroblock(image_t *image, u8 *data)
+H264BSD_HOT void h264bsdWriteMacroblock(image_t *image, u8 *data)
 {
 
 /* Variables */
@@ -188,7 +188,7 @@ void h264bsdWriteMacroblock(image_t *image, u8 *data)
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdWriteOutputBlocks(image_t *image, u32 mbNum, u8 *data,
+H264BSD_HOT void h264bsdWriteOutputBlocks(image_t *image, u32 mbNum, u8 *data,
         i32 residual[][16])
 {
 

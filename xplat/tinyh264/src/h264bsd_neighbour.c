@@ -62,7 +62,7 @@
  */
 
 /* left neighbour for each block */
-static const neighbour_t N_A_4x4B[24] = {
+static const neighbour_t N_A_4x4B[24] H264BSD_HOT_DATA = {
     {MB_A,5},    {MB_CURR,0}, {MB_A,7},    {MB_CURR,2},
     {MB_CURR,1}, {MB_CURR,4}, {MB_CURR,3}, {MB_CURR,6},
     {MB_A,13},   {MB_CURR,8}, {MB_A,15},   {MB_CURR,10},
@@ -71,7 +71,7 @@ static const neighbour_t N_A_4x4B[24] = {
     {MB_A,21},   {MB_CURR,20},{MB_A,23},   {MB_CURR,22} };
 
 /* above neighbour for each block */
-static const neighbour_t N_B_4x4B[24] = {
+static const neighbour_t N_B_4x4B[24] H264BSD_HOT_DATA = {
     {MB_B,10},   {MB_B,11},   {MB_CURR,0}, {MB_CURR,1},
     {MB_B,14},   {MB_B,15},   {MB_CURR,4}, {MB_CURR,5},
     {MB_CURR,2}, {MB_CURR,3}, {MB_CURR,8}, {MB_CURR,9},
@@ -80,7 +80,7 @@ static const neighbour_t N_B_4x4B[24] = {
     {MB_B,22},   {MB_B,23},   {MB_CURR,20},{MB_CURR,21} };
 
 /* above-right neighbour for each block */
-static const neighbour_t N_C_4x4B[24] = {
+static const neighbour_t N_C_4x4B[24] H264BSD_HOT_DATA = {
     {MB_B,11},   {MB_B,14},   {MB_CURR,1}, {MB_NA,4},
     {MB_B,15},   {MB_C,10},   {MB_CURR,5}, {MB_NA,0},
     {MB_CURR,3}, {MB_CURR,6}, {MB_CURR,9}, {MB_NA,12},
@@ -89,7 +89,7 @@ static const neighbour_t N_C_4x4B[24] = {
     {MB_B,23},   {MB_C,22},   {MB_CURR,21},{MB_NA,20} };
 
 /* above-left neighbour for each block */
-static const neighbour_t N_D_4x4B[24] = {
+static const neighbour_t N_D_4x4B[24] H264BSD_HOT_DATA = {
     {MB_D,15},   {MB_B,10},   {MB_A,5},    {MB_CURR,0},
     {MB_B,11},   {MB_B,14},   {MB_CURR,1}, {MB_CURR,4},
     {MB_A,7},    {MB_CURR,2}, {MB_A,13},   {MB_CURR,8},
@@ -125,7 +125,7 @@ static const neighbour_t N_D_4x4B[24] = {
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdInitMbNeighbours(mbStorage_t *pMbStorage, u32 picWidth,
+H264BSD_COLD_FN void h264bsdInitMbNeighbours(mbStorage_t *pMbStorage, u32 picWidth,
     u32 picSizeInMbs)
 {
 
@@ -196,7 +196,7 @@ void h264bsdInitMbNeighbours(mbStorage_t *pMbStorage, u32 picWidth,
 
 ------------------------------------------------------------------------------*/
 
-mbStorage_t* h264bsdGetNeighbourMb(mbStorage_t *pMb, neighbourMb_e neighbour)
+H264BSD_HOT mbStorage_t* h264bsdGetNeighbourMb(mbStorage_t *pMb, neighbourMb_e neighbour)
 {
 
 /* Variables */
@@ -239,7 +239,7 @@ mbStorage_t* h264bsdGetNeighbourMb(mbStorage_t *pMb, neighbourMb_e neighbour)
 
 ------------------------------------------------------------------------------*/
 
-const neighbour_t* h264bsdNeighbour4x4BlockA(u32 blockIndex)
+H264BSD_HOT const neighbour_t* h264bsdNeighbour4x4BlockA(u32 blockIndex)
 {
 
 /* Variables */
@@ -270,7 +270,7 @@ const neighbour_t* h264bsdNeighbour4x4BlockA(u32 blockIndex)
 
 ------------------------------------------------------------------------------*/
 
-const neighbour_t* h264bsdNeighbour4x4BlockB(u32 blockIndex)
+H264BSD_HOT const neighbour_t* h264bsdNeighbour4x4BlockB(u32 blockIndex)
 {
 
 /* Variables */
@@ -301,7 +301,7 @@ const neighbour_t* h264bsdNeighbour4x4BlockB(u32 blockIndex)
 
 ------------------------------------------------------------------------------*/
 
-const neighbour_t* h264bsdNeighbour4x4BlockC(u32 blockIndex)
+H264BSD_HOT const neighbour_t* h264bsdNeighbour4x4BlockC(u32 blockIndex)
 {
 
 /* Variables */
@@ -332,7 +332,7 @@ const neighbour_t* h264bsdNeighbour4x4BlockC(u32 blockIndex)
 
 ------------------------------------------------------------------------------*/
 
-const neighbour_t* h264bsdNeighbour4x4BlockD(u32 blockIndex)
+H264BSD_HOT const neighbour_t* h264bsdNeighbour4x4BlockD(u32 blockIndex)
 {
 
 /* Variables */
@@ -367,7 +367,7 @@ const neighbour_t* h264bsdNeighbour4x4BlockD(u32 blockIndex)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdIsNeighbourAvailable(mbStorage_t *pMb, mbStorage_t *pNeighbour)
+H264BSD_HOT u32 h264bsdIsNeighbourAvailable(mbStorage_t *pMb, mbStorage_t *pNeighbour)
 {
 
 /* Variables */

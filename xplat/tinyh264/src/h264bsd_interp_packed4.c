@@ -222,7 +222,7 @@ AI void ver_core(const u8 *src, u32 stride, u8 *dst, u32 pw, u32 ph, const int o
 
 /* The block's top-left in the picture, or in an edge-filled copy (stride a
  * multiple of 4) when it reaches past an edge. */
-static const u8 *block(u8 *ref, i32 x0, i32 y0, u32 width, u32 height, u32 bw, u32 bh, u32 *fill, u32 *stride)
+H264BSD_HOT static const u8 *block(u8 *ref, i32 x0, i32 y0, u32 width, u32 height, u32 bw, u32 bh, u32 *fill, u32 *stride)
 {
     if (x0 < 0 || (u32)x0 + bw > width || y0 < 0 || (u32)y0 + bh > height) {
         u32 s = (bw + 3) & ~3u;
@@ -237,7 +237,7 @@ static const u8 *block(u8 *ref, i32 x0, i32 y0, u32 width, u32 height, u32 bw, u
 /* an edge-filled luma block: 21 rows of 24, and a word of slack per row read */
 #define FILL_WORDS (21 * 24 / 4 + 4)
 
-void h264bsdInterpolateVerHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateVerHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                u32 partHeight)
 {
     u32 fill[FILL_WORDS], st;
@@ -245,7 +245,7 @@ void h264bsdInterpolateVerHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 h
     VER(s, st, mb, partWidth, partHeight, 0, 0);
 }
 
-void h264bsdInterpolateVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                   u32 partHeight, u32 verOffset)
 {
     u32 fill[FILL_WORDS], st;
@@ -256,7 +256,7 @@ void h264bsdInterpolateVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u3
         VER(s, st, mb, partWidth, partHeight, 2, 0);
 }
 
-void h264bsdInterpolateHorHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateHorHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                u32 partHeight)
 {
     u32 fill[FILL_WORDS], st;
@@ -264,7 +264,7 @@ void h264bsdInterpolateHorHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 h
     HOR(s, st, mb, partWidth, partHeight, 0, 0);
 }
 
-void h264bsdInterpolateHorQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateHorQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                   u32 partHeight, u32 horOffset)
 {
     u32 fill[FILL_WORDS], st;
@@ -275,7 +275,7 @@ void h264bsdInterpolateHorQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u3
         HOR(s, st, mb, partWidth, partHeight, 2, 0);
 }
 
-void h264bsdInterpolateHorVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateHorVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                      u32 partHeight, u32 horVerOffset)
 {
     u32 fill[FILL_WORDS], st;
@@ -357,7 +357,7 @@ AI void mid_core(const u8 *src, u32 stride, u8 *dst, u32 pw, u32 ph, const int o
     default: mid_core(s_, stride, dst, pw, ph, 3, acc); break; \
     } } while (0)
 
-void h264bsdInterpolateMidHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateMidHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                u32 partHeight)
 {
     u32 fill[FILL_WORDS], st;
@@ -365,7 +365,7 @@ void h264bsdInterpolateMidHalf(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 h
     MID(s, st, mb, partWidth, partHeight, 0);
 }
 
-void h264bsdInterpolateMidVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateMidVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                      u32 partHeight, u32 verOffset)
 {
     u32 fill[FILL_WORDS], st;
@@ -374,7 +374,7 @@ void h264bsdInterpolateMidVerQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width,
     MID(s, st, mb, partWidth, partHeight, 1);
 }
 
-void h264bsdInterpolateMidHorQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
+H264BSD_HOT void h264bsdInterpolateMidHorQuarter(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                      u32 partHeight, u32 horOffset)
 {
     u32 fill[FILL_WORDS], st;
@@ -416,7 +416,7 @@ AI void chroma_core(const u8 *src, u32 stride, u8 *dst, u32 cw, u32 ch, u32 cA, 
     }
 }
 
-static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height, P4_CR u32 xFrac, u32 yFrac,
+H264BSD_HOT static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height, P4_CR u32 xFrac, u32 yFrac,
                        u32 cw, u32 ch)
 {
     u32 cA = (8 - xFrac) * (8 - yFrac) * 0x01010101u, cB = xFrac * (8 - yFrac) * 0x01010101u;
@@ -444,7 +444,7 @@ static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height,
     }
 }
 
-void h264bsdInterpolateChromaHor(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
+H264BSD_HOT void h264bsdInterpolateChromaHor(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
                                  P4_CR u32 xFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {
@@ -455,7 +455,7 @@ void h264bsdInterpolateChromaHor(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u
     chroma_any(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) xFrac, 0, chromaPartWidth, chromaPartHeight);
 }
 
-void h264bsdInterpolateChromaVer(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
+H264BSD_HOT void h264bsdInterpolateChromaVer(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
                                  P4_CR u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {
@@ -466,7 +466,7 @@ void h264bsdInterpolateChromaVer(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u
     chroma_any(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) 0, yFrac, chromaPartWidth, chromaPartHeight);
 }
 
-void h264bsdInterpolateChromaHorVer(u8 *ref, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
+H264BSD_HOT void h264bsdInterpolateChromaHorVer(u8 *ref, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
                                     P4_CR u32 xFrac, u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {

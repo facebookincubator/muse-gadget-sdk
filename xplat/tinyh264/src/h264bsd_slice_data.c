@@ -108,7 +108,7 @@ static void SetMbParams(mbStorage_t *pMb, sliceHeader_t *pSlice, u32 sliceId,
  * macroblock's inner edges. Anything else (intra, I_PCM, a vector, a
  * residual sample, another reference) leaves its bit 0: changed. Called
  * after h264bsdDecodeMacroblock (the residual still in pStorage->mbLayer). */
-static void ChmMb(storage_t *s, const mbStorage_t *mb, u32 addr)
+H264BSD_HOT static void ChmMb(storage_t *s, const mbStorage_t *mb, u32 addr)
 {
     u32 i, j;
     if (mb->mbType > P_8x8ref0)
@@ -150,7 +150,7 @@ static void ChmMb(storage_t *s, const mbStorage_t *mb, u32 addr)
 }
 #endif
 
-u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
+H264BSD_HOT u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
     image_t *currImage, sliceHeader_t *pSliceHeader)
 {
 
@@ -415,7 +415,7 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
 
 ------------------------------------------------------------------------------*/
 
-void SetMbParams(mbStorage_t *pMb, sliceHeader_t *pSlice, u32 sliceId,
+H264BSD_HOT void SetMbParams(mbStorage_t *pMb, sliceHeader_t *pSlice, u32 sliceId,
     i32 chromaQpIndexOffset)
 {
 
@@ -459,7 +459,7 @@ void SetMbParams(mbStorage_t *pMb, sliceHeader_t *pSlice, u32 sliceId,
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdMarkSliceCorrupted(storage_t *pStorage, u32 firstMbInSlice)
+H264BSD_COLD_FN void h264bsdMarkSliceCorrupted(storage_t *pStorage, u32 firstMbInSlice)
 {
 
 /* Variables */

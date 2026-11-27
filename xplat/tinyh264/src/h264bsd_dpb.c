@@ -626,7 +626,7 @@ static u32 Mmcop6(dpbStorage_t *dpb, u32 frameNum, i32 picOrderCnt,
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdMarkDecRefPic(
+H264BSD_COLD_FN2 u32 h264bsdMarkDecRefPic(
   dpbStorage_t *dpb,
   decRefPicMarking_t *mark,
   image_t *image,
@@ -844,7 +844,7 @@ u32 h264bsdMarkDecRefPic(
 
 ------------------------------------------------------------------------------*/
 
-u8* h264bsdGetRefPicData(dpbStorage_t *dpb, u32 index)
+H264BSD_HOT u8* h264bsdGetRefPicData(dpbStorage_t *dpb, u32 index)
 {
 
 /* Variables */
@@ -907,7 +907,7 @@ u8* h264bsdAllocateDpbImage(dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-static u32 SlidingWindowRefPicMarking(dpbStorage_t *dpb)
+H264BSD_COLD_FN2 static u32 SlidingWindowRefPicMarking(dpbStorage_t *dpb)
 {
 
 /* Variables */
@@ -978,7 +978,7 @@ static u32 SlidingWindowRefPicMarking(dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdInitDpb(
+H264BSD_COLD_FN2 u32 h264bsdInitDpb(
   dpbStorage_t *dpb,
   u32 picSizeInMbs,
   u32 dpbSize,
@@ -1466,7 +1466,7 @@ dpbPicture_t* FindSmallestPicOrderCnt(dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 OutputPicture(dpbStorage_t *dpb)
+H264BSD_COLD_FN2 u32 OutputPicture(dpbStorage_t *dpb)
 {
 
 /* Variables */

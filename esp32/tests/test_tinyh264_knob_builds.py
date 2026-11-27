@@ -15,13 +15,17 @@
 """tinyh264's portable optimization knobs on the host: the decoder built with
 each one decodes the repository's H.264 vectors (tests/vectors/h264) to the
 same pictures, picture for picture, as the decoder without it
-(xplat/tests/h264_corpus.py). TINYH264_PACKED4_MC runs its kernels on the
-plain-C model of the packed operations; TINYH264_DSP_MC runs its kernels on the
+(xplat/tests/h264_corpus.py). TINYH264_XPULP runs on rv_xpulp.h's plain-C
+twins. TINYH264_PACKED4_MC runs its kernels on the plain-C model of the packed
+operations; TINYH264_DSP_MC runs its kernels on the
 DSP instructions' plain-C stand-ins, and its first-use check against the C must
-pass (a mismatch aborts here instead of falling back to the C). The knobs for
-other platforms (xplat/tinyh264/README.md) are built in here as a port builds
-them, their modes not asked for (tests/test_tinyh264_knobs.py runs those),
-but for H264BSD_LEAN_VUI, which is on once built in. Every build runs under
+pass (a mismatch aborts here instead of falling back to the C).
+H264BSD_COLD_LEVEL=2 and the hot sections (H264BSD_HOT_SECTION,
+H264BSD_HOT_DATA_SECTION) build together, as a port would set them (the cold
+attribute is GCC's: under clang that build compiles them without it). The memory and
+API switches (xplat/tinyh264/README.md) are built in here all together, their
+modes not asked for; tests/test_tinyh264_knobs.py builds each one on its own
+and runs the modes. Every build runs under
 ASan and UBSan where the compiler's runtime works (the damaged vectors reach
 the backends' edge paths); where it doesn't, the pictures are still compared
 and the sanitizer subtest skips, saying why."""
@@ -49,10 +53,13 @@ KNOBS = {
     "dsp_mc": "-DTINYH264_DSP_MC=1 " + CHECKED,
     # Backend switches set to 0 are off (several at 0 are not several backends).
     "backends_0": "-DTINYH264_MVE=0 -DTINYH264_DSP_MC=0 -DTINYH264_PACKED4_MC=0",
-    "custom_alloc": "-DTINYH264_CUSTOM_ALLOC=1 -Dtinyh264_alloc=malloc -Dtinyh264_alloc_hot=malloc "
-                    "-Dtinyh264_free=free -include stdlib.h",
-    "pic_align64": "-DTINYH264_PIC_ALIGN=64",
-    "lean_vui": "-DH264BSD_LEAN_VUI=1",
+    # rv_xpulp.h's plain-C twins on the host
+    "xpulp": f"-DTINYH264_XPULP=1 -I{ROOT.parent / 'xplat/include'}",
+    # Mach-O section names are "segment,section"; ELF ones a single name.
+    "cold2_hot": "-DH264BSD_COLD_LEVEL=2 " + (
+        "'-DH264BSD_HOT_SECTION=\"__TEXT,__h264hot\"' '-DH264BSD_HOT_DATA_SECTION=\"__TEXT,__h264hotd\"'"
+        if sys.platform == "darwin" else
+        "'-DH264BSD_HOT_SECTION=\".text.h264hot\"' '-DH264BSD_HOT_DATA_SECTION=\".rodata.h264hot\"'"),
     "lowmem_strip_built_in": "-DH264BSD_LIMITS=1 -DH264BSD_BUFFER_GATE=1 -DH264BSD_LOWMEM=1 -DH264BSD_STRIP=1 "
                              "-DH264BSD_ONEREF=1 -DH264BSD_CHANGED_MAP=1",
 }

@@ -93,7 +93,7 @@ static u32 DecRefPicMarking(strmData_t *pStrmData,
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdDecodeSliceHeader(strmData_t *pStrmData, sliceHeader_t *pSliceHeader,
+H264BSD_COLD_FN2 u32 h264bsdDecodeSliceHeader(strmData_t *pStrmData, sliceHeader_t *pSliceHeader,
     seqParamSet_t *pSeqParamSet, picParamSet_t *pPicParamSet,
     nalUnit_t *pNalUnit)
 {
@@ -1048,7 +1048,7 @@ u32 h264bsdCheckPicOrderCntLsb(
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdCheckDeltaPicOrderCntBottom(
+H264BSD_COLD_FN2 u32 h264bsdCheckDeltaPicOrderCntBottom(
   strmData_t *pStrmData,
   seqParamSet_t *pSeqParamSet,
   nalUnitType_e nalUnitType,
@@ -1155,7 +1155,7 @@ u32 h264bsdCheckDeltaPicOrderCntBottom(
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdCheckDeltaPicOrderCnt(
+H264BSD_COLD_FN2 u32 h264bsdCheckDeltaPicOrderCnt(
   strmData_t *pStrmData,
   seqParamSet_t *pSeqParamSet,
   nalUnitType_e nalUnitType,

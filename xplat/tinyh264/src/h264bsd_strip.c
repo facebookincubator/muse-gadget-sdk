@@ -63,7 +63,7 @@
 static u32 ring_rows(const storage_t *s) { return s->stripMode + 2; }
 
 /* Re-point the picture at the ring for slot 0 = picture row stripBase. */
-static void rebase(storage_t *s)
+H264BSD_COLD_FN static void rebase(storage_t *s)
 {
     image_t *im = s->currImage;
     /* addresses before the ring: integers first, then pointers (see the top
@@ -78,7 +78,7 @@ static void rebase(storage_t *s)
 /* Neighbours of every ring entry, relative to its current slot. Slot 0 has
  * no row above in the ring; by the time a row reaches slot 0 neither its
  * decoding nor its filtering needs one. */
-static void neighbours(storage_t *s)
+H264BSD_COLD_FN static void neighbours(storage_t *s)
 {
     u32 w = s->currImage->width, rows = ring_rows(s), r, c;
     for (r = 0; r < rows; r++)
@@ -106,7 +106,7 @@ static void emit(storage_t *s, u32 row)
     s->stripEmitted = row + 1;
 }
 
-u32 h264bsdStripAlloc(storage_t *s)
+H264BSD_COLD_FN u32 h264bsdStripAlloc(storage_t *s)
 {
     u32 w = s->activeSps->picWidthInMbs, rows = ring_rows(s);
     u32 ysz = rows * w * 256, csz = rows * w * 64;
@@ -143,7 +143,7 @@ void h264bsdStripBegin(storage_t *s)
 
 /* Row `row` is about to start and does not fit: emit the K final rows, move
  * the two live rows to the front. */
-void h264bsdStripRow(storage_t *s, u32 row)
+H264BSD_COLD_FN void h264bsdStripRow(storage_t *s, u32 row)
 {
     u32 w = s->currImage->width, k, r;
     u32 ylen = 2 * 16 * w * 16, clen = 2 * 8 * w * 8;
@@ -163,7 +163,7 @@ void h264bsdStripRow(storage_t *s, u32 row)
 }
 
 /* The picture is complete and fully deblocked: emit the rows still held. */
-void h264bsdStripFinish(storage_t *s)
+H264BSD_COLD_FN void h264bsdStripFinish(storage_t *s)
 {
     u32 r;
     for (r = s->stripEmitted; r < s->currImage->height; r++)

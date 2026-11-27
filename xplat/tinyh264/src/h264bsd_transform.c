@@ -55,15 +55,15 @@
 /*lint -e701 -e702 */
 
 /* LevelScale function */
-static const i32 levelScale[6][3] = {
+static const i32 levelScale[6][3] H264BSD_HOT_DATA = {
     {10,13,16}, {11,14,18}, {13,16,20}, {14,18,23}, {16,20,25}, {18,23,29}};
 
 /* qp % 6 as a function of qp */
-static const u8 qpMod6[52] = {0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,
+static const u8 qpMod6[52] H264BSD_HOT_DATA = {0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,
     0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3,4,5,0,1,2,3};
 
 /* qp / 6 as a function of qp */
-static const u8 qpDiv6[52] = {0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,
+static const u8 qpDiv6[52] H264BSD_HOT_DATA = {0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,
     4,4,4,4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,7,7,7,7,7,7,8,8,8,8};
 
 /*------------------------------------------------------------------------------
@@ -102,10 +102,10 @@ static const u8 qpDiv6[52] = {0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,
  * the horizontal transform lane by lane on the columns; a transpose through
  * an interleaving store (vst4); the vertical transform lane by lane on the
  * rows, (x + 32) >> 6, the [-512, 511] check, raster order back into data. */
-static u32 ProcessBlockMve(i32 *data, i32 s1, i32 s2, i32 s3, u32 skip)
+H264BSD_HOT static u32 ProcessBlockMve(i32 *data, i32 s1, i32 s2, i32 s3, u32 skip)
 {
     /* the scan index of each raster position, column by column (rows 0..3) */
-    static const uint32_t colScan[4][4] = {{0, 2, 3, 9}, {1, 4, 8, 10}, {5, 7, 11, 14}, {6, 12, 13, 15}};
+    static const uint32_t colScan[4][4] H264BSD_HOT_DATA = {{0, 2, 3, 9}, {1, 4, 8, 10}, {5, 7, 11, 14}, {6, 12, 13, 15}};
     int32_t *d32 = (int32_t *)data;   /* i32 is int, int32_t long on some targets */
     int32x4_t even = vdupq_n_s32(s2), odd = vdupq_n_s32(s3);
     even = vsetq_lane_s32(s1, even, 0);
@@ -152,7 +152,7 @@ static u32 ProcessBlockMve(i32 *data, i32 s1, i32 s2, i32 s3, u32 skip)
 }
 #endif
 
-u32 h264bsdProcessBlock(i32 *data, u32 qp, u32 skip, u32 coeffMap)
+H264BSD_HOT u32 h264bsdProcessBlock(i32 *data, u32 qp, u32 skip, u32 coeffMap)
 {
 
 /* Variables */
@@ -314,7 +314,7 @@ u32 h264bsdProcessBlock(i32 *data, u32 qp, u32 skip, u32 coeffMap)
             none
 
 ------------------------------------------------------------------------------*/
-void h264bsdProcessLumaDc(i32 *data, u32 qp)
+H264BSD_COLD_FN H264BSD_HOT void h264bsdProcessLumaDc(i32 *data, u32 qp)
 {
 
 /* Variables */
@@ -418,7 +418,7 @@ void h264bsdProcessLumaDc(i32 *data, u32 qp)
             none
 
 ------------------------------------------------------------------------------*/
-void h264bsdProcessChromaDc(i32 *data, u32 qp)
+H264BSD_COLD_FN H264BSD_HOT void h264bsdProcessChromaDc(i32 *data, u32 qp)
 {
 
 /* Variables */

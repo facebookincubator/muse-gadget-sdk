@@ -81,7 +81,7 @@ static void GetInterNeighbour(u32 sliceId, mbStorage_t *nMb,
     interNeighbour_t *n, u32 index);
 static void GetPredictionMv(mv_t *mv, interNeighbour_t *a, u32 refIndex);
 
-static const neighbour_t N_A_SUB_PART[4][4][4] = {
+static const neighbour_t N_A_SUB_PART[4][4][4] H264BSD_HOT_DATA = {
     { { {MB_A,5}, {MB_NA,0}, {MB_NA,0}, {MB_NA,0} },
       { {MB_A,5}, {MB_A,7}, {MB_NA,0}, {MB_NA,0} },
       { {MB_A,5}, {MB_CURR,0}, {MB_NA,0}, {MB_NA,0} },
@@ -102,7 +102,7 @@ static const neighbour_t N_A_SUB_PART[4][4][4] = {
       { {MB_CURR,9}, {MB_CURR,12}, {MB_NA,0}, {MB_NA,0} },
       { {MB_CURR,9}, {MB_CURR,12}, {MB_CURR,11}, {MB_CURR,14} } } };
 
-static const neighbour_t N_B_SUB_PART[4][4][4] = {
+static const neighbour_t N_B_SUB_PART[4][4][4] H264BSD_HOT_DATA = {
     { { {MB_B,10}, {MB_NA,0}, {MB_NA,0}, {MB_NA,0} },
       { {MB_B,10}, {MB_CURR,0}, {MB_NA,0}, {MB_NA,0} },
       { {MB_B,10}, {MB_B,11}, {MB_NA,0}, {MB_NA,0} },
@@ -123,7 +123,7 @@ static const neighbour_t N_B_SUB_PART[4][4][4] = {
       { {MB_CURR,6}, {MB_CURR,7}, {MB_NA,0}, {MB_NA,0} },
       { {MB_CURR,6}, {MB_CURR,7}, {MB_CURR,12}, {MB_CURR,13} } } };
 
-static const neighbour_t N_C_SUB_PART[4][4][4] = {
+static const neighbour_t N_C_SUB_PART[4][4][4] H264BSD_HOT_DATA = {
     { { {MB_B,14}, {MB_NA,0}, {MB_NA,0}, {MB_NA,0} },
       { {MB_B,14}, {MB_NA,4}, {MB_NA,0}, {MB_NA,0} },
       { {MB_B,11}, {MB_B,14}, {MB_NA,0}, {MB_NA,0} },
@@ -144,7 +144,7 @@ static const neighbour_t N_C_SUB_PART[4][4][4] = {
       { {MB_CURR,7}, {MB_NA,2}, {MB_NA,0}, {MB_NA,0} },
       { {MB_CURR,7}, {MB_NA,2}, {MB_CURR,13}, {MB_NA,8} } } };
 
-static const neighbour_t N_D_SUB_PART[4][4][4] = {
+static const neighbour_t N_D_SUB_PART[4][4][4] H264BSD_HOT_DATA = {
     { { {MB_D,15}, {MB_NA,0}, {MB_NA,0}, {MB_NA,0} },
       { {MB_D,15}, {MB_A,5}, {MB_NA,0}, {MB_NA,0} },
       { {MB_D,15}, {MB_B,10}, {MB_NA,0}, {MB_NA,0} },
@@ -195,7 +195,7 @@ static const neighbour_t N_D_SUB_PART[4][4][4] = {
           HANTRO_NOK    error in motion vector prediction
 
 ------------------------------------------------------------------------------*/
-u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
+H264BSD_HOT u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     dpbStorage_t *dpb, u32 mbNum, image_t *currImage, u8 *data)
 {
 
@@ -343,7 +343,7 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
  * the reference's Cb plane found from its luma (h264bsdCbOf), Cr crDelta
  * from it; in place, a reference row already overwritten is an error as in
  * h264bsdPredictSamples */
-static void CopySkipMb(image_t *currImage, const image_t *refImage, u32 row)
+H264BSD_HOT static void CopySkipMb(image_t *currImage, const image_t *refImage, u32 row)
 {
     u32 w = currImage->width * 16, i;
     const u8 *ref = refImage->data, *refCb = h264bsdCbOf(refImage, ref);
@@ -380,7 +380,7 @@ static void CopySkipMb(image_t *currImage, const image_t *refImage, u32 row)
     }
 }
 #else
-static void CopySkipMb(image_t *currImage, const u8 *ref)
+H264BSD_HOT static void CopySkipMb(image_t *currImage, const u8 *ref)
 {
     u32 w = currImage->width * 16, i;
     const u32 *s;
@@ -453,7 +453,7 @@ void h264bsdAddResidualMb(image_t *image, i32 residual[][16], u32 mask);
             h264bsdPredictSamples(d, mvp, ref, c, r, x, y, w, h); \
     } while (0)
 #endif
-u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
+H264BSD_HOT u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     dpbStorage_t *dpb, u32 mbNum, image_t *currImage, u8 *data)
 {
 
@@ -613,7 +613,7 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 
 ------------------------------------------------------------------------------*/
 
-u32 MvPrediction16x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
+H264BSD_HOT u32 MvPrediction16x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 {
 
 /* Variables */
@@ -697,7 +697,7 @@ u32 MvPrediction16x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 MvPrediction16x8(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
+H264BSD_HOT u32 MvPrediction16x8(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 {
 
 /* Variables */
@@ -804,7 +804,7 @@ u32 MvPrediction16x8(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 MvPrediction8x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
+H264BSD_HOT u32 MvPrediction8x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 {
 
 /* Variables */
@@ -914,7 +914,7 @@ u32 MvPrediction8x16(mbStorage_t *pMb, mbPred_t *mbPred, dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 MvPrediction8x8(mbStorage_t *pMb, subMbPred_t *subMbPred, dpbStorage_t *dpb)
+H264BSD_HOT u32 MvPrediction8x8(mbStorage_t *pMb, subMbPred_t *subMbPred, dpbStorage_t *dpb)
 {
 
 /* Variables */
@@ -951,7 +951,7 @@ u32 MvPrediction8x8(mbStorage_t *pMb, subMbPred_t *subMbPred, dpbStorage_t *dpb)
 
 ------------------------------------------------------------------------------*/
 
-u32 MvPrediction(mbStorage_t *pMb, subMbPred_t *subMbPred, u32 mbPartIdx,
+H264BSD_HOT u32 MvPrediction(mbStorage_t *pMb, subMbPred_t *subMbPred, u32 mbPartIdx,
     u32 subMbPartIdx)
 {
 
@@ -1039,7 +1039,7 @@ u32 MvPrediction(mbStorage_t *pMb, subMbPred_t *subMbPred, u32 mbPartIdx,
 
 ------------------------------------------------------------------------------*/
 
-i32 MedianFilter(i32 a, i32 b, i32 c)
+H264BSD_HOT i32 MedianFilter(i32 a, i32 b, i32 c)
 {
 
 /* Variables */
@@ -1082,7 +1082,7 @@ i32 MedianFilter(i32 a, i32 b, i32 c)
 
 ------------------------------------------------------------------------------*/
 
-void GetInterNeighbour(u32 sliceId, mbStorage_t *nMb,
+H264BSD_HOT void GetInterNeighbour(u32 sliceId, mbStorage_t *nMb,
     interNeighbour_t *n, u32 index)
 {
 
@@ -1118,7 +1118,7 @@ void GetInterNeighbour(u32 sliceId, mbStorage_t *nMb,
 
 ------------------------------------------------------------------------------*/
 
-void GetPredictionMv(mv_t *mv, interNeighbour_t *a, u32 refIndex)
+H264BSD_COLD_FN H264BSD_HOT void GetPredictionMv(mv_t *mv, interNeighbour_t *a, u32 refIndex)
 {
 
     if ( a[1].available || a[2].available || !a[0].available)

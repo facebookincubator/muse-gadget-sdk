@@ -86,12 +86,12 @@
 
 
 /* x- and y-coordinates for each block */
-const u32 h264bsdBlockX[16] =
+const u32 h264bsdBlockX[16] H264BSD_HOT_DATA =
     { 0, 4, 0, 4, 8, 12, 8, 12, 0, 4, 0, 4, 8, 12, 8, 12 };
-const u32 h264bsdBlockY[16] =
+const u32 h264bsdBlockY[16] H264BSD_HOT_DATA =
     { 0, 0, 4, 4, 0, 0, 4, 4, 8, 8, 12, 12, 8, 8, 12, 12 };
 
-const u8 h264bsdClip[1280] =
+const u8 h264bsdClip[1280] H264BSD_HOT_DATA =
 {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -159,7 +159,7 @@ const u8 h264bsdClip[1280] =
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
 };
 
-u8 *get_h264bsdClip() {
+H264BSD_HOT u8 *get_h264bsdClip() {
     return (u8*)h264bsdClip;
 }
 
@@ -211,7 +211,7 @@ static u32 DetermineIntra4x4PredMode(macroblockLayer_t *pMbLayer,
           stored in macroblock array 'data'.
 
 ------------------------------------------------------------------------------*/
-u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, u8 *ptr,
+H264BSD_HOT u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, u8 *ptr,
                                 u32 width, u32 constrainedIntraPred)
 {
 
@@ -266,7 +266,7 @@ u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, u8 *ptr,
           block is stored in 'pMb' structure.
 
 ------------------------------------------------------------------------------*/
-u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
+H264BSD_HOT u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
                               macroblockLayer_t *mbLayer,
                               u8 *ptr, u32 width,
                               u32 constrainedIntraPred, u32 block)
@@ -377,7 +377,7 @@ u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
           into prediction. The resulting chroma pixels are stored in 'data'.
 
 ------------------------------------------------------------------------------*/
-u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, image_t *image,
+H264BSD_HOT u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, image_t *image,
                                         u32 predMode, u32 constrainedIntraPred)
 {
 
@@ -478,7 +478,7 @@ u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, image_t *image,
           HANTRO_NOK    error in intra prediction
 
 ------------------------------------------------------------------------------*/
-u32 h264bsdIntraPrediction(mbStorage_t *pMb, macroblockLayer_t *mbLayer,
+H264BSD_HOT u32 h264bsdIntraPrediction(mbStorage_t *pMb, macroblockLayer_t *mbLayer,
     image_t *image, u32 mbNum, u32 constrainedIntraPred, u8 *data)
 {
 
@@ -545,7 +545,7 @@ u32 h264bsdIntraPrediction(mbStorage_t *pMb, macroblockLayer_t *mbLayer,
 
 ------------------------------------------------------------------------------*/
 
-void h264bsdGetNeighbourPels(image_t *image, u8 *above, u8 *left, u32 mbNum)
+H264BSD_HOT void h264bsdGetNeighbourPels(image_t *image, u8 *above, u8 *left, u32 mbNum)
 {
 
 /* Variables */
@@ -639,7 +639,7 @@ void h264bsdGetNeighbourPels(image_t *image, u8 *above, u8 *left, u32 mbNum)
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
+H264BSD_HOT u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
                                 u8 *above, u8 *left, u32 constrainedIntraPred)
 {
 
@@ -713,7 +713,7 @@ u32 h264bsdIntra16x16Prediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
+H264BSD_HOT u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
                               macroblockLayer_t *mbLayer, u8 *above,
                               u8 *left, u32 constrainedIntraPred)
 {
@@ -855,7 +855,7 @@ u32 h264bsdIntra4x4Prediction(mbStorage_t *pMb, u8 *data,
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
+H264BSD_HOT u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
                     u8 *above, u8 *left, u32 predMode, u32 constrainedIntraPred)
 {
 
@@ -937,7 +937,7 @@ u32 h264bsdIntraChromaPrediction(mbStorage_t *pMb, u8 *data, i32 residual[][16],
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_OMXDL
-void h264bsdAddResidual(u8 *data, i32 *residual, u32 blockNum)
+H264BSD_HOT void h264bsdAddResidual(u8 *data, i32 *residual, u32 blockNum)
 {
 
 /* Variables */
@@ -1019,7 +1019,7 @@ void h264bsdAddResidual(u8 *data, i32 *residual, u32 blockNum)
 
 ------------------------------------------------------------------------------*/
 
-void Intra16x16VerticalPrediction(u8 *data, u8 *above)
+H264BSD_HOT void Intra16x16VerticalPrediction(u8 *data, u8 *above)
 {
 
 /* Variables */
@@ -1050,7 +1050,7 @@ void Intra16x16VerticalPrediction(u8 *data, u8 *above)
 
 ------------------------------------------------------------------------------*/
 
-void Intra16x16HorizontalPrediction(u8 *data, u8 *left)
+H264BSD_HOT void Intra16x16HorizontalPrediction(u8 *data, u8 *left)
 {
 
 /* Variables */
@@ -1081,7 +1081,7 @@ void Intra16x16HorizontalPrediction(u8 *data, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Intra16x16DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
+H264BSD_HOT void Intra16x16DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
     u32 availableB)
 {
 
@@ -1132,7 +1132,7 @@ void Intra16x16DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
 
 ------------------------------------------------------------------------------*/
 
-void Intra16x16PlanePrediction(u8 *data, u8 *above, u8 *left)
+H264BSD_HOT void Intra16x16PlanePrediction(u8 *data, u8 *above, u8 *left)
 {
 
 /* Variables */
@@ -1179,7 +1179,7 @@ void Intra16x16PlanePrediction(u8 *data, u8 *above, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void IntraChromaDcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
+H264BSD_HOT void IntraChromaDcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
     u32 availableB)
 {
 
@@ -1277,7 +1277,7 @@ void IntraChromaDcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
 
 ------------------------------------------------------------------------------*/
 
-void IntraChromaHorizontalPrediction(u8 *data, u8 *left)
+H264BSD_HOT void IntraChromaHorizontalPrediction(u8 *data, u8 *left)
 {
 
 /* Variables */
@@ -1312,7 +1312,7 @@ void IntraChromaHorizontalPrediction(u8 *data, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void IntraChromaVerticalPrediction(u8 *data, u8 *above)
+H264BSD_HOT void IntraChromaVerticalPrediction(u8 *data, u8 *above)
 {
 
 /* Variables */
@@ -1347,7 +1347,7 @@ void IntraChromaVerticalPrediction(u8 *data, u8 *above)
 
 ------------------------------------------------------------------------------*/
 
-void IntraChromaPlanePrediction(u8 *data, u8 *above, u8 *left)
+H264BSD_HOT void IntraChromaPlanePrediction(u8 *data, u8 *above, u8 *left)
 {
 
 /* Variables */
@@ -1407,7 +1407,7 @@ void IntraChromaPlanePrediction(u8 *data, u8 *above, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Get4x4NeighbourPels(u8 *a, u8 *l, u8 *data, u8 *above, u8 *left,
+H264BSD_HOT void Get4x4NeighbourPels(u8 *a, u8 *l, u8 *data, u8 *above, u8 *left,
     u32 blockNum)
 {
 
@@ -1512,7 +1512,7 @@ void Get4x4NeighbourPels(u8 *a, u8 *l, u8 *data, u8 *above, u8 *left,
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4VerticalPrediction(u8 *data, u8 *above)
+H264BSD_HOT void Intra4x4VerticalPrediction(u8 *data, u8 *above)
 {
 
 /* Variables */
@@ -1544,7 +1544,7 @@ void Intra4x4VerticalPrediction(u8 *data, u8 *above)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4HorizontalPrediction(u8 *data, u8 *left)
+H264BSD_HOT void Intra4x4HorizontalPrediction(u8 *data, u8 *left)
 {
 
 /* Variables */
@@ -1576,7 +1576,7 @@ void Intra4x4HorizontalPrediction(u8 *data, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
+H264BSD_HOT void Intra4x4DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
     u32 availableB)
 {
 
@@ -1631,7 +1631,7 @@ void Intra4x4DcPrediction(u8 *data, u8 *above, u8 *left, u32 availableA,
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4DiagonalDownLeftPrediction(u8 *data, u8 *above)
+H264BSD_HOT void Intra4x4DiagonalDownLeftPrediction(u8 *data, u8 *above)
 {
 
 /* Variables */
@@ -1669,7 +1669,7 @@ void Intra4x4DiagonalDownLeftPrediction(u8 *data, u8 *above)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4DiagonalDownRightPrediction(u8 *data, u8 *above, u8 *left)
+H264BSD_HOT void Intra4x4DiagonalDownRightPrediction(u8 *data, u8 *above, u8 *left)
 {
 
 /* Variables */
@@ -1707,7 +1707,7 @@ void Intra4x4DiagonalDownRightPrediction(u8 *data, u8 *above, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4VerticalRightPrediction(u8 *data, u8 *above, u8 *left)
+H264BSD_HOT void Intra4x4VerticalRightPrediction(u8 *data, u8 *above, u8 *left)
 {
 
 /* Variables */
@@ -1746,7 +1746,7 @@ void Intra4x4VerticalRightPrediction(u8 *data, u8 *above, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4HorizontalDownPrediction(u8 *data, u8 *above, u8 *left)
+H264BSD_HOT void Intra4x4HorizontalDownPrediction(u8 *data, u8 *above, u8 *left)
 {
 
 /* Variables */
@@ -1784,7 +1784,7 @@ void Intra4x4HorizontalDownPrediction(u8 *data, u8 *above, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4VerticalLeftPrediction(u8 *data, u8 *above)
+H264BSD_HOT void Intra4x4VerticalLeftPrediction(u8 *data, u8 *above)
 {
 
 /* Variables */
@@ -1822,7 +1822,7 @@ void Intra4x4VerticalLeftPrediction(u8 *data, u8 *above)
 
 ------------------------------------------------------------------------------*/
 
-void Intra4x4HorizontalUpPrediction(u8 *data, u8 *left)
+H264BSD_HOT void Intra4x4HorizontalUpPrediction(u8 *data, u8 *left)
 {
 
 /* Variables */
@@ -1863,7 +1863,7 @@ void Intra4x4HorizontalUpPrediction(u8 *data, u8 *left)
 
 ------------------------------------------------------------------------------*/
 
-void Write4x4To16x16(u8 *data, u8 *data4x4, u32 blockNum)
+H264BSD_HOT void Write4x4To16x16(u8 *data, u8 *data4x4, u32 blockNum)
 {
 
 /* Variables */
@@ -1905,7 +1905,7 @@ void Write4x4To16x16(u8 *data, u8 *data4x4, u32 blockNum)
 
 ------------------------------------------------------------------------------*/
 
-u32 DetermineIntra4x4PredMode(macroblockLayer_t *pMbLayer,
+H264BSD_HOT u32 DetermineIntra4x4PredMode(macroblockLayer_t *pMbLayer,
     u32 available, neighbour_t *nA, neighbour_t *nB, u32 index,
     mbStorage_t *nMbA, mbStorage_t *nMbB)
 {

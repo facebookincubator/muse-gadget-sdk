@@ -79,7 +79,7 @@
 
 ------------------------------------------------------------------------------*/
 
-u32 h264bsdExtractNalUnit(u8 *pByteStream, u32 len, strmData_t *pStrmData,
+H264BSD_HOT u32 h264bsdExtractNalUnit(u8 *pByteStream, u32 len, strmData_t *pStrmData,
     u32 *readBytes)
 {
 

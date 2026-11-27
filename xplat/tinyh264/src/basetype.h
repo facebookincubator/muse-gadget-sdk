@@ -49,12 +49,54 @@ typedef signed int      i16x;
 #define H264BSD_MVE 1
 #endif
 
+/* OPT: H264BSD_COLD_LEVEL compiles small or rare functions for size (GCC's
+ * optimize("Os") attribute; GCC documents it as a debugging aid, so check
+ * that the port's own flags such as its stack protection survive in them;
+ * other compilers ignore it) while the rest keeps the build's -O level: 1
+ * the ones marked H264BSD_COLD_FN (the neighbour set-up once per sequence,
+ * an error's slice marking, strip mode's once-per-row work, and some that do
+ * run per macroblock: the luma and chroma DC transforms, a motion vector's
+ * prediction from its neighbours), 2 also H264BSD_COLD_FN2 (once per slice
+ * or picture: the slice header and its checks, the reference picture
+ * marking, the DPB's set-up and output). 0, the default, changes nothing.
+ * The same pictures at every level. */
+#ifndef H264BSD_COLD_LEVEL
+#define H264BSD_COLD_LEVEL 0
+#endif
+#if H264BSD_COLD_LEVEL >= 1 && defined(__GNUC__) && !defined(__clang__)
+#define H264BSD_COLD_FN __attribute__((optimize("Os")))
+#else
+#define H264BSD_COLD_FN
+#endif
+#if H264BSD_COLD_LEVEL >= 2 && defined(__GNUC__) && !defined(__clang__)
+#define H264BSD_COLD_FN2 __attribute__((optimize("Os")))
+#else
+#define H264BSD_COLD_FN2
+#endif
+
 #ifndef NULL
 #ifdef  __cplusplus
 #define NULL 0
 #else
 #define NULL ((void *)0)
 #endif
+#endif
+
+/* OPT: a port with tightly-coupled (or otherwise fast) RAM names its
+ * sections here, as string macros (-DH264BSD_HOT_SECTION='".itcm.h264"'):
+ * the code run for every macroblock (H264BSD_HOT) and the tables it reads
+ * (H264BSD_HOT_DATA) go there; its linker script places them (and copies
+ * them from flash where it must). Without them the markers are empty. The
+ * ESP-IDF component places whole objects with linker.lf instead. */
+#if defined(H264BSD_HOT_SECTION)
+#define H264BSD_HOT __attribute__((section(H264BSD_HOT_SECTION)))
+#else
+#define H264BSD_HOT
+#endif
+#if defined(H264BSD_HOT_DATA_SECTION)
+#define H264BSD_HOT_DATA __attribute__((section(H264BSD_HOT_DATA_SECTION)))
+#else
+#define H264BSD_HOT_DATA
 #endif
 
 /* OPT: H264BSD_CLZ counts leading zeros with __builtin_clz and decodes

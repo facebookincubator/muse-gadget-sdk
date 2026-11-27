@@ -75,12 +75,12 @@
 /*lint -e701 -e702 */
 
 /* array of alpha values, from the standard */
-static const u8 alphas[52] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,5,6,7,8,9,10,
+static const u8 alphas[52] H264BSD_HOT_DATA = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,5,6,7,8,9,10,
     12,13,15,17,20,22,25,28,32,36,40,45,50,56,63,71,80,90,101,113,127,144,162,
     182,203,226,255,255};
 
 /* array of beta values, from the standard */
-static const u8 betas[52] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,3,3,3,3,4,4,
+static const u8 betas[52] H264BSD_HOT_DATA = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,3,3,3,3,4,4,
     4,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15,16,16,17,17,18,18};
 
 
@@ -88,7 +88,7 @@ static const u8 betas[52] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,3,3,3,3,4,4,
 #ifndef H264DEC_OMXDL
 /* array of tc0 values, from the standard, each triplet corresponds to a
  * column in the table. Indexing goes as tc0[indexA][bS-1] */
-static const u8 tc0[52][3] = {
+static const u8 tc0[52][3] H264BSD_HOT_DATA = {
     {0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},
     {0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},
     {0,0,0},{0,0,1},{0,0,1},{0,0,1},{0,0,1},{0,1,1},{0,1,1},{1,1,1},
@@ -100,7 +100,7 @@ static const u8 tc0[52][3] = {
 #else
 /* array of tc0 values, from the standard, each triplet corresponds to a
  * column in the table. Indexing goes as tc0[indexA][bS] */
-static const u8 tc0[52][5] = {
+static const u8 tc0[52][5] H264BSD_HOT_DATA = {
     {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0},
     {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0},
@@ -231,7 +231,7 @@ static void GetChromaEdgeThresholds(
             of a macroblock.
 
 ------------------------------------------------------------------------------*/
-u32 IsSliceBoundaryOnLeft(mbStorage_t *mb)
+H264BSD_HOT u32 IsSliceBoundaryOnLeft(mbStorage_t *mb)
 {
 
 /* Variables */
@@ -256,7 +256,7 @@ u32 IsSliceBoundaryOnLeft(mbStorage_t *mb)
             current macroblock.
 
 ------------------------------------------------------------------------------*/
-u32 IsSliceBoundaryOnTop(mbStorage_t *mb)
+H264BSD_HOT u32 IsSliceBoundaryOnTop(mbStorage_t *mb)
 {
 
 /* Variables */
@@ -283,7 +283,7 @@ u32 IsSliceBoundaryOnTop(mbStorage_t *mb)
           shall be filtered.
 
 ------------------------------------------------------------------------------*/
-u32 GetMbFilteringFlags(mbStorage_t *mb)
+H264BSD_HOT u32 GetMbFilteringFlags(mbStorage_t *mb)
 {
 
 /* Variables */
@@ -327,7 +327,7 @@ u32 GetMbFilteringFlags(mbStorage_t *mb)
             called -> no intra mb condition here.
 
 ------------------------------------------------------------------------------*/
-u32 InnerBoundaryStrength(mbStorage_t *mb1, u32 ind1, u32 ind2)
+H264BSD_HOT u32 InnerBoundaryStrength(mbStorage_t *mb1, u32 ind1, u32 ind2)
 {
     i32 tmp1, tmp2;
     i32 mv1, mv2, mv3, mv4;
@@ -363,7 +363,7 @@ u32 InnerBoundaryStrength(mbStorage_t *mb1, u32 ind1, u32 ind2)
             InnerBoundaryStrength but without checking totalCoeff.
 
 ------------------------------------------------------------------------------*/
-u32 InnerBoundaryStrength2(mbStorage_t *mb1, u32 ind1, u32 ind2)
+H264BSD_HOT u32 InnerBoundaryStrength2(mbStorage_t *mb1, u32 ind1, u32 ind2)
 {
     i32 tmp1, tmp2, tmp3, tmp4;
 
@@ -392,7 +392,7 @@ u32 InnerBoundaryStrength2(mbStorage_t *mb1, u32 ind1, u32 ind2)
             before this is called -> no intra mb conditions here.
 
 ------------------------------------------------------------------------------*/
-u32 EdgeBoundaryStrengthTop(mbStorage_t *mb1, mbStorage_t *mb2)
+H264BSD_HOT u32 EdgeBoundaryStrengthTop(mbStorage_t *mb1, mbStorage_t *mb2)
 {
     u32 topBs = 0;
     u32 tmp1, tmp2, tmp3, tmp4;
@@ -459,7 +459,7 @@ u32 EdgeBoundaryStrengthTop(mbStorage_t *mb1, mbStorage_t *mb2)
             before this is called -> no intra mb conditions here.
 
 ------------------------------------------------------------------------------*/
-u32 EdgeBoundaryStrengthLeft(mbStorage_t *mb1, mbStorage_t *mb2)
+H264BSD_HOT u32 EdgeBoundaryStrengthLeft(mbStorage_t *mb1, mbStorage_t *mb2)
 {
     u32 leftBs = 0;
     u32 tmp1, tmp2, tmp3, tmp4;
@@ -542,7 +542,7 @@ u32 EdgeBoundaryStrengthLeft(mbStorage_t *mb1, mbStorage_t *mb2)
 
 ------------------------------------------------------------------------------*/
 #ifndef H264DEC_OMXDL
-void h264bsdFilterMbRange(
+H264BSD_HOT void h264bsdFilterMbRange(
   image_t *image,
   mbStorage_t *mb, u32 m0, u32 m1)
 {
@@ -653,7 +653,7 @@ void h264bsdFilterMbRange(
 
 }
 
-void h264bsdFilterPicture(
+H264BSD_HOT void h264bsdFilterPicture(
   image_t *image,
   mbStorage_t *mb)
 {
@@ -681,14 +681,14 @@ unsigned int hashD = 0;
 #define W16B(x) vreinterpretq_s16_u16(vmovlbq_u8(x))
 #define W16T(x) vreinterpretq_s16_u16(vmovltq_u8(x))
 
-static inline uint8x16_t n8(int16x8_t b, int16x8_t t)
+H264BSD_HOT static inline uint8x16_t n8(int16x8_t b, int16x8_t t)
 {
     uint8x16_t r = vmovnbq_u16(vdupq_n_u8(0), vreinterpretq_u16_s16(b));
     return vmovntq_u16(r, vreinterpretq_u16_s16(t));
 }
 
 /* bS < 4, one half: p1' q1' (unclipped narrow, as the C's u8 store), p0' q0' (16 bits) */
-static inline void mve_norm_half(int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
+H264BSD_HOT static inline void mve_norm_half(int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
                                  int16x8_t q2, int16x8_t avg, int16x8_t tc0, int16x8_t tc,
                                  int16x8_t *p1n, int16x8_t *q1n, int16x8_t *p0n, int16x8_t *q0n)
 {
@@ -704,7 +704,7 @@ static inline void mve_norm_half(int16x8_t p2, int16x8_t p1, int16x8_t p0, int16
 }
 
 /* bS 4, one half */
-static inline void mve_strong_half(int16x8_t p3, int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0,
+H264BSD_HOT static inline void mve_strong_half(int16x8_t p3, int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0,
                                    int16x8_t q1, int16x8_t q2, int16x8_t q3, int16x8_t o[8])
 {
     int16x8_t sp = vaddq_s16(vaddq_s16(p1, p0), q0), sq = vaddq_s16(vaddq_s16(p0, q0), q1);
@@ -724,7 +724,7 @@ static inline void mve_strong_half(int16x8_t p3, int16x8_t p2, int16x8_t p1, int
  * scattered back. The edges' loads and gathers are unpredicated (a VPST each saved): every
  * lane reads pixels of the macroblock and its filtered neighbour; only the stores are
  * predicated (filt includes the lanes with bS > 0). */
-static void mve_ver_luma8(u8 *data, uint16x8_t bsv, const edgeThreshold_t *th, u32 w)
+H264BSD_HOT static void mve_ver_luma8(u8 *data, uint16x8_t bsv, const edgeThreshold_t *th, u32 w)
 {
     mve_pred16_t act = vcmpneq_n_u16(bsv, 0), strong = vcmpeqq_n_u16(bsv, 4);
     uint16x8_t off = vmulq_n_u16(vidupq_n_u16(0, 1), (uint16_t)w);
@@ -772,7 +772,7 @@ static void mve_ver_luma8(u8 *data, uint16x8_t bsv, const edgeThreshold_t *th, u
 
 /* A horizontal luma edge, 16 columns: bsv each column's bS (its 4-column segment's: 0..3,
  * or all 4; 0: not filtered) */
-static __attribute__((noinline)) void mve_hor_luma16(u8 *data, uint8x16_t bsv, const edgeThreshold_t *th, i32 w)
+H264BSD_HOT static __attribute__((noinline)) void mve_hor_luma16(u8 *data, uint8x16_t bsv, const edgeThreshold_t *th, i32 w)
 {
     mve_pred16_t lanes = vcmpneq_n_u8(bsv, 0), strong = vcmpeqq_n_u8(bsv, 4);
     uint8x16_t p2 = vldrbq_u8(data - 3 * w), p1 = vldrbq_u8(data - 2 * w);
@@ -832,7 +832,7 @@ static __attribute__((noinline)) void mve_hor_luma16(u8 *data, uint8x16_t bsv, c
 
 /* Chroma, 8 lanes (16-bit): p1 p0 q0 q1 of a row (horizontal edge) or column (vertical);
  * tc the lanes' tc0 + 1 (bS < 4) or strong (bS 4); only p0 and q0 change. */
-static inline mve_pred16_t mve_chroma8(int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
+H264BSD_HOT static inline mve_pred16_t mve_chroma8(int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
                                                    uint16x8_t a, uint16x8_t be, int16x8_t tc, u32 strong,
                                                    mve_pred16_t act, int16x8_t *p0n, int16x8_t *q0n)
 {
@@ -853,7 +853,7 @@ static inline mve_pred16_t mve_chroma8(int16x8_t p1, int16x8_t p0, int16x8_t q0,
 
 /* a chroma edge of both components: 8 columns (horizontal: h 1) or 8 rows gathered
  * (vertical), bsv the lanes' bS (pairs; 0..3 each, or all 4) */
-static __attribute__((noinline)) void mve_chroma_edge(u8 *cb, u8 *cr, uint16x8_t bsv, const edgeThreshold_t *th, u32 w, u32 h)
+H264BSD_HOT static __attribute__((noinline)) void mve_chroma_edge(u8 *cb, u8 *cr, uint16x8_t bsv, const edgeThreshold_t *th, u32 w, u32 h)
 {
     mve_pred16_t act = vcmpneq_n_u16(bsv, 0), s4 = vcmpeqq_n_u16(bsv, 4);
     u32 strong = s4 != 0;
@@ -899,7 +899,7 @@ static __attribute__((noinline)) void mve_chroma_edge(u8 *cb, u8 *cr, uint16x8_t
  * a little-endian core; bS is 0..4), whatever bS_t's field size */
 #define BSE ((u32)sizeof(bS_t))
 
-static void FilterLumaMve(u8 *data, bS_t *bS, edgeThreshold_t *th, u32 width)
+H264BSD_HOT static void FilterLumaMve(u8 *data, bS_t *bS, edgeThreshold_t *th, u32 width)
 {
     const u8 *bl = (const u8 *)&bS[0].left, *bt = (const u8 *)&bS[0].top;
     /* rows 0..3 segment k, rows 4..7 segment k + 4 */
@@ -929,7 +929,7 @@ static void FilterLumaMve(u8 *data, bS_t *bS, edgeThreshold_t *th, u32 width)
 /* all chroma edges of a macroblock, both components (each bS covers 2 chroma pixels of an
  * edge): vertical x = 0 (left: luma's left edge) and x = 4 (luma's x = 8), then horizontal
  * y = 0 (top) and y = 4 (luma's y = 8) */
-static void FilterChromaMve(u8 *cb, u8 *cr, bS_t *bS, edgeThreshold_t *th, u32 width)
+H264BSD_HOT static void FilterChromaMve(u8 *cb, u8 *cr, bS_t *bS, edgeThreshold_t *th, u32 width)
 {
     const u8 *bl = (const u8 *)&bS[0].left, *bt = (const u8 *)&bS[0].top;
     /* rows 2i, 2i + 1: luma segment 4i (+ 2e) */
@@ -964,7 +964,7 @@ static void FilterChromaMve(u8 *cb, u8 *cr, bS_t *bS, edgeThreshold_t *th, u32 w
             Filter one vertical 4-pixel luma edge.
 
 ------------------------------------------------------------------------------*/
-void FilterVerLumaEdge(
+H264BSD_HOT void FilterVerLumaEdge(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1082,7 +1082,7 @@ void FilterVerLumaEdge(
             Filter one horizontal 4-pixel luma edge
 
 ------------------------------------------------------------------------------*/
-void FilterHorLumaEdge(
+H264BSD_HOT void FilterHorLumaEdge(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1159,7 +1159,7 @@ void FilterHorLumaEdge(
             be done when bS is equal to all four edges.
 
 ------------------------------------------------------------------------------*/
-void FilterHorLuma(
+H264BSD_HOT void FilterHorLuma(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1280,7 +1280,7 @@ void FilterHorLuma(
             Filter one vertical 2-pixel chroma edge
 
 ------------------------------------------------------------------------------*/
-void FilterVerChromaEdge(
+H264BSD_HOT void FilterVerChromaEdge(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1355,7 +1355,7 @@ void FilterVerChromaEdge(
             Filter one horizontal 2-pixel chroma edge
 
 ------------------------------------------------------------------------------*/
-void FilterHorChromaEdge(
+H264BSD_HOT void FilterHorChromaEdge(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1403,7 +1403,7 @@ void FilterHorChromaEdge(
             can be done if bS is equal for all four edges.
 
 ------------------------------------------------------------------------------*/
-void FilterHorChroma(
+H264BSD_HOT void FilterHorChroma(
   u8 *data,
   u32 bS,
   edgeThreshold_t *thresholds,
@@ -1478,7 +1478,7 @@ void FilterHorChroma(
 #define NzMask(mb) ((mb)->nzMask)
 
 /* 1 if the two blocks' references or motion vectors differ (by 4 quarter samples or more) */
-static inline u32 MvRefDiffer(const mbStorage_t *m1, u32 i1, const mbStorage_t *m2, u32 i2)
+H264BSD_HOT static inline u32 MvRefDiffer(const mbStorage_t *m1, u32 i1, const mbStorage_t *m2, u32 i2)
 {
     return (m1->refAddr[i1 >> 2] != m2->refAddr[i2 >> 2]) ||
            ((u32)ABS(m1->mv[i1].hor - m2->mv[i2].hor) >= 4) ||
@@ -1494,7 +1494,7 @@ static inline u32 MvRefDiffer(const mbStorage_t *m1, u32 i1, const mbStorage_t *
  * the coefficient tests on the masks; between two macroblocks of one motion vector each
  * (16x16, skipped) the references and vectors are compared once; a 16x16 inter macroblock
  * without coefficients has every inner bS 0. */
-u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
+H264BSD_HOT u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
 {
     u32 nz, any = 0, intra = IS_INTRA_MB(*mb), one;
 
@@ -1686,7 +1686,7 @@ u32 GetBoundaryStrengths(mbStorage_t *mb, bS_t *bS, u32 flags)
             luma edges of a macroblock.
 
 ------------------------------------------------------------------------------*/
-void GetLumaEdgeThresholds(
+H264BSD_HOT void GetLumaEdgeThresholds(
   edgeThreshold_t *thresholds,
   mbStorage_t *mb,
   u32 filteringFlags)
@@ -1765,7 +1765,7 @@ void GetLumaEdgeThresholds(
             chroma edges of a macroblock.
 
 ------------------------------------------------------------------------------*/
-void GetChromaEdgeThresholds(
+H264BSD_HOT void GetChromaEdgeThresholds(
   edgeThreshold_t *thresholds,
   mbStorage_t *mb,
   u32 filteringFlags,
@@ -1847,7 +1847,7 @@ void GetChromaEdgeThresholds(
             Function to filter all luma edges of a macroblock
 
 ------------------------------------------------------------------------------*/
-void FilterLuma(
+H264BSD_HOT void FilterLuma(
   u8 *data,
   bS_t *bS,
   edgeThreshold_t *thresholds,
@@ -1929,7 +1929,7 @@ void FilterLuma(
             Function to filter all chroma edges of a macroblock
 
 ------------------------------------------------------------------------------*/
-void FilterChroma(
+H264BSD_HOT void FilterChroma(
   u8 *dataCb,
   u8 *dataCr,
   bS_t *bS,
@@ -2071,7 +2071,7 @@ void FilterChroma(
 ------------------------------------------------------------------------------*/
 
 /*lint --e{550} Symbol not accessed */
-void h264bsdFilterPicture(
+H264BSD_HOT void h264bsdFilterPicture(
   image_t *image,
   mbStorage_t *mb)
 {
@@ -2187,7 +2187,7 @@ void h264bsdFilterPicture(
             the macroblock had non-zero value, HANTRO_FALSE otherwise.
 
 ------------------------------------------------------------------------------*/
-u32 GetBoundaryStrengths(mbStorage_t *mb, u8 (*bS)[16], u32 flags)
+H264BSD_HOT u32 GetBoundaryStrengths(mbStorage_t *mb, u8 (*bS)[16], u32 flags)
 {
 
 /* Variables */
@@ -2479,7 +2479,7 @@ u32 GetBoundaryStrengths(mbStorage_t *mb, u8 (*bS)[16], u32 flags)
             luma edges of a macroblock.
 
 ------------------------------------------------------------------------------*/
-void GetLumaEdgeThresholds(
+H264BSD_HOT void GetLumaEdgeThresholds(
     mbStorage_t *mb,
     u8 (*alpha)[2],
     u8 (*beta)[2],
@@ -2609,7 +2609,7 @@ void GetLumaEdgeThresholds(
             chroma edges of a macroblock.
 
 ------------------------------------------------------------------------------*/
-void GetChromaEdgeThresholds(
+H264BSD_HOT void GetChromaEdgeThresholds(
     mbStorage_t *mb,
     u8 (*alpha)[2],
     u8 (*beta)[2],
