@@ -42,6 +42,13 @@ typedef signed int      i16x;
 #endif
 
 
+/* OPT: TINYH264_MVE=1 (Arm Helium) takes effect only where the compiler
+ * targets it; elsewhere the knob builds the C. Like the other backend
+ * switches (TINYH264_DSP_MC, TINYH264_PACKED4_MC), 0 is off. */
+#if defined(TINYH264_MVE) && TINYH264_MVE && defined(__ARM_FEATURE_MVE)
+#define H264BSD_MVE 1
+#endif
+
 #ifndef NULL
 #ifdef  __cplusplus
 #define NULL 0

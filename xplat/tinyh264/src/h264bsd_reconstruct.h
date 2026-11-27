@@ -145,9 +145,18 @@ void h264bsdInterpolateHorHalf(
   u32 partWidth,
   u32 partHeight);
 
-/* 1 when the S31 SIMD luma filters passed their check and are used, 0 for
- * the C, negative before the first inter block. */
+/* 1 when the motion-compensation backend (the S31's SIMD, TINYH264_DSP_MC,
+ * or TINYH264_MVE's Helium prediction) passed its first-use check and is
+ * used, 0 for the C (always with TINYH264_PACKED4_MC, which has no such
+ * check, and without a backend), negative before the first inter block. */
 i32 h264bsdPieState(void);
+
+#if defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC
+/* Every packed interpolation function against the C on random blocks, for a
+ * port to check its operations on the target: the number of blocks that
+ * differ (0: bit-exact), *blocks the number run (h264bsd_interp_packed4.c) */
+u32 h264bsdPacked4Check(u32 iters, u32 *blocks);
+#endif
 
 void h264bsdInterpolateHorQuarter(
   u8 *ref,

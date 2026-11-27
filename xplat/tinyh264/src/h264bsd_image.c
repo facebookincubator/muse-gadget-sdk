@@ -34,6 +34,9 @@
 ------------------------------------------------------------------------------*/
 
 #include "h264bsd_image.h"
+#if defined(H264BSD_MVE)
+#include <arm_mve.h>
+#endif
 #include "h264bsd_util.h"
 #include "h264bsd_neighbour.h"
 
@@ -108,6 +111,22 @@ void h264bsdWriteMacroblock(image_t *image, u8 *data)
 
     ptr = (u32*)data;
 
+#if defined(H264BSD_MVE)
+    /* OPT (Helium): a luma row in one 16-byte move, a chroma row in one 8-byte one */
+    {
+        u8 *l8 = image->luma, *cb8 = image->cb, *cr8 = image->cr;
+        u32 lw = width * 16, cw = width * 8;
+        for (i = 0; i < 16; i++)
+            vstrbq_u8(l8 + i * lw, vld1q_u8(data + 16 * i));
+        for (i = 0; i < 8; i++)
+        {
+            /* 8 bytes each way (through 16-bit lanes): nothing past the row */
+            vstrbq_u16(cb8 + i * cw, vldrbq_u16(data + 256 + 8 * i));
+            vstrbq_u16(cr8 + i * cw, vldrbq_u16(data + 320 + 8 * i));
+        }
+        return;
+    }
+#endif
     width *= 4;
     for (i = 16; i ; i--)
     {

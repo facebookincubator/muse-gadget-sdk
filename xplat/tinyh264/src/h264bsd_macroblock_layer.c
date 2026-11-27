@@ -106,6 +106,9 @@ static u32 ProcessIntra16x16Residual(mbStorage_t *pMb, u8 *data, u32 constrained
 
 #else
 static u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *);
+#if defined(H264BSD_MVE)
+static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap, u32 *pMask);
+#endif
 #endif
 
 /*------------------------------------------------------------------------------
@@ -1158,6 +1161,13 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 
             tmp = ProcessChromaResidual(pMb, data, &pSrc);
 
+#elif defined(H264BSD_MVE)
+            if (h264bsdMbPartPredMode(mbType) == PRED_MODE_INTER)
+                tmp = ProcessResidualInter(pMb, pMbLayer->residual.level,
+                    pMbLayer->residual.coeffMap, &pMbLayer->residual.resMask);
+            else
+                tmp = ProcessResidual(pMb, pMbLayer->residual.level,
+                    pMbLayer->residual.coeffMap);
 #else
             tmp = ProcessResidual(pMb, pMbLayer->residual.level,
                 pMbLayer->residual.coeffMap);
@@ -1486,6 +1496,44 @@ u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap)
 
     return(HANTRO_OK);
 }
+
+#if defined(H264BSD_MVE)
+/* OPT (Helium, inter macroblocks): only the blocks with coefficients (the
+ * luma ones in nzMask; the chroma ones whose DC or AC is
+ * non-zero), no empty marks: their mask goes to h264bsdAddResidualMb, which
+ * adds just those to the prediction already in the picture. The same
+ * transforms and errors as ProcessResidual's inter case. */
+static u32 ProcessResidualInter(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap, u32 *pMask)
+{
+    u32 m = pMb->nzMask, mask = m, qp = pMb->qpY, chromaQp, i;   /* the luma blocks with coefficients */
+    i32 *chromaDc;
+
+    while (m)
+    {
+        u32 b = (u32)__builtin_ctz(m);
+        m &= m - 1;
+        if (h264bsdProcessBlock(residualLevel[b], qp, 0, coeffMap[b]) != HANTRO_OK)
+            return(HANTRO_NOK);
+    }
+    chromaQp = h264bsdQpC[CLIP3(0, 51, (i32)qp + pMb->chromaQpIndexOffset)];
+    if (pMb->totalCoeff[25] || pMb->totalCoeff[26])
+        h264bsdProcessChromaDc(residualLevel[25], chromaQp);
+    chromaDc = residualLevel[25];
+    for (i = 0; i < 8; i++)
+    {
+        i32 *blk = residualLevel[16 + i];
+        blk[0] = chromaDc[i];
+        if (blk[0] || pMb->totalCoeff[16 + i])
+        {
+            if (h264bsdProcessBlock(blk, chromaQp, 1, coeffMap[16 + i]) != HANTRO_OK)
+                return(HANTRO_NOK);
+            mask |= 1u << (16 + i);
+        }
+    }
+    *pMask = mask;
+    return(HANTRO_OK);
+}
+#endif
 #endif /* H264DEC_OMXDL */
 
 /*------------------------------------------------------------------------------

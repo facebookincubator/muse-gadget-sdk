@@ -58,6 +58,9 @@
 ------------------------------------------------------------------------------*/
 
 #include "h264bsd_intra_prediction.h"
+#if defined(H264BSD_MVE)
+#include <arm_mve.h>
+#endif
 #include "h264bsd_util.h"
 #include "h264bsd_macroblock_layer.h"
 #include "h264bsd_neighbour.h"
@@ -959,6 +962,15 @@ void h264bsdAddResidual(u8 *data, i32 *residual, u32 blockNum)
     }
 
     tmp = data + y*width + x;
+#if defined(H264BSD_MVE)
+    /* OPT (Helium): a row of four at once, the residual added and clipped to 0..255 */
+    for (i = 4; i; i--, tmp += width, residual += 4)
+    {
+        int32x4_t v = vaddq_s32(vreinterpretq_s32_u32(vldrbq_u32(tmp)), vld1q_s32((const int32_t *)residual));
+        vstrbq_s32((int8_t *)tmp, vmaxq_s32(vminq_s32(v, vdupq_n_s32(255)), vdupq_n_s32(0)));
+    }
+    return;
+#endif
     for (i = 4; i; i--)
     {
         tmp1 = *residual++;

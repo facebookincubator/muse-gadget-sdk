@@ -188,6 +188,10 @@ static void GetLumaEdgeThresholds(
   edgeThreshold_t *thresholds,
   mbStorage_t *mb,
   u32 filteringFlags);
+#if defined(H264BSD_MVE)
+static void FilterLumaMve(u8 *data, bS_t *bS, edgeThreshold_t *th, u32 width);
+static void FilterChromaMve(u8 *cb, u8 *cr, bS_t *bS, edgeThreshold_t *th, u32 width);
+#endif
 
 static void GetChromaEdgeThresholds(
   edgeThreshold_t *thresholds,
@@ -584,7 +588,11 @@ void h264bsdFilterMbRange(
                 GetLumaEdgeThresholds(thresholds, pMb, flags);
                 data = image->data + mbRow * picWidthInMbs * 256 + mbCol * 16;
 
+#if defined(H264BSD_MVE)
+                FilterLumaMve((u8*)data, bS, thresholds, picWidthInMbs*16);
+#else
                 FilterLuma((u8*)data, bS, thresholds, picWidthInMbs*16);
+#endif
 
                 /* chroma */
                 GetChromaEdgeThresholds(thresholds, pMb, flags,
@@ -592,8 +600,13 @@ void h264bsdFilterMbRange(
                 data = image->data + picSizeInMbs * 256 +
                     mbRow * picWidthInMbs * 64 + mbCol * 8;
 
+#if defined(H264BSD_MVE)
+                FilterChromaMve((u8*)data, data + 64*picSizeInMbs, bS,
+                        thresholds, picWidthInMbs*8);
+#else
                 FilterChroma((u8*)data, data + 64*picSizeInMbs, bS,
                         thresholds, picWidthInMbs*8);
+#endif
 
             }
         }
@@ -621,6 +634,295 @@ unsigned int hashB = 0;
 unsigned int hashC = 0;
 unsigned int hashD = 0;
 
+#if defined(H264BSD_MVE)
+/* OPT (TINYH264_MVE, Arm Helium): a macroblock's edges a whole edge at a time,
+ * the same arithmetic as the C below lane by lane. FilterLuma / FilterChroma take
+ * all vertical edges first, then the horizontal ones (the standard's order; the C's
+ * interleaving by 4-row strips gives the same pixels: a horizontal edge never reads the
+ * rows a later strip's vertical edges change). Horizontal edges: 16 (luma) or 8 (chroma)
+ * columns in one vector; vertical edges: 8 rows gathered into 16-bit lanes. Each lane
+ * carries its own segment's bS (tc0 per lane, bS 0 masked off); bS 4 (an intra
+ * macroblock's edge) is never mixed with smaller ones on an edge. Loads and stores are
+ * predicated to the lanes that filter: nothing else is read or written. */
+#include <arm_mve.h>
+
+#define W16B(x) vreinterpretq_s16_u16(vmovlbq_u8(x))
+#define W16T(x) vreinterpretq_s16_u16(vmovltq_u8(x))
+
+static inline uint8x16_t n8(int16x8_t b, int16x8_t t)
+{
+    uint8x16_t r = vmovnbq_u16(vdupq_n_u8(0), vreinterpretq_u16_s16(b));
+    return vmovntq_u16(r, vreinterpretq_u16_s16(t));
+}
+
+/* bS < 4, one half: p1' q1' (unclipped narrow, as the C's u8 store), p0' q0' (16 bits) */
+static inline void mve_norm_half(int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
+                                 int16x8_t q2, int16x8_t avg, int16x8_t tc0, int16x8_t tc,
+                                 int16x8_t *p1n, int16x8_t *q1n, int16x8_t *p0n, int16x8_t *q0n)
+{
+    int16x8_t ntc0 = vnegq_s16(tc0), ntc = vnegq_s16(tc);
+    int16x8_t v = vshrq_n_s16(vsubq_s16(vaddq_s16(p2, avg), vshlq_n_s16(p1, 1)), 1);
+    *p1n = vaddq_s16(p1, vmaxq_s16(vminq_s16(v, tc0), ntc0));
+    v = vshrq_n_s16(vsubq_s16(vaddq_s16(q2, avg), vshlq_n_s16(q1, 1)), 1);
+    *q1n = vaddq_s16(q1, vmaxq_s16(vminq_s16(v, tc0), ntc0));
+    v = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vshlq_n_s16(vsubq_s16(q0, p0), 2), vsubq_s16(p1, q1)), 4), 3);
+    int16x8_t d = vmaxq_s16(vminq_s16(v, tc), ntc);
+    *p0n = vaddq_s16(p0, d);
+    *q0n = vsubq_s16(q0, d);
+}
+
+/* bS 4, one half */
+static inline void mve_strong_half(int16x8_t p3, int16x8_t p2, int16x8_t p1, int16x8_t p0, int16x8_t q0,
+                                   int16x8_t q1, int16x8_t q2, int16x8_t q3, int16x8_t o[8])
+{
+    int16x8_t sp = vaddq_s16(vaddq_s16(p1, p0), q0), sq = vaddq_s16(vaddq_s16(p0, q0), q1);
+    o[0] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(p2, vshlq_n_s16(sp, 1)), q1), 4), 3);   /* p0 strong */
+    o[1] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(p2, sp), 2), 2);                                 /* p1 */
+    o[2] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(p3, 1), vmulq_n_s16(p2, 3)), sp), 4), 3);
+    o[3] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(p1, 1), p0), q1), 2), 2);    /* p0 weak */
+    o[4] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(p1, vshlq_n_s16(sq, 1)), q2), 4), 3);   /* q0 strong */
+    o[5] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(sq, q2), 2), 2);                                 /* q1 */
+    o[6] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(q3, 1), vmulq_n_s16(q2, 3)), sq), 4), 3);
+    o[7] = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(q1, 1), q0), p1), 2), 2);    /* q0 weak */
+}
+
+
+/* A vertical luma edge, 8 rows (two 4-row segments): bsv the rows' bS (0..3 each, or all 4;
+ * 0: not filtered); the rows' pixels gathered into 16-bit lanes, the same arithmetic,
+ * scattered back. The edges' loads and gathers are unpredicated (a VPST each saved): every
+ * lane reads pixels of the macroblock and its filtered neighbour; only the stores are
+ * predicated (filt includes the lanes with bS > 0). */
+static void mve_ver_luma8(u8 *data, uint16x8_t bsv, const edgeThreshold_t *th, u32 w)
+{
+    mve_pred16_t act = vcmpneq_n_u16(bsv, 0), strong = vcmpeqq_n_u16(bsv, 4);
+    uint16x8_t off = vmulq_n_u16(vidupq_n_u16(0, 1), (uint16_t)w);
+#define G(k) vreinterpretq_s16_u16(vldrbq_gather_offset_u16(data + (k), off))
+    int16x8_t p2 = G(-3), p1 = G(-2), p0 = G(-1), q0 = G(0), q1 = G(1), q2 = G(2);
+    uint16x8_t a = vdupq_n_u16((uint16_t)th->alpha), b = vdupq_n_u16((uint16_t)th->beta);
+#define AD(x, y) vreinterpretq_u16_s16(vabdq_s16(x, y))
+    mve_pred16_t filt = vcmphiq_u16(a, AD(p0, q0)) & vcmphiq_u16(b, AD(p1, p0)) & vcmphiq_u16(b, AD(q1, q0)) & act;
+
+    if (filt == 0)
+        return;
+    mve_pred16_t ap = vcmphiq_u16(b, AD(p2, p0)), aq = vcmphiq_u16(b, AD(q2, q0));
+#define S(k, v, pr) vstrbq_scatter_offset_p_u16(data + (k), off, vreinterpretq_u16_s16(v), pr)
+
+    if (!strong) {
+        /* tc0 of each lane's bS (tc0[bS - 1]) */
+        int16x8_t t0 = vreinterpretq_s16_u16(vldrbq_gather_offset_z_u16(th->tc0, vsubq_n_u16(bsv, 1), act));
+        int16x8_t tc = t0;
+        tc = vpselq_s16(vaddq_n_s16(tc, 1), tc, ap);
+        tc = vpselq_s16(vaddq_n_s16(tc, 1), tc, aq);
+        int16x8_t p1n, q1n, p0n, q0n, zero = vdupq_n_s16(0), max = vdupq_n_s16(255);
+
+        mve_norm_half(p2, p1, p0, q0, q1, q2, vrhaddq_s16(p0, q0), t0, tc, &p1n, &q1n, &p0n, &q0n);
+        S(-2, p1n, filt & ap);
+        S(1, q1n, filt & aq);
+        S(-1, vmaxq_s16(vminq_s16(p0n, max), zero), filt);
+        S(0, vmaxq_s16(vminq_s16(q0n, max), zero), filt);
+        return;
+    }
+    int16x8_t p3 = G(-4), q3 = G(3), o[8];
+    mve_pred16_t small = vcmphiq_u16(vdupq_n_u16((uint16_t)((th->alpha >> 2) + 2)), AD(p0, q0));
+    mve_pred16_t aps = filt & small & ap, aqs = filt & small & aq;
+
+    mve_strong_half(p3, p2, p1, p0, q0, q1, q2, q3, o);
+    S(-1, vpselq_s16(o[0], o[3], aps), filt);
+    S(-2, o[1], aps);
+    S(-3, o[2], aps);
+    S(0, vpselq_s16(o[4], o[7], aqs), filt);
+    S(1, o[5], aqs);
+    S(2, o[6], aqs);
+#undef G
+#undef AD
+#undef S
+}
+
+/* A horizontal luma edge, 16 columns: bsv each column's bS (its 4-column segment's: 0..3,
+ * or all 4; 0: not filtered) */
+static __attribute__((noinline)) void mve_hor_luma16(u8 *data, uint8x16_t bsv, const edgeThreshold_t *th, i32 w)
+{
+    mve_pred16_t lanes = vcmpneq_n_u8(bsv, 0), strong = vcmpeqq_n_u8(bsv, 4);
+    uint8x16_t p2 = vldrbq_u8(data - 3 * w), p1 = vldrbq_u8(data - 2 * w);
+    uint8x16_t p0 = vldrbq_u8(data - w), q0 = vldrbq_u8(data);
+    uint8x16_t q1 = vldrbq_u8(data + w), q2 = vldrbq_u8(data + 2 * w);
+    uint8x16_t va = vdupq_n_u8((u8)th->alpha), vb = vdupq_n_u8((u8)th->beta);
+    uint8x16_t d00 = vabdq_u8(p0, q0);
+    mve_pred16_t filt = vcmphiq_u8(va, d00) & vcmphiq_u8(vb, vabdq_u8(p1, p0)) & vcmphiq_u8(vb, vabdq_u8(q1, q0)) &
+                        lanes;
+
+    if (filt == 0)
+        return;
+    mve_pred16_t ap = vcmphiq_u8(vb, vabdq_u8(p2, p0)), aq = vcmphiq_u8(vb, vabdq_u8(q2, q0));
+
+    if (!strong) {
+        uint8x16_t t0 = vldrbq_gather_offset_z_u8(th->tc0, vsubq_n_u8(bsv, 1), lanes);   /* tc0[bS - 1] */
+        uint8x16_t tc = t0;
+        tc = vpselq_u8(vaddq_n_u8(tc, 1), tc, ap);
+        tc = vpselq_u8(vaddq_n_u8(tc, 1), tc, aq);
+        /* in 8-bit lanes where that is exact: p1' = p1 + clip3(-tc0, tc0, (p2 + avg - 2 p1) >> 1)
+         * is clamp((p2 + avg) >> 1, p1 - tc0, p1 + tc0) (avg = (p0 + q0 + 1) >> 1); the delta
+         * of p0 / q0 in 16-bit halves, narrowed with saturation (beyond +-127 it clips to
+         * +-tc <= 27 anyway), then added as its positive and negative parts, saturating */
+        uint8x16_t avg = vrhaddq_u8(p0, q0);
+        uint8x16_t p1n = vminq_u8(vmaxq_u8(vhaddq_u8(p2, avg), vqsubq_u8(p1, t0)), vqaddq_u8(p1, t0));
+        uint8x16_t q1n = vminq_u8(vmaxq_u8(vhaddq_u8(q2, avg), vqsubq_u8(q1, t0)), vqaddq_u8(q1, t0));
+#define DELTA(L, S)                                                                                        \
+    vreinterpretq_s16_u16(vaddq_u16(vsubq_u16(S(q0, 2), S(p0, 2)), vsubq_u16(L(p1), L(q1))))
+        int16x8_t db = DELTA(vmovlbq_u8, vshllbq_n_u8), dt = DELTA(vmovltq_u8, vshlltq_n_u8);
+#undef DELTA
+        int8x16_t d = vqrshrntq_n_s16(vqrshrnbq_n_s16(vdupq_n_s8(0), db, 3), dt, 3);   /* (x + 4) >> 3 */
+        int8x16_t tcs = vreinterpretq_s8_u8(tc);
+        d = vmaxq_s8(vminq_s8(d, tcs), vnegq_s8(tcs));
+        uint8x16_t dp = vreinterpretq_u8_s8(vmaxq_s8(d, vdupq_n_s8(0)));
+        uint8x16_t dn = vreinterpretq_u8_s8(vmaxq_s8(vnegq_s8(d), vdupq_n_s8(0)));
+
+        vstrbq_p_u8(data - 2 * w, p1n, filt & ap);
+        vstrbq_p_u8(data + w, q1n, filt & aq);
+        vstrbq_p_u8(data - w, vqsubq_u8(vqaddq_u8(p0, dp), dn), filt);
+        vstrbq_p_u8(data, vqsubq_u8(vqaddq_u8(q0, dn), dp), filt);
+        return;
+    }
+    uint8x16_t p3 = vldrbq_u8(data - 4 * w), q3 = vldrbq_u8(data + 3 * w);
+    mve_pred16_t small = vcmphiq_u8(vdupq_n_u8((u8)((th->alpha >> 2) + 2)), d00);
+    mve_pred16_t aps = filt & small & ap, aqs = filt & small & aq;
+    int16x8_t ob[8], ot[8];
+
+    mve_strong_half(W16B(p3), W16B(p2), W16B(p1), W16B(p0), W16B(q0), W16B(q1), W16B(q2), W16B(q3), ob);
+    mve_strong_half(W16T(p3), W16T(p2), W16T(p1), W16T(p0), W16T(q0), W16T(q1), W16T(q2), W16T(q3), ot);
+    vstrbq_p_u8(data - w, vpselq_u8(n8(ob[0], ot[0]), n8(ob[3], ot[3]), aps), filt);
+    vstrbq_p_u8(data - 2 * w, n8(ob[1], ot[1]), aps);
+    vstrbq_p_u8(data - 3 * w, n8(ob[2], ot[2]), aps);
+    vstrbq_p_u8(data, vpselq_u8(n8(ob[4], ot[4]), n8(ob[7], ot[7]), aqs), filt);
+    vstrbq_p_u8(data + w, n8(ob[5], ot[5]), aqs);
+    vstrbq_p_u8(data + 2 * w, n8(ob[6], ot[6]), aqs);
+}
+
+/* Chroma, 8 lanes (16-bit): p1 p0 q0 q1 of a row (horizontal edge) or column (vertical);
+ * tc the lanes' tc0 + 1 (bS < 4) or strong (bS 4); only p0 and q0 change. */
+static inline mve_pred16_t mve_chroma8(int16x8_t p1, int16x8_t p0, int16x8_t q0, int16x8_t q1,
+                                                   uint16x8_t a, uint16x8_t be, int16x8_t tc, u32 strong,
+                                                   mve_pred16_t act, int16x8_t *p0n, int16x8_t *q0n)
+{
+#define AD(x, y) vreinterpretq_u16_s16(vabdq_s16(x, y))
+    mve_pred16_t filt = vcmphiq_u16(a, AD(p0, q0)) & vcmphiq_u16(be, AD(p1, p0)) & vcmphiq_u16(be, AD(q1, q0)) & act;
+#undef AD
+    if (!strong) {
+        int16x8_t v = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vshlq_n_s16(vsubq_s16(q0, p0), 2), vsubq_s16(p1, q1)), 4), 3);
+        int16x8_t d = vmaxq_s16(vminq_s16(v, tc), vnegq_s16(tc)), zero = vdupq_n_s16(0), max = vdupq_n_s16(255);
+        *p0n = vmaxq_s16(vminq_s16(vaddq_s16(p0, d), max), zero);
+        *q0n = vmaxq_s16(vminq_s16(vsubq_s16(q0, d), max), zero);
+    } else {
+        *p0n = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(p1, 1), p0), q1), 2), 2);
+        *q0n = vshrq_n_s16(vaddq_n_s16(vaddq_s16(vaddq_s16(vshlq_n_s16(q1, 1), q0), p1), 2), 2);
+    }
+    return filt;
+}
+
+/* a chroma edge of both components: 8 columns (horizontal: h 1) or 8 rows gathered
+ * (vertical), bsv the lanes' bS (pairs; 0..3 each, or all 4) */
+static __attribute__((noinline)) void mve_chroma_edge(u8 *cb, u8 *cr, uint16x8_t bsv, const edgeThreshold_t *th, u32 w, u32 h)
+{
+    mve_pred16_t act = vcmpneq_n_u16(bsv, 0), s4 = vcmpeqq_n_u16(bsv, 4);
+    u32 strong = s4 != 0;
+    /* tc0[bS - 1] + 1 (bS 1..3 lanes only: tc0 has three columns) */
+    int16x8_t tc = vaddq_n_s16(vreinterpretq_s16_u16(vldrbq_gather_offset_z_u16(th->tc0, vsubq_n_u16(bsv, 1),
+                                                                                  act & ~s4)), 1);
+    uint16x8_t a = vdupq_n_u16((uint16_t)th->alpha), be = vdupq_n_u16((uint16_t)th->beta);
+    uint16x8_t off = vmulq_n_u16(vidupq_n_u16(0, 1), (uint16_t)w);
+
+    for (u32 c = 0; c < 2; c++) {
+        u8 *data = c ? cr : cb;
+        int16x8_t p1, p0, q0, q1, p0n, q0n;
+        mve_pred16_t filt;
+
+        if (h) {
+#define L(k) vreinterpretq_s16_u16(vldrbq_u16(data + (k) * (i32)w))
+            p1 = L(-2); p0 = L(-1); q0 = L(0); q1 = L(1);
+#undef L
+            filt = mve_chroma8(p1, p0, q0, q1, a, be, tc, strong, act, &p0n, &q0n);
+            if (filt) {
+                vstrbq_p_u16(data - w, vreinterpretq_u16_s16(p0n), filt);
+                vstrbq_p_u16(data, vreinterpretq_u16_s16(q0n), filt);
+            }
+        } else {
+#define G(k) vreinterpretq_s16_u16(vldrbq_gather_offset_u16(data + (k), off))
+            p1 = G(-2); p0 = G(-1); q0 = G(0); q1 = G(1);
+#undef G
+            filt = mve_chroma8(p1, p0, q0, q1, a, be, tc, strong, act, &p0n, &q0n);
+            if (filt) {
+                vstrbq_scatter_offset_p_u16(data - 1, off, vreinterpretq_u16_s16(p0n), filt);
+                vstrbq_scatter_offset_p_u16(data, off, vreinterpretq_u16_s16(q0n), filt);
+            }
+        }
+    }
+}
+
+/* (the edge functions stay out of line: inlined into h264bsdFilterMbRange they spilled
+ * vectors to the stack, ~4 % more instructions) */
+
+/* all luma edges of a macroblock: vertical (x = 0 left, 4, 8, 12 inner), then horizontal
+ * (y = 0 top, 4, 8, 12 inner); each edge's bS gathered into lanes from the byte array */
+/* entry k's top / left bS as a byte: bt / bl + k * BSE (a field's low byte on
+ * a little-endian core; bS is 0..4), whatever bS_t's field size */
+#define BSE ((u32)sizeof(bS_t))
+
+static void FilterLumaMve(u8 *data, bS_t *bS, edgeThreshold_t *th, u32 width)
+{
+    const u8 *bl = (const u8 *)&bS[0].left, *bt = (const u8 *)&bS[0].top;
+    /* rows 0..3 segment k, rows 4..7 segment k + 4 */
+    const uint16x8_t vofs = {0, 0, 0, 0, 4 * BSE, 4 * BSE, 4 * BSE, 4 * BSE};
+    /* columns 0..3 segment k, 4..7 k + 1, ... */
+    const uint8x16_t hofs = {0, 0, 0, 0, BSE, BSE, BSE, BSE, 2 * BSE, 2 * BSE, 2 * BSE, 2 * BSE,
+                             3 * BSE, 3 * BSE, 3 * BSE, 3 * BSE};
+    u32 e;
+
+    for (e = 0; e < 4; e++) {
+        const edgeThreshold_t *t = th + (e ? INNER : LEFT);
+
+        if (bl[BSE * e] | bl[BSE * (4 + e)])
+            mve_ver_luma8(data + 4 * e, vldrbq_gather_offset_u16(bl + BSE * e, vofs), t, width);
+        if (bl[BSE * (8 + e)] | bl[BSE * (12 + e)])
+            mve_ver_luma8(data + 4 * e + 8 * width, vldrbq_gather_offset_u16(bl + BSE * (8 + e), vofs), t, width);
+    }
+    for (e = 0; e < 4; e++) {
+        const u8 *b = bt + 4 * BSE * e;
+
+        if (b[0] | b[BSE] | b[2 * BSE] | b[3 * BSE])
+            mve_hor_luma16(data + 4 * e * width, vldrbq_gather_offset_u8(b, hofs), th + (e ? INNER : TOP),
+                           (i32)width);
+    }
+}
+
+/* all chroma edges of a macroblock, both components (each bS covers 2 chroma pixels of an
+ * edge): vertical x = 0 (left: luma's left edge) and x = 4 (luma's x = 8), then horizontal
+ * y = 0 (top) and y = 4 (luma's y = 8) */
+static void FilterChromaMve(u8 *cb, u8 *cr, bS_t *bS, edgeThreshold_t *th, u32 width)
+{
+    const u8 *bl = (const u8 *)&bS[0].left, *bt = (const u8 *)&bS[0].top;
+    /* rows 2i, 2i + 1: luma segment 4i (+ 2e) */
+    const uint16x8_t vofs = {0, 0, 4 * BSE, 4 * BSE, 8 * BSE, 8 * BSE, 12 * BSE, 12 * BSE};
+    /* columns 2i, 2i + 1: luma segment i (+ 8e) */
+    const uint16x8_t hofs = {0, 0, BSE, BSE, 2 * BSE, 2 * BSE, 3 * BSE, 3 * BSE};
+    u32 e;
+
+    for (e = 0; e < 2; e++) {
+        const u8 *b = bl + 2 * BSE * e;
+
+        if (b[0] | b[4 * BSE] | b[8 * BSE] | b[12 * BSE])
+            mve_chroma_edge(cb + 4 * e, cr + 4 * e, vldrbq_gather_offset_u16(b, vofs), th + (e ? INNER : LEFT),
+                            width, 0);
+    }
+    for (e = 0; e < 2; e++) {
+        const u8 *b = bt + 8 * BSE * e;
+
+        if (b[0] | b[BSE] | b[2 * BSE] | b[3 * BSE])
+            mve_chroma_edge(cb + 4 * e * width, cr + 4 * e * width, vldrbq_gather_offset_u16(b, hofs),
+                            th + (e ? INNER : TOP), width, 1);
+    }
+}
+#undef BSE
+#endif
 
 /*------------------------------------------------------------------------------
 

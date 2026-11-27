@@ -94,6 +94,64 @@ static const u8 qpDiv6[52] = {0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,
             HANTRO_NOK      processed data not in valid range [-512, 511]
 
 ------------------------------------------------------------------------------*/
+#if defined(H264BSD_MVE)
+#include <arm_mve.h>
+/* OPT (Helium): the general case (coefficients past the first row) with the
+ * same arithmetic as the C below: the inverse zig-zag as gathers of the
+ * block's columns (lanes: rows), each scaled by its position's level scale;
+ * the horizontal transform lane by lane on the columns; a transpose through
+ * an interleaving store (vst4); the vertical transform lane by lane on the
+ * rows, (x + 32) >> 6, the [-512, 511] check, raster order back into data. */
+static u32 ProcessBlockMve(i32 *data, i32 s1, i32 s2, i32 s3, u32 skip)
+{
+    /* the scan index of each raster position, column by column (rows 0..3) */
+    static const uint32_t colScan[4][4] = {{0, 2, 3, 9}, {1, 4, 8, 10}, {5, 7, 11, 14}, {6, 12, 13, 15}};
+    int32_t *d32 = (int32_t *)data;   /* i32 is int, int32_t long on some targets */
+    int32x4_t even = vdupq_n_s32(s2), odd = vdupq_n_s32(s3);
+    even = vsetq_lane_s32(s1, even, 0);
+    even = vsetq_lane_s32(s1, even, 2);     /* rows 0, 2: s1; rows 1, 3: s2 */
+    odd = vsetq_lane_s32(s2, odd, 0);
+    odd = vsetq_lane_s32(s2, odd, 2);       /* rows 0, 2: s2; rows 1, 3: s3 */
+    int32x4_t first = skip ? vsetq_lane_s32(1, even, 0) : even;
+    int32x4_t c0 = vmulq_s32(vldrwq_gather_shifted_offset_s32(d32, vld1q_u32(colScan[0])), first);
+    int32x4_t c1 = vmulq_s32(vldrwq_gather_shifted_offset_s32(d32, vld1q_u32(colScan[1])), odd);
+    int32x4_t c2 = vmulq_s32(vldrwq_gather_shifted_offset_s32(d32, vld1q_u32(colScan[2])), even);
+    int32x4_t c3 = vmulq_s32(vldrwq_gather_shifted_offset_s32(d32, vld1q_u32(colScan[3])), odd);
+    /* horizontal transform (each lane a row) */
+    int32x4_t t0 = vaddq_s32(c0, c2), t1 = vsubq_s32(c0, c2);
+    int32x4_t t2 = vsubq_s32(vshrq_n_s32(c1, 1), c3), t3 = vaddq_s32(c1, vshrq_n_s32(c3, 1));
+    int32x4x4_t x;
+    x.val[0] = vaddq_s32(t0, t3);
+    x.val[1] = vaddq_s32(t1, t2);
+    x.val[2] = vsubq_s32(t1, t2);
+    x.val[3] = vsubq_s32(t0, t3);
+    vst4q_s32(d32, x);   /* row-major: data[4 * row + column] */
+    /* vertical transform (each lane a column) */
+    int32x4_t a0 = vld1q_s32(d32), a1 = vld1q_s32(d32 + 4), a2 = vld1q_s32(d32 + 8), a3 = vld1q_s32(d32 + 12);
+    t0 = vaddq_s32(a0, a2);
+    t1 = vsubq_s32(a0, a2);
+    t2 = vsubq_s32(vshrq_n_s32(a1, 1), a3);
+    t3 = vaddq_s32(a1, vshrq_n_s32(a3, 1));
+    int32x4_t o0 = vshrq_n_s32(vaddq_n_s32(vaddq_s32(t0, t3), 32), 6);
+    int32x4_t o1 = vshrq_n_s32(vaddq_n_s32(vaddq_s32(t1, t2), 32), 6);
+    int32x4_t o2 = vshrq_n_s32(vaddq_n_s32(vsubq_s32(t1, t2), 32), 6);
+    int32x4_t o3 = vshrq_n_s32(vaddq_n_s32(vsubq_s32(t0, t3), 32), 6);
+    /* each value in [-512, 511] */
+    uint32x4_t lim = vdupq_n_u32(1023);
+    mve_pred16_t bad = vcmphiq_u32(vreinterpretq_u32_s32(vaddq_n_s32(o0, 512)), lim) |
+                       vcmphiq_u32(vreinterpretq_u32_s32(vaddq_n_s32(o1, 512)), lim) |
+                       vcmphiq_u32(vreinterpretq_u32_s32(vaddq_n_s32(o2, 512)), lim) |
+                       vcmphiq_u32(vreinterpretq_u32_s32(vaddq_n_s32(o3, 512)), lim);
+    if (bad)
+        return(HANTRO_NOK);
+    vst1q_s32(d32, o0);
+    vst1q_s32(d32 + 4, o1);
+    vst1q_s32(d32 + 8, o2);
+    vst1q_s32(d32 + 12, o3);
+    return(HANTRO_OK);
+}
+#endif
+
 u32 h264bsdProcessBlock(i32 *data, u32 qp, u32 skip, u32 coeffMap)
 {
 
@@ -112,6 +170,10 @@ u32 h264bsdProcessBlock(i32 *data, u32 qp, u32 skip, u32 coeffMap)
     tmp2 = levelScale[qpMod6[qp]][1] << qpDiv;
     tmp3 = levelScale[qpMod6[qp]][2] << qpDiv;
 
+#if defined(H264BSD_MVE)
+    if (coeffMap & 0xFF9C)
+        return ProcessBlockMve(data, tmp1, tmp2, tmp3, skip);
+#endif
     if (!skip)
         data[0] = (data[0] * tmp1);
 

@@ -77,15 +77,36 @@ static const u32 lumaFracPos[4][4] = {
 /* clipping table, defined in h264bsd_intra_prediction.c */
 extern const u8 h264bsdClip[];
 
-/* OPT: the luma 6-tap positions (a, b, c, d, h, n) on the ESP32-S31's SIMD
- * (h264bsd_interp_pie_s31.S), for partitions 8 or 16 pixels wide: about a
- * third of a P frame's decode, several times faster. QEMU can't run it, so
- * the first call checks it against the C on random blocks and keeps the C
- * if they differ (h264bsdPieState()). */
+/* OPT: motion-compensation backends, at most one (without one, the C
+ * below). These two take the hooks at the top of the C functions (PIE_VER,
+ * PIE_HOR, PIE_HORVER, PIE_CHROMA; PIE_PAD bytes of slack past an edge-filled
+ * block), and their first call checks them against the C on random blocks and
+ * keeps the C if they differ (PieSelftest, h264bsdPieState()):
+ *   TINYH264_PIE_S31  the ESP32-S31's SIMD (h264bsd_interp_pie_s31.S)
+ *   TINYH264_DSP_MC   the Armv8-M DSP extension (h264bsd_interp_dsp.c)
+ * TINYH264_PACKED4_MC replaces the interpolation functions instead
+ * (h264bsd_interp_packed4.c, below; no check of its own: a port runs
+ * h264bsdPacked4Check()), and TINYH264_MVE all of h264bsdPredictSamples
+ * (h264bsd_inter_mve.c, Arm Helium, which checks its prediction on first use).
+ *
+ * The luma 6-tap positions (a, b, c, d, h, n) on the ESP32-S31's SIMD, for
+ * partitions 8 or 16 pixels wide: about a third of a P frame's decode,
+ * several times faster. QEMU can't run it, hence the check. */
+/* The switches as set (0 is off), before S31 and DSP both become
+ * TINYH264_PIE; TINYH264_MVE counts where it builds Helium (H264BSD_MVE). */
+#if (defined(TINYH264_PIE_S31) + (defined(TINYH264_DSP_MC) && TINYH264_DSP_MC) + \
+     (defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC) + defined(H264BSD_MVE)) > 1
+#error "one motion-compensation backend at a time"
+#endif
 #if defined(TINYH264_PIE_S31)   /* CMakeLists.txt, on the S31 */
 #define TINYH264_PIE 1
 /* The SIMD reads 16 bytes from each row start: room past a filled block. */
 #define PIE_PAD 32
+#define PIE_TLS __thread
+#define PIE_W4 0          /* 4-wide partitions stay in C */
+#define PIE_TEST_SLACK 0
+#define PIE_TEST_ITERS 96
+#define PIE_NAME "S31 SIMD"
 void h264bsdPieVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off, u8 *scratch, const i16 *k);
 void h264bsdPieHor(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off, u8 *scratch, const i16 *k);
 static const i16 pieK[32] __attribute__((aligned(16))) = {
@@ -93,17 +114,6 @@ static const i16 pieK[32] __attribute__((aligned(16))) = {
     16, 16, 16, 16, 16, 16, 16, 16,
     1, 1, 1, 1, 1, 1, 1, 1,
     255, 255, 255, 255, 255, 255, 255, 255 };
-/* -1 unchecked, -2 being checked (the C meanwhile, except for the checking
- * task's own SIMD calls), 0 C, 1 SIMD */
-static volatile i32 pieState = -1;
-static __thread u8 pieTesting;
-static void PieSelftest(void);
-static inline i32 PieOk(void)
-{
-    if (pieState == -1)
-        PieSelftest();
-    return pieState == 1 || pieTesting;
-}
 #define PIE_VER(off) \
     if (partWidth >= 8 && PieOk()) { \
         u8 scr_[21 * 32] __attribute__((aligned(16))); \
@@ -146,7 +156,58 @@ void h264bsdPieChroma(const u8 *src, u32 stride, u8 *dst, u32 h, u32 rows, const
             } \
         return; \
     }
-#else
+#elif defined(TINYH264_DSP_MC) && TINYH264_DSP_MC
+/* OPT: the luma 6-tap (a, b, c, d, h, n and the e, g, p, r averages) and the
+ * chroma bilinear on the Armv8-M DSP extension, two pixels to a register in
+ * 16-bit lanes, partitions 4, 8 or 16 wide (h264bsd_interp_dsp.c). Without
+ * the extension (a host build) the same lane arithmetic runs in plain C. */
+#define TINYH264_PIE 1
+#define PIE_PAD 0         /* its word loads stay within the taps */
+#ifndef TINYH264_TLS
+#define TINYH264_TLS      /* a port with threads and TLS may set __thread */
+#endif
+#define PIE_TLS TINYH264_TLS
+#define PIE_W4 1
+#define PIE_TEST_SLACK 0
+#define PIE_TEST_ITERS 30   /* ~2 M instructions on a Cortex-M33, once */
+#define PIE_NAME "DSP"
+void h264bsdDspVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off);
+void h264bsdDspHor(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h, i32 off);
+void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows,
+                      u32 wa, u32 wb, u32 wc, u32 wd);
+#define PIE_VER(off) \
+    if (PieOk()) { \
+        h264bsdDspVer(ref, width, mb, partWidth, partHeight, (off)); \
+        return; \
+    }
+#define PIE_HOR(off) \
+    if (PieOk()) { \
+        h264bsdDspHor(ref, width, mb, partWidth, partHeight, (off)); \
+        return; \
+    }
+/* Both components, 4 or 8 wide: (wA*A + wB*B + wC*C + wD*D + 32) >> 6. */
+#define PIE_CHROMA(base, wa, wb, wc, wd, rows) \
+    if (chromaPartWidth >= 4 && PieOk()) { \
+        for (u32 c_ = 0; c_ < 2; c_++) \
+            h264bsdDspChroma((base) + (c_ * height + (u32)y0) * width + x0, width, \
+                             predPartChroma + c_ * 64, chromaPartWidth, chromaPartHeight, \
+                             (rows), (wa), (wb), (wc), (wd)); \
+        return; \
+    }
+#define PIE_HORVER(off) \
+    if (PieOk()) { \
+        u8 hv_[256] __attribute__((aligned(4))); \
+        h264bsdDspHor(ref + (((off) >> 1) + 2) * width, width, mb, partWidth, partHeight, -1); \
+        h264bsdDspVer(ref + 2 + ((off) & 1), width, hv_, partWidth, partHeight, -1); \
+        for (u32 y_ = 0; y_ < partHeight; y_++) \
+            for (u32 x_ = 0; x_ < partWidth; x_ += 4) { \
+                u32 a_ = *(u32 *)(mb + y_ * 16 + x_), b_ = *(u32 *)(hv_ + y_ * 16 + x_); \
+                *(u32 *)(mb + y_ * 16 + x_) = (a_ | b_) - (((a_ ^ b_) >> 1) & 0x7f7f7f7f); \
+            } \
+        return; \
+    }
+#endif
+#if !defined(TINYH264_PIE)
 #define PIE_HORVER(off) do {} while (0)
 #define PIE_PAD 0
 #define PIE_VER(off) do {} while (0)
@@ -154,14 +215,48 @@ void h264bsdPieChroma(const u8 *src, u32 stride, u8 *dst, u32 h, u32 rows, const
 #define PIE_CHROMA(base, wa, wb, wc, wd, rows) do {} while (0)
 #endif
 
+/* OPT: with TINYH264_PACKED4_MC the interpolation functions are
+ * h264bsd_interp_packed4.c's, in packed 4-lane operations; the C ones here
+ * are kept as *_c (its fallback for 2-wide chroma, and its check). */
+#if defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC
+#define h264bsdInterpolateVerHalf h264bsdInterpolateVerHalf_c
+#define h264bsdInterpolateVerQuarter h264bsdInterpolateVerQuarter_c
+#define h264bsdInterpolateHorHalf h264bsdInterpolateHorHalf_c
+#define h264bsdInterpolateHorQuarter h264bsdInterpolateHorQuarter_c
+#define h264bsdInterpolateHorVerQuarter h264bsdInterpolateHorVerQuarter_c
+#define h264bsdInterpolateMidHalf h264bsdInterpolateMidHalf_c
+#define h264bsdInterpolateMidVerQuarter h264bsdInterpolateMidVerQuarter_c
+#define h264bsdInterpolateMidHorQuarter h264bsdInterpolateMidHorQuarter_c
+#define h264bsdInterpolateChromaHor h264bsdInterpolateChromaHor_c
+#define h264bsdInterpolateChromaVer h264bsdInterpolateChromaVer_c
+#define h264bsdInterpolateChromaHorVer h264bsdInterpolateChromaHorVer_c
+#endif
+
+#ifdef TINYH264_PIE
+/* -1 unchecked, -2 being checked (the C meanwhile, except for the checking
+ * task's own SIMD calls), 0 C, 1 SIMD; read and written atomically, as
+ * decoders on other threads share it */
+static i32 pieState = -1;
+static PIE_TLS u8 pieTesting;
+static void PieSelftest(void);
+static inline i32 PieOk(void)
+{
+    if (__atomic_load_n(&pieState, __ATOMIC_ACQUIRE) == -1)
+        PieSelftest();
+    return __atomic_load_n(&pieState, __ATOMIC_ACQUIRE) == 1 || pieTesting;
+}
+#endif
+
+#if !defined(H264BSD_MVE)   /* else h264bsd_inter_mve.c's */
 i32 h264bsdPieState(void)
 {
 #ifdef TINYH264_PIE
-    return pieState;
+    return __atomic_load_n(&pieState, __ATOMIC_ACQUIRE);
 #else
     return 0;
 #endif
 }
+#endif
 
 /*------------------------------------------------------------------------------
     4. Local function prototypes
@@ -490,6 +585,12 @@ void h264bsdInterpolateChromaHorVer(
     }
 
 }
+
+#if defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC   /* the callers below take the packed ones */
+#undef h264bsdInterpolateChromaHor
+#undef h264bsdInterpolateChromaVer
+#undef h264bsdInterpolateChromaHorVer
+#endif
 
 /*------------------------------------------------------------------------------
 
@@ -1884,6 +1985,17 @@ void h264bsdInterpolateMidHorQuarter(
 }
 
 
+#if defined(TINYH264_PACKED4_MC) && TINYH264_PACKED4_MC
+#undef h264bsdInterpolateVerHalf
+#undef h264bsdInterpolateVerQuarter
+#undef h264bsdInterpolateHorHalf
+#undef h264bsdInterpolateHorQuarter
+#undef h264bsdInterpolateHorVerQuarter
+#undef h264bsdInterpolateMidHalf
+#undef h264bsdInterpolateMidVerQuarter
+#undef h264bsdInterpolateMidHorQuarter
+#endif
+
 /*------------------------------------------------------------------------------
 
     Function: h264bsdPredictSamples
@@ -1909,6 +2021,13 @@ void h264bsdInterpolateMidHorQuarter(
 
 ------------------------------------------------------------------------------*/
 
+#if defined(H264BSD_MVE)
+/* OPT: h264bsd_inter_mve.c's Helium h264bsdPredictSamples is the decoder's;
+ * this C is its reference (its first-use check) and its fallback. */
+#define h264bsdPredictSamples h264bsdPredictSamplesC
+void h264bsdPredictSamplesC(u8 *data, mv_t *mv, image_t *refPic, u32 xA, u32 yA,
+    u32 partX, u32 partY, u32 partWidth, u32 partHeight);
+#endif
 void h264bsdPredictSamples(
   u8 *data,
   mv_t *mv,
@@ -2032,6 +2151,7 @@ void h264bsdPredictSamples(
       refPic);
 
 }
+#undef h264bsdPredictSamples
 
 #else /* H264DEC_OMXDL */
 /*------------------------------------------------------------------------------
@@ -2466,21 +2586,32 @@ void h264bsdFillBlock(
 
 #ifdef TINYH264_PIE
 #include <string.h>
+#if defined(TINYH264_PIE_S31)
 #include "esp_log.h"
+#define PIE_LOGW(...) ESP_LOGW("tinyh264", __VA_ARGS__)
+#define PIE_LOGI(...) ESP_LOGI("tinyh264", __VA_ARGS__)
+#else
+/* OPT: a port's printf-style log (none by default) */
+#ifndef TINYH264_LOG
+#define TINYH264_LOG(...) ((void)0)
+#endif
+#define PIE_LOGW(...) TINYH264_LOG(__VA_ARGS__)
+#define PIE_LOGI(...) TINYH264_LOG(__VA_ARGS__)
+#endif
 /* The SIMD against the C on random 48x48 pictures (flat, noisy and 0/255),
  * every width, height, position and offset; only one caller checks. */
 static void PieSelftest(void)
 {
-    static u8 pic[48 * 48];
+    static u8 pic[48 * 48 + PIE_TEST_SLACK];
     if (!__atomic_compare_exchange_n(&pieState, &(i32){-1}, -2, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
         return;
     u32 seed = 0x2545f491, bad = 0, n = 0;
-    for (u32 it = 0; it < 96 && !bad; it++) {
+    for (u32 it = 0; it < PIE_TEST_ITERS && !bad; it++) {
         for (u32 i = 0; i < sizeof pic; i++) {
             seed = seed * 1664525 + 1013904223;
             pic[i] = it % 3 == 0 ? (u8)(seed >> 24) : it % 3 == 1 ? (seed >> 31) * 255 : (u8)(i + it);
         }
-        u32 w = (it & 1) ? 16 : 8, h = (it >> 1) % 3 == 0 ? 4 : (it >> 1) % 3 == 1 ? 8 : 16;
+        u32 w = PIE_W4 && it % 3 == 2 ? 4 : (it & 1) ? 16 : 8, h = (it >> 1) % 3 == 0 ? 4 : (it >> 1) % 3 == 1 ? 8 : 16;
         i32 x0 = (i32)(seed >> 8) % 24 - 2, y0 = (i32)(seed >> 16) % 24 - 2;   /* some off the edge */
         for (u32 f = 0; f < 10 && !bad; f++) {
             u8 a[256] __attribute__((aligned(16))), b[256] __attribute__((aligned(16)));
@@ -2506,18 +2637,19 @@ static void PieSelftest(void)
             n++;
             if (memcmp(a, b, sizeof a)) {
                 bad = 1;
-                ESP_LOGW("tinyh264", "S31 SIMD interpolation differs from C (case %u, %ux%u at %d,%d): using C",
+                PIE_LOGW(PIE_NAME " interpolation differs from C (case %u, %ux%u at %d,%d): using C",
                          (unsigned)f, (unsigned)w, (unsigned)h, (int)x0, (int)y0);
             }
         }
     }
-    /* chroma: the picture as two 48x24 planes, 8 wide, 4 or 8 high */
-    for (u32 it = 0; it < 96 && !bad; it++) {
+    /* chroma: the picture as two 48x24 planes, 8 wide (and 4), 4 or 8 high */
+    for (u32 it = 0; it < PIE_TEST_ITERS && !bad; it++) {
         for (u32 i = 0; i < sizeof pic; i++) {
             seed = seed * 1664525 + 1013904223;
             pic[i] = it % 3 == 0 ? (u8)(seed >> 24) : it % 3 == 1 ? (seed >> 31) * 255 : (u8)(i * 3 + it);
         }
         u32 h = (it & 1) ? 8 : 4, xf = 1 + (seed >> 8) % 7, yf = 1 + (seed >> 12) % 7;
+        u32 cw = PIE_W4 && it % 4 == 3 ? 4 : 8;
         i32 x0 = (i32)(seed >> 16) % 40 - 2, y0 = (i32)(seed >> 22) % 16 - 2;
         for (u32 f = 0; f < 3 && !bad; f++) {
             u8 a[128] __attribute__((aligned(16))), b[128] __attribute__((aligned(16)));
@@ -2527,23 +2659,23 @@ static void PieSelftest(void)
                 u8 *o = pass ? b : a;
                 pieTesting = (u8)pass;
                 if (f == 0)
-                    h264bsdInterpolateChromaHor(pic, o, x0, y0, 48, 24, xf, 8, h);
+                    h264bsdInterpolateChromaHor(pic, o, x0, y0, 48, 24, xf, cw, h);
                 else if (f == 1)
-                    h264bsdInterpolateChromaVer(pic, o, x0, y0, 48, 24, yf, 8, h);
+                    h264bsdInterpolateChromaVer(pic, o, x0, y0, 48, 24, yf, cw, h);
                 else
-                    h264bsdInterpolateChromaHorVer(pic, o, x0, y0, 48, 24, xf, yf, 8, h);
+                    h264bsdInterpolateChromaHorVer(pic, o, x0, y0, 48, 24, xf, yf, cw, h);
             }
             pieTesting = 0;
             n++;
             if (memcmp(a, b, sizeof a)) {
                 bad = 1;
-                ESP_LOGW("tinyh264", "S31 SIMD chroma differs from C (case %u, 8x%u at %d,%d, %u/%u): using C",
-                         (unsigned)f, (unsigned)h, (int)x0, (int)y0, (unsigned)xf, (unsigned)yf);
+                PIE_LOGW(PIE_NAME " chroma differs from C (case %u, %ux%u at %d,%d, %u/%u): using C",
+                         (unsigned)f, (unsigned)cw, (unsigned)h, (int)x0, (int)y0, (unsigned)xf, (unsigned)yf);
             }
         }
     }
     if (!bad)
-        ESP_LOGI("tinyh264", "S31 SIMD interpolation matches C on %u blocks: in use", (unsigned)n);
-    pieState = bad ? 0 : 1;
+        PIE_LOGI(PIE_NAME " interpolation matches C on %u blocks: in use", (unsigned)n);
+    __atomic_store_n(&pieState, bad ? 0 : 1, __ATOMIC_RELEASE);
 }
 #endif

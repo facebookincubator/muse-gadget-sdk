@@ -69,6 +69,41 @@ jobs:
           SANITIZE: ${{ matrix.sanitize && '--sanitize' || '' }}
         run: python3 xplat/tests/run_tests.py $SANITIZE
 
+  targets:
+    # The paths only other cores build, compile-only (the host tests run the
+    # plain C): tinyh264's Helium and DSP motion compensation with Arm GCC,
+    # and the Xpulp instructions (lc3fx, tinyh264, libvpx_vp8's five users,
+    # test_rv_xpulp.c) for RV32 with clang, newlib's headers for both.
+    name: Target builds (Arm Helium and DSP, RISC-V Xpulp)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Arm GCC and newlib headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gcc-arm-none-eabi libnewlib-dev
+      - name: Compile
+        run: |
+          set -eu
+          C="-std=gnu99 -O2 -Werror -isystem /usr/include/newlib"
+          ARM="arm-none-eabi-gcc $C -Ixplat/tinyh264/src"
+          RV="clang --target=riscv32-unknown-elf -march=rv32imc -mabi=ilp32 $C -Ixplat/include -DRV_XPULP=1"
+          for f in xplat/tinyh264/src/*.c; do
+            $ARM -mcpu=cortex-m55 -mfloat-abi=hard -DTINYH264_MVE=1 -c "$f" -o /dev/null
+            $ARM -mcpu=cortex-m33 -DTINYH264_DSP_MC=1 -c "$f" -o /dev/null
+            $RV -Ixplat/tinyh264/src -DTINYH264_XPULP=1 -c "$f" -o /dev/null
+          done
+          for f in xplat/lc3fx/src/*.c; do
+            $RV -Ixplat/lc3fx/include -Ixplat/lc3fx/src -DLC3FX_XPULP=1 -c "$f" -o /dev/null
+          done
+          for f in vp8/common/filter vp8/common/idctllm vp8/common/idct_blk vp8/common/loopfilter_filters \
+                   vpx_dsp/intrapred; do
+            $RV -Ixplat/libvpx_vp8/src -DVPX_XPULP=1 -c "xplat/libvpx_vp8/src/$f.c" -o /dev/null
+          done
+          $RV -c xplat/tests/test_rv_xpulp.c -o /dev/null
+
   fuzz:
     # The lc3fx, liblc3 and libsbc decoders on arbitrary peer bytes, with
     # libFuzzer and ASan + UBSan, two minutes per LC3 build.

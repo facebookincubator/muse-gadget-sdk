@@ -390,6 +390,22 @@ static void CopySkipMb(image_t *currImage, const u8 *ref)
           HANTRO_NOK    error in motion vector prediction
 
 ------------------------------------------------------------------------------*/
+#if defined(H264BSD_MVE)
+/* OPT (Helium, h264bsd_inter_mve.c): the prediction goes straight into the
+ * picture's macroblock and the residual is added there, no macroblock array
+ * copied out; the array only for a macroblock already written (redundant
+ * slices), which is predicted but kept. */
+void h264bsdPredictSamplesPic(image_t *image, mv_t *mv, image_t *refPic, u32 xA,
+    u32 yA, u32 partX, u32 partY, u32 partWidth, u32 partHeight);
+void h264bsdAddResidualMb(image_t *image, i32 residual[][16], u32 mask);
+#define h264bsdPredictSamples(d, mvp, ref, c, r, x, y, w, h) \
+    do { \
+        if (pMb->decoded <= 1) \
+            h264bsdPredictSamplesPic(currImage, mvp, ref, c, r, x, y, w, h); \
+        else \
+            h264bsdPredictSamples(d, mvp, ref, c, r, x, y, w, h); \
+    } while (0)
+#endif
 u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     dpbStorage_t *dpb, u32 mbNum, image_t *currImage, u8 *data)
 {
@@ -511,6 +527,12 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     if (pMb->decoded > 1)
         return HANTRO_OK;
 
+#if defined(H264BSD_MVE)
+    /* the prediction is in the picture already: the residual goes on in place */
+    if (pMb->mbType != P_Skip)
+        h264bsdAddResidualMb(currImage, pMbLayer->residual.level,
+            pMbLayer->residual.resMask);
+#else
     if (pMb->mbType != P_Skip)
     {
         h264bsdWriteOutputBlocks(currImage, mbNum, data,
@@ -520,9 +542,11 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     {
         h264bsdWriteMacroblock(currImage, data);
     }
+#endif
 
     return(HANTRO_OK);
 }
+#undef h264bsdPredictSamples
 #endif /* H264DEC_OMXDL */
 
 /*------------------------------------------------------------------------------

@@ -147,6 +147,11 @@ typedef struct
 #endif
     i32 level[26][16];
     u32 coeffMap[24];
+#if defined(H264BSD_MVE)
+    /* OPT (Helium, inter macroblocks): the blocks with a residual, bit i for
+     * block i (0..23; h264bsdAddResidualMb adds just those) */
+    u32 resMask;
+#endif
 } residual_t;
 
 typedef struct
