@@ -543,7 +543,7 @@ u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 
     if (retCode == H264BSD_PIC_RDY) {
       /* OPT: a picture that reached no output (concealed with no valid
        * slice, or not stored) is an error, not a NULL dereference: damaged
-       * parameter sets got here (tests/test_video_route.py, sps) */
+       * parameter sets got here (esp32/tests/test_video_route.py, sps) */
       dpbOutPicture_t *out = h264bsdDpbOutputPicture(pStorage->dpb);
       if (out == NULL || pStorage->activeSps == NULL)
         return H264BSD_ERROR;

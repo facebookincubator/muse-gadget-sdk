@@ -520,8 +520,8 @@ Third-party code keeps its upstream license and header: `minimp3.h` (CC0),
 `components/esp_lcd_gc9107` (Apache-2.0, Espressif),
 `main/epd_ssd1677.c` (MIT, Seeed-reTerminal-E10xx-Firmware),
 `main/epd_it8951.c` and `main/uc8179_gray4_lut.h` (MIT, Seeed_GFX2),
-`components/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
-`components/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
+`../xplat/tinyh264/src` (Apache-2.0, the Android Open Source Project) and
+`../xplat/libvpx_vp8/src` (BSD-3-Clause and `PATENTS`, the WebM Project).
 Each third-party file is listed under License in `README.md` and the root
 `README.md`; add a new one to both.
 Don't restyle them or replace their headers with the Apache one; `components/minimp3/README.md` says how to
@@ -891,8 +891,9 @@ the design, the Wi-Fi protocol and the numbers.
   UI streams (one to one) are placed as before. `tests/test_muse_video_fit.py`
   renders each round board's picture and checks the circle, the centering,
   the window's alignment, the suggestions and the square panels.
-- **Pieces:** `components/tinyh264` and `components/libvpx_vp8` (the
-  decoders, behind `muse_vdec.c`),
+- **Pieces:** `../xplat/tinyh264` and `../xplat/libvpx_vp8` (the
+  decoders, behind `muse_vdec.c`; `components/tinyh264` and
+  `components/libvpx_vp8` build them),
   `components/muse_vstream` (the receive ring and frame format any transport
   shares), `components/muse/muse_video.c` (decode and show tasks, pacing,
   bands, the view), `muse_video_fit.c` (where the picture goes: fit, or a

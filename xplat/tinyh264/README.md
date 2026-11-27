@@ -17,11 +17,12 @@ limitations under the License.
 # tinyh264
 
 The H.264 constrained baseline decoder behind Muse video streaming
-(`CONFIG_MUSE_VIDEO`, `../../../protocols/VIDEO.md`). It's the Android
+(`CONFIG_MUSE_VIDEO`, `../../protocols/VIDEO.md`). It's the Android
 Open Source Project's software decoder (`h264bsd`, originally Hantro's) as
 packaged by [udevbe/tinyh264](https://github.com/udevbe/tinyh264) at
 `524a702`, Apache-2.0 (`LICENSE`); Espressif's `esp_h264` ships the same code
-as a prebuilt library.
+as a prebuilt library. The ESP32 firmware builds it with its ESP-IDF
+component, `../../esp32/components/tinyh264` (`CMakeLists.txt`, `linker.lf`).
 
 Changes from upstream, each marked `OPT:` in the source, all bit-exact (the
 decoded pictures match upstream and ffmpeg byte for byte on 406 test
@@ -55,13 +56,13 @@ deblocking off and 2 Mb/s VGA):
   instead of failing on an empty buffer. With `gaps_in_frame_num_allowed`
   0, a gap in frame_num (a lost reference frame) is an error
   (`h264bsdCheckGapsInFrameNum`) where upstream decoded on regardless.
-  `muse_vdec.c` uses all of it; `tests/test_video_route.py` checks it.
+  `muse_vdec.c` uses all of it; `../../esp32/tests/test_video_route.py` checks it.
 - Undefined behavior out (found by fuzzing tinyh264; the
   same results): the Exp-Golomb decoder's `1 << 31` is unsigned, the
   crop check sums in 64 bits, deblocking multiplies `q0 - p0` by 4 instead
   of shifting a negative value, and `h264bsdDecode` never steps past its
-  buffer. `tests/test_video_route.py` (TinyH264Regress) replays the corpus
-  in `tests/vectors/h264/regress` under ASan and UBSan.
+  buffer. `../../esp32/tests/test_video_route.py` (TinyH264Regress) replays the corpus
+  in `../../esp32/tests/vectors/h264/regress` under ASan and UBSan.
 - Frame cropping: `h264bsdCroppingOffsets`
   hands the active sequence parameter set's four frame_crop offsets to the
   caller, which shows that window of the coded picture (`muse_vdec.c`);
@@ -78,7 +79,7 @@ deblocking off and 2 Mb/s VGA):
   so every step is lane-wise and the same arithmetic as the C. QEMU can't
   run it, so the first inter block checks it against the C on 1248 random
   blocks and keeps the C if any differs (logged on `tinyh264`;
-  `h264bsdPieState()`). `tests/test_tinyh264_pie.py` checks a model of its
+  `h264bsdPieState()`). `../../esp32/tests/test_tinyh264_pie.py` checks a model of its
   lane operations against the C and runs the hooks and the check on the
   host; with the model in place of the assembly, 110 test streams decode
   byte for byte as with the C. It passes its check on the board but is
@@ -100,6 +101,6 @@ picture that isn't there.
 On the S3 at 240 MHz a 232 px picture decodes in about 21 ms at 600 kb/s and
 25 ms at 1000 (x264, no deblocking), with the code running from cache.
 `CONFIG_MUSE_VIDEO_DECODER_IRAM` puts the per-macroblock code and its tables
-in IRAM instead (`linker.lf`, about 44 KB at -O2; -O3 would more than double
+in IRAM instead (the component's `linker.lf`, about 44 KB at -O2; -O3 would more than double
 it): on the S3 that comes out of the heap, which a board running Wi-Fi, BLE
 and the UI can't spare, so it's off by default.

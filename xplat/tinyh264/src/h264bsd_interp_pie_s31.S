@@ -23,7 +23,7 @@
 // (all values there are non-negative and under 2^14). The same arithmetic as
 // the C, so the same pixels; QEMU runs none of this, so h264bsd_reconstruct.c
 // checks it against the C on first use and keeps the C if they differ
-// (tests/tinyh264_pie_harness.c is the lane-op model of this file, checked
+// (esp32/tests/tinyh264_pie_harness.c is the lane-op model of this file, checked
 // against the C on the host). Chroma (h264bsdPieChroma, below) likewise.
 //
 // void h264bsdPieVer(const u8 *src, u32 stride, u8 *mb, u32 w, u32 h,

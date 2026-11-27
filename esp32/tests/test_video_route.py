@@ -51,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also w
 from test_mg_ble import MG, PROTOCOLS, ROOT, SEAL_INCS, SEAL_SRCS, codec_build
 
 MUSE = ROOT / "components/muse"
-TINY = ROOT / "components/tinyh264/src"
+TINY = ROOT.parent / "xplat/tinyh264/src"
 VSTREAM = ROOT / "components/muse_vstream"
 CLIP = ROOT / "tests/vectors/h264/testsrc2_208.264"
 REGRESS = ROOT / "tests/vectors/h264/regress"

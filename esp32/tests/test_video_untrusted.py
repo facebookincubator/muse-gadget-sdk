@@ -34,7 +34,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-TINY = ROOT / "components/tinyh264/src"
+TINY = ROOT.parent / "xplat/tinyh264/src"
 MUSE = ROOT / "components/muse"
 
 
@@ -356,7 +356,7 @@ class UntrustedVideoTest(unittest.TestCase):
         # 512 x 512 entries and kept per PPS id: 256 of them, a megabyte each.
         explicit = lambda b: (b.ue(1), b.ue(6), b.ue(512 * 512 - 1))
         self.assertIsNone(self.decode(au(2, 2, full=False, slice_groups=explicit), 0, 0))
-        tiny = (ROOT / "components/tinyh264/src/h264bsd_pic_param_set.c").read_text()
+        tiny = (TINY / "h264bsd_pic_param_set.c").read_text()
         self.assertIn("slice groups unsupported", tiny)
 
     def test_vp8_keyframes_larger_than_the_stream(self):
@@ -620,7 +620,7 @@ def idr16(mbs, idr_pic_id):
 
 AU_MAX = 64 * 1024   # tests/vdec_stale_harness.c's buffer, as a single-band stream's s_au
 VSTREAM_INC = ROOT / "components/muse_vstream/include"
-VP8 = ROOT / "components/libvpx_vp8/src"
+VP8 = ROOT.parent / "xplat/libvpx_vp8/src"
 VP8_KEYS = ROOT / "tests/vectors/vp8/p0_keyframes.ivf"   # 240 x 240, a keyframe then inter frames
 
 

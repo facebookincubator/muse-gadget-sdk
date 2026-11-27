@@ -17,14 +17,16 @@ limitations under the License.
 # libvpx_vp8
 
 The decoder behind video streaming's second codec (`CONFIG_MUSE_VIDEO_VP8`,
-`../../../protocols/VIDEO.md`): the VP8
+`../../protocols/VIDEO.md`): the VP8
 decoder of [libvpx](https://chromium.googlesource.com/webm/libvpx) v1.16.0,
 trimmed to what decoding needs, C only. libvpx is under the BSD-3-Clause
 license (`LICENSE`) with the WebM project's additional patent grant
 (`PATENTS`); `AUTHORS` lists its authors. `src/` keeps libvpx's layout, and
 its generated headers (`vpx_config.h`, `*_rtcd.h`) are libvpx's generic C
 configuration (`--target=generic-gnu --disable-vp9 --disable-vp8-encoder
---disable-multithread --disable-postproc`).
+--disable-multithread --disable-postproc`). The ESP32 firmware builds it
+with its ESP-IDF component, `../../esp32/components/libvpx_vp8`
+(`CMakeLists.txt`, `Kconfig`, `linker.lf`).
 
 Changes from upstream, each marked `Muse gadget port` in the source. All but
 the progress hook are speed-ups, bit-exact: the decoded pictures match stock
@@ -97,14 +99,15 @@ segmentation, 240 to 480 px).
   with the cycle counter; `mg.video` logs them.
 - Progress (`vp8dx_mgx_set_progress()`, `vpx/vp8dx.h`): the decoder reports
   the luma rows of the shown picture that are final as it goes, so the panel
-  draws the top while the bottom decodes (`components/muse/muse_vdec.c`).
+  draws the top while the bottom decodes (`../../esp32/components/muse/muse_vdec.c`).
 
 Cost, from instruction counts in QEMU (the S31's base ISA), per frame at
 600 kb/s, 480 px (crew, soccer, city, ice): 6.0 M with the phone's settings
 (version 1, loop filter off, decoder-friendly motion vectors), 7.2 M
 without the motion vector restriction; tinyh264 takes 7.5 M on the same
 clips at the same rate. At 240 px and 250 kb/s: 1.8 M against 2.7 M. The
-per-macroblock code can run from IRAM (`linker.lf`, `CONFIG_MUSE_VP8_IRAM`):
+per-macroblock code can run from IRAM (the component's `linker.lf`,
+`CONFIG_MUSE_VP8_IRAM`):
 full (every per-macroblock object with the unrolled filters, about 45 KB on
 the S31), compact (the default with `CONFIG_MUSE_VIDEO_DECODER_IRAM`, about
 33 KB: the same objects compiled without loop unrolling or the 6-tap

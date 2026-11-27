@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""components/libvpx_vp8 on the host: the trimmed, sped-up decoder against
+"""xplat/libvpx_vp8 on the host: the trimmed, sped-up decoder against
 stock libvpx (MD5s of its output in tests/vectors/vp8/md5.txt, from libvpx
 v1.16.0's vpxdec) on streams covering versions 0 to 3, the normal, simple and
 no loop filter, segmentation, four token partitions, error resilience, an
@@ -31,7 +31,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "components/libvpx_vp8/src"
+SRC = ROOT.parent / "xplat/libvpx_vp8/src"
 VEC = ROOT / "tests/vectors/vp8"
 
 

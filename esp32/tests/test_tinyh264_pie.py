@@ -26,7 +26,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TINY = ROOT / "components/tinyh264/src"
+TINY = ROOT.parent / "xplat/tinyh264/src"
 
 
 class TinyH264PieTest(unittest.TestCase):
