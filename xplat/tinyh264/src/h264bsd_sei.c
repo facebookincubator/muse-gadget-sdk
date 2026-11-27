@@ -59,6 +59,11 @@
 #include "h264bsd_seq_param_set.h"
 #include "h264bsd_slice_header.h"
 
+/* OPT: nothing calls the SEI parser (h264bsd_decoder.c skips SEI NAL units),
+ * and with H264BSD_LEAN_VUI the HRD parameters it reads aren't kept: it is
+ * left out then. */
+#if !H264BSD_LEAN_VUI
+
 /*------------------------------------------------------------------------------
     2. External compiler flags
 --------------------------------------------------------------------------------
@@ -1692,3 +1697,4 @@ static u32 DecodeReservedSeiMessage(
 
 }
 
+#endif /* !H264BSD_LEAN_VUI */

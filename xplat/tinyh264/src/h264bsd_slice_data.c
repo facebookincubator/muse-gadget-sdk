@@ -84,6 +84,72 @@ static void SetMbParams(mbStorage_t *pMb, sliceHeader_t *pSlice, u32 sliceId,
 
 ------------------------------------------------------------------------------*/
 
+/* OPT: the current macroblock's entry and the entries' base: in low-memory
+ * mode a ring (h264bsd_lowmem.c), not indexed by address */
+#if H264BSD_LOWMEM
+#define CURR_MB pMb
+#define MB_BASE (pStorage->lmRingRows ? pStorage->lmMb : pStorage->mb)
+#else
+#define CURR_MB (pStorage->mb + currMbAddr)
+#define MB_BASE pStorage->mb
+#endif
+
+#if H264BSD_CHANGED_MAP
+/* OPT: h264bsdChangedMap: a macroblock is clean, its pixels the previous
+ * output picture's before the loop filter, when it is inter predicted from
+ * reference index 0 (the previous picture: h264bsd_decoder.c ChmStart) with
+ * every motion vector zero (full-pel: the prediction is the same 16x16 luma
+ * and 8x8 chroma samples) and adds no residual: a skipped macroblock, or
+ * every residual block h264bsdWriteOutputBlocks adds is empty or all zero
+ * after the inverse transform (an encoder may code coefficients that
+ * reconstruct to nothing: a coefficient count would call those changed).
+ * When its slice deblocks, a macroblock with luma coefficients is changed even
+ * so: the loop filter's boundary strength counts them and filters the
+ * macroblock's inner edges. Anything else (intra, I_PCM, a vector, a
+ * residual sample, another reference) leaves its bit 0: changed. Called
+ * after h264bsdDecodeMacroblock (the residual still in pStorage->mbLayer). */
+static void ChmMb(storage_t *s, const mbStorage_t *mb, u32 addr)
+{
+    u32 i, j;
+    if (mb->mbType > P_8x8ref0)
+        return;
+    for (i = 0; i < 4; i++)
+        if (mb->refPic[i])
+            return;
+    for (i = 0; i < 16; i++)
+        if (mb->mv[i].hor | mb->mv[i].ver)
+            return;
+    if (mb->mbType != P_Skip)
+    {
+        if (mb->disableDeblockingFilterIdc != 1 && mb->nzMask)
+            return;
+#ifdef H264DEC_OMXDL
+        for (i = 0; i < 27; i++)
+            if (mb->totalCoeff[i])
+                return;
+#else
+        for (i = 0; i < 24; i++)
+        {
+            const i32 *r = s->mbLayer->residual.level[i];
+#if defined(H264BSD_MVE)
+            /* Helium's inter residual marks no empty blocks: resMask holds
+             * the ones it added (ProcessResidualInter) */
+            if (!(s->mbLayer->residual.resMask >> i & 1))
+                continue;
+#else
+            if (IS_RESIDUAL_EMPTY(r))
+                continue;
+#endif
+            for (j = 0; j < 16; j++)
+                if (r[j])
+                    return;
+        }
+#endif
+    }
+    s->chmBits[addr >> 3] |= (u8)(1u << (addr & 7));
+}
+#endif
+
 u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
     image_t *currImage, sliceHeader_t *pSliceHeader)
 {
@@ -100,6 +166,9 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
     u32 mbCount;
     i32 qpY;
     macroblockLayer_t *mbLayer;
+#if H264BSD_LOWMEM
+    mbStorage_t *pMb;
+#endif
 
 /* Code */
 
@@ -131,14 +200,48 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
     qpY = (i32)pStorage->activePps->picInitQp + pSliceHeader->sliceQpDelta;
     do
     {
+#if H264BSD_STRIP
+        /* OPT: strip mode: make room in the row ring for a new row. Only
+         * the next macroblock in raster order can come in (rows that left
+         * the ring, or skipping rows, would address outside it, and a row
+         * is handed out only once all of it is decoded), checked before
+         * anything reads the entry or a row is handed out. */
+        if (pStorage->stripMode)
+        {
+            u32 row = currMbAddr / currImage->width;
+            if (currMbAddr != pStorage->dbNextMb || pStorage->dbBad ||
+                row < pStorage->stripBase ||
+                row > pStorage->stripBase + pStorage->stripMode + 2)
+                return(HANTRO_NOK);
+            if (row == pStorage->stripBase + pStorage->stripMode + 2)
+                h264bsdStripRow(pStorage, row);
+        }
+#endif
+#if H264BSD_LOWMEM
+        /* OPT: low-memory mode: the macroblock ring and in-place pictures
+         * (h264bsd_lowmem.c) */
+        if (pStorage->lmRingRows)
+        {
+            u32 w = currImage->width;
+            pMb = h264bsdLowMemMb(pStorage, currMbAddr);
+            if (!pMb || pStorage->dbBad || pStorage->lmIpBad)
+                return(HANTRO_NOK);
+            if (pStorage->dpb->lmRows)
+                currImage->ipWater = (i32)((currMbAddr / w) * 16 + 16) -
+                    (i32)pStorage->dpb->lmRows;
+        }
+        else
+            pMb = pStorage->mb + currMbAddr;
+#endif
+
         /* primary picture and already decoded macroblock -> error */
-        if (!pSliceHeader->redundantPicCnt && pStorage->mb[currMbAddr].decoded)
+        if (!pSliceHeader->redundantPicCnt && CURR_MB->decoded)
         {
             EPRINT("Primary and already decoded");
             return(HANTRO_NOK);
         }
 
-        SetMbParams(pStorage->mb + currMbAddr, pSliceHeader,
+        SetMbParams(CURR_MB, pSliceHeader,
             pStorage->slice->sliceId, pStorage->activePps->chromaQpIndexOffset);
 
         if (!IS_I_SLICE(pSliceHeader->sliceType))
@@ -174,7 +277,7 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
         {
             prevSkipped = HANTRO_FALSE;
             tmp = h264bsdDecodeMacroblockLayer(pStrmData, mbLayer,
-                pStorage->mb + currMbAddr, pSliceHeader->sliceType,
+                CURR_MB, pSliceHeader->sliceType,
                 pSliceHeader->numRefIdxL0Active);
             if (tmp != HANTRO_OK)
             {
@@ -183,7 +286,7 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
             }
         }
 
-        tmp = h264bsdDecodeMacroblock(pStorage->mb + currMbAddr, mbLayer,
+        tmp = h264bsdDecodeMacroblock(CURR_MB, mbLayer,
             currImage, pStorage->dpb, &qpY, currMbAddr,
             pStorage->activePps->constrainedIntraPredFlag, data);
         if (tmp != HANTRO_OK)
@@ -191,10 +294,14 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
             EPRINT("MACRO_BLOCK");
             return(tmp);
         }
+#if H264BSD_CHANGED_MAP
+        if (pStorage->chmOk && currMbAddr < H264BSD_CHANGED_MAP_MBS)
+            ChmMb(pStorage, CURR_MB, currMbAddr);
+#endif
 
         /* increment macroblock count only for macroblocks that were decoded
          * for the first time (redundant slices) */
-        if (pStorage->mb[currMbAddr].decoded == 1)
+        if (CURR_MB->decoded == 1)
         {
             mbCount++;
             /* OPT: deblock macroblock (r-1, c-1) right after (r, c) is decoded
@@ -215,12 +322,16 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
                     pStorage->dbNextMb++;
                     if (lim >= (i32)pStorage->dbRowsDone)
                     {
-                        h264bsdFilterMbRange(currImage, pStorage->mb,
+                        h264bsdFilterMbRange(currImage, MB_BASE,
                             pStorage->dbRowsDone, (u32)lim + 1);
                         pStorage->dbRowsDone = (u32)lim + 1;
                         /* OPT: macroblock row r is final once row r + 1 has
                          * been filtered (its top edge reaches 3 rows up) */
+#if H264BSD_STRIP
+                        if (pStorage->progressFn && !pStorage->stripMode)
+#else
                         if (pStorage->progressFn)
+#endif
                         {
                             u32 full = pStorage->dbRowsDone / w;
                             u32 rows = full >= 2 ? (full - 1) * 16 : 0;
@@ -259,6 +370,17 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
 
     } while (moreMbs);
 
+#if H264BSD_LOWMEM
+    /* OPT: low-memory mode: the last macroblocks' checks */
+    if (pStorage->lmRingRows && (pStorage->dbBad || pStorage->lmIpBad))
+        return(HANTRO_NOK);
+#endif
+#if H264BSD_STRIP
+    /* OPT: strip mode: macroblocks out of order can't be filtered in time */
+    if (pStorage->stripMode && pStorage->dbBad)
+        return(HANTRO_NOK);
+#endif
+
     if ((pStorage->slice->numDecodedMbs + mbCount) > pStorage->picSizeInMbs)
     {
         EPRINT("Num decoded mbs");
@@ -270,6 +392,8 @@ u32 h264bsdDecodeSliceData(strmData_t *pStrmData, storage_t *pStorage,
     return(HANTRO_OK);
 
 }
+#undef CURR_MB
+#undef MB_BASE
 
 /*------------------------------------------------------------------------------
 

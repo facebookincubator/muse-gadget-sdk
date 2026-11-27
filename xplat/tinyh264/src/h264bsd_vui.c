@@ -56,9 +56,197 @@
     4. Local function prototypes
 ------------------------------------------------------------------------------*/
 
+#if !H264BSD_LEAN_VUI
 static u32 DecodeHrdParameters(
   strmData_t *pStrmData,
   hrdParameters_t *pHrdParameters);
+#endif
+
+#if H264BSD_LEAN_VUI
+/*------------------------------------------------------------------------------
+
+    OPT: H264BSD_LEAN_VUI (off by default), for ports short of code space:
+    the same walk through every VUI field in the standard's order, with the
+    full parser's end-of-stream checks and validations unchanged (so a VUI is
+    accepted or refused exactly as before and the walk ends on the same bit,
+    where h264bsd_seq_param_set.c checks the RBSP trailing bits), but only
+    what the decoder reads is stored: bitstream_restriction_flag,
+    num_reorder_frames and max_dec_frame_buffering (h264bsd_seq_param_set.c's
+    checks and maxDpbSize, h264bsd_storage.c's output bumping) and the two
+    log2_max_mv_length fields, with the full parser's defaults when
+    bitstream_restriction is absent. Everything else (aspect ratio, overscan,
+    video signal type, chroma location, timing, both hrd_parameters with
+    their cpb loops, low_delay, pic_struct, the other restriction fields) is
+    read and dropped; the rest of vuiParameters_t stays zero. The HRD fields'
+    only reader is SEI parsing, which nothing calls (h264bsd_decoder.c skips
+    SEI NAL units) and which this compiles out (h264bsd_sei.c). Code: the
+    full parser is about 5 KB on a 32-bit Arm core at -O2 (the bit readers
+    inlined at every field); this is under 1 KB, its readers out of line.
+
+------------------------------------------------------------------------------*/
+
+/* The VUI is read once per SPS: each reader below is one out-of-line function,
+ * so the inlined bit-reader primitives (h264bsd_stream.h) are expanded once
+ * here instead of at every field (that, not the stores, is the full parser's
+ * size). */
+#if defined(__GNUC__)
+#define VUI_READER __attribute__((noinline, cold))
+#else
+#define VUI_READER
+#endif
+
+/* n bits into *v (n < 32); HANTRO_NOK at the end of the stream */
+static VUI_READER u32 VuiBits(strmData_t *pStrmData, u32 n, u32 *v)
+{
+    u32 tmp = h264bsdGetBits(pStrmData, n);
+    if (tmp == END_OF_STREAM)
+        return(HANTRO_NOK);
+    *v = tmp;
+    return(HANTRO_OK);
+}
+
+/* one ue(v) into *v, refused above max (as the full parser refuses it) */
+static VUI_READER u32 VuiUe(strmData_t *pStrmData, u32 max, u32 *v)
+{
+    u32 tmp = h264bsdDecodeExpGolombUnsigned(pStrmData, v);
+    if (tmp != HANTRO_OK)
+        return(tmp);
+    return(*v > max ? HANTRO_NOK : HANTRO_OK);
+}
+
+/* 32 bits that must not be 0 (num_units_in_tick, time_scale) */
+static VUI_READER u32 VuiNonZero32(strmData_t *pStrmData)
+{
+    u32 tmp = h264bsdShowBits32(pStrmData);
+    if (h264bsdFlushBits(pStrmData, 32) == END_OF_STREAM)
+        return(HANTRO_NOK);
+    return(tmp ? HANTRO_OK : HANTRO_NOK);
+}
+
+/* hrd_parameters(), walked: cpb_cnt_minus1 + 1 (u32, as the full parser
+ * counts it) <= MAX_CPB_CNT, the two scales, each cpb's bit rate and size
+ * (each <= 2^32 - 2) and cbr flag, the four lengths */
+static VUI_READER u32 VuiHrd(strmData_t *pStrmData)
+{
+    u32 cnt, v, i;
+    if (VuiUe(pStrmData, 0xFFFFFFFFU, &cnt) != HANTRO_OK)
+        return(HANTRO_NOK);
+    cnt++;
+    if (cnt > MAX_CPB_CNT || VuiBits(pStrmData, 8, &v) != HANTRO_OK)
+        return(HANTRO_NOK);
+    for (i = 0; i < cnt; i++)
+        if (VuiUe(pStrmData, 4294967294U, &v) != HANTRO_OK ||
+            VuiUe(pStrmData, 4294967294U, &v) != HANTRO_OK ||
+            VuiBits(pStrmData, 1, &v) != HANTRO_OK)
+            return(HANTRO_NOK);
+    return(VuiBits(pStrmData, 20, &v));
+}
+
+u32 h264bsdDecodeVuiParameters(strmData_t *pStrmData,
+    vuiParameters_t *pVuiParameters)
+{
+    u32 f, v, hrd;
+
+    ASSERT(pStrmData);
+    ASSERT(pVuiParameters);
+
+    memset(pVuiParameters, 0, sizeof(vuiParameters_t));
+
+    /* aspect_ratio_info_present_flag: aspect_ratio_idc; Extended_SAR's
+     * sar_width, sar_height */
+    if (VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+        return(HANTRO_NOK);
+    if (f)
+    {
+        if (VuiBits(pStrmData, 8, &v) != HANTRO_OK)
+            return(HANTRO_NOK);
+        if (v == ASPECT_RATIO_EXTENDED_SAR &&
+            (VuiBits(pStrmData, 16, &v) != HANTRO_OK ||
+             VuiBits(pStrmData, 16, &v) != HANTRO_OK))
+            return(HANTRO_NOK);
+    }
+
+    /* overscan_info_present_flag: overscan_appropriate_flag */
+    if (VuiBits(pStrmData, 1, &f) != HANTRO_OK ||
+        (f && VuiBits(pStrmData, 1, &v) != HANTRO_OK))
+        return(HANTRO_NOK);
+
+    /* video_signal_type_present_flag: video_format, video_full_range_flag,
+     * colour_description_present_flag: colour_primaries,
+     * transfer_characteristics, matrix_coefficients */
+    if (VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+        return(HANTRO_NOK);
+    if (f)
+    {
+        if (VuiBits(pStrmData, 3, &v) != HANTRO_OK ||
+            VuiBits(pStrmData, 1, &v) != HANTRO_OK ||
+            VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+            return(HANTRO_NOK);
+        if (f && (VuiBits(pStrmData, 8, &v) != HANTRO_OK ||
+                  VuiBits(pStrmData, 8, &v) != HANTRO_OK ||
+                  VuiBits(pStrmData, 8, &v) != HANTRO_OK))
+            return(HANTRO_NOK);
+    }
+
+    /* chroma_loc_info_present_flag: the two chroma_sample_loc_types, <= 5 */
+    if (VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+        return(HANTRO_NOK);
+    if (f && (VuiUe(pStrmData, 5, &v) != HANTRO_OK ||
+              VuiUe(pStrmData, 5, &v) != HANTRO_OK))
+        return(HANTRO_NOK);
+
+    /* timing_info_present_flag: num_units_in_tick, time_scale (both
+     * non-zero), fixed_frame_rate_flag */
+    if (VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+        return(HANTRO_NOK);
+    if (f && (VuiNonZero32(pStrmData) != HANTRO_OK ||
+              VuiNonZero32(pStrmData) != HANTRO_OK ||
+              VuiBits(pStrmData, 1, &v) != HANTRO_OK))
+        return(HANTRO_NOK);
+
+    /* nal_ and vcl_hrd_parameters_present_flag: hrd_parameters() each;
+     * low_delay_hrd_flag after either */
+    if (VuiBits(pStrmData, 1, &hrd) != HANTRO_OK ||
+        (hrd && VuiHrd(pStrmData) != HANTRO_OK) ||
+        VuiBits(pStrmData, 1, &f) != HANTRO_OK ||
+        (f && VuiHrd(pStrmData) != HANTRO_OK) ||
+        ((hrd || f) && VuiBits(pStrmData, 1, &v) != HANTRO_OK))
+        return(HANTRO_NOK);
+
+    /* pic_struct_present_flag; bitstream_restriction_flag:
+     * motion_vectors_over_pic_boundaries_flag, max_bytes_per_pic_denom,
+     * max_bits_per_mb_denom, log2_max_mv_length_horizontal / _vertical (each
+     * <= 16, the last two kept), then the two the DPB is sized by */
+    if (VuiBits(pStrmData, 1, &v) != HANTRO_OK ||
+        VuiBits(pStrmData, 1, &f) != HANTRO_OK)
+        return(HANTRO_NOK);
+    pVuiParameters->bitstreamRestrictionFlag = f ? HANTRO_TRUE : HANTRO_FALSE;
+    if (f)
+    {
+        if (VuiBits(pStrmData, 1, &v) != HANTRO_OK ||
+            VuiUe(pStrmData, 16, &v) != HANTRO_OK ||
+            VuiUe(pStrmData, 16, &v) != HANTRO_OK ||
+            VuiUe(pStrmData, 16,
+                  &pVuiParameters->log2MaxMvLengthHorizontal) != HANTRO_OK ||
+            VuiUe(pStrmData, 16,
+                  &pVuiParameters->log2MaxMvLengthVertical) != HANTRO_OK ||
+            VuiUe(pStrmData, 0xFFFFFFFFU,
+                  &pVuiParameters->numReorderFrames) != HANTRO_OK ||
+            VuiUe(pStrmData, 0xFFFFFFFFU,
+                  &pVuiParameters->maxDecFrameBuffering) != HANTRO_OK)
+            return(HANTRO_NOK);
+    }
+    else
+    {
+        pVuiParameters->log2MaxMvLengthHorizontal = 16;
+        pVuiParameters->log2MaxMvLengthVertical   = 16;
+        pVuiParameters->numReorderFrames          = MAX_DPB_SIZE;
+        pVuiParameters->maxDecFrameBuffering      = MAX_DPB_SIZE;
+    }
+
+    return(HANTRO_OK);
+}
+#else
 
 /*------------------------------------------------------------------------------
 
@@ -490,3 +678,4 @@ static u32 DecodeHrdParameters(
 
 }
 
+#endif /* H264BSD_LEAN_VUI */

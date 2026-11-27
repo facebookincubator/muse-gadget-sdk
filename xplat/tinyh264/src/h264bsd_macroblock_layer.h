@@ -137,14 +137,19 @@ typedef struct
     mv_t mvdL0[4][4];
 } subMbPred_t;
 
+/* OPT: coefficient counts (0..16): bytes in low-memory builds */
+#if defined(H264DEC_OMXDL) || H264BSD_LOWMEM
+typedef u8 tcoeff_t;
+#else
+typedef i16 tcoeff_t;
+#endif
+
 typedef struct
 {
 #ifdef H264DEC_OMXDL
     u8 posCoefBuf[27*16*3];
-    u8 totalCoeff[27];
-#else
-    i16 totalCoeff[27];
 #endif
+    tcoeff_t totalCoeff[27];
     i32 level[26][16];
     u32 coeffMap[24];
 #if defined(H264BSD_MVE)
@@ -164,6 +169,32 @@ typedef struct
     residual_t residual;
 } macroblockLayer_t;
 
+#if H264BSD_LOWMEM
+typedef struct mbStorage
+{
+    /* OPT: fields ordered by size and narrowed to their ranges (160 bytes
+     * instead of 216 on 32-bit targets): the decoder keeps one per
+     * macroblock, or one per macroblock of three rows (h264bsdSetLowMem) */
+    u8* refAddr[4];
+    struct mbStorage *mbA;
+    struct mbStorage *mbB;
+    struct mbStorage *mbC;
+    struct mbStorage *mbD;
+    mv_t mv[16];
+    u32 sliceId;
+    u32 decoded;                    /* full width: redundant slices count it up */
+    u16 nzMask;                     /* as below */
+    u8 mbType;                      /* mbType_e */
+    u8 disableDeblockingFilterIdc;
+    i8 filterOffsetA;
+    i8 filterOffsetB;
+    u8 qpY;
+    i8 chromaQpIndexOffset;
+    u8 refPic[4];
+    u8 intra4x4PredMode[16];
+    tcoeff_t totalCoeff[27];
+} mbStorage_t;
+#else
 typedef struct mbStorage
 {
     mbType_e mbType;
@@ -191,6 +222,7 @@ typedef struct mbStorage
     struct mbStorage *mbC;
     struct mbStorage *mbD;
 } mbStorage_t;
+#endif
 
 /*------------------------------------------------------------------------------
     4. Function prototypes

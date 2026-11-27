@@ -570,12 +570,24 @@ void h264bsdFilterMbRange(
     picSizeInMbs = picWidthInMbs * image->height;
 
     if (m1 > picWidthInMbs * image->height) m1 = picWidthInMbs * image->height;
+#if H264BSD_LOWMEM
+    /* OPT: mb may be a ring of image->mbRingRows macroblock rows
+     * (h264bsd_lowmem.c), row r in slot r % mbRingRows */
+    mbRow = m0 / picWidthInMbs;
+    mbCol = m0 % picWidthInMbs;
+    pMb = image->mbRingRows ?
+        mb + (mbRow % image->mbRingRows) * picWidthInMbs + mbCol : mb + m0;
+
+    for (; m0 < m1; m0++)
+    {
+#else
     pMb = mb + m0;
     mbRow = m0 / picWidthInMbs;
     mbCol = m0 % picWidthInMbs;
 
     for (; pMb < mb + m1; pMb++)
     {
+#endif
         flags = GetMbFilteringFlags(pMb);
 
         if (flags)
@@ -597,6 +609,18 @@ void h264bsdFilterMbRange(
                 /* chroma */
                 GetChromaEdgeThresholds(thresholds, pMb, flags,
                     pMb->chromaQpIndexOffset);
+#if H264BSD_SPLIT_PLANES
+                data = image->cbData +
+                    mbRow * picWidthInMbs * 64 + mbCol * 8;
+
+#if defined(H264BSD_MVE)
+                FilterChromaMve((u8*)data, data + image->crDelta, bS,
+                        thresholds, picWidthInMbs*8);
+#else
+                FilterChroma((u8*)data, data + image->crDelta, bS,
+                        thresholds, picWidthInMbs*8);
+#endif
+#else
                 data = image->data + picSizeInMbs * 256 +
                     mbRow * picWidthInMbs * 64 + mbCol * 8;
 
@@ -607,15 +631,23 @@ void h264bsdFilterMbRange(
                 FilterChroma((u8*)data, data + 64*picSizeInMbs, bS,
                         thresholds, picWidthInMbs*8);
 #endif
+#endif
 
             }
         }
 
+#if H264BSD_LOWMEM
+        pMb++;
+#endif
         mbCol++;
         if (mbCol == picWidthInMbs)
         {
             mbCol = 0;
             mbRow++;
+#if H264BSD_LOWMEM
+            if (image->mbRingRows && mbRow % image->mbRingRows == 0)
+                pMb = mb;
+#endif
         }
     }
 

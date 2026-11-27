@@ -224,8 +224,12 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     colAndRow += (mbNum - colAndRow * currImage->width) << 16;
     colAndRow <<= 4;
 
+#if H264BSD_SPLIT_PLANES
+    h264bsdRefImageInit(&refImage, currImage);
+#else
     refImage.width = currImage->width;
     refImage.height = currImage->height;
+#endif
 
     switch (pMb->mbType)
     {
@@ -334,6 +338,48 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 /* OPT: see the P_Skip case of h264bsdInterPrediction. currImage's macroblock
  * pointers (luma, cb, cr) are set and ref has the same layout; rows are 4-byte
  * aligned (widths are multiples of 16 luma and 8 chroma pixels). */
+#if H264BSD_SPLIT_PLANES
+/* OPT: the same with the chroma planes laid out apart (low-memory mode):
+ * the reference's Cb plane found from its luma (h264bsdCbOf), Cr crDelta
+ * from it; in place, a reference row already overwritten is an error as in
+ * h264bsdPredictSamples */
+static void CopySkipMb(image_t *currImage, const image_t *refImage, u32 row)
+{
+    u32 w = currImage->width * 16, i;
+    const u8 *ref = refImage->data, *refCb = h264bsdCbOf(refImage, ref);
+    const u32 *s;
+    u32 *d;
+#if H264BSD_LOWMEM
+    if ((i32)row < refImage->ipWater)
+        *refImage->ipBad = 1;
+#else
+    (void)row;
+#endif
+    s = (const u32 *)(ref + (currImage->luma - currImage->data));
+    d = (u32 *)currImage->luma;
+    for (i = 16; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+        s += w / 4; d += w / 4;
+    }
+    w /= 2;
+    s = (const u32 *)(refCb + (currImage->cb - currImage->cbData));
+    d = (u32 *)currImage->cb;
+    for (i = 8; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1];
+        s += w / 4; d += w / 4;
+    }
+    s = (const u32 *)(refCb + refImage->crDelta +
+                      (currImage->cr - (currImage->cbData + currImage->crDelta)));
+    d = (u32 *)currImage->cr;
+    for (i = 8; i; i--)
+    {
+        d[0] = s[0]; d[1] = s[1];
+        s += w / 4; d += w / 4;
+    }
+}
+#else
 static void CopySkipMb(image_t *currImage, const u8 *ref)
 {
     u32 w = currImage->width * 16, i;
@@ -362,6 +408,7 @@ static void CopySkipMb(image_t *currImage, const u8 *ref)
         s += w / 4; d += w / 4;
     }
 }
+#endif
 
 /*------------------------------------------------------------------------------
 
@@ -429,8 +476,12 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
     row *= 16;
     col *= 16;
 
+#if H264BSD_SPLIT_PLANES
+    h264bsdRefImageInit(&refImage, currImage);
+#else
     refImage.width = currImage->width;
     refImage.height = currImage->height;
+#endif
 
     switch (pMb->mbType)
     {
@@ -447,7 +498,11 @@ u32 h264bsdInterPrediction(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
             if (pMb->mbType == P_Skip && !pMb->mv[0].hor && !pMb->mv[0].ver &&
                 pMb->decoded <= 1)
             {
+#if H264BSD_SPLIT_PLANES
+                CopySkipMb(currImage, &refImage, row);
+#else
                 CopySkipMb(currImage, refImage.data);
+#endif
                 return(HANTRO_OK);
             }
             h264bsdPredictSamples(data, pMb->mv, &refImage, col, row, 0, 0,

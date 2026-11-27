@@ -593,14 +593,22 @@ void h264bsdGetNeighbourPels(image_t *image, u8 *above, u8 *left, u32 mbNum)
     }
 
     width >>= 1;
+#if H264BSD_SPLIT_PLANES
+    ptr = image->cbData + row * 8 * width  + col * 8;
+#else
     ptr = image->data + picSize * 256 + row * 8 * width  + col * 8;
+#endif
 
     if (row)
     {
         tmp = ptr - (width + 1);
         for (i = 9; i--;)
             *above++ = *tmp++;
+#if H264BSD_SPLIT_PLANES
+        tmp += image->crDelta - 9;
+#else
         tmp += (picSize * 64) - 9;
+#endif
         for (i = 9; i--;)
             *above++ = *tmp++;
     }
@@ -610,7 +618,11 @@ void h264bsdGetNeighbourPels(image_t *image, u8 *above, u8 *left, u32 mbNum)
         ptr--;
         for (i = 8; i--; ptr+=width)
             *left++ = *ptr;
+#if H264BSD_SPLIT_PLANES
+        ptr += image->crDelta - 8 * width;
+#else
         ptr += (picSize * 64) - 8 * width;
+#endif
         for (i = 8; i--; ptr+=width)
             *left++ = *ptr;
     }

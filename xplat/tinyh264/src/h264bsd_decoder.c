@@ -139,6 +139,81 @@ u32 h264bsdInit(storage_t *pStorage, u32 noOutputReordering)
 
 ------------------------------------------------------------------------------*/
 
+#if H264BSD_BUFFER_GATE
+/* OPT: the DPB buffer the next picture is decoded into, once the caller's
+ * buffer gate (h264bsdSetBufferGate) has let it go: a picture still being
+ * read elsewhere is never written. */
+static u8 *AllocateImage(storage_t *pStorage)
+{
+    u8 *data = h264bsdAllocateDpbImage(pStorage->dpb);
+    if (pStorage->bufferGateFn)
+#if H264BSD_LOWMEM
+        /* in place, the new picture always starts at lmY, where the last
+         * one is, and moving that one down writes the whole buffer */
+        pStorage->bufferGateFn(pStorage->bufferGateCtx,
+            pStorage->dpb->lmRows ? pStorage->dpb->lmY : data);
+#else
+        pStorage->bufferGateFn(pStorage->bufferGateCtx, data);
+#endif
+    return data;
+}
+#else
+#define AllocateImage(pStorage) h264bsdAllocateDpbImage((pStorage)->dpb)
+#endif
+
+#if H264BSD_CHANGED_MAP
+/* OPT: h264bsdChangedMap. A picture starts: its map is trusted only if it
+ * predicts from the picture last output, which was a reference picture
+ * whose frame_num is one less (no gap: no non-existing frame sits ahead of
+ * it in the reference list), and the bit map holds it. Only without output
+ * reordering: with it, the call that decodes this picture may return
+ * another one. */
+static void ChmStart(storage_t *s, const nalUnit_t *nal)
+{
+    memset(s->chmBits, 0, sizeof(s->chmBits));
+    s->chmDb = 0;
+    s->chmOk = !s->chmSkip && s->chmPrev && !IS_IDR_NAL_UNIT(nal) &&
+               s->dpb->noReordering &&
+               s->picSizeInMbs <= H264BSD_CHANGED_MAP_MBS && s->dpb->maxFrameNum &&
+               s->sliceHeader[1].frameNum == (s->chmFn + 1) % s->dpb->maxFrameNum;
+}
+
+/* A slice (its reference list built): reordered references, a reference
+ * index 0 that isn't the last output picture or a redundant slice end the
+ * map's trust. In place (one buffer) the reference is the last picture,
+ * moved down. */
+static void ChmSlice(storage_t *s, const sliceHeader_t *sh)
+{
+    if (sh->redundantPicCnt ||
+        (!IS_I_SLICE(sh->sliceType) && sh->refPicListReordering.refPicListReorderingFlagL0))
+        s->chmOk = 0;
+    if (!IS_I_SLICE(sh->sliceType) &&
+#if H264BSD_LOWMEM
+        !s->dpb->lmRows &&
+#endif
+        (!s->dpb->list[0] || s->dpb->list[0]->data != s->chmPrevData))
+        s->chmOk = 0;
+    if (sh->disableDeblockingFilterIdc != 1)
+        s->chmDb = 1;
+}
+
+/* The picture is finished: its map, and whether the next picture may trust
+ * one */
+static void ChmDone(storage_t *s)
+{
+    const sliceHeader_t *sh = s->sliceHeader;
+    const nalUnit_t *nal = s->prevNalUnit;
+    u32 whole = s->validSliceInAccessUnit && !s->numConcealedMbs &&
+                s->slice->numDecodedMbs == s->picSizeInMbs;
+    /* bit 2 (IDR) comes from the picture returned (DecodeAu) */
+    s->chmOut = (u8)(whole && s->chmOk ? (s->chmDb ? 3 : 1) : 0);
+    s->chmPrev = (u8)(whole && nal->nalRefIdc &&
+                      !(IS_IDR_NAL_UNIT(nal) ? sh->decRefPicMarking.longTermReferenceFlag :
+                        sh->decRefPicMarking.adaptiveRefPicMarkingModeFlag));
+    s->chmFn = sh->frameNum;
+}
+#endif
+
 u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
     u32 *readBytes)
 {
@@ -153,6 +228,9 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
     strmData_t strm;
     u32 accessUnitBoundaryFlag = HANTRO_FALSE;
     u32 picReady = HANTRO_FALSE;
+#if H264BSD_LOWMEM
+    u32 lmRecover;
+#endif
 
     /* if previous buffer was not finished and same pointer given -> skip NAL
      * unit extraction */
@@ -211,6 +289,25 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
     if ( accessUnitBoundaryFlag )
     {
         DEBUG(("Access unit boundary\n"));
+#if H264BSD_LOWMEM || H264BSD_STRIP
+        /* OPT: low-memory and strip modes: no concealment (it needs the
+         * whole picture): drop the unfinished picture */
+        if (pStorage->picStarted && pStorage->activeSps != NULL &&
+            H264BSD_DROPS(pStorage))
+        {
+#if H264BSD_LOWMEM
+            if (pStorage->lmFlags)
+                h264bsdLowMemDrop(pStorage);
+#endif
+            pStorage->picStarted = HANTRO_FALSE;
+            pStorage->validSliceInAccessUnit = HANTRO_FALSE;
+            pStorage->slice->numDecodedMbs = 0;
+            pStorage->slice->sliceId = 0;
+            pStorage->dbNextMb = pStorage->dbRowsDone = pStorage->dbBad = 0;
+            pStorage->progressRows = 0;
+        }
+        else
+#endif
         /* conceal if picture started and param sets activated */
         if (pStorage->picStarted && pStorage->activeSps != NULL)
         {
@@ -226,8 +323,13 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
 
             if (!pStorage->validSliceInAccessUnit)
             {
+#if H264BSD_SPLIT_PLANES
+                h264bsdImageSetData(pStorage->currImage,
+                    AllocateImage(pStorage));
+#else
                 pStorage->currImage->data =
-                    h264bsdAllocateDpbImage(pStorage->dpb);
+                    AllocateImage(pStorage);
+#endif
                 h264bsdInitRefPicList(pStorage->dpb);
                 tmp = h264bsdConceal(pStorage, pStorage->currImage, P_SLICE);
             }
@@ -265,6 +367,13 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
                     return(H264BSD_ERROR);
                 }
                 tmp = h264bsdStoreSeqParamSet(pStorage, &seqParamSet);
+#if H264BSD_LIMITS
+                if (tmp == H264BSD_SPS_PAST_LIMITS)
+                {
+                    EPRINT("SEQ_PARAM_SET past the limits");
+                    return(H264BSD_ERROR);
+                }
+#endif
                 break;
 
             case NAL_PIC_PARAM_SET:
@@ -388,6 +497,88 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
                     EPRINT("SLICE_HEADER");
                     return(H264BSD_ERROR);
                 }
+#if H264BSD_LOWMEM
+                /* OPT: low-memory mode: what it can't decode exactly */
+                if (pStorage->lmFlags)
+                {
+                    sliceHeader_t *sh = pStorage->sliceHeader + 1;
+                    if (h264bsdIsStartOfPicture(pStorage))
+                    {
+                        u32 prev = pStorage->dpb->prevRefFrameNum;
+                        /* an IDR picture ends the wait once it has decoded
+                         * whole (picReady below), not when it starts: it
+                         * may still be refused or fail */
+                        u32 needIdr = pStorage->lmNeedIdr && !IS_IDR_NAL_UNIT(&nalUnit);
+                        pStorage->lmFail = pStorage->lmSkip = HANTRO_FALSE;
+                        pStorage->lmRecover = pStorage->lmNeedIdr && IS_IDR_NAL_UNIT(&nalUnit);
+#if H264BSD_ONEREF
+                        pStorage->lmNonRef = HANTRO_FALSE;
+#endif
+                        /* an intra picture can restart too, if all its
+                         * slices are intra (checked slice by slice below)
+                         * and it is a reference picture (at its end) */
+                        if (needIdr && IS_I_SLICE(sh->sliceType))
+                        {
+                            /* the pictures skipped while waiting never
+                             * reached the frame_num gap check: the restart
+                             * continues frame_num from its own */
+                            pStorage->lmRecover = HANTRO_TRUE;
+                            pStorage->dpb->prevRefFrameNum =
+                                (sh->frameNum + pStorage->dpb->maxFrameNum - 1) %
+                                pStorage->dpb->maxFrameNum;
+                        }
+                        else if (needIdr)
+                            pStorage->lmSkip = HANTRO_TRUE;
+                        else if (pStorage->activePps->numSliceGroups > 1 ||
+                            (!IS_IDR_NAL_UNIT(&nalUnit) &&
+                             pStorage->activeSps->gapsInFrameNumValueAllowedFlag &&
+                             sh->frameNum != prev &&
+                             sh->frameNum != (prev + 1) % pStorage->dpb->maxFrameNum))
+                        {
+                            pStorage->lmFail = HANTRO_TRUE;   /* nothing written yet */
+                            pStorage->lmRefused++;
+                        }
+                        else if (LM_OVERWRITES_REF(pStorage) && !nalUnit.nalRefIdc)
+                        {
+                            pStorage->lmSkip = HANTRO_TRUE;  /* would overwrite the reference */
+#if H264BSD_ONEREF
+                            pStorage->lmNonRef = HANTRO_TRUE;
+                            pStorage->lmNonRefs++;
+#endif
+                        }
+                    }
+#if H264BSD_ONEREF
+                    /* OPT: one reference kept (an SPS that allows more): a
+                     * slice that would use another is refused */
+                    if (pStorage->lmOneRef && !pStorage->lmSkip && !pStorage->lmFail &&
+                        ((IS_P_SLICE(sh->sliceType) && sh->numRefIdxL0Active > 1) ||
+                         sh->refPicListReordering.refPicListReorderingFlagL0 ||
+                         (IS_IDR_NAL_UNIT(&nalUnit) ?
+                          sh->decRefPicMarking.longTermReferenceFlag :
+                          nalUnit.nalRefIdc && sh->decRefPicMarking.adaptiveRefPicMarkingModeFlag)))
+                    {
+                        pStorage->lmFail = HANTRO_TRUE;
+                        pStorage->lmNeedIdr = HANTRO_TRUE;
+                        pStorage->lmRefused++;
+                    }
+#endif
+                    if (pStorage->lmRecover && !IS_I_SLICE(sh->sliceType))
+                    {
+                        /* a P slice in the picture meant to restart */
+                        pStorage->lmFail = HANTRO_TRUE;
+                        pStorage->lmRefused++;
+                    }
+                    if (pStorage->lmSkip || pStorage->lmFail || sh->redundantPicCnt)
+                        return(H264BSD_ERROR);
+                }
+#endif
+#if H264BSD_STRIP
+                /* OPT: strip mode: intra slices only, no redundant ones */
+                if (pStorage->stripMode &&
+                    (!IS_I_SLICE(pStorage->sliceHeader[1].sliceType) ||
+                     pStorage->sliceHeader[1].redundantPicCnt))
+                    return(H264BSD_ERROR);
+#endif
                 if (h264bsdIsStartOfPicture(pStorage))
                 {
                     if (!IS_IDR_NAL_UNIT(&nalUnit))
@@ -404,8 +595,27 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
                             return(H264BSD_ERROR);
                         }
                     }
+#if H264BSD_SPLIT_PLANES
+                    h264bsdImageSetData(pStorage->currImage,
+                        AllocateImage(pStorage));
+#else
                     pStorage->currImage->data =
-                        h264bsdAllocateDpbImage(pStorage->dpb);
+                        AllocateImage(pStorage);
+#endif
+#if H264BSD_LOWMEM
+                    /* OPT: low-memory mode */
+                    if (pStorage->dpb->lmRows)
+                        h264bsdLowMemPlace(pStorage);
+                    if (pStorage->lmRingRows)
+                        h264bsdLowMemBeginPicture(pStorage);
+#endif
+#if H264BSD_STRIP
+                    if (pStorage->stripMode)
+                        h264bsdStripBegin(pStorage);
+#endif
+#if H264BSD_CHANGED_MAP
+                    ChmStart(pStorage, &nalUnit);
+#endif
                 }
 
                 /* store slice header to storage if successfully decoded */
@@ -429,11 +639,29 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
 
                 DEBUG(("SLICE DATA, FIRST %d\n",
                         pStorage->sliceHeader->firstMbInSlice));
+#if H264BSD_CHANGED_MAP
+                ChmSlice(pStorage, pStorage->sliceHeader);
+#endif
                 tmp = h264bsdDecodeSliceData(&strm, pStorage,
                     pStorage->currImage, pStorage->sliceHeader);
                 if (tmp != HANTRO_OK)
                 {
                     EPRINT("SLICE_DATA");
+#if H264BSD_LOWMEM
+                    if (pStorage->lmFlags)
+                    {
+                        /* OPT: low-memory mode: the picture failed */
+                        pStorage->lmFail = HANTRO_TRUE;
+                        if (LM_OVERWRITES_REF(pStorage))
+                            pStorage->lmNeedIdr = HANTRO_TRUE;
+                        pStorage->lmRefused++;
+                        return(H264BSD_ERROR);
+                    }
+#endif
+#if H264BSD_STRIP
+                    if (pStorage->stripMode)
+                        return(H264BSD_ERROR);   /* OPT: dropped, never concealed */
+#endif
                     h264bsdMarkSliceCorrupted(pStorage,
                         pStorage->sliceHeader->firstMbInSlice);
                     return(H264BSD_ERROR);
@@ -457,10 +685,37 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
 
     if (picReady)
     {
+#if H264BSD_CHANGED_MAP
+        ChmDone(pStorage);  /* before the storage reset clears the decoded count */
+#endif
+#if H264BSD_LOWMEM
+        /* OPT: low-memory mode: a complete intra picture restarts once it
+         * is the reference (below: a picture that isn't one, or that
+         * reference marking couldn't store, leaves the damaged reference
+         * in the DPB) */
+        lmRecover = pStorage->lmRecover && pStorage->prevNalUnit->nalRefIdc;
+        pStorage->lmRecover = HANTRO_FALSE;
+        h264bsdFilterMbRange(pStorage->currImage,
+            pStorage->lmRingRows ? pStorage->lmMb : pStorage->mb,
+            pStorage->dbRowsDone,
+            pStorage->currImage->width * pStorage->currImage->height);
+#else
         h264bsdFilterMbRange(pStorage->currImage, pStorage->mb,
             pStorage->dbRowsDone,
             pStorage->currImage->width * pStorage->currImage->height);
+#endif
         pStorage->dbNextMb = pStorage->dbRowsDone = pStorage->dbBad = 0;
+#if H264BSD_STRIP
+        if (pStorage->stripMode)
+        {
+            /* OPT: strip mode: the rows still held, then the DPB's stand-in
+             * picture back (its bookkeeping checks the picture it gave) */
+            h264bsdStripFinish(pStorage);
+            h264bsdImageSetData(pStorage->currImage,
+                pStorage->dpb->currentOut->data);
+        }
+        else
+#endif
         /* OPT: a picture concealed without a single valid slice isn't
          * reported: it isn't stored, and the rest of the call may reuse or
          * free its buffer */
@@ -486,6 +741,20 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
                     IS_IDR_NAL_UNIT(pStorage->prevNalUnit) ?
                     HANTRO_TRUE : HANTRO_FALSE,
                     pStorage->currentPicId, pStorage->numConcealedMbs);
+#if H264BSD_LOWMEM
+                /* in place, a picture reference marking can't store has
+                 * overwritten the reference left in the DPB */
+                if (tmp != HANTRO_OK && LM_OVERWRITES_REF(pStorage))
+                    pStorage->lmNeedIdr = HANTRO_TRUE;
+                else if (lmRecover && tmp == HANTRO_OK)
+                    pStorage->lmNeedIdr = HANTRO_FALSE;
+#endif
+#if H264BSD_CHANGED_MAP
+                /* a picture not stored as the reference can't be the next
+                 * map's predecessor */
+                if (tmp != HANTRO_OK)
+                    pStorage->chmPrev = 0;
+#endif
             }
             /* non-reference picture, just store for possible display
              * reordering */
@@ -509,6 +778,13 @@ u32 h264bsdDecodeInternal(storage_t *pStorage, u8 *byteStrm, u32 len,
         return(H264BSD_RDY);
 
 }
+
+#if H264BSD_CHANGED_MAP
+/* OPT: h264bsdChangedMap: the decode below is DecodeAu, wrapped by the
+ * h264bsdDecode after it */
+static u32 DecodeAu(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 *width, u32 *height);
+#define h264bsdDecode DecodeAu
+#endif
 
 u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 *width, u32 *height) {
   u32 bytesRead = 0;
@@ -549,11 +825,59 @@ u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 
         return H264BSD_ERROR;
       *width = (pStorage->activeSps->picWidthInMbs)*16;
       *height = (pStorage->activeSps->picHeightInMbs)*16;
+#if H264BSD_STRIP
+      /* OPT: strip mode: the rows went to the row callback; the DPB's
+       * picture is a stand-in, nothing to read */
+      *picture = pStorage->stripMode ? NULL : out->data;
+#else
       *picture = out->data;
+#endif
+#if H264BSD_CHANGED_MAP
+      if (out->isIdr)
+        pStorage->chmOut |= 4;
+#endif
     }
 
     return retCode;
 }
+#if H264BSD_CHANGED_MAP
+#undef h264bsdDecode
+
+/* OPT: h264bsdChangedMap: a map only with the picture it describes; any
+ * failure but a skipped non-reference picture (which leaves the reference
+ * and the shown picture as they were) means the next picture can't trust
+ * one */
+u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 *width, u32 *height)
+{
+    u32 rc = DecodeAu(pStorage, byteStrm, len, picture, width, height);
+    if (rc == H264BSD_PIC_RDY)
+        pStorage->chmPrevData = *picture;
+    else
+    {
+        pStorage->chmOut = 0;
+#if H264BSD_ONEREF
+        if (rc >= H264BSD_ERROR && !pStorage->lmNonRef)
+#else
+        if (rc >= H264BSD_ERROR)
+#endif
+            pStorage->chmPrev = 0;
+    }
+    return rc;
+}
+
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdChangedMap(storage_t *pStorage, const u8 **clean)
+{
+    *clean = pStorage->chmBits;
+    return pStorage->chmOut;
+}
+
+/* OPT: see h264bsd_decoder.h */
+void h264bsdChangedMapSkip(storage_t *pStorage, u32 skip)
+{
+    pStorage->chmSkip = (u8)(skip != 0);
+}
+#endif
 
 /*------------------------------------------------------------------------------
 
@@ -583,6 +907,9 @@ void h264bsdShutdown(storage_t *pStorage)
 
     ASSERT(pStorage);
 
+#if H264BSD_BUFFER_GATE
+    h264bsdGateDpb(pStorage);   /* the pictures are freed below */
+#endif
     for (i = 0; i < MAX_NUM_SEQ_PARAM_SETS; i++)
     {
         if (pStorage->sps[i])
@@ -621,6 +948,16 @@ void h264bsdShutdown(storage_t *pStorage)
     }
 
     FREE(pStorage->mbLayer);
+#if H264BSD_LOWMEM
+    if (pStorage->lmRingRows)
+        h264bsdLowMemFreeMb(pStorage);
+    else
+#endif
+#if H264BSD_STRIP
+    if (pStorage->stripMode)
+        h264bsdStripFree(pStorage);
+    else
+#endif
     FREE(pStorage->mb);
     FREE(pStorage->sliceGroupMap);
 
@@ -647,6 +984,16 @@ void h264bsdShutdown(storage_t *pStorage)
 
 ------------------------------------------------------------------------------*/
 
+#if H264BSD_SPLIT_PLANES
+/* OPT: see h264bsd_decoder.h */
+void h264bsdPicturePlanes(storage_t *pStorage, const u8 *luma, u8 **cb, u8 **cr)
+{
+    image_t *im = pStorage->currImage;
+    *cb = h264bsdCbOf(im, luma);
+    *cr = *cb + (im->yBase ? im->crDelta : 64 * (long)(im->width * im->height));
+}
+#endif
+
 storage_t* h264bsdAlloc()
 {
     return (storage_t*)h264bsdMalloc(sizeof(storage_t));
@@ -672,7 +1019,7 @@ storage_t* h264bsdAlloc()
 
 void h264bsdFree(storage_t *pStorage)
 {
-    free(pStorage);
+    h264bsdRelease(pStorage);   /* OPT: the allocator it came from */
 }
 
 /* OPT: see h264bsd_decoder.h */
@@ -686,6 +1033,30 @@ void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs)
     pStorage->maxWidthMbs = maxWidthMbs;
     pStorage->maxHeightMbs = maxHeightMbs;
 }
+
+#if H264BSD_LIMITS
+/* OPT: see h264bsd_decoder.h */
+void h264bsdSetLimits(storage_t *pStorage, u32 maxMbs, u32 maxRefFrames)
+{
+    pStorage->maxMbs = maxMbs;
+    pStorage->maxRefFrames = pStorage->maxDpbFrames = maxRefFrames;
+}
+#endif
+
+#if H264BSD_BUFFER_GATE
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdSetBufferGate(storage_t *pStorage,
+    void (*fn)(void *ctx, const u8 *pic), void *ctx)
+{
+#if H264BSD_STRIP
+    if (fn && pStorage->stripMode)
+        return(HANTRO_NOK);   /* strip mode: no picture buffers to gate */
+#endif
+    pStorage->bufferGateFn = fn;
+    pStorage->bufferGateCtx = ctx;
+    return(HANTRO_OK);
+}
+#endif
 
 /* OPT: see h264bsd_decoder.h */
 void h264bsdSetMaxCropped(storage_t *pStorage, u32 maxWidth, u32 maxHeight)
@@ -730,6 +1101,11 @@ u32 h264bsdPictureStarted(const storage_t *pStorage)
 /* OPT: see h264bsd_decoder.h */
 void h264bsdAbandonPicture(storage_t *pStorage)
 {
+#if H264BSD_LOWMEM
+    if (pStorage->lmFlags &&
+        (pStorage->picStarted || pStorage->validSliceInAccessUnit))
+        h264bsdLowMemDrop(pStorage);
+#endif
     pStorage->picStarted = HANTRO_FALSE;
     pStorage->validSliceInAccessUnit = HANTRO_FALSE;
     pStorage->skipRedundantSlices = HANTRO_FALSE;
@@ -740,7 +1116,11 @@ void h264bsdAbandonPicture(storage_t *pStorage)
     pStorage->numConcealedMbs = 0;
     /* mb is sized for picSizeInMbs only once a pending activation is done
      * (and then cleared whole) */
+#if H264BSD_LOWMEM
+    if (!pStorage->pendingActivation && (pStorage->mb || pStorage->lmRingRows))
+#else
     if (!pStorage->pendingActivation && pStorage->mb)
+#endif
         h264bsdResetStorage(pStorage);
     pStorage->dbNextMb = pStorage->dbRowsDone = pStorage->dbBad = 0;
     pStorage->progressRows = 0;

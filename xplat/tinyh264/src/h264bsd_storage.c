@@ -124,6 +124,36 @@ void h264bsdInitStorage(storage_t *pStorage)
 
 ------------------------------------------------------------------------------*/
 
+/* OPT: once the stream has shown a picture (h264bsdKeepParamSets), a set of
+ * another size or profile than its own, or another one with the kept one's
+ * id outside a keyframe's access unit: damaged or stray bytes, never let
+ * them replace the stream's parameter sets */
+static u32 KeptSetsRefuse(const storage_t *pStorage, seqParamSet_t *sps)
+{
+    return (pStorage->lockWidthMbs &&
+            (sps->picWidthInMbs != pStorage->lockWidthMbs ||
+             sps->picHeightInMbs != pStorage->lockHeightMbs ||
+             sps->profileIdc != pStorage->lockProfileIdc)) ||
+           (pStorage->lockWidthMbs && pStorage->goodSps &&
+            !pStorage->ppsChangeAllowed &&
+            sps->seqParameterSetId == pStorage->goodSps->seqParameterSetId &&
+            h264bsdCompareSeqParamSets(sps, pStorage->goodSps) != 0);
+}
+
+#if H264BSD_LIMITS
+/* OPT: the DPB won't reorder output for this sequence parameter set (as
+ * h264bsdActivateParamSets decides): it then holds the reference frames
+ * alone */
+static u32 NoReordering(const storage_t *pStorage, const seqParamSet_t *sps)
+{
+    return pStorage->noReordering ||
+           sps->picOrderCntType == 2 ||
+           (sps->vuiParametersPresentFlag &&
+            sps->vuiParameters->bitstreamRestrictionFlag &&
+            !sps->vuiParameters->numReorderFrames);
+}
+#endif
+
 u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
 {
 
@@ -139,14 +169,47 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
 
     id = pSeqParamSet->seqParameterSetId;
 
+#if H264BSD_LIMITS
+    /* OPT: h264bsdSetLimits (its reference frames, and the frames the DPB
+     * holds for output reordering; without it, the reference frames alone).
+     * The stream now means a sequence past the limits by this id: the one
+     * stored with it is dropped too (deactivated if active), so no slice
+     * decodes with it as if it still held, and the caller gets an error.
+     * One the kept sets refuse anyway is only refused, as any other. */
+    if ( !KeptSetsRefuse(pStorage, pSeqParamSet) &&
+         ((pStorage->maxMbs &&
+           pSeqParamSet->picWidthInMbs * pSeqParamSet->picHeightInMbs >
+               pStorage->maxMbs) ||
+          (pStorage->maxDpbFrames &&
+           pSeqParamSet->numRefFrames > pStorage->maxDpbFrames) ||
+          (pStorage->maxDpbFrames && !NoReordering(pStorage, pSeqParamSet) &&
+           pSeqParamSet->maxDpbSize > pStorage->maxDpbFrames)) )
+    {
+        FREE(pSeqParamSet->offsetForRefFrame);
+        FREE(pSeqParamSet->vuiParameters);
+        if (pStorage->sps[id])
+        {
+            if (id == pStorage->activeSpsId)
+            {
+                pStorage->activeSpsId = MAX_NUM_SEQ_PARAM_SETS + 1;
+                pStorage->activePpsId = MAX_NUM_PIC_PARAM_SETS + 1;
+                pStorage->activeSps = NULL;
+                pStorage->activePps = NULL;
+            }
+            FREE(pStorage->sps[id]->offsetForRefFrame);
+            FREE(pStorage->sps[id]->vuiParameters);
+            FREE(pStorage->sps[id]);
+        }
+        return(H264BSD_SPS_PAST_LIMITS);
+    }
+#endif
+
     /* OPT: a picture larger than the caller allows (h264bsdSetMaxSize), or
      * with more reference frames (h264bsdSetMaxReferences), or
-     * once the stream has shown a picture, of another size or profile than
-     * its own (h264bsdKeepParamSets), or another one with the kept one's id
-     * outside a keyframe's access unit: damaged or stray bytes, never let
-     * them replace the stream's parameter sets. The picture after frame
-     * cropping (crop units of 2 x 2: 4:2:0 frames only, as the parse takes;
-     * the parse checked the offsets leave one) is held to
+     * one the kept sets refuse (KeptSetsRefuse): damaged or stray bytes,
+     * never let them replace the stream's parameter sets. The picture after
+     * frame cropping (crop units of 2 x 2: 4:2:0 frames only, as the parse
+     * takes; the parse checked the offsets leave one) is held to
      * h264bsdSetMaxCropped's size, the coded one to h264bsdSetMaxSize's */
     if ( (pStorage->maxWidthMbs &&
           pSeqParamSet->picWidthInMbs > pStorage->maxWidthMbs) ||
@@ -166,14 +229,7 @@ u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet)
            2 * ((uint64_t)pSeqParamSet->frameCropTopOffset +
                 pSeqParamSet->frameCropBottomOffset) : 0) >
           pStorage->maxCroppedHeight) ||
-         (pStorage->lockWidthMbs &&
-          (pSeqParamSet->picWidthInMbs != pStorage->lockWidthMbs ||
-           pSeqParamSet->picHeightInMbs != pStorage->lockHeightMbs ||
-           pSeqParamSet->profileIdc != pStorage->lockProfileIdc)) ||
-         (pStorage->lockWidthMbs && pStorage->goodSps &&
-          !pStorage->ppsChangeAllowed &&
-          id == pStorage->goodSps->seqParameterSetId &&
-          h264bsdCompareSeqParamSets(pSeqParamSet, pStorage->goodSps) != 0) )
+         KeptSetsRefuse(pStorage, pSeqParamSet) )
     {
         FREE(pSeqParamSet->offsetForRefFrame);
         FREE(pSeqParamSet->vuiParameters);
@@ -334,6 +390,33 @@ u32 h264bsdStorePicParamSet(storage_t *pStorage, picParamSet_t *pPicParamSet)
 
 }
 
+#if H264BSD_BUFFER_GATE
+/* OPT: before the DPB's pictures are freed (another sequence parameter set
+ * activated, h264bsdShutdown) the buffer gate lets each one go, so a display
+ * still reading one in place is done with it first. In place the shared
+ * buffer is named by its start, as when a picture is decoded into it. */
+void h264bsdGateDpb(storage_t *pStorage)
+{
+    dpbStorage_t *dpb = pStorage->dpb;
+    u32 i;
+
+    if (!pStorage->bufferGateFn || !dpb->buffer)
+        return;
+#if H264BSD_LOWMEM
+    if (dpb->lmRows)
+    {
+        /* NULL when its allocation failed: nothing to let go */
+        if (dpb->lmY)
+            pStorage->bufferGateFn(pStorage->bufferGateCtx, dpb->lmY);
+        return;
+    }
+#endif
+    for (i = 0; i < dpb->dpbSize + 1; i++)
+        if (dpb->buffer[i].data)
+            pStorage->bufferGateFn(pStorage->bufferGateCtx, dpb->buffer[i].data);
+}
+#endif
+
 /*------------------------------------------------------------------------------
 
     Function: h264bsdActivateParamSets
@@ -425,10 +508,50 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
     else if (pStorage->pendingActivation)
     {
         pStorage->pendingActivation = HANTRO_FALSE;
+#if H264BSD_BUFFER_GATE
+        h264bsdGateDpb(pStorage);   /* the old pictures are freed below */
+#endif
 
+#if H264BSD_LOWMEM
+        if (pStorage->lmRingRows)
+            h264bsdLowMemFreeMb(pStorage);
+        else
+#endif
+#if H264BSD_STRIP
+        if (pStorage->stripMode)
+            h264bsdStripFree(pStorage);
+        else
+#endif
         FREE(pStorage->mb);
         FREE(pStorage->sliceGroupMap);
 
+#if H264BSD_STRIP
+        /* OPT: strip mode: a ring of macroblock rows, pixels and entries
+         * (h264bsd_strip.c) */
+        pStorage->dpb->stripMode = pStorage->stripMode;
+        if (pStorage->stripMode)
+        {
+            pStorage->sliceGroupMap = (u32 *)h264bsdMallocHot(pStorage->picSizeInMbs * sizeof(u32));
+            if (pStorage->sliceGroupMap == NULL ||
+                h264bsdStripAlloc(pStorage) != HANTRO_OK)
+                return(MEMORY_ALLOCATION_ERROR);
+        }
+        else
+#endif
+#if H264BSD_LOWMEM
+        /* OPT: low-memory mode: a ring of macroblock rows */
+        if (pStorage->lmFlags & H264BSD_LOWMEM_MBRING)
+        {
+            pStorage->sliceGroupMap = (u32 *)h264bsdMallocHot(pStorage->picSizeInMbs * sizeof(u32));
+            if (pStorage->sliceGroupMap == NULL ||
+                h264bsdLowMemAllocMb(pStorage) != HANTRO_OK)
+                return(MEMORY_ALLOCATION_ERROR);
+        }
+        else
+#endif
+#if H264BSD_LOWMEM || H264BSD_STRIP
+        {
+#endif
         ALLOCATE(pStorage->mb, pStorage->picSizeInMbs, mbStorage_t);
         pStorage->sliceGroupMap = (u32 *)h264bsdMallocHot(pStorage->picSizeInMbs * sizeof(u32));
         if (pStorage->mb == NULL || pStorage->sliceGroupMap == NULL)
@@ -440,6 +563,9 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
         h264bsdInitMbNeighbours(pStorage->mb,
             pStorage->activeSps->picWidthInMbs,
             pStorage->picSizeInMbs);
+#if H264BSD_LOWMEM || H264BSD_STRIP
+        }
+#endif
 
         /* dpb output reordering disabled if
          * 1) application set noReordering flag
@@ -454,6 +580,39 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
         else
             flag = HANTRO_FALSE;
 
+#if H264BSD_LOWMEM
+        /* OPT: low-memory mode: in-place pictures when the DPB will hold
+         * one reference (and nothing waits for reordering) */
+        pStorage->dpb->lmRows = 0;
+        pStorage->dpb->lmWidthMbs = pStorage->activeSps->picWidthInMbs;
+#if H264BSD_ONEREF
+        {
+        /* OPT: an SPS allowing several references decodes in place too,
+         * keeping one; a slice that needs more is refused
+         * (h264bsd_decoder.c) */
+        u32 refs = pStorage->activeSps->numRefFrames;
+        u32 dpbSize = pStorage->activeSps->maxDpbSize;
+        pStorage->lmOneRef = (pStorage->lmFlags & H264BSD_LOWMEM_INPLACE) &&
+            flag && refs > 1;
+        if (pStorage->lmOneRef)
+            refs = dpbSize = 1;
+        if ((pStorage->lmFlags & H264BSD_LOWMEM_INPLACE) && flag && refs <= 1)
+            pStorage->dpb->lmRows = h264bsdLowMemRows(pStorage);
+        tmp = h264bsdResetDpb(pStorage->dpb,
+            pStorage->activeSps->picWidthInMbs *
+            pStorage->activeSps->picHeightInMbs,
+            dpbSize,
+            refs,
+            pStorage->activeSps->maxFrameNum,
+            flag);
+        }
+#else
+        if ((pStorage->lmFlags & H264BSD_LOWMEM_INPLACE) && flag &&
+            pStorage->activeSps->numRefFrames <= 1)
+            pStorage->dpb->lmRows = h264bsdLowMemRows(pStorage);
+#endif
+#endif
+#if !H264BSD_ONEREF
         tmp = h264bsdResetDpb(pStorage->dpb,
             pStorage->activeSps->picWidthInMbs *
             pStorage->activeSps->picHeightInMbs,
@@ -461,8 +620,12 @@ u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr)
             pStorage->activeSps->numRefFrames,
             pStorage->activeSps->maxFrameNum,
             flag);
+#endif
         if (tmp != HANTRO_OK)
             return(tmp);
+#if H264BSD_LOWMEM
+        h264bsdLowMemLayout(pStorage);
+#endif
     }
     else if (ppsId != pStorage->activePpsId)
     {
@@ -537,7 +700,20 @@ void h264bsdResetStorage(storage_t *pStorage)
     pStorage->slice->numDecodedMbs = 0;
     pStorage->slice->sliceId = 0;
 
+#if H264BSD_LOWMEM && H264BSD_STRIP
+    /* OPT: in low-memory and strip modes the ring is reset when a picture
+     * starts */
+    for (i = 0; !pStorage->lmRingRows && !pStorage->stripMode &&
+         i < pStorage->picSizeInMbs; i++)
+#elif H264BSD_LOWMEM
+    /* OPT: in low-memory mode the ring is reset when a picture starts */
+    for (i = 0; !pStorage->lmRingRows && i < pStorage->picSizeInMbs; i++)
+#elif H264BSD_STRIP
+    /* OPT: in strip mode the ring is reset when a picture starts */
+    for (i = 0; !pStorage->stripMode && i < pStorage->picSizeInMbs; i++)
+#else
     for (i = 0; i < pStorage->picSizeInMbs; i++)
+#endif
     {
         pStorage->mb[i].sliceId = 0;
         pStorage->mb[i].decoded = 0;
@@ -627,6 +803,12 @@ u32 h264bsdIsEndOfPicture(storage_t *pStorage)
     }
     else
     {
+#if H264BSD_LOWMEM || H264BSD_STRIP
+        /* OPT: low-memory and strip modes refuse redundant slices
+         * (h264bsd_decoder.c) */
+        if (H264BSD_DROPS(pStorage))
+            return(HANTRO_FALSE);
+#endif
         for (i = 0, tmp = 0; i < pStorage->picSizeInMbs; i++)
             tmp += pStorage->mb[i].decoded ? 1 : 0;
 

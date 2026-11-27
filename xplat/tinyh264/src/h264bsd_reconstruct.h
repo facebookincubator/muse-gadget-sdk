@@ -87,6 +87,9 @@ void h264bsdInterpolateChromaHor(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,         /* OPT: bytes from the Cb plane to Cr */
+#endif
   u32 xFrac,
   u32 chromaPartWidth,
   u32 chromaPartHeight);
@@ -98,6 +101,9 @@ void h264bsdInterpolateChromaVer(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,         /* OPT: bytes from the Cb plane to Cr */
+#endif
   u32 yFrac,
   u32 chromaPartWidth,
   u32 chromaPartHeight);
@@ -109,6 +115,9 @@ void h264bsdInterpolateChromaHorVer(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,         /* OPT: bytes from the Cb plane to Cr */
+#endif
   u32 xFrac,
   u32 yFrac,
   u32 chromaPartWidth,

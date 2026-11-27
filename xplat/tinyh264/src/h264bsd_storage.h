@@ -133,6 +133,17 @@ typedef struct storage
      * (h264bsdSetMaxSize), in macroblocks; 0: no limit but the overall one */
     u32 maxWidthMbs, maxHeightMbs;
     u32 maxRefFrames; /* optional caller limit; zero preserves streaming defaults */
+#if H264BSD_LIMITS
+    /* OPT: h264bsdSetLimits: the most macroblocks a picture may have (0: no
+     * limit); its reference-frame limit is maxRefFrames above, and
+     * maxDpbFrames holds the DPB to it with output reordering too */
+    u32 maxMbs, maxDpbFrames;
+#endif
+#if H264BSD_BUFFER_GATE
+    /* OPT: h264bsdSetBufferGate (NULL: off) */
+    void (*bufferGateFn)(void *ctx, const u8 *pic);
+    void *bufferGateCtx;
+#endif
     /* OPT: the largest picture after frame cropping (h264bsdSetMaxCropped),
      * in pixels; 0: no limit */
     u32 maxCroppedWidth, maxCroppedHeight;
@@ -147,6 +158,61 @@ typedef struct storage
     u32 ppsChangeAllowed;
     seqParamSet_t *goodSps;
     picParamSet_t *goodPps;
+#if H264BSD_LOWMEM
+    /* OPT: low-memory mode (h264bsdSetLowMem, h264bsd_lowmem.c) */
+    u32 lmFlags;            /* H264BSD_LOWMEM_* */
+    u32 lmRingRowsWanted;   /* macroblock rows in the ring */
+    u32 lmRingRows;         /* 0: one entry per macroblock */
+    mbStorage_t *lmMb;      /* the ring */
+    u32 lmTop;              /* lowest macroblock row set up this picture */
+    u32 lmRowsWanted;       /* in-place D asked for (luma rows), 0: auto */
+    u32 lmNeedIdr;          /* a picture failed: wait for an IDR picture */
+    u32 lmRecover;          /* this picture is intra so far: it may restart */
+    u32 lmFail;             /* the current picture failed */
+    u32 lmSkip;             /* the current picture is skipped (non-reference) */
+    u32 lmIpBad;            /* a prediction read an overwritten row */
+    u32 lmRefused;          /* pictures that failed or were skipped */
+#if H264BSD_ONEREF
+    /* OPT: an SPS with max_num_ref_frames > 1 decoded in place keeping one
+     * reference (a stream that uses only the last one); the current picture
+     * was skipped as a non-reference one, and how many were */
+    u32 lmOneRef, lmNonRef, lmNonRefs;
+#endif
+#endif
+#if H264BSD_STRIP
+    /* OPT: strip mode (h264bsdSetStrip, h264bsd_strip.c): intra-only streams
+     * decoded into a ring of macroblock rows instead of whole pictures; rows
+     * are handed to stripRowFn as soon as they are final */
+    u32 stripMode;          /* K: rows freed per shift; 0 = off */
+    u8 *stripY, *stripCb;   /* ring planes (Cr = Cb + currImage->crDelta) */
+    mbStorage_t *stripMb;   /* ring of (K + 2) * width entries */
+    u32 stripBase;          /* picture macroblock row in ring slot 0 */
+    u32 stripEmitted;       /* macroblock rows handed out this picture */
+    void (*stripRowFn)(void *ctx, u32 mbRow, const u8 *y, const u8 *cb,
+                       const u8 *cr, u32 yStride, u32 cStride);
+    void *stripRowCtx;
+#endif
+
+#if H264BSD_CHANGED_MAP
+    /* OPT: h264bsdChangedMap. chmBits bit i: macroblock i of the picture
+     * being decoded is clean (the previous output picture's pixels before
+     * the loop filter); chmOk: this picture's map is trusted so far; chmDb:
+     * one of its slices deblocks; chmPrev: the last output picture is the
+     * one the next P picture predicts from (a fully decoded reference
+     * picture, nothing long-term or adaptively marked), chmFn its frame_num;
+     * chmOut: the output picture's map (0 none, bit 0 trusted, bit 1
+     * deblocked, bit 2 an IDR picture), valid until the next h264bsdDecode
+     * call; chmSkip: the caller wants no map (h264bsdChangedMapSkip: the
+     * macroblock loop skips its bit writes; the validity above is still
+     * tracked, so the picture after the skip ends has a map). A P slice's
+     * reference index 0 must be the last output picture's buffer, not just
+     * have the frame_num after it: a damaged stream can leave a stale
+     * picture with that frame_num in the DPB. */
+    u8 chmBits[(H264BSD_CHANGED_MAP_MBS + 7) / 8];
+    u8 chmOk, chmDb, chmPrev, chmOut, chmSkip;
+    u32 chmFn;
+    const u8 *chmPrevData;  /* the last output picture's buffer */
+#endif
 
     /* last valid NAL unit header is stored here */
     nalUnit_t prevNalUnit[1];
@@ -185,6 +251,10 @@ void h264bsdResetStorage(storage_t *pStorage);
 u32 h264bsdIsStartOfPicture(storage_t *pStorage);
 u32 h264bsdIsEndOfPicture(storage_t *pStorage);
 u32 h264bsdStoreSeqParamSet(storage_t *pStorage, seqParamSet_t *pSeqParamSet);
+#if H264BSD_LIMITS
+/* h264bsdStoreSeqParamSet: refused by h264bsdSetLimits */
+#define H264BSD_SPS_PAST_LIMITS 2
+#endif
 u32 h264bsdStorePicParamSet(storage_t *pStorage, picParamSet_t *pPicParamSet);
 u32 h264bsdActivateParamSets(storage_t *pStorage, u32 ppsId, u32 isIdr);
 void h264bsdComputeSliceGroupMap(storage_t *pStorage,
@@ -197,6 +267,42 @@ u32 h264bsdCheckAccessUnitBoundary(
   u32 *accessUnitBoundaryFlag);
 
 u32 h264bsdValidParamSets(storage_t *pStorage);
+#if H264BSD_BUFFER_GATE
+void h264bsdGateDpb(storage_t *pStorage);
+#endif
+
+#if H264BSD_LOWMEM
+/* OPT: low-memory mode, h264bsd_lowmem.c (flags: h264bsdSetLowMem) */
+#define H264BSD_LOWMEM_MBRING 1u
+#define H264BSD_LOWMEM_INPLACE 2u
+/* in-place decoding overwrites the reference: a failed picture damages it */
+#define LM_OVERWRITES_REF(s) ((s)->dpb->lmRows && \
+    (s)->dpb->lmRows < (s)->currImage->height * 16)
+u32 h264bsdLowMemAllocMb(storage_t *s);
+void h264bsdLowMemFreeMb(storage_t *s);
+void h264bsdLowMemBeginPicture(storage_t *s);
+mbStorage_t *h264bsdLowMemMb(storage_t *s, u32 currMbAddr);
+u32 h264bsdLowMemRows(const storage_t *s);
+void h264bsdLowMemPlace(storage_t *s);
+void h264bsdLowMemLayout(storage_t *s);
+void h264bsdLowMemDrop(storage_t *s);
+#endif
+#if H264BSD_STRIP
+/* OPT: strip mode, h264bsd_strip.c */
+u32 h264bsdStripAlloc(storage_t *pStorage);
+void h264bsdStripFree(storage_t *pStorage);
+void h264bsdStripBegin(storage_t *pStorage);
+void h264bsdStripRow(storage_t *pStorage, u32 mbRow);
+void h264bsdStripFinish(storage_t *pStorage);
+#endif
+/* OPT: a mode that conceals nothing: what it can't decode exactly is dropped */
+#if H264BSD_LOWMEM && H264BSD_STRIP
+#define H264BSD_DROPS(s) ((s)->lmFlags || (s)->stripMode)
+#elif H264BSD_LOWMEM
+#define H264BSD_DROPS(s) ((s)->lmFlags)
+#elif H264BSD_STRIP
+#define H264BSD_DROPS(s) ((s)->stripMode)
+#endif
 
 #endif /* #ifdef H264SWDEC_STORAGE_H */
 

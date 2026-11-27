@@ -1016,18 +1016,54 @@ u32 h264bsdInitDpb(
         return(MEMORY_ALLOCATION_ERROR);
     memset(dpb->buffer, 0,
             (MAX_NUM_REF_IDX_L0_ACTIVE + 1)*sizeof(dpbPicture_t));
+#if H264BSD_LOWMEM
+    /* OPT: in-place pictures (h264bsd_lowmem.c): one region for both */
+    if (dpb->lmRows && dpb->dpbSize == 1)
+    {
+        u32 w = dpb->lmWidthMbs * 16, h = picSizeInMbs / dpb->lmWidthMbs * 16;
+        u32 rows = h + dpb->lmRows, csz = (rows / 2) * (w / 2);
+        /* luma apart from the chroma: two smaller blocks fit a fragmented
+         * heap better than one. Cb and Cr share theirs, so Cr is an offset
+         * inside it (image_t.crDelta). Each plane keeps the 32 bytes past
+         * it that every picture buffer has (below): the motion compensation
+         * backends' word and vector loads read into them */
+        ALLOCATE(dpb->lmBlock, rows * w + 32 + TINYH264_PIC_ALIGN - 1, u8);
+        ALLOCATE(dpb->lmBlockC, 2 * (csz + 32 + TINYH264_PIC_ALIGN - 1), u8);
+        if (dpb->lmBlock == NULL || dpb->lmBlockC == NULL)
+            return(MEMORY_ALLOCATION_ERROR);
+        dpb->lmY = ALIGN(dpb->lmBlock, TINYH264_PIC_ALIGN);
+        dpb->lmCb = ALIGN(dpb->lmBlockC, TINYH264_PIC_ALIGN);
+        dpb->lmCr = ALIGN((dpb->lmCb + csz + 32), TINYH264_PIC_ALIGN);
+        dpb->buffer[0].data = dpb->lmY;
+        dpb->buffer[1].data = dpb->lmY + dpb->lmRows * w;
+    }
+    else
+        dpb->lmRows = 0;
+    for (i = 0; !dpb->lmRows && i < dpb->dpbSize + 1; i++)
+#else
     for (i = 0; i < dpb->dpbSize + 1; i++)
+#endif
     {
         /* Allocate needed amount of memory, which is:
          * image size + 32 + 15, where 32 cames from the fact that in ARM OpenMax
          * DL implementation Functions may read beyond the end of an array,
          * by a maximum of 32 bytes. And +15 cames for the need to align memory
          * to 16-byte boundary */
-        ALLOCATE(dpb->buffer[i].pAllocatedData, (picSizeInMbs*384 + 32+15), u8);
+        /* OPT: aligned to TINYH264_PIC_ALIGN (16 as upstream by default) */
+#if H264BSD_STRIP
+        /* OPT: strip mode: the decoder writes into its row ring
+         * (h264bsd_strip.c); the DPB only keeps its bookkeeping */
+        ALLOCATE(dpb->buffer[i].pAllocatedData,
+                 dpb->stripMode ? 64 :
+                 (picSizeInMbs*384 + 32 + TINYH264_PIC_ALIGN - 1), u8);
+#else
+        ALLOCATE(dpb->buffer[i].pAllocatedData,
+                 (picSizeInMbs*384 + 32 + TINYH264_PIC_ALIGN - 1), u8);
+#endif
         if (dpb->buffer[i].pAllocatedData == NULL)
             return(MEMORY_ALLOCATION_ERROR);
 
-        dpb->buffer[i].data = ALIGN(dpb->buffer[i].pAllocatedData, 16);
+        dpb->buffer[i].data = ALIGN(dpb->buffer[i].pAllocatedData, TINYH264_PIC_ALIGN);
     }
 
     ALLOCATE(dpb->list, MAX_NUM_REF_IDX_L0_ACTIVE + 1, dpbPicture_t*);
@@ -1551,6 +1587,11 @@ void h264bsdFreeDpb(dpbStorage_t *dpb)
     FREE(dpb->buffer);
     FREE(dpb->list);
     FREE(dpb->outBuf);
+#if H264BSD_LOWMEM
+    FREE(dpb->lmBlock);
+    FREE(dpb->lmBlockC);
+    dpb->lmY = dpb->lmCb = dpb->lmCr = NULL;
+#endif
 
 }
 

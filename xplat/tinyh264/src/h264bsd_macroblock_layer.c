@@ -731,10 +731,10 @@ static const u8 ncNbB[24] = {
     0x80|2, 0x80|3, 0x80|8, 0x80|9, 0x80|6, 0x80|7, 0x80|12, 0x80|13,
     18, 19, 0x80|16, 0x80|17, 22, 23, 0x80|20, 0x80|21 };
 
-static inline u32 NcFast(u32 blockIndex, const i16 *cur, const i16 *tcA, const i16 *tcB)
+static inline u32 NcFast(u32 blockIndex, const tcoeff_t *cur, const tcoeff_t *tcA, const tcoeff_t *tcB)
 {
     u32 a = ncNbA[blockIndex], b = ncNbB[blockIndex];
-    const i16 *pa = (a & 0x80) ? cur : tcA, *pb = (b & 0x80) ? cur : tcB;
+    const tcoeff_t *pa = (a & 0x80) ? cur : tcA, *pb = (b & 0x80) ? cur : tcB;
 
     if (pa && pb)
         return (u32)((pa[a & 0x1F] + pb[b & 0x1F] + 1) >> 1);
@@ -759,8 +759,8 @@ u32 DecodeResidual(strmData_t *pStrmData, residual_t *pResidual,
     cavlcBits_t cb;
     i32 (*level)[16];
     /* OPT: the neighbours' availability once per macroblock (NcFast) */
-    const i16 *tcA = h264bsdIsNeighbourAvailable(pMb, pMb->mbA) ? pMb->mbA->totalCoeff : NULL;
-    const i16 *tcB = h264bsdIsNeighbourAvailable(pMb, pMb->mbB) ? pMb->mbB->totalCoeff : NULL;
+    const tcoeff_t *tcA = h264bsdIsNeighbourAvailable(pMb, pMb->mbA) ? pMb->mbA->totalCoeff : NULL;
+    const tcoeff_t *tcB = h264bsdIsNeighbourAvailable(pMb, pMb->mbB) ? pMb->mbB->totalCoeff : NULL;
 
 /* Code */
 
@@ -1020,7 +1020,7 @@ u32 h264bsdPredModeIntra16x16(mbType_e mbType)
 #ifdef H264DEC_OMXDL
 static inline u32 NzMask16(const u8 *tc)
 #else
-static inline u32 NzMask16(const i16 *tc)
+static inline u32 NzMask16(const tcoeff_t *tc)
 #endif
 {
     u32 m = 0, i;
@@ -1062,7 +1062,7 @@ u32 h264bsdDecodeMacroblock(mbStorage_t *pMb, macroblockLayer_t *pMbLayer,
 #ifdef H264DEC_OMXDL
         u8 *tot = pMb->totalCoeff;
 #else
-        i16 *tot = pMb->totalCoeff;
+        tcoeff_t *tot = pMb->totalCoeff;
 #endif
         i32 *lev = pMbLayer->residual.level[0];
 
@@ -1423,7 +1423,7 @@ u32 ProcessResidual(mbStorage_t *pMb, i32 residualLevel[][16], u32 *coeffMap)
     u32 chromaQp;
     i32 (*blockData)[16];
     i32 (*blockDc)[16];
-    i16 *totalCoeff;
+    tcoeff_t *totalCoeff;
     i32 *chromaDc;
     const u32 *dcCoeffIdx;
 

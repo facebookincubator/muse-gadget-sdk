@@ -278,6 +278,11 @@ void h264bsdSetCurrImageMbPointers(image_t *image, u32 mbNum)
     picSize = width * height;
 
     image->luma = (u8*)(image->data + col * 16 + tmp * 256);
+#if H264BSD_SPLIT_PLANES
+    image->cb = (u8*)(image->cbData + tmp * 64 + col * 8);
+    image->cr = (u8*)(image->cb + image->crDelta);
+#else
     image->cb = (u8*)(image->data + picSize * 256 + tmp * 64 + col * 8);
     image->cr = (u8*)(image->cb + picSize * 64);
+#endif
 }

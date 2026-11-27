@@ -93,6 +93,24 @@ typedef struct {
     u32 lastContainsMmco5;
     u32 noReordering;
     u32 flushed;
+#if H264BSD_LOWMEM
+    /* OPT: in-place pictures (h264bsd_lowmem.c): when lmRows (D) is set
+     * and the DPB holds one reference, both pictures share a luma region
+     * lmY of H + D rows (block lmBlock) and the Cb and Cr regions lmCb and
+     * lmCr of H/2 + D/2 rows each (both in block lmBlockC: two smaller
+     * blocks fit a fragmented heap); the picture being decoded
+     * starts at lmY, the reference D rows down. lmWidthMbs: picture width. */
+    u32 lmRows;
+    u32 lmWidthMbs;
+    u8 *lmBlock;
+    u8 *lmBlockC;
+    u8 *lmY;
+    u8 *lmCb;
+    u8 *lmCr;
+#endif
+#if H264BSD_STRIP
+    u32 stripMode;  /* OPT: pictures live in the strip ring; no picture memory */
+#endif
 } dpbStorage_t;
 
 /*------------------------------------------------------------------------------

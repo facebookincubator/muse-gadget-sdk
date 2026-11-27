@@ -322,8 +322,12 @@ u32 ConcealMb(mbStorage_t *pMb, image_t *currImage, u32 row, u32 col,
     {
         mv_t mv = {0,0};
         image_t refImage;
+#if H264BSD_SPLIT_PLANES
+        h264bsdRefImageInit(&refImage, currImage);
+#else
         refImage.width = width;
         refImage.height = height;
+#endif
         refImage.data = refData;
         if (refImage.data)
         {
@@ -466,8 +470,12 @@ u32 ConcealMb(mbStorage_t *pMb, image_t *currImage, u32 row, u32 col,
     }
 
     /* chroma components */
+#if H264BSD_SPLIT_PLANES
+    mbPos = currImage->cbData + row * 8 * width * 8 + col * 8;
+#else
     mbPos = currImage->data + width * height * 256 +
        row * 8 * width * 8 + col * 8;
+#endif
     for (comp = 0; comp < 2; comp++)
     {
 
@@ -577,7 +585,11 @@ u32 ConcealMb(mbStorage_t *pMb, image_t *currImage, u32 row, u32 col,
         }
 
         /* increment pointers for cr */
+#if H264BSD_SPLIT_PLANES
+        mbPos += currImage->crDelta;
+#else
         mbPos += width * height * 64;
+#endif
     }
 
     h264bsdWriteMacroblock(currImage, data);

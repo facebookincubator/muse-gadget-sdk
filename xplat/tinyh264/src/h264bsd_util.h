@@ -166,7 +166,25 @@
  * several times slower: on the ESP32-S31 a 480 px stream with three such
  * blocks in LP RAM took 170 ms a frame instead of 30. Falls back to main
  * SRAM (MALLOC_CAP_DMA, which LP RAM lacks). Elsewhere plain malloc. Blocks
- * are freed with free() either way. */
+ * are freed with free() either way.
+ *
+ * OPT: with TINYH264_CUSTOM_ALLOC every block comes from the port's own
+ * allocator instead: tinyh264_alloc, tinyh264_alloc_hot (the blocks read for
+ * every macroblock, where a port may hand out faster memory) and
+ * tinyh264_free, which the port defines. Blocks are aligned as malloc's
+ * are (the decoder keeps pointers and 32-bit fields in them; it aligns its
+ * pictures itself). A fixed arena, say: the decoder then never touches a
+ * system heap, and h264bsdSetLimits bounds what it allocates for a
+ * sequence (h264bsd_decoder.h). */
+#if TINYH264_CUSTOM_ALLOC
+#include <stddef.h>
+void *tinyh264_alloc(size_t n);
+void *tinyh264_alloc_hot(size_t n);
+void tinyh264_free(void *p);
+#define h264bsdMalloc(n) tinyh264_alloc(n)
+#define h264bsdMallocHot(n) tinyh264_alloc_hot(n)
+#define h264bsdRelease(p) tinyh264_free(p)
+#else
 #if defined(ESP_PLATFORM)
 #include "sdkconfig.h"
 #endif
@@ -196,6 +214,18 @@ static inline void *h264bsdMallocHot(size_t n)
 #define h264bsdMalloc(n) malloc(n)
 #define h264bsdMallocHot(n) malloc(n)
 #endif
+#define h264bsdRelease(p) free(p)
+#endif /* TINYH264_CUSTOM_ALLOC */
+
+/* OPT: the alignment of each picture buffer, bytes (a power of two, at
+ * least 16): 64, say, where a GPU or DMA engine reads the planes straight
+ * from the decoder's pictures. */
+#ifndef TINYH264_PIC_ALIGN
+#define TINYH264_PIC_ALIGN 16
+#endif
+#if TINYH264_PIC_ALIGN < 16 || (TINYH264_PIC_ALIGN & (TINYH264_PIC_ALIGN - 1))
+#error "TINYH264_PIC_ALIGN must be a power of two, at least 16"
+#endif
 
 /* macro to allocate memory */
 #define ALLOCATE(ptr, count, type) \
@@ -206,7 +236,7 @@ static inline void *h264bsdMallocHot(size_t n)
 /* macro to free allocated memory */
 #define FREE(ptr) \
 { \
-    free((ptr)); (ptr) = NULL; \
+    h264bsdRelease((ptr)); (ptr) = NULL; \
 }
 
 #define ALIGN(ptr, bytePos) \

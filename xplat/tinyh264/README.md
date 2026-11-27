@@ -161,3 +161,112 @@ For a base from before the decoder moved to `xplat/`, its sources are in
 
 `hash --crop` and `ffmpeg` give lines to compare with ffmpeg's own decode of
 the undamaged streams.
+
+## Knobs for other platforms
+
+Compile-time switches for ports to other MCUs, each off by default: off, the
+code is the same as without it. Define them for the decoder's sources and for
+the code that calls their functions. `esp32/tests/test_tinyh264_knobs.py` builds
+each one in and compares it with the decoder as it ships, picture for picture
+(set `TINYH264_CORPUS` to a directory of `.264` streams to run more).
+
+- `TINYH264_CUSTOM_ALLOC=1`: every block comes from the port's allocator,
+  `tinyh264_alloc`, `tinyh264_alloc_hot` (the blocks read for every
+  macroblock, where faster memory pays) and `tinyh264_free`, which the port
+  defines; a fixed arena, say, so the decoder never touches a system heap.
+  Blocks are aligned as `malloc`'s are.
+- `TINYH264_PIC_ALIGN=N`: picture buffers aligned to N bytes (a power of two,
+  at least 16, checked at compile time; 16 by default), for a GPU or DMA
+  engine that reads the planes in place.
+- `H264BSD_LIMITS=1`: `h264bsdSetLimits(dec, maxMbs, maxRefFrames)` refuses a
+  sequence parameter set for more macroblocks a picture or more reference
+  frames (with output reordering on, more frames in the DPB too) before
+  anything is allocated for it, so what the decoder allocates for a sequence
+  is bounded: at most maxRefFrames + 1 pictures of maxMbs macroblocks and
+  their macroblock entries. A refused one is an error from `h264bsdDecode`
+  (the rest of that access unit isn't decoded) and drops the set stored with
+  its id, deactivated if active, so the stream needs a new sequence parameter
+  set and an IDR picture; one the kept parameter sets refuse anyway
+  (`h264bsdKeepParamSets`) is only refused, as any other, and the kept ones
+  decode on. The parameter sets it holds aren't bounded by it
+  (`src/h264bsd_decoder.h`).
+- `H264BSD_BUFFER_GATE=1`: `h264bsdSetBufferGate(dec, fn, ctx)` calls
+  `fn(ctx, luma)` with the buffer each new picture is about to be decoded
+  into, before any pixel of it is written, and with every picture buffer
+  before it is freed (another sequence parameter set, `h264bsdShutdown`);
+  `fn` returns once a display that reads pictures in place is done with it.
+  Refused (an error, nothing set) in strip mode, which has no picture
+  buffers.
+- `H264BSD_LEAN_VUI=1`: a VUI parser of under 1 KB instead of about 5 KB. It
+  walks every field with the full parser's checks, so it accepts and refuses
+  the same parameter sets and ends on the same bit, and keeps only what the
+  decoder reads; the SEI parser, which nothing calls, is left out with it.
+  `tests/tinyh264_vui_lean_harness.c` runs both parsers on every sequence
+  parameter set of the streams, 200 mutations of each and 20,000 crafted
+  ones cut at every byte.
+- `H264BSD_LOWMEM=1`: `h264bsdSetLowMem(dec, flags)`, right after
+  `h264bsdInit`, for boards without external RAM (`src/h264bsd_lowmem.c`).
+  Macroblock entries shrink from 216 to 160 bytes (32-bit targets), and
+  `H264BSD_LOWMEM_MBRING` keeps them for three macroblock rows instead of
+  the whole picture. `H264BSD_LOWMEM_INPLACE` (with one reference frame and
+  no output reordering) decodes each picture over its reference in one
+  buffer D luma rows taller than a picture: D from the stream's motion
+  vector limit, or bits 8-15 of the flags times 8. A picture whose motion
+  reaches further up than D is an error, never a wrong picture; the picture
+  returned stays valid until the next call, and `h264bsdPicturePlanes`
+  gives its chroma planes. This mode conceals nothing: a damaged picture is
+  dropped, and in place, once one (or a reference picture that reference
+  marking can't store) has overwritten part of the reference, the decoder
+  waits for an IDR or all-intra reference picture (an all-intra
+  non-reference one is still shown). With the macroblock ring alone it
+  doesn't wait: the P pictures after a dropped reference picture are decoded
+  against the reference before it, wrong but not errors, until the next IDR
+  or intra picture, as the shipped decoder drifts after a picture it
+  conceals or its caller abandons. Not with `TINYH264_MVE` where it builds
+  Helium, yet (refused at compile time). Peak
+  memory (32-bit build, one reference frame), shipped / ring / in place /
+  in place D = 64: 180 x 180 150.8 / 125.6 / 112.4 / 88.7 KB, 240 x 240
+  230.8 / 189.5 / 155.7 / 126.2 KB, 480 x 480 897.7 / 717.8 / 569.6 /
+  418.4 KB.
+- `H264BSD_STRIP=1`: `h264bsdSetStrip(dec, k, fn, ctx)`, for intra-only
+  streams on boards that can't hold a picture (`src/h264bsd_strip.c`): the
+  decoder works in a ring of k + 2 macroblock rows and hands each row to
+  `fn` once it's final, in order (k from 1 to 255); `h264bsdDecode` returns
+  a NULL picture pointer. P slices, redundant slices and macroblocks out of
+  raster order are refused; nothing is concealed. The call itself is
+  refused (an error) for k = 0, with output reordering on
+  (`h264bsdInit(dec, 0)`) or a buffer gate set. Not with `TINYH264_MVE`
+  where it builds Helium, yet (refused at compile time). It assumes a flat
+  address space, as on the cores it's for: the picture's row addresses are
+  re-based to point before the ring and are dereferenced only once a row
+  offset brings them into it. Peak
+  memory (32-bit build, intra-only), shipped / k = 1 / k = 4: 180 x 180
+  150.8 / 30.8 / 52.4 KB, 240 x 240 230.8 / 36.5 / 63.5 KB, 480 x 480
+  897.7 / 66.2 / 120.2 KB (with `H264BSD_LOWMEM`'s smaller macroblock
+  entries, k = 1: 28.9, 34.1, 61.3 KB).
+- `H264BSD_ONEREF=1` (with `H264BSD_LOWMEM`): in place, a sequence parameter
+  set that allows several reference frames decodes keeping one, for encoders
+  that declare several and predict from the last picture only. A slice that
+  needs another (more than one active, reordering, long-term or adaptive
+  marking) is refused and the decoder waits for an IDR picture; a
+  non-reference picture is skipped, and `h264bsdRefInfo` counts those so a
+  caller can tell such a skip from an error. Peak memory with a sequence
+  parameter set allowing 4 reference frames, shipped / one kept in place:
+  180 x 180 316.9 / 112.4 KB, 240 x 240 490.2 / 155.7 KB, 480 x 480
+  1934.7 / 569.6 KB.
+- `H264BSD_CHANGED_MAP=1`: `h264bsdChangedMap(dec, &clean)` says which
+  macroblocks of the picture just returned carry the previous output
+  picture's pixels before the loop filter (inter predicted from that very
+  picture with zero motion and no residual, and no luma coefficients where it
+  deblocks), one bit each, when its result
+  has bit 0 set. With bit 1 also set a slice deblocked, and a clean
+  macroblock beside a changed one may differ in the 3 luma (1 chroma) pixels
+  along their shared edge: a display that redraws only the changed
+  macroblocks redraws those edges too, or the whole picture. The contract is
+  in `src/h264bsd_decoder.h`. `h264bsdChangedMapSkip` pauses it. No map (bit
+  0 clear; bit 2 then marks an IDR picture) after an IDR, an error, a gap,
+  reordered or long-term references, output reordering on, a concealed
+  picture, or one larger
+  than `H264BSD_CHANGED_MAP_MBS` (1024) macroblocks. `muse_vdec_same.c`
+  works out a similar map after the fact from the macroblock entries; this
+  one is built while decoding, so it works with the macroblock ring too.

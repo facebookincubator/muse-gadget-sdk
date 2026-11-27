@@ -221,8 +221,13 @@ void h264bsdWriteOutputBlocks(image_t *image, u32 mbNum, u8 *data,
 
     /* Output macroblock position in output picture */
     lum = (image->data + row * picWidth * 256 + col * 16);
+#if H264BSD_SPLIT_PLANES
+    cb = (image->cbData + row * picWidth * 64 + col * 8);
+    cr = (cb + image->crDelta);
+#else
     cb = (image->data + picSize * 256 + row * picWidth * 64 + col * 8);
     cr = (cb + picSize * 64);
+#endif
 
     picWidth *= 16;
 

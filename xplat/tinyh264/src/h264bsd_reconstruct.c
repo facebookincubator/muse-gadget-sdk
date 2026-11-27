@@ -127,6 +127,11 @@ static const i16 pieK[32] __attribute__((aligned(16))) = {
         return; \
     }
 void h264bsdPieChroma(const u8 *src, u32 stride, u8 *dst, u32 h, u32 rows, const i16 *wt, u8 *scratch, const i16 *k);
+#if H264BSD_SPLIT_PLANES
+#define PIE_CR_AT(c) ((c) ? crOff : 0)
+#else
+#define PIE_CR_AT(c) (long)((c) * height * width)
+#endif
 /* Both components of an 8-wide chroma partition: (wA*A + wB*B + wC*C + wD*D
  * + 32) >> 6, the same sum as the C's bilinear arithmetic. */
 #define PIE_CHROMA(base, wa, wb, wc, wd, rows) \
@@ -137,7 +142,7 @@ void h264bsdPieChroma(const u8 *src, u32 stride, u8 *dst, u32 h, u32 rows, const
         for (u32 i_ = 0; i_ < 48; i_++) \
             wt_[i_] = w4_[i_ >> 3]; \
         for (u32 c_ = 0; c_ < 2; c_++) \
-            h264bsdPieChroma((base) + (c_ * height + (u32)y0) * width + x0, width, \
+            h264bsdPieChroma((base) + PIE_CR_AT(c_) + (u32)y0 * width + x0, width, \
                              predPartChroma + c_ * 64, chromaPartHeight, (rows), wt_, scr_, pieK); \
         return; \
     }
@@ -186,6 +191,17 @@ void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows
         return; \
     }
 /* Both components, 4 or 8 wide: (wA*A + wB*B + wC*C + wD*D + 32) >> 6. */
+#if H264BSD_SPLIT_PLANES
+/* OPT: the chroma planes apart (low-memory mode): Cr crOff from Cb */
+#define PIE_CHROMA(base, wa, wb, wc, wd, rows) \
+    if (chromaPartWidth >= 4 && PieOk()) { \
+        for (u32 c_ = 0; c_ < 2; c_++) \
+            h264bsdDspChroma((base) + (c_ ? crOff : 0) + (u32)y0 * width + x0, width, \
+                             predPartChroma + c_ * 64, chromaPartWidth, chromaPartHeight, \
+                             (rows), (wa), (wb), (wc), (wd)); \
+        return; \
+    }
+#else
 #define PIE_CHROMA(base, wa, wb, wc, wd, rows) \
     if (chromaPartWidth >= 4 && PieOk()) { \
         for (u32 c_ = 0; c_ < 2; c_++) \
@@ -194,6 +210,7 @@ void h264bsdDspChroma(const u8 *src, u32 stride, u8 *dst, u32 w, u32 h, u32 rows
                              (rows), (wa), (wb), (wc), (wd)); \
         return; \
     }
+#endif
 #define PIE_HORVER(off) \
     if (PieOk()) { \
         u8 hv_[256] __attribute__((aligned(4))); \
@@ -294,6 +311,9 @@ void h264bsdInterpolateChromaHor(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,
+#endif
   u32 xFrac,
   u32 chromaPartWidth,
   u32 chromaPartHeight)
@@ -319,7 +339,11 @@ void h264bsdInterpolateChromaHor(
     {
         h264bsdFillBlock(pRef, block, x0, y0, width, height,
             chromaPartWidth + 1, chromaPartHeight, chromaPartWidth + 1);
+#if H264BSD_SPLIT_PLANES
+        pRef += crOff;
+#else
         pRef += width * height;
+#endif
         h264bsdFillBlock(pRef, block + (chromaPartWidth+1)*chromaPartHeight,
             x0, y0, width, height, chromaPartWidth + 1,
             chromaPartHeight, chromaPartWidth + 1);
@@ -329,6 +353,9 @@ void h264bsdInterpolateChromaHor(
         y0 = 0;
         width = chromaPartWidth+1;
         height = chromaPartHeight;
+#if H264BSD_SPLIT_PLANES
+        crOff = (long)(width * height);
+#endif
     }
 
     PIE_CHROMA(pRef, 8 * (8 - xFrac), 8 * xFrac, 0, 0, chromaPartHeight);   /* OPT: S31 SIMD */
@@ -337,7 +364,11 @@ void h264bsdInterpolateChromaHor(
     for (comp = 0; comp <= 1; comp++)
     {
 
+#if H264BSD_SPLIT_PLANES
+        ptrA = pRef + (comp ? crOff : 0) + (u32)y0 * width + x0;
+#else
         ptrA = pRef + (comp * height + (u32)y0) * width + x0;
+#endif
         cbr = predPartChroma + comp * 8 * 8;
 
         /* 2x2 pels per iteration
@@ -391,6 +422,9 @@ void h264bsdInterpolateChromaVer(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,
+#endif
   u32 yFrac,
   u32 chromaPartWidth,
   u32 chromaPartHeight)
@@ -416,7 +450,11 @@ void h264bsdInterpolateChromaVer(
     {
         h264bsdFillBlock(pRef, block, x0, y0, width, height, chromaPartWidth,
             chromaPartHeight + 1, chromaPartWidth);
+#if H264BSD_SPLIT_PLANES
+        pRef += crOff;
+#else
         pRef += width * height;
+#endif
         h264bsdFillBlock(pRef, block + chromaPartWidth*(chromaPartHeight+1),
             x0, y0, width, height, chromaPartWidth,
             chromaPartHeight + 1, chromaPartWidth);
@@ -426,6 +464,9 @@ void h264bsdInterpolateChromaVer(
         y0 = 0;
         width = chromaPartWidth;
         height = chromaPartHeight+1;
+#if H264BSD_SPLIT_PLANES
+        crOff = (long)(width * height);
+#endif
     }
 
     PIE_CHROMA(pRef, 8 * (8 - yFrac), 0, 8 * yFrac, 0, chromaPartHeight + 1);   /* OPT: S31 SIMD */
@@ -434,7 +475,11 @@ void h264bsdInterpolateChromaVer(
     for (comp = 0; comp <= 1; comp++)
     {
 
+#if H264BSD_SPLIT_PLANES
+        ptrA = pRef + (comp ? crOff : 0) + (u32)y0 * width + x0;
+#else
         ptrA = pRef + (comp * height + (u32)y0) * width + x0;
+#endif
         cbr = predPartChroma + comp * 8 * 8;
 
         /* 2x2 pels per iteration
@@ -488,6 +533,9 @@ void h264bsdInterpolateChromaHorVer(
   i32 y0,
   u32 width,
   u32 height,
+#if H264BSD_SPLIT_PLANES
+  long crOff,
+#endif
   u32 xFrac,
   u32 yFrac,
   u32 chromaPartWidth,
@@ -512,7 +560,11 @@ void h264bsdInterpolateChromaHorVer(
     {
         h264bsdFillBlock(ref, block, x0, y0, width, height,
             chromaPartWidth + 1, chromaPartHeight + 1, chromaPartWidth + 1);
+#if H264BSD_SPLIT_PLANES
+        ref += crOff;
+#else
         ref += width * height;
+#endif
         h264bsdFillBlock(ref, block + (chromaPartWidth+1)*(chromaPartHeight+1),
             x0, y0, width, height, chromaPartWidth + 1,
             chromaPartHeight + 1, chromaPartWidth + 1);
@@ -522,6 +574,9 @@ void h264bsdInterpolateChromaHorVer(
         y0 = 0;
         width = chromaPartWidth+1;
         height = chromaPartHeight+1;
+#if H264BSD_SPLIT_PLANES
+        crOff = (long)(width * height);
+#endif
     }
 
     PIE_CHROMA(ref, (8 - xFrac) * (8 - yFrac), xFrac * (8 - yFrac), (8 - xFrac) * yFrac, xFrac * yFrac, chromaPartHeight + 1);   /* OPT: S31 SIMD */
@@ -531,7 +586,11 @@ void h264bsdInterpolateChromaHorVer(
     for (comp = 0; comp <= 1; comp++)
     {
 
+#if H264BSD_SPLIT_PLANES
+        ptrA = ref + (comp ? crOff : 0) + (u32)y0 * width + x0;
+#else
         ptrA = ref + (comp * height + (u32)y0) * width + x0;
+#endif
         cbr = predPartChroma + comp * 8 * 8;
 
         /* 2x2 pels per iteration
@@ -636,32 +695,44 @@ static void PredictChroma(
 
     chromaPartWidth  = partWidth >> 1;
     chromaPartHeight = partHeight >> 1;
+#if H264BSD_SPLIT_PLANES
+    /* OPT: the Cb plane wherever the layout puts it, Cr crDelta on */
+    ref = h264bsdCbOf(refPic, refPic->data);
+#define CR_OFF refPic->crDelta,
+#else
     ref = refPic->data + 256 * refPic->width * refPic->height;
+#define CR_OFF
+#endif
 
     if (xFrac && yFrac)
     {
         h264bsdInterpolateChromaHorVer(ref, mbPartChroma, xInt, yInt, width,
-                height, xFrac, yFrac, chromaPartWidth, chromaPartHeight);
+                height, CR_OFF xFrac, yFrac, chromaPartWidth, chromaPartHeight);
     }
     else if (xFrac)
     {
         h264bsdInterpolateChromaHor(ref, mbPartChroma, xInt, yInt, width,
-                height, xFrac, chromaPartWidth, chromaPartHeight);
+                height, CR_OFF xFrac, chromaPartWidth, chromaPartHeight);
     }
     else if (yFrac)
     {
         h264bsdInterpolateChromaVer(ref, mbPartChroma, xInt, yInt, width,
-                height, yFrac, chromaPartWidth, chromaPartHeight);
+                height, CR_OFF yFrac, chromaPartWidth, chromaPartHeight);
     }
     else
     {
         h264bsdFillBlock(ref, mbPartChroma, xInt, yInt, width, height,
             chromaPartWidth, chromaPartHeight, 8);
+#if H264BSD_SPLIT_PLANES
+        ref += refPic->crDelta;
+#else
         ref += width * height;
+#endif
         h264bsdFillBlock(ref, mbPartChroma + 8*8, xInt, yInt, width, height,
             chromaPartWidth, chromaPartHeight, 8);
     }
 
+#undef CR_OFF
 }
 
 
@@ -2070,6 +2141,18 @@ void h264bsdPredictSamples(
     xInt = (i32)xA + (i32)partX + (mv->hor >> 2);
     yInt = (i32)yA + (i32)partY + (mv->ver >> 2);
 
+#if H264BSD_LOWMEM
+    /* OPT: in-place pictures (h264bsd_lowmem.c): the first reference row
+     * read must not have been overwritten yet */
+    {
+        i32 top = yFrac ? yInt - 2 : yInt;
+        if (top < 0)
+            top = 0;
+        if (top < refPic->ipWater)
+            *refPic->ipBad = 1;
+    }
+#endif
+
     ASSERT(lumaFracPos[xFrac][yFrac] < 16);
 
     switch (lumaFracPos[xFrac][yFrac])
@@ -2600,6 +2683,11 @@ void h264bsdFillBlock(
 #endif
 /* The SIMD against the C on random 48x48 pictures (flat, noisy and 0/255),
  * every width, height, position and offset; only one caller checks. */
+#if H264BSD_SPLIT_PLANES
+#define PIE_TEST_CR (long)(48 * 24),   /* the test picture's Cr plane follows its Cb */
+#else
+#define PIE_TEST_CR
+#endif
 static void PieSelftest(void)
 {
     static u8 pic[48 * 48 + PIE_TEST_SLACK];
@@ -2659,11 +2747,11 @@ static void PieSelftest(void)
                 u8 *o = pass ? b : a;
                 pieTesting = (u8)pass;
                 if (f == 0)
-                    h264bsdInterpolateChromaHor(pic, o, x0, y0, 48, 24, xf, cw, h);
+                    h264bsdInterpolateChromaHor(pic, o, x0, y0, 48, 24, PIE_TEST_CR xf, cw, h);
                 else if (f == 1)
-                    h264bsdInterpolateChromaVer(pic, o, x0, y0, 48, 24, yf, cw, h);
+                    h264bsdInterpolateChromaVer(pic, o, x0, y0, 48, 24, PIE_TEST_CR yf, cw, h);
                 else
-                    h264bsdInterpolateChromaHorVer(pic, o, x0, y0, 48, 24, xf, yf, cw, h);
+                    h264bsdInterpolateChromaHorVer(pic, o, x0, y0, 48, 24, PIE_TEST_CR xf, yf, cw, h);
             }
             pieTesting = 0;
             n++;

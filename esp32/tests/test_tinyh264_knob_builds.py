@@ -18,10 +18,13 @@ same pictures, picture for picture, as the decoder without it
 (xplat/tests/h264_corpus.py). TINYH264_PACKED4_MC runs its kernels on the
 plain-C model of the packed operations; TINYH264_DSP_MC runs its kernels on the
 DSP instructions' plain-C stand-ins, and its first-use check against the C must
-pass (a mismatch aborts here instead of falling back to the C). Every build
-runs under ASan and UBSan where the compiler's runtime works (the damaged
-vectors reach the backends' edge paths); where it doesn't, the pictures are
-still compared and the sanitizer subtest skips, saying why."""
+pass (a mismatch aborts here instead of falling back to the C). The knobs for
+other platforms (xplat/tinyh264/README.md) are built in here as a port builds
+them, their modes not asked for (tests/test_tinyh264_knobs.py runs those),
+but for H264BSD_LEAN_VUI, which is on once built in. Every build runs under
+ASan and UBSan where the compiler's runtime works (the damaged vectors reach
+the backends' edge paths); where it doesn't, the pictures are still compared
+and the sanitizer subtest skips, saying why."""
 
 from __future__ import annotations
 
@@ -46,6 +49,12 @@ KNOBS = {
     "dsp_mc": "-DTINYH264_DSP_MC=1 " + CHECKED,
     # Backend switches set to 0 are off (several at 0 are not several backends).
     "backends_0": "-DTINYH264_MVE=0 -DTINYH264_DSP_MC=0 -DTINYH264_PACKED4_MC=0",
+    "custom_alloc": "-DTINYH264_CUSTOM_ALLOC=1 -Dtinyh264_alloc=malloc -Dtinyh264_alloc_hot=malloc "
+                    "-Dtinyh264_free=free -include stdlib.h",
+    "pic_align64": "-DTINYH264_PIC_ALIGN=64",
+    "lean_vui": "-DH264BSD_LEAN_VUI=1",
+    "lowmem_strip_built_in": "-DH264BSD_LIMITS=1 -DH264BSD_BUFFER_GATE=1 -DH264BSD_LOWMEM=1 -DH264BSD_STRIP=1 "
+                             "-DH264BSD_ONEREF=1 -DH264BSD_CHANGED_MAP=1",
 }
 
 

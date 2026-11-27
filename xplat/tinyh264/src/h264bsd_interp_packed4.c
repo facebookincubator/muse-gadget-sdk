@@ -79,12 +79,23 @@ void h264bsdInterpolateMidVerQuarter_c(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 widt
                                        u32 partHeight, u32 verOffset);
 void h264bsdInterpolateMidHorQuarter_c(u8 *ref, u8 *mb, i32 x0, i32 y0, u32 width, u32 height, u32 partWidth,
                                        u32 partHeight, u32 horOffset);
+/* OPT: with the chroma planes apart (H264BSD_SPLIT_PLANES, low-memory
+ * mode) the chroma functions take Cr's offset from Cb, crOff */
+#if H264BSD_SPLIT_PLANES
+#define P4_CR long crOff,
+#define P4_CRV(v) (v),
+#define P4_CR_AT(width, height) crOff
+#else
+#define P4_CR
+#define P4_CRV(v)
+#define P4_CR_AT(width, height) (width) * (height)
+#endif
 void h264bsdInterpolateChromaHor_c(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                   u32 xFrac, u32 chromaPartWidth, u32 chromaPartHeight);
+                                   P4_CR u32 xFrac, u32 chromaPartWidth, u32 chromaPartHeight);
 void h264bsdInterpolateChromaVer_c(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                   u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight);
+                                   P4_CR u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight);
 void h264bsdInterpolateChromaHorVer_c(u8 *ref, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                      u32 xFrac, u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight);
+                                      P4_CR u32 xFrac, u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight);
 
 #define AI static inline __attribute__((always_inline))
 
@@ -405,14 +416,14 @@ AI void chroma_core(const u8 *src, u32 stride, u8 *dst, u32 cw, u32 ch, u32 cA, 
     }
 }
 
-static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height, u32 xFrac, u32 yFrac,
+static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height, P4_CR u32 xFrac, u32 yFrac,
                        u32 cw, u32 ch)
 {
     u32 cA = (8 - xFrac) * (8 - yFrac) * 0x01010101u, cB = xFrac * (8 - yFrac) * 0x01010101u;
     u32 cC = (8 - xFrac) * yFrac * 0x01010101u, cD = xFrac * yFrac * 0x01010101u;
     u32 fill[9 * 12 / 4 + 4];
     for (u32 comp = 0; comp < 2; comp++) {
-        u8 *plane = ref + (comp ? width * height : 0);   /* Cr: a plane past Cb */
+        u8 *plane = ref + (comp ? P4_CR_AT(width, height) : 0);   /* Cr: a plane past Cb */
         const u8 *s;
         u32 st;
         if (x0 < 0 || (u32)x0 + cw + 1 > width || y0 < 0 || (u32)y0 + ch + 1 > height) {
@@ -434,36 +445,36 @@ static void chroma_any(u8 *ref, u8 *pred, i32 x0, i32 y0, u32 width, u32 height,
 }
 
 void h264bsdInterpolateChromaHor(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                 u32 xFrac, u32 chromaPartWidth, u32 chromaPartHeight)
+                                 P4_CR u32 xFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {
-        h264bsdInterpolateChromaHor_c(pRef, predPartChroma, x0, y0, width, height, xFrac, chromaPartWidth,
+        h264bsdInterpolateChromaHor_c(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) xFrac, chromaPartWidth,
                                       chromaPartHeight);
         return;
     }
-    chroma_any(pRef, predPartChroma, x0, y0, width, height, xFrac, 0, chromaPartWidth, chromaPartHeight);
+    chroma_any(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) xFrac, 0, chromaPartWidth, chromaPartHeight);
 }
 
 void h264bsdInterpolateChromaVer(u8 *pRef, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                 u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
+                                 P4_CR u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {
-        h264bsdInterpolateChromaVer_c(pRef, predPartChroma, x0, y0, width, height, yFrac, chromaPartWidth,
+        h264bsdInterpolateChromaVer_c(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) yFrac, chromaPartWidth,
                                       chromaPartHeight);
         return;
     }
-    chroma_any(pRef, predPartChroma, x0, y0, width, height, 0, yFrac, chromaPartWidth, chromaPartHeight);
+    chroma_any(pRef, predPartChroma, x0, y0, width, height, P4_CRV(crOff) 0, yFrac, chromaPartWidth, chromaPartHeight);
 }
 
 void h264bsdInterpolateChromaHorVer(u8 *ref, u8 *predPartChroma, i32 x0, i32 y0, u32 width, u32 height,
-                                    u32 xFrac, u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
+                                    P4_CR u32 xFrac, u32 yFrac, u32 chromaPartWidth, u32 chromaPartHeight)
 {
     if (chromaPartWidth < 4) {
-        h264bsdInterpolateChromaHorVer_c(ref, predPartChroma, x0, y0, width, height, xFrac, yFrac,
+        h264bsdInterpolateChromaHorVer_c(ref, predPartChroma, x0, y0, width, height, P4_CRV(crOff) xFrac, yFrac,
                                          chromaPartWidth, chromaPartHeight);
         return;
     }
-    chroma_any(ref, predPartChroma, x0, y0, width, height, xFrac, yFrac, chromaPartWidth, chromaPartHeight);
+    chroma_any(ref, predPartChroma, x0, y0, width, height, P4_CRV(crOff) xFrac, yFrac, chromaPartWidth, chromaPartHeight);
 }
 
 /* ---- the check against the C ------------------------------------------- */
@@ -514,11 +525,11 @@ u32 h264bsdPacked4Check(u32 iters, u32 *blocks)
                 u32 cw = pw / 2, chh = ph / 2;
                 i32 cx = x0 / 2, cy = y0 / 2;
                 if (fn == 9 || fn == 12)
-                    (pass ? h264bsdInterpolateChromaHor : h264bsdInterpolateChromaHor_c)(pic, mb, cx, cy, W / 2, H / 2, xf | 1, cw, chh);
+                    (pass ? h264bsdInterpolateChromaHor : h264bsdInterpolateChromaHor_c)(pic, mb, cx, cy, W / 2, H / 2, P4_CRV((long)(W / 2) * (H / 2)) xf | 1, cw, chh);
                 else if (fn == 10)
-                    (pass ? h264bsdInterpolateChromaVer : h264bsdInterpolateChromaVer_c)(pic, mb, cx, cy, W / 2, H / 2, yf | 1, cw, chh);
+                    (pass ? h264bsdInterpolateChromaVer : h264bsdInterpolateChromaVer_c)(pic, mb, cx, cy, W / 2, H / 2, P4_CRV((long)(W / 2) * (H / 2)) yf | 1, cw, chh);
                 else
-                    (pass ? h264bsdInterpolateChromaHorVer : h264bsdInterpolateChromaHorVer_c)(pic, mb, cx, cy, W / 2, H / 2, xf | 1, yf | 1, cw, chh);
+                    (pass ? h264bsdInterpolateChromaHorVer : h264bsdInterpolateChromaHorVer_c)(pic, mb, cx, cy, W / 2, H / 2, P4_CRV((long)(W / 2) * (H / 2)) xf | 1, yf | 1, cw, chh);
                 break;
             }
             }
