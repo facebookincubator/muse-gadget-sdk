@@ -1145,6 +1145,7 @@ static int s_cjk_lines;         /* lines of CJK the small screen's caption band 
 /* The small screen's band: scaled to fit the chosen Text size. */
 static void set_caption_font(const char *caption)
 {
+    (void)caption;
 #if CONFIG_MUSE_SMALL_FULL_REPLY
     if (s_full_reply) {
         return;   /* the reply keeps the screen: set_full_font() once its text is in */
