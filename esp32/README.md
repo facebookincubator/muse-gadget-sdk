@@ -23,6 +23,9 @@ the devices you already own and anything you build with a local HTTP API.
 Then hack on it: add a display, a button, or support for a board we haven't
 tried yet, and build your own Muse gadget.
 
+For optional personal-avatar animation, pixel packs and white-background
+removal, see the [avatar rendering overview](docs/avatar-rendering.md).
+
 > **Note:** Built by hackers, for hackers, just for fun. Flashing custom
 > firmware can brick boards and void warranties. Proceed at your own risk!
 

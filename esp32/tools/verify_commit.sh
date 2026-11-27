@@ -71,7 +71,10 @@ cmake -S simulator -B simulator/build -G Ninja -DCMAKE_BUILD_TYPE=Debug > "$SIML
     exit 1
   fi
   export PATH="$(dirname "$PY"):$PATH"
-  ${TIMEOUT:+$TIMEOUT 3000} "$PY" -m unittest discover -v -s tests -p 'test_*.py' > "$LOG" 2>&1
+  # Match CI's per-module process isolation and freeze watchdog. A stuck module
+  # fails the run; it is never treated as a pass or an optional skip.
+  ${TIMEOUT:+$TIMEOUT 3000} "$PY" tools/stuck_watch.py --cap 900 -- \
+      "$PY" -m unittest discover -v -s tests -p 'test_*.py' > "$LOG" 2>&1
 ); rc=$?
 echo "commit $(git log --oneline -1 | cut -c1-70): rc=$rc (logs in $LOGS)"
 grep -a -E '^(Ran|OK|FAILED)' "$LOG" | tail -2
