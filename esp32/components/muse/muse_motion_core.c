@@ -42,13 +42,18 @@ bool muse_motion_update(muse_motion_core_t *s, muse_motion_sample_t raw, uint32_
     /* The first impulse distinguishes lift/braking from lower/landing.
      * A confirmed upward start may subsequently have low apparent gravity
      * while the hand brakes; that is not a new lowering episode. */
-    if (!s->lowering && !s->rising && s->have_reference) {
-        if (mag > 1150LL*1150) {
+    /* A sustained impulse overrides the put-down latch; the latch only
+       inhibits the tilt path below, not this rise path. A pickup often
+       starts with a brief dip that latches lowering, which used to mute
+       the whole gesture. */
+    if (!s->rising && s->have_reference) {
+        if (mag > 1080LL*1080) { /* was 1150; resting magnitude on the QMI8658 board measures 880-950 mg */
             if (!s->rise_pending) s->rise_ms = now;
             s->rise_pending = true;
             if ((uint32_t)(now - s->rise_ms) >= 40) {
                 s->rising = true;
                 s->rise_pending = false;
+                s->lowering = false;
             }
         } else {
             s->rise_pending = false;
@@ -57,7 +62,7 @@ bool muse_motion_update(muse_motion_core_t *s, muse_motion_sample_t raw, uint32_
     /* Lowering reduces apparent gravity. Normalizing that smaller vector
      * can otherwise turn translation into a fake viewing tilt. Block wake
      * through the downward impulse and landing, then adopt the new rest. */
-    if (mag < 900LL*900 && !s->rising) {
+    if (mag < 820LL*820 && !s->rising) { /* was 900, inside the 880-950 mg resting band, so normal handling latched a put-down */
         s->lowering = true;
         s->moving = s->settling = false;
     }
@@ -65,7 +70,7 @@ bool muse_motion_update(muse_motion_core_t *s, muse_motion_sample_t raw, uint32_
     if (s->lowering) {
         /* A fixed delay can expire in mid-air. Require a full stable window
          * relative to one anchor, not merely tiny changes between samples. */
-        if (mag < 900LL*900 || mag > 1100LL*1100 ||
+        if (mag < 820LL*820 || mag > 1100LL*1100 ||
             distance_sq(raw, s->landing_reference) > 60LL*60) {
             s->lowering_ms = now;
             s->landing_reference = raw;
