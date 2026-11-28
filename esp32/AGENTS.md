@@ -795,8 +795,9 @@ call's `POST /voice/realtime` and `POST /voice/end-call`:
   `file` part. Send the body in pieces (below); the `file` part has no size
   cap of its own, and each text field is capped at 64 KB. There's no append:
   a file is written in one upload.
-- `GET /identity`: the user's Muse identity, whose avatar the avatar face and
-  avatar sync follow (`main/mg_face.c`, `main/avatar_sync.c`).
+- `GET /identity`: the user's Muse identity, whose avatar the avatar face
+  follows (`main/mg_face.c`). Avatar sync reads `/api/gadget/identity`
+  instead (above).
 
 `POST /fs/read` and `POST /fs/write` are owner-only: a gadget's credentials
 get 403 there. There are no list or stat routes for gadgets.

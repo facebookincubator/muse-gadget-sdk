@@ -77,8 +77,9 @@ Control, tunnel (including in-place batches/resets), and agent identity use
 over Wi-Fi; a BLE-only gadget's device session, through the phone's relay,
 keeps its control stream on the daemon's `POST /link-control`.
 A refused control stream reconnects normally; a refused identity fetch only
-leaves the name unknown. Extra `noise_ctrl_req_*` requests still target
-`ServiceType::Daemon`.
+leaves the name unknown. Extra `noise_ctrl_req_*` requests target
+`ServiceType::Daemon`, except `noise_ctrl_req_open_gadget_api()` (avatar sync),
+which targets `ServiceType::Gadget`.
 
 ## Focused host checks
 

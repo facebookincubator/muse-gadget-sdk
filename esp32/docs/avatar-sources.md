@@ -22,9 +22,9 @@ by default. The default user setting remains Built-in, including after an
 upgrade. Initial hardware validation covers the Waveshare 1.75C.
 
 Avatar updates are data. A daily scheduled avatar change requires no firmware
-rebuild and no change to the scheduled prompt. This implementation uses the
-paired daemon directly; it does not send chat messages to discover or convert
-an avatar.
+rebuild and no change to the scheduled prompt. This implementation reads the
+paired Muse's Gadget API directly; it does not send chat messages to discover
+or convert an avatar.
 
 ## Select an avatar source
 

@@ -13,7 +13,7 @@
 #include <string.h>
 #include <stdint.h>
 
-/* Shared by temporary images and avatar downloads; callers own the result.
+/* Used by temporary image downloads; callers own the result.
  * Encode VM paths as paths, never as URLs or query parameters. */
 static inline char *vm_file_request_path(const char *path) {
     if (!path) return NULL;
