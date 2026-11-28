@@ -147,6 +147,8 @@ static_assert(MP3_BUF > MP3_POLL_ROOM + MP3_HOLD, "reads would stall with the MP
 #define REPLY_TIMEOUT_US (60 * 1000000LL)  /* chat posted -> first assistant message */
 #define TURN_CAP_US (180 * 1000000LL)
 #define SETTLE_US (3 * 1000000LL)          /* quiet period that ends a turn */
+#define SETTLE_GATE_QUIET_US (20 * 1000000LL) /* settle gate: quiet period before an unsettled turn may end */
+#define SETTLE_GATE_CAP_US (120 * 1000000LL)   /* settle gate: absolute cap for an unsettled turn; terminal events clear the gate at once */
 #define BUSY_HOLD_US (20 * 1000000LL)      /* how long a busy agent keeps it open */
 #define TEXT_REPLY_TIMEOUT_US (5 * 60 * 1000000LL)   /* typed turns: agents can work a while */
 #define TEXT_TURN_CAP_US (15 * 60 * 1000000LL)
@@ -329,6 +331,11 @@ struct pending_t {
     int nplayed;
     struct cJSON *replies;       /* its rows, held for the voice task (an array, at most MAX_MSGS) */
 };
+
+/* The settle gate's reason string lives here so turn_done (in the
+ * host session harness's earliest slice) can record it; the rest of
+ * the gate state sits with the gate functions at turn_done below. */
+static const char *s_settle_reason __attribute__((unused)) = "no previous turn";
 
 /* 10 KB, most of it the MP3 decoder: in PSRAM on boards that let static data go
  * there (the AIPI), so Wi-Fi setup and TLS have the internal RAM. */
@@ -939,12 +946,22 @@ static bool resolve_vm(char *err, size_t err_cap)
     return false;
 }
 
+static void drop_connection(const char *why);   /* v4.3: fwd, for check_turn */
+
+/* wk46/v4: defined with the settle gate below. */
+static void gate_clear(const char *how);
 static bool open_subscription(void)
 {
     s_last_seq = s_last_row_seq = 0;
     s_conn.sub_id = open_stream(K_SUB, "POST", "/chat/subscribe", "application/json", "application/x-ndjson", "{}",
                                 true);
-    return s_conn.sub_id != 0;
+    bool ok = s_conn.sub_id != 0;
+    if (ok) {
+        /* v4 settle: a live subscription is a terminal fact - the old
+         * turn's generation channel is gone, release held sends. */
+        gate_clear("resubscribed");
+    }
+    return ok;
 }
 
 #if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
@@ -1139,6 +1156,34 @@ static size_t resample(resampler_t *r, const int16_t *in, size_t n, int16_t *out
 
 /* ---- Turn: dictation ---- */
 
+/* ---- v4.5 settle gate ----
+ * A turn that ends while the VM may still be generating its reply
+ * (cancelled mid-thought, cut off at the cap, connection lost) arms
+ * this gate: new sends stay held until the turn is seen to settle -
+ * its reply completes late (on_event notices the message_done) or
+ * the subscription stays quiet for SETTLE_GATE_QUIET_US. Sending
+ * into that window is what wedged the VM's upload path on
+ * 2026-10-17: the cancel looked idle locally, the next stream
+ * opened 0.2 s later, and the VM never consumed again. Interrupting
+ * a fully generated reply (all messages done, still playing out)
+ * does NOT arm the gate - that case is proven safe. */
+/* (the gate state and functions sit with turn_done below.) */
+
+/* True once every message of the current turn has completed: the
+ * VM is done generating (the reply may still be playing out). */
+static bool turn_generation_complete(void)
+{
+    if (!s_turn.nmsgs) {
+        return false;
+    }
+    for (int i = 0; i < s_turn.nmsgs; i++) {
+        if (!s_turn.msgs[i].done) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void turn_reset_streams(void)
 {
     send_reset(s_turn.dict_id);
@@ -1150,8 +1195,16 @@ static void turn_reset_streams(void)
     }
 }
 
+static bool s_suppress_gate_arm __attribute__((unused));   /* v4.3: set around turn_finish for an acked cancel */
+static void gate_arm(void);   /* defined with the settle gate at turn_done below */
+
 static void turn_finish(void)
 {
+    /* v4.5: arm the settle gate if this turn ends with the VM
+     * possibly still generating (see the gate block above). */
+    if (!s_suppress_gate_arm && s_turn.phase == P_WAIT_REPLY && !turn_generation_complete()) {
+        gate_arm();
+    }
     if (s_option_sending) {
         muse_options_result(s_option_send->generation, MUSE_OPTIONS_UNCERTAIN, false,
                             "Check the Muse app before answering again.");
@@ -1159,6 +1212,7 @@ static void turn_finish(void)
     }
     turn_reset_streams();
     s_turn.phase = P_IDLE;
+    s_turn.agent_busy = false;   /* v4.5.4: a finished turn's agent state ends with it */
     s_turn.dict_id = s_turn.chat_id = 0;
     s_turn.tts_msg = -1;
     s_turn.silent = false;
@@ -1187,12 +1241,64 @@ static void turn_fail(const char *why)
 /* Ends the turn once its reply is in; `complete` is false when it was cut off. */
 static void turn_done(bool complete)
 {
+    if (complete) {
+        s_settle_reason = "previous turn completed";
+    }
     if (s_turn.text) {
         muse_hatch_console("done", nullptr, "\"messages\":%d,\"complete\":%s", s_turn.nmsgs,
                            complete ? "true" : "false");
     }
     emit(MUSE_HATCH_EV_DONE, complete ? nullptr : "REPLY INCOMPLETE");
     turn_finish();
+}
+
+static bool s_gate_armed;
+static int64_t s_gate_since_us;
+static int64_t s_gate_last_event_us;
+static uint32_t s_settle_epoch;   /* v4: bumped on every gate clear; the
+                                   * voice layer watches it to release the
+                                   * held-note retry backoff on the event,
+                                   * not on the clock. */
+
+static __attribute__((unused)) void gate_arm(void)
+{
+    if (s_gate_armed) {
+        return;
+    }
+    s_gate_armed = true;
+    s_gate_since_us = s_gate_last_event_us = now_us();
+    ESP_LOGI(TAG, "send queue: previous turn ended unsettled, holding new sends until it settles");
+}
+
+static void gate_clear(const char *how)
+{
+    if (!s_gate_armed) {
+        return;
+    }
+    s_gate_armed = false;
+    s_settle_reason = how;
+    s_settle_epoch++;
+    ESP_LOGI(TAG, "send queue: previous turn settled (%s), sends released", how);
+
+}
+
+static bool gate_active(void)
+{
+    if (!s_gate_armed) {
+        return false;
+    }
+    /* v4.5.4: absolute cap - any-event refresh must not starve the
+     * quiet window forever. */
+    if (now_us() - s_gate_since_us >= SETTLE_GATE_CAP_US) {
+        gate_clear("settle cap reached");
+        return false;
+    }
+    int64_t last = s_gate_since_us > s_gate_last_event_us ? s_gate_since_us : s_gate_last_event_us;
+    if (now_us() - last >= SETTLE_GATE_QUIET_US) {
+        gate_clear("quiet 20 s after it ended");
+        return false;
+    }
+    return true;
 }
 
 /* Ends any turn in progress and starts a fresh one. False if Hatch can't be reached. */
@@ -2118,6 +2224,59 @@ static void on_event(cJSON *line)
         }
         last = v > last ? v : last;
     }
+    /* v4.5: while the settle gate is armed, the phase gate below
+     * drops the cancelled turn's late events; notice them here -
+     * any event proves the VM is still working on that turn, and
+     * its message_done proves the reply finished after all. */
+    if (s_gate_armed) {
+        const char *ev = cJSON_GetStringValue(cJSON_GetObjectItem(line, "event")) ?: "";
+        /* v4.5.4: only turn-generation events refresh the quiet
+         * window - unrelated subscription traffic must not keep the
+         * gate (and new sends) waiting past the turn's own life. */
+        if (!strncmp(ev, "delta.", 6) || !strncmp(ev, "message.", 8) ||
+            !strcmp(ev, "agent.status") || !strcmp(ev, "task.status")) {
+            s_gate_last_event_us = now_us();
+        }
+        if (!strcmp(ev, "delta.message_done") || !strcmp(ev, "message.assistant")) {
+            gate_clear("cancelled reply completed late");
+        } else if (!strcmp(ev, "agent.status") || !strcmp(ev, "task.status")) {
+            /* v4.1: a terminal status from the cancelled turn is
+             * terminal proof too - a cancelled generation never
+             * emits message_done, and v4 treated even its final
+             * status as "still working", so every interrupt cost
+             * the full 10 s quiet window. */
+            cJSON *pl = cJSON_GetObjectItem(line, "payload");
+            const char *st = cJSON_GetStringValue(cJSON_GetObjectItem(pl, "status"));
+            const char *ac = cJSON_GetStringValue(cJSON_GetObjectItem(pl, "activity_code"));
+            if ((st && (!strcmp(st, "completed") || !strcmp(st, "failed"))) ||
+                (ac && (!strcmp(ac, "idle") || !strcmp(ac, "online")))) {
+                gate_clear("terminal status");
+            }
+        }
+    }
+    {
+        const char *ev2 = cJSON_GetStringValue(cJSON_GetObjectItem(line, "event")) ?: "";
+        if (!strcmp(ev2, "agent.status") || !strcmp(ev2, "task.status")) {
+            cJSON *pl2 = cJSON_GetObjectItem(line, "payload");
+            const char *ac2 = cJSON_GetStringValue(cJSON_GetObjectItem(pl2, "activity_code"));
+            const char *st2 = cJSON_GetStringValue(cJSON_GetObjectItem(pl2, "status"));
+            /* v4.5.4 intent, narrowed for upstream (WK-315): out of phase
+             * this writer may only CLEAR a busy flag left set when its
+             * turn ended; setting it here (and refreshing the quiet clock
+             * on every status) rewrote upstream's detach/pending timing
+             * and failed the host session scenarios. */
+            bool busy = s_turn.agent_busy;
+            if (ac2) {
+                busy = ac2[0] && strcmp(ac2, "online") && strcmp(ac2, "idle");
+            } else if (st2) {
+                busy = st2[0] && strcmp(st2, "completed") && strcmp(st2, "failed");
+            }
+            if (!busy && s_turn.agent_busy) {
+                s_turn.agent_busy = false;
+                s_turn.last_event_us = now_us();
+            }
+        }
+    }
     cJSON *payload = cJSON_GetObjectItem(line, "payload");
     if (!strcmp(event, "widget.state_updated")) {
         muse_options_receive(payload);
@@ -2403,6 +2562,13 @@ static void decode(void)
 static void check_turn(void)
 {
     int64_t t = now_us();
+    gate_active();   /* v4.5: let a quiet-settled gate clear (and log) promptly */
+    /* v4.5.4: a busy flag latched past its turn must not hold sends
+     * forever - BUSY_HOLD of subscription quiet after it expires it. */
+    if (s_turn.phase == P_IDLE && s_turn.agent_busy && t - s_turn.last_event_us > BUSY_HOLD_US) {
+        s_turn.agent_busy = false;
+        ESP_LOGW(TAG, "agent busy latch expired");
+    }
     if (s_turn.phase == P_WAIT_FINAL && t - s_turn.end_sent_us > FINAL_TIMEOUT_US) {
         on_dictation_end(true);
         return;
@@ -2697,6 +2863,9 @@ static void drop_connection(const char *why)
 {
     bool in_turn = s_turn.phase != P_IDLE;
     disconnect(why);
+    /* v4 settle: a lost connection is a terminal fact for the old
+     * turn - its generation channel died with the socket. */
+    gate_clear(why && strstr(why, "send failed") ? "send failed" : "connection lost");
     s_auto_next_us = now_us() + s_auto_backoff_us;
     if (in_turn) {
         turn_fail("LOST CONNECTION TO MUSE");
@@ -2747,7 +2916,18 @@ static void handle(const cmd_t &cmd)
     case CMD_CANCEL:
         if (cmd.gen == s_turn.gen && !s_turn.text && s_turn.phase != P_IDLE) {
             ESP_LOGI(TAG, "turn cancelled");
+            if (s_turn.acked) {
+                /* v4.3: the note was acked by the VM, so this turn
+                 * is delivered and known - cancelling it is a
+                 * settled end, not an unsettled one. Latching the
+                 * gate here (capture 2026-10-19: ack at 902352,
+                 * cancel 32 ms later) wedged the next note behind
+                 * a terminal event that would never come. */
+                s_suppress_gate_arm = true;
+                s_settle_reason = "acked turn cancelled";
+            }
             turn_finish();
+            s_suppress_gate_arm = false;
         }
         break;
     case CMD_TEXT:
@@ -3048,6 +3228,30 @@ extern "C" void muse_hatch_turn_begin(void)
     xStreamBufferReset(s_in);
     drain_out();
     post(CMD_BEGIN, gen);
+}
+
+/* v4.4: the voice layer queues new notes while this is true instead of
+ * opening another stream behind work the agent hasn't finished. */
+extern "C" bool muse_hatch_busy(void)
+{
+    /* v4.5: an unsettled previous turn holds new sends, connected
+     * or not. (The local tree's rebuild-reset dwell has no counterpart
+     * upstream; its hold clause is dropped with this port.) */
+    if (gate_active()) {
+        return true;
+    }
+    return s_connected && (s_turn.phase != P_IDLE || s_turn.agent_busy);
+}
+
+/* v4.5: why the send gate last cleared, for the release log line. */
+extern "C" const char *muse_hatch_settle_reason(void)
+{
+    return s_settle_reason;
+}
+
+extern "C" uint32_t muse_hatch_settle_epoch(void)
+{
+    return s_settle_epoch;
 }
 
 extern "C" void muse_hatch_turn_audio(const int16_t *pcm, size_t frames)
