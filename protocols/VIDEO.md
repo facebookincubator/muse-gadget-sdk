@@ -21,7 +21,7 @@ gadget decodes it and draws it. This is the design note for anyone changing that
 side (Muse Gadgets Test, for Android in `../android/musegadgetstest` and for iPhone in
 `../ios/musegadgetstest`: the same app, class for class), the wire (the frame format and,
 for Wi-Fi, the messages below) and the ESP32 side
-(`../esp32/components/tinyh264`, `components/muse/muse_video.c` and its
+(`../xplat/tinyh264`, `components/muse/muse_video.c` and its
 transports). It says what each choice buys, how it was measured, and how to
 check a change.
 
@@ -30,8 +30,8 @@ check a change.
 | this file, Wi-Fi | the Wi-Fi protocol: discovery, messages, credits |
 | `../android/musegadgetstest/README.md` | the Android app (Android Studio or Gradle), its extras and flow control |
 | `../ios/musegadgetstest/README.md` | the iPhone app (Xcode), its launch arguments |
-| `../esp32/components/tinyh264/README.md` | the decoder and its bit-exact optimizations |
-| `../esp32/components/libvpx_vp8/README.md` | the VP8 decoder, the same |
+| `../xplat/tinyh264/README.md` | the decoder and its bit-exact optimizations |
+| `../xplat/libvpx_vp8/README.md` | the VP8 decoder, the same |
 | `../esp32/components/muse_vstream` | the receive ring and frame format every transport shares |
 | `../esp32/components/muse/muse_video.c` | decode, pacing and drawing on the ESP32 |
 | `../esp32/components/muse/muse_video_wifi.c` | the Wi-Fi transport (TCP and mDNS) |
@@ -450,7 +450,7 @@ grant. A gadget built with `CONFIG_MUSE_VIDEO_VP8` (on with
 (Muse Gadgets Test: the Codec row, `--es codec vp8` on Android, `-codec vp8` on iPhone). Frames, bands, credits
 and keyframe requests work as with H.264; two bands are two VP8 streams.
 
-- **Decoder:** libvpx v1.16.0's (`../esp32/components/libvpx_vp8`), C only
+- **Decoder:** libvpx v1.16.0's (`../xplat/libvpx_vp8`), C only
   and trimmed, with bit-exact speed-ups (one-pass sub-pixel prediction,
   early-out loop filters, skipped zero DC blocks, an inlined bool decoder,
   and on the S3 bilinear prediction on its SIMD) and the same row progress

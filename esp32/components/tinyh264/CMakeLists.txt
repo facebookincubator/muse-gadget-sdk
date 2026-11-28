@@ -13,16 +13,18 @@
 # limitations under the License.
 
 # H.264 constrained baseline decoder for video streaming
-# (CONFIG_MUSE_VIDEO). See README.md.
+# (CONFIG_MUSE_VIDEO). The sources are the one copy in xplat/tinyh264 (see its
+# README.md); this component only builds them for ESP-IDF.
+set(src_dir "${CMAKE_CURRENT_LIST_DIR}/../../../xplat/tinyh264/src")
 if(CONFIG_MUSE_VIDEO OR CONFIG_MUSE_AVATAR_ANIMATIONS)
-    file(GLOB srcs "${CMAKE_CURRENT_LIST_DIR}/src/*.c")
+    file(GLOB srcs "${src_dir}/*.c")
     if(CONFIG_MUSE_VIDEO_SIMD_MC)
         # The luma 6-tap filters on the S31's SIMD (h264bsd_reconstruct.c checks them).
-        list(APPEND srcs "${CMAKE_CURRENT_LIST_DIR}/src/h264bsd_interp_pie_s31.S")
+        list(APPEND srcs "${src_dir}/h264bsd_interp_pie_s31.S")
     endif()
     idf_component_register(
         SRCS ${srcs}
-        INCLUDE_DIRS "src"
+        INCLUDE_DIRS "${src_dir}"
         LDFRAGMENTS "linker.lf")
     # P4 BSPs also pull in esp_h264's prebuilt libtinyh264.a. Keep this
     # source-built decoder's archive and linker mapping in a Muse namespace.

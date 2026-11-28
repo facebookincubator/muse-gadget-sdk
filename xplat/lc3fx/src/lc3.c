@@ -482,7 +482,11 @@ LC3_EXPORT int lc3_encode(struct lc3_encoder *encoder,
 
     struct side_data side;
     int32_t xf[LC3_MAX_NS];
-    alignas(8) int32_t buf[LC3_MAX(LC3_MAX_NS, 144)];
+    /* 8-byte aligned by hand, with a word of slack: compilers that realign
+     * over-aligned stack arrays without slack on a 4-byte-aligned stack
+     * overflowed an alignas(8) array here */
+    int32_t buf_raw[LC3_MAX(LC3_MAX_NS, 144) + 1];
+    int32_t *buf = (int32_t *)(((uintptr_t)buf_raw + 7) & ~(uintptr_t)7);
 
     LC3FX_MARK0();
     load[fmt](encoder, pcm, stride);

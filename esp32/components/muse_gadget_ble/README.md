@@ -1093,7 +1093,7 @@ the frame format, decoding and drawing are the Wi-Fi path's;
   25 fps at 300 kb/s for 60 s, keeps the rate with no stall over 40 ms (the
   old eighth-of-the-ring / 100 ms rule fell 9.8 s behind).
 - **Decode and show** (`components/muse/muse_video.c`): the optimized
-  tinyH264 (`components/tinyh264`, hot code in IRAM with
+  tinyH264 (`../xplat/tinyh264`, hot code in IRAM with
   `CONFIG_MUSE_VIDEO_DECODER_IRAM`, which the overlay turns on) on core 0 reports rows
   as they become final, and the UI core draws them as they come: converted
   with the S3's SIMD (`muse_yuv_pie.S`), two times upscaled, straight into

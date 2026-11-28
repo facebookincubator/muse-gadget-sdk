@@ -723,14 +723,16 @@ their upstream licenses:
 - [`components/muse/eink/fonts/`](components/muse/eink/fonts/), the e-ink UI's
   fonts, are subsets of Montserrat (SIL OFL 1.1), unscii (public domain) and
   Font Awesome 5 Free (SIL OFL 1.1); see its README.
-- [`components/tinyh264/src`](components/tinyh264), the H.264 decoder, is the
+- [`../xplat/tinyh264/src`](../xplat/tinyh264), the H.264 decoder built by
+  [`components/tinyh264`](components/tinyh264), is the
   Android Open Source Project's (via udevbe/tinyh264), Apache-2.0 under its
-  copyright. See [`components/tinyh264/LICENSE`](components/tinyh264/LICENSE).
-- [`components/libvpx_vp8/src`](components/libvpx_vp8), the VP8 decoder, is
+  copyright. See [`LICENSE`](../xplat/tinyh264/LICENSE).
+- [`../xplat/libvpx_vp8/src`](../xplat/libvpx_vp8), the VP8 decoder built by
+  [`components/libvpx_vp8`](components/libvpx_vp8), is
   libvpx v1.16.0's, trimmed: BSD-3-Clause under the WebM Project authors'
   copyright, with Google's patent grant. See
-  [`components/libvpx_vp8/LICENSE`](components/libvpx_vp8/LICENSE) and
-  [`PATENTS`](components/libvpx_vp8/PATENTS).
+  [`LICENSE`](../xplat/libvpx_vp8/LICENSE) and
+  [`PATENTS`](../xplat/libvpx_vp8/PATENTS).
 - libwebp v1.6.0's WebP decoder, built in with the opt-in avatar sync
   (`CONFIG_MUSE_AVATAR_SYNC`) from a pinned archive fetched at build time
   ([`cmake/avatar_webp.cmake`](cmake/avatar_webp.cmake)), is BSD-3-Clause

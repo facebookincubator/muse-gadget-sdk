@@ -18,7 +18,24 @@ limitations under the License.
 
 **The Muse Gadgets fixed-point LC3 codec**, the integer-only LC3 that every
 Muse Gadget can run: SBC and LC3 on every gadget, and lc3fx on chips without a
-fast FPU. `src/fxmath.h` has portable C only (`lc3fx_clz()`, `LC3FX_SAT16`).
+fast FPU. `src/fxmath.h` has portable C (`lc3fx_clz()`, `LC3FX_SAT16`), and
+with `LC3FX_XPULP=1` takes both from `xplat/include/rv_xpulp.h` (Xpulp fl1
+and clip on RISC-V cores built with `RV_XPULP=1`, that header's plain-C twins
+elsewhere; the same output; experimental with `RV_XPULP=1`: the instructions
+have run on QEMU, not on hardware). With `LC3FX_MERGE_TABLES=1` (GCC, ELF targets)
+the static tables of `lc3fx_log2_q16_u32()` and `lc3fx_pow2_q27()`, which
+every unit inlining them keeps a copy of, go in mergeable sections and the
+linker keeps one copy (196 bytes less on RISC-V with the ESP32 SDK's rates).
+
+Placement hooks for ports whose code runs from XIP flash: a port that
+defines `LC3_HOT_SECTION` (a section name, `src/common.h`) gets the `LC3_HOT`
+functions in that section, and one that defines `LC3_TABLES_IN_RAM` gets
+`src/tables.c`'s data tables in that one (each carries `LC3_TABLE`; about
+44 KB, as the tables carry every rate; the descriptors and pointer tables that
+index them, under 1 KB, stay in `.rodata`); its linker script puts them in
+RAM. Undefined, nothing changes.
+`xplat/tools/hot_place.py` does the same per function or table after the
+compile, from a list (`xplat/PORTING-PERF.md`).
 
 Integer overflow hardening in `src/lc3.c`, `src/fxmath.h`, `src/bits.c`,
 `src/tns.c` and `src/common.h`: the global gain's Q27 log2 stays in 64 bits
@@ -42,6 +59,11 @@ band of zeros has that much headroom). The output is bit-exact with the
 code before the change. The postfilter (`LC3_DEC_LTPF=1`, `src/ltpf.c`)
 does the same; `run_tests.py` builds and fuzzes it too.
 
+The encoder's stack scratch buffer in `src/lc3.c` is 8-byte aligned by
+hand, with a word of slack, instead of `alignas(8)`: compilers that realign
+over-aligned stack arrays without slack on a 4-byte-aligned stack wrote past
+it. The output is unchanged elsewhere.
+
 `LC3_ENC_LTPF` and `LC3_DEC_LTPF` are layout definitions
 (`include/lc3_private.h`): the library and every file that includes
 `lc3.h` must be built with the same values.
@@ -64,11 +86,11 @@ e6cba23dea78d694405a26448ef1dfba48e433db6ea631ecf344f10c42aeb2d3  src/attdet.h
 ce1529a758cbde44cc5a8b8c8f5676b3e6f92e59161c7c6f9867224e4b8eb98a  src/bits.h
 b4e732b32e45b39c505238acd986303e63791587afb9567ae81f47a8eb3ca7bf  src/bwdet.c
 7eac3dd6476b78f8bd8f1e2f275ee0f86d4099ce6077ca3fc01e992935a76db2  src/bwdet.h
-14e32176de8045a2dfa65f1e54dbecd4a3ae22cc74ce2426275e18a541cb9f01  src/common.h
+7024f44c00900ed63429ddaa565d9deeba05a50ca9873547d38d1c6217e961cb  src/common.h
 a0425e18de54fc3ecc7eec899b0ff80ef6b076929545e61357c24e8416b34299  src/energy.c
 4be279f7455a5194542000a66b1c1987c9ee306f7fe4528363abe64ca5f1e076  src/energy.h
-fde134dd8e855eabcbf30d81ddedfc3b6f52d2df8db663069bdac8d5ef0648b3  src/fxmath.h
-b0bcfb0cc62d7cad0bf8b27cd1ef5024fbedc0d671b91778450e1e55df229f35  src/lc3.c
+77b58fc03011135af65170145803f2f80dac1c45d5a9b02454001706a79c907d  src/fxmath.h
+ae3e38d4b50190ca05e136d024538e38ad9697c23569f7797cf6af405746c110  src/lc3.c
 355d5e40dd40f123b904f90182124d8bdaf87f0a1743ba1074277f290c121c38  src/ltpf.c
 5bb2f262b280eb6a26168466308a000c37d99b0f5642f67fec10180168e06f39  src/ltpf.h
 cce018f41fa447d10427691c75ee75331f019e3cc8efb3d2b59af3b040193209  src/mdct.c
@@ -79,7 +101,7 @@ eb2a0a494faeadf94b828ffc0a1c7a2e428218bf5fe467b0d893d209102a3ef5  src/plc.h
 d8a10163d4652c357d8e5202dfce5bb68b935fabcfc5f66450b4484da36f7826  src/sns.h
 04bac9c240c6d3c233d8a1ba93f4e018b300f1d6ff35e4090162b20017cc2ccd  src/spec.c
 ba8018b6b9289f2df62df515070df817a7adfa528cc5c0ce4266dde394d63bb7  src/spec.h
-4400d445ba7fb63fdd91813e88489831bbccb3b3bc0613a043f45a2aea61d3e7  src/tables.c
+3d62803218e99695fc42b0529e7d8ed7296a48e6d1e7e65bd6f3e7e4ed10f333  src/tables.c
 3187d445c6f539b1377d54c4835fbc39d8842bef6e3e13b2bc2e65436458ba49  src/tables.h
 b4b8c75dc959177effe95c0889c7835ecfcd664f09d33843f623dea111bc0f67  src/tns.c
 200371db6060b564b038448772911975195c66baa6e0a37c4bf5094238eab234  src/tns.h

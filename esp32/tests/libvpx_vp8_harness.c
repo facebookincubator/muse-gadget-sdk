@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* libvpx_vp8_harness IN.ivf OUT.yuv: decodes with components/libvpx_vp8,
+/* libvpx_vp8_harness IN.ivf OUT.yuv: decodes with xplat/libvpx_vp8,
  * writes the shown pictures (visible size, I420), and checks the progress
  * hook: rows never go back, and the last report of each shown picture is its
  * full height. Prints "pics N progress ok" or the failure. */

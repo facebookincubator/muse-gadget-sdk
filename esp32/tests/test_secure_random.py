@@ -80,8 +80,7 @@ SECURITY_FILES = [
 ]
 
 # Third-party code the scan skips (none of it calls the ESP-IDF RNG).
-THIRD_PARTY = ("components/libvpx_vp8/src/", "components/tinyh264/src/", "components/minimp3/",
-               "components/liblc3/", "components/libsbc/")
+THIRD_PARTY = ("components/minimp3/", "components/liblc3/", "components/libsbc/")
 
 RNG_CALL = re.compile(r"\besp_(?:fill_random|random)\s*\(")
 

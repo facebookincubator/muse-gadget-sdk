@@ -22,7 +22,7 @@ wrong probabilities (garbage until the next keyframe, on any decoder).
 Encodes with the apps' encoder glue (ios/musegadgetstest/native/mgvpx.c, the same
 as android/musegadgetstest/jni/mgvpx.c) and the host's libvpx
 (tests/musegadgetstest_vp8_loop_harness.c; skipped without libvpx's encoder), and
-decodes with components/libvpx_vp8 (tests/libvpx_vp8_harness.c)."""
+decodes with xplat/libvpx_vp8 (tests/libvpx_vp8_harness.c)."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
-SRC = ROOT / "components/libvpx_vp8/src"
+SRC = ROOT.parent / "xplat/libvpx_vp8/src"
 APPS = {
     "android": REPO / "android/musegadgetstest/src/com/musegadgets/test/ClipStreamer.java",
     "ios": REPO / "ios/musegadgetstest/Sources/ClipStreamer.swift",

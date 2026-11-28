@@ -41,7 +41,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TINY = ROOT / "components/tinyh264/src"
+TINY = ROOT.parent / "xplat/tinyh264/src"
 MUSE = ROOT / "components/muse"
 VSTREAM = ROOT / "components/muse_vstream"
 VEC = ROOT / "tests/vectors/h264"
