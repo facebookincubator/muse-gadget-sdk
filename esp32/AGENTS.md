@@ -94,6 +94,7 @@ before adding a feature to one.
 | Seeed XIAO ESP32-S3 1.47 Touch Display | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-seeed-xiao-s3-147` | `tools/muse/board.sh build xiao147` |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
 | M5Stack CoreS3 Lite | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3lite` | `tools/muse/board.sh build cores3lite` |
+| M5Stack Stack-Chan | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stackchan` | `tools/muse/board.sh build stackchan` |
 | Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
 | VN ESP32-S3 1.83-inch NV3023 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-vn-s3-183` | `tools/muse/board.sh build vn183` |
 | Guition JC3248W535 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-guition-jc3248w535` | `tools/muse/board.sh build jc3248w535` |

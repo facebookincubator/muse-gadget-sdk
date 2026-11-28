@@ -100,7 +100,7 @@ class PowerKeyTalkBoardsInit(unittest.TestCase):
         return source[start:end]
 
     def test_pwr_talk_boards_turn_key_shutdown_on(self):
-        for name in ("board_m5stack_cores3.c", "board_waveshare_s3_216.c"):
+        for name in ("board_m5stack_cores3.c", "board_m5stack_stackchan.c", "board_waveshare_s3_216.c"):
             init = self.init_of(name)
             self.assertIn("muse_pmu_set_key_shutdown(true)", init, name)
             self.assertLess(init.index("muse_pmu_init("), init.index("muse_pmu_set_key_shutdown(true)"), name)
@@ -111,7 +111,8 @@ class PowerKeyTalkBoardsInit(unittest.TestCase):
         self.assertNotIn("#endif", init[init.rindex("#if !CONFIG_MUSE_BOARD_WAVESHARE_S3_175", 0, call):call])
 
     def test_other_axp2101_boards_leave_it(self):
-        pwr_talk = {"board_m5stack_cores3.c", "board_waveshare_s3_175c.c", "board_waveshare_s3_216.c"}
+        pwr_talk = {"board_m5stack_cores3.c", "board_m5stack_stackchan.c", "board_waveshare_s3_175c.c",
+                    "board_waveshare_s3_216.c"}
         others = [path.name for path in sorted((MUSE / "boards").glob("board_*.c"))
                   if "muse_pmu_init(" in path.read_text() and path.name not in pwr_talk]
         self.assertIn("board_waveshare_c6_18.c", others)   # the glob found the AXP2101 boards
