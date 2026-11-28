@@ -22,7 +22,20 @@ static uint16_t average(uint16_t a,uint16_t b) {
     return (uint16_t)((a&b)+(((a^b)&0xf7deu)>>1));
 }
 
-bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image,int canvas_px,
+static uint16_t sample(const uint16_t *row,int x,const uint16_t *base,const uint8_t *alpha,uint16_t bg) {
+    uint16_t p=row[x];
+    if(!alpha)return p;
+    unsigned a=alpha[(size_t)(row-base)+(size_t)x];
+    if(!a)return bg;
+    if(a==255)return p;
+    unsigned inverse=255-a;
+    unsigned r=((p>>11)*a+(bg>>11)*inverse+127)/255;
+    unsigned g=(((p>>5)&63u)*a+((bg>>5)&63u)*inverse+127)/255;
+    unsigned b=((p&31u)*a+(bg&31u)*inverse+127)/255;
+    return (uint16_t)((r<<11)|(g<<5)|b);
+}
+
+bool muse_avatar_blit_alpha_transform(const muse_avatar_pixels_t *image,const uint8_t *alpha,int canvas_px,
                                const muse_avatar_transform_t *t,uint16_t background,
                                uint16_t *dst,int stride_px,int x0,int x1,int y0,int y1) {
     if(!image || !image->pixels || !t || !dst || image->width<1 || image->height<1 ||
@@ -56,7 +69,7 @@ bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image,int canvas_px,
         if(t->filter==MUSE_AVATAR_NEAREST) {
             int sy=(y-top)*source_h/h;
             const uint16_t *source=pixels+(size_t)sy*source_w;
-            for(int x=start;x<=stop;x++)row[x-x0]=source[(x-left)*source_w/w];
+            for(int x=start;x<=stop;x++)row[x-x0]=sample(source,(x-left)*source_w/w,pixels,alpha,background);
             continue;
         }
         int fy=(y-top)*step_y+step_y/2-32768;
@@ -77,9 +90,11 @@ bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image,int canvas_px,
                 unsigned wx=((unsigned)sx_fp>>11)&31u;
                 bool mix_x=wx>=8 && wx<24;
                 if(wx>=24)sx=sx1;
-                uint16_t a=mix_x?average(upper[sx],upper[sx1]):upper[sx];
+                uint16_t a=mix_x?average(sample(upper,sx,pixels,alpha,background),sample(upper,sx1,pixels,alpha,background)):
+                    sample(upper,sx,pixels,alpha,background);
                 if(mix_y) {
-                    uint16_t b=mix_x?average(lower[sx],lower[sx1]):lower[sx];
+                    uint16_t b=mix_x?average(sample(lower,sx,pixels,alpha,background),sample(lower,sx1,pixels,alpha,background)):
+                        sample(lower,sx,pixels,alpha,background);
                     a=average(a,b);
                 }
                 row[x-x0]=a;
@@ -90,12 +105,18 @@ bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image,int canvas_px,
             int sx_fp=fx<0?0:fx>max_x?max_x:fx;
             int sx=sx_fp>>16,sx1=sx+1<source_w?sx+1:sx;
             unsigned wx=((unsigned)sx_fp>>11)&31u;
-            uint16_t a=blend(upper[sx],upper[sx1],wx);
-            uint16_t b=blend(lower[sx],lower[sx1],wx);
+            uint16_t a=blend(sample(upper,sx,pixels,alpha,background),sample(upper,sx1,pixels,alpha,background),wx);
+            uint16_t b=blend(sample(lower,sx,pixels,alpha,background),sample(lower,sx1,pixels,alpha,background),wx);
             row[x-x0]=blend(a,b,wy);
         }
     }
     return true;
+}
+
+bool muse_avatar_blit_transform(const muse_avatar_pixels_t *image,int canvas_px,
+                               const muse_avatar_transform_t *t,uint16_t background,
+                               uint16_t *dst,int stride_px,int x0,int x1,int y0,int y1) {
+    return muse_avatar_blit_alpha_transform(image,NULL,canvas_px,t,background,dst,stride_px,x0,x1,y0,y1);
 }
 
 bool muse_avatar_blit_background(const muse_avatar_pixels_t *image, int canvas_px, int zoom,

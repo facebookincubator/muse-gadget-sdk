@@ -20,6 +20,10 @@ typedef struct {
     const char *error;
 } avatar_webp_result_t;
 
+/* Internal avatar allocation reserve, shared by admission and the ESP-IDF
+ * allocator's checks. Not a new setting or an increase to the peak cap. */
+#define AVATAR_WEBP_RESERVE_BYTES (1024u * 1024u)
+
 /* One decoder at a time. Live outputs continue to count against the budget.
  * Large allocations use PSRAM exclusively on ESP-IDF. */
 bool avatar_webp_decode(const uint8_t *bytes, size_t len, int max_edge,

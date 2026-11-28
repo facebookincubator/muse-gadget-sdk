@@ -23,6 +23,11 @@ the devices you already own and anything you build with a local HTTP API.
 Then hack on it: add a display, a button, or support for a board we haven't
 tried yet, and build your own Muse gadget.
 
+For optional software H.264 home-avatar playback on S3/P4, reusable pixel packs
+and white-background removal, see the [avatar rendering overview](docs/avatar-rendering.md).
+The [S3 2.06 fixes and validation](docs/avatar-validation-s3-206.md) explain the
+memory profile required on that board.
+
 > **Note:** Built by hackers, for hackers, just for fun. Flashing custom
 > firmware can brick boards and void warranties. Proceed at your own risk!
 
@@ -382,6 +387,14 @@ on top of `sdkconfig.defaults`. To add a board, copy the closest one and change
 the chip, button pin, status light, and flash size.
 [`devices/README.md`](devices/README.md#add-a-board) covers the details, or ask
 Muse Code to do it for you.
+
+To apply a reusable pixel-art appearance without writing a renderer for each
+avatar, enable the experimental [data-only pixel-avatar path](docs/pixel-avatars.md).
+The [shared converter/API](../avatar_pixel/README.md) compiles images into bounded
+sprite packs; one local renderer supplies generic reactions. New packs do not
+require a firmware rebuild. Inputs and generated personal assets stay private.
+For a flat white source backdrop, optional [local background matting](docs/avatar-background.md)
+keeps normal rendering and the original cache intact while compositing a foreground mask.
 
 To put your own avatar on a board's screen, plug in the board and run
 `python3 tools/muse/avatar.py`. It asks your Muse to redraw its avatar as the

@@ -33,6 +33,9 @@ bool muse_avatar_pack_parse(const uint8_t *data, size_t size, const uint8_t sour
         off+=16;
         if (kind>=MUSE_AVATAR_CLIPS || flags>1 || !frames || frames>240 || bytes>size-off ||
             (p.coverage&(1u<<kind)) || crc!=muse_avatar_pack_crc(data+off,bytes)) return false;
+        /* Idle is the worker's EOF fallback. A one-shot idle would repeatedly
+         * select itself at EOF without yielding, starving the idle task. */
+        if (kind==MUSE_CLIP_IDLE && flags!=1) return false;
         p.clip[kind]=(muse_avatar_clip_t){(uint32_t)off,bytes,frames,flags==1};
         p.coverage|=1u<<kind;
         size_t end=off+bytes;

@@ -239,10 +239,13 @@ standard CTest run includes the avatar UI and settings tests. Follow
 ## Phone animation development preview
 
 `CONFIG_MUSE_AVATAR_ANIMATIONS` is a separate, default-off build option. It
-requires avatar sync and the ESP32-S3. It reuses the bounded H.264 decoder,
-without enabling Phone camera, its full-screen view, a TCP listener, mDNS, or
-VP8. The preview renders decoded RGB565 frames through the existing home
-canvas and strip ownership protocol.
+requires avatar sync and the ESP32-S3 or ESP32-P4. Both targets reuse the
+bounded TinyH264 software decoder and scalar YUV-to-RGB565 conversion;
+the P4's hardware H.264 encoder is not involved. The preview does not enable
+Phone camera, its full-screen view, a TCP listener, mDNS, or VP8. It renders
+decoded RGB565 frames through the existing home canvas and strip ownership
+protocol. The S3 clip player, format bounds, state selection, and resource
+ownership are shared rather than duplicated for P4.
 
 **This is not full My Muse interaction parity.** The observed identity API
 supplies idle and work-family MP4s. The phone's internal manifest names more
@@ -273,6 +276,24 @@ Enable both options in a local build fragment:
 CONFIG_MUSE_AVATAR_SYNC=y
 CONFIG_MUSE_AVATAR_ANIMATIONS=y
 ```
+
+For the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.5, save those lines in a
+local `sdkconfig.avatar-motion` fragment and build from `esp32/`:
+
+```sh
+idf.py -B build-muse-waveshare-p4-lcd35-avatar-motion -DIDF_TARGET=esp32p4 \
+  -DSDKCONFIG=build-muse-waveshare-p4-lcd35-avatar-motion/sdkconfig \
+  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35;sdkconfig.avatar-motion" build
+```
+
+Keep the normal SDK-token configuration. Check the P4 silicon revision first
+as described in [the P4 setup guide](../devices/waveshare-p4-lcd35.md); its
+standard overlay is for v3.x. This feature does not change partition offsets,
+format an existing filesystem, or need a C6 radio reflash. Reflashing without
+erasing NVS preserves pairing and Wi-Fi. The pack installer needs a writable
+`files` LittleFS volume: a mount failure on nonblank data is not permission to
+format it. Back up that data and obtain the owner's approval before repairing
+storage; the personal still remains the fallback in the meantime.
 
 With that development firmware on a paired board and My Muse selected, use
 Python with pyserial and a local ffmpeg build that includes libx264:
@@ -369,6 +390,11 @@ avatar directory. The prior still-cache layout remains unchanged. Clear saved
 avatar also removes the animation pack. No partition changes are required.
 
 ### Validation and remaining release gates
+
+The [S3 2.06 fixes and hardware validation](avatar-validation-s3-206.md) cover
+bounded image admission, PSRAM placement and software H.264 playback through the
+real home UI. That playback check uses a synthetic constrained-baseline clip;
+it is not evidence of phone-animation parity or per-frame transparency.
 
 On the Waveshare 1.75C, the current two-clip 192-pixel CRF 20 pack is 401,067
 bytes. Two 10-second samples produced 19.97–20.04 decoded pictures/s at the

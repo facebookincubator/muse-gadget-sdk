@@ -54,6 +54,9 @@
 #endif
 #include "token_fp.h"
 #include "config_store.h"
+#if CONFIG_MUSE_PIXEL_AVATAR
+#include "muse_pixel_avatar.h"
+#endif
 #include "wifi_mgr.h"
 #include "wifi_known.h"
 #include "network_proxy_tls.h"
@@ -3657,7 +3660,17 @@ static void muse_keep_vm_session(void) {
 // starts at once. Napping off Wi-Fi, there's nothing for the heartbeat to do,
 // and each tick wakes the CPU.
 static void muse_heartbeat_pause(void) {
+#if CONFIG_MUSE_PIXEL_AVATAR
+    int remaining=s_muse_napping?60000:5000;
+    while(remaining>0) {
+        muse_pixel_avatar_poll();
+        int slice=remaining>1000?1000:remaining;
+        if(xSemaphoreTake(s_muse_joined,pdMS_TO_TICKS(slice))==pdTRUE)break;
+        remaining-=slice;
+    }
+#else
     xSemaphoreTake(s_muse_joined, pdMS_TO_TICKS(s_muse_napping ? 60000 : 5000));
+#endif
 }
 
 app_wifi_join_t app_wifi_join_saved(int timeout_ms, bool first_only) {
@@ -4442,7 +4455,16 @@ void app_run(void) {
     }
 
     bool skip_boot_scan = false;
-    if (setup_complete && !CONFIG_HOMEHUB_WIFI_SSID[0]) {
+#if CONFIG_MUSE_PIXEL_AVATAR && CONFIG_LV_USE_SNAPSHOT
+    const bool pixel_boot_offline = muse_pixel_avatar_test_boot_offline();
+    if (pixel_boot_offline) {
+        skip_boot_scan = true;
+        ESP_LOGI(TAG, "pixel bench: isolated boot; no Wi-Fi join or VM request");
+    }
+#else
+    const bool pixel_boot_offline = false;
+#endif
+    if (setup_complete && !CONFIG_HOMEHUB_WIFI_SSID[0] && !pixel_boot_offline) {
         char hint_ssid[33] = {0};
         if (config_get_str("ssid", hint_ssid, sizeof(hint_ssid))
             && config_key_lookup("password") == CONFIG_KEY_FOUND
@@ -4590,7 +4612,7 @@ void app_run(void) {
         ESP_LOGI(TAG, "found provisioned creds in NVS, reconnecting (first: %s)", wifi_ssid);
     }
 
-    if (wifi_ssid) {
+    if (wifi_ssid && !pixel_boot_offline) {
         ui_set_status("wifi_connecting");
         led_status_set_state(LED_STATE_WIFI_CONNECTING);
         char joined[WIFI_KNOWN_SSID_MAX + 1] = {0};

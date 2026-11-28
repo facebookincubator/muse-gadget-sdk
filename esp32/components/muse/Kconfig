@@ -33,15 +33,40 @@ menu "Muse"
             default and can be selected without restarting. Requires PSRAM
             for bounded image decoding. Initially validated on the 1.75C.
 
+    config MUSE_AVATAR_WHITE_MATTE
+        bool "Remove uniform white personal-avatar backgrounds (experimental)"
+        depends on MUSE_AVATAR_SYNC
+        default n
+        help
+            Derives a conservative border-connected A8 foreground mask once
+            per still image. Original avatar/cache pixels are preserved.
+            This is not general segmentation; outlined/enclosed white details
+            are retained. Allocation failure keeps the original image and retries.
+            No phone UI, avatar generation, or pixel-style selection is changed.
+
+    config MUSE_PIXEL_AVATAR
+        bool "Data-only pixel-art personal avatars (experimental)"
+        depends on MUSE_AVATAR_SYNC
+        default n
+        help
+            Adds a reusable local indexed-sprite renderer and USB asset-pack
+            installer. New avatars are data rather than custom firmware code.
+            Generic breathing, bob, tap and state feedback make no anatomical
+            assumptions. No camera, live voice or public listener is enabled.
+            A matching saved pixel pack restores offline independently of the
+            cloud session. Requires a writable files volume for installation.
+
     config MUSE_AVATAR_ANIMATIONS
         bool "Experimental phone-avatar clip playback"
-        depends on MUSE_AVATAR_SYNC && IDF_TARGET_ESP32S3
+        depends on MUSE_AVATAR_SYNC && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4)
         default n
         help
             Adds bounded local H.264 clip packs to My Muse, rendered in the
-            existing home canvas. Requires conversion of phone MP4 assets.
-            Missing interactive clips keep the personal image with local
-            feedback. This does not provide a personal face or mouth rig.
+            existing home canvas. Uses the same TinyH264 software decoder and
+            scalar RGB565 conversion on the ESP32-S3 and ESP32-P4; the P4's
+            hardware H.264 encoder is not used. Requires conversion of phone
+            MP4 assets. Missing interactive clips keep the personal image with
+            local feedback. This does not provide a personal face or mouth rig.
             No camera view, Wi-Fi listener, or video transport is enabled.
 
     # Always present in sdkconfig.json, including when the bool is disabled.

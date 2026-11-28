@@ -1,0 +1,54 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# SPDX-License-Identifier: Apache-2.0
+name: Pixel-avatar compiler
+
+on:
+  pull_request:
+    paths:
+      - "avatar_pixel/**"
+      - "protocols/PIXEL_AVATAR.md"
+      - ".github/workflows/avatar-pixel.yml"
+  push:
+    branches: [main]
+    paths:
+      - "avatar_pixel/**"
+      - "protocols/PIXEL_AVATAR.md"
+      - ".github/workflows/avatar-pixel.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avatar-pixel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Compiler/API (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install compiler and lint dependencies
+        run: python -m pip install -r avatar_pixel/requirements.txt black==25.1.0 flake8==7.3.0
+      - name: Lint
+        run: |
+          python -m black --check avatar_pixel
+          python -m flake8 --config=avatar_pixel/.flake8 avatar_pixel
+      - name: Test private compile workers and real loopback HTTP
+        run: python -W error -m unittest discover -s avatar_pixel/tests -v

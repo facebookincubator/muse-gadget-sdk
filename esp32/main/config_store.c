@@ -25,6 +25,27 @@
 #include "esp_log.h"
 #include "esp_efuse.h"
 #include "esp_efuse_table.h"
+#if CONFIG_MUSE_PIXEL_AVATAR
+#include "muse_pixel_avatar.h"
+static void pixel_owner_changed(const char *key) {
+    if(!strcmp(key,"rp_open") || !strcmp(key,"tok_update")) {
+        muse_pixel_avatar_journal_changed();return;
+    }
+    const char *keys[]={"refresh_token","access_token","auth_token","node_id","noise_host","vm_url","setup_complete"};
+    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
+        if(!strcmp(key,keys[i])) {
+            /* Per-key writes inside an open journal are provisional. Fence
+             * them without erasing the prior authoritative generation; the
+             * backend recognizes a real owner change after marker completion. */
+            if(config_key_lookup("rp_open")!=CONFIG_KEY_NOT_FOUND ||
+               config_key_lookup("tok_update")!=CONFIG_KEY_NOT_FOUND)
+                muse_pixel_avatar_journal_changed();
+            else muse_pixel_avatar_invalidate();
+            break;
+        }
+    }
+}
+#endif
 
 static const char *TAG = "link.config";
 static const char *NS = "homehub";
@@ -277,6 +298,9 @@ bool config_set_str(const char *key, const char *value) {
         ESP_LOGW(TAG, "set %s failed: %s", key, esp_err_to_name(err));
         return false;
     }
+#if CONFIG_MUSE_PIXEL_AVATAR
+    pixel_owner_changed(key); /* committed owner boundary, not a speculative VM switch */
+#endif
     return true;
 }
 
@@ -297,6 +321,9 @@ bool config_erase_key(const char *key) {
         ESP_LOGW(TAG, "erase %s failed: %s", key, esp_err_to_name(err));
         return false;
     }
+#if CONFIG_MUSE_PIXEL_AVATAR
+    pixel_owner_changed(key);
+#endif
     return true;
 }
 

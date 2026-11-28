@@ -22,6 +22,9 @@
 #if CONFIG_MUSE_AVATAR_SYNC
 #include "avatar_sync.h"
 #include "muse_avatar.h"
+#if CONFIG_MUSE_PIXEL_AVATAR && CONFIG_LV_USE_SNAPSHOT
+#include "muse_pixel_avatar.h"
+#endif
 #endif
 
 #include <stdio.h>
@@ -725,6 +728,9 @@ static void keeper_task(void *arg) {
         bool have = s_ssid[0] != '\0' || WIFI_OVERRIDE;
         napped = napped && s_nap;
         bool stop_wifi = !muse_settings_wifi_on() || !have;
+#if CONFIG_MUSE_PIXEL_AVATAR && CONFIG_LV_USE_SNAPSHOT
+        stop_wifi=stop_wifi || muse_pixel_avatar_test_boot_offline();
+#endif
         wifi_stopped = wifi_stopped && stop_wifi;
         if (stop_wifi) {
             // A dropped connection may still have a reconnect timer pending.

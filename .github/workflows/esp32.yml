@@ -94,8 +94,8 @@ jobs:
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
-            # The mirror tests decode its messages with numpy (tools/muse/requirements-mirror.txt).
-            python -m pip install -q "numpy>=1.26"
+            # Mirror messages use numpy; pixel-avatar tests use the shared Pillow compiler.
+            python -m pip install -q "numpy>=1.26" -r ../avatar_pixel/requirements.txt
             # Registry components for the wake word runner tests (ExecuTorch,
             # esp-nn, the microfrontend). No apostrophes in this command: the
             # action wraps it in single quotes.
@@ -443,6 +443,17 @@ jobs:
           - board: muse-dfrobot-unihiker-k10
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10"
+          # Opt-in data-only pixels, white matting and shared software H.264.
+          # Keep these profiles off the web flasher and append to preserve group caches.
+          - board: muse-waveshare-p4-lcd35-avatars
+            target: esp32p4
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-p4-lcd35;devices/sdkconfig.muse-avatar-rendering"
+          - board: muse-waveshare-s3-175c-avatars
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-avatar-rendering"
+          - board: muse-waveshare-s3-206-avatars
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-206;devices/sdkconfig.muse-avatar-rendering"
           BOARDS
           echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
           targets=$(jq -r '[.include[].boards[].target] | unique | join(",")' /tmp/matrix.json)

@@ -14,9 +14,9 @@
 # limitations under the License.
 #
 # The full ESP32 host suite on one exact commit, in a clean worktree, with nothing skipped for
-# want of setup: the simulator built, cJSON linked, ESP-IDF exported, and a Python that has
-# smpclient, bleak, cryptography and ppk2-api. Run it before every push: it fails if setup
-# fails or any test is skipped.
+# want of setup: the simulator built, pinned registry test dependencies configured, ESP-IDF
+# exported, and a Python with the host tests' packages. Run it before every push: it fails
+# if setup fails or any test is skipped.
 #
 #   esp32/tools/verify_commit.sh <commit>
 #
@@ -50,20 +50,31 @@ W=$PARENT/worktree
 cleanup() { cd "$REPO" && git worktree remove --force "$W" 2> /dev/null; rm -rf "$PARENT"; }
 trap cleanup EXIT
 LOGS=$(mktemp -d "$SCRATCH/verify-$SHA-logs.XXXXXX") || exit 1
-SIMLOG=$LOGS/simulator.log LOG=$LOGS/tests.log
+SIMLOG=$LOGS/simulator.log DEPSLOG=$LOGS/dependencies.log LOG=$LOGS/tests.log
 cd "$REPO" && git worktree prune && git worktree add -q --detach "$W" "$FULL" || exit 1
 fail() { echo "verify_commit: $1"; exit 1; }
 cd "$W/esp32" || fail "no esp32/ in $FULL"
 cmake -S simulator -B simulator/build -G Ninja -DCMAKE_BUILD_TYPE=Debug > "$SIMLOG" 2>&1 \
   && cmake --build simulator/build >> "$SIMLOG" 2>&1 \
   || { tail -5 "$SIMLOG"; fail "simulator build failed"; }
-CJ=$(ls -d "$HOME"/Library/Caches/Espressif/ComponentManager/*/espressif__cjson* "$HOME"/.cache/Espressif/ComponentManager/*/espressif__cjson* 2>/dev/null | head -1)
-[ -n "$CJ" ] || fail "no cJSON in the component manager's cache (run one idf.py build)"
-mkdir -p managed_components && ln -sfn "$CJ" managed_components/espressif__cjson
 (
   . "$IDF_EXPORT" > /dev/null 2>&1 || { echo "verify_commit: $IDF_EXPORT failed" > "$LOG"; exit 1; }
+  # As in CI, configure (do not build or flash) a wake-word profile to fetch the
+  # exact cJSON, LVGL, ExecuTorch, ESP-NN and microfrontend pins in this clean
+  # worktree. Linking cJSON alone left the real mirror and runner tests skipped.
+  if ! ${TIMEOUT:+$TIMEOUT 900} env IDF_TARGET=esp32s3 idf.py \
+      -B build-verify-deps -DSDKCONFIG=build-verify-deps/sdkconfig \
+      -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
+      reconfigure > "$DEPSLOG" 2>&1; then
+    echo "verify_commit: pinned host-test dependency configure failed (see $DEPSLOG)" > "$LOG"
+    tail -5 "$DEPSLOG" >> "$LOG"
+    exit 1
+  fi
   export PATH="$(dirname "$PY"):$PATH"
-  ${TIMEOUT:+$TIMEOUT 3000} "$PY" -m unittest discover -v -s tests -p 'test_*.py' > "$LOG" 2>&1
+  # Match CI's per-module process isolation and freeze watchdog. A stuck module
+  # fails the run; it is never treated as a pass or an optional skip.
+  ${TIMEOUT:+$TIMEOUT 3000} "$PY" tools/stuck_watch.py --cap 900 -- \
+      "$PY" -m unittest discover -v -s tests -p 'test_*.py' > "$LOG" 2>&1
 ); rc=$?
 echo "commit $(git log --oneline -1 | cut -c1-70): rc=$rc (logs in $LOGS)"
 grep -a -E '^(Ran|OK|FAILED)' "$LOG" | tail -2

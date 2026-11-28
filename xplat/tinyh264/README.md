@@ -17,8 +17,11 @@ limitations under the License.
 # tinyh264
 
 The H.264 constrained baseline decoder behind Muse video streaming
-(`CONFIG_MUSE_VIDEO`, `../../protocols/VIDEO.md`). It's the Android
-Open Source Project's software decoder (`h264bsd`, originally Hantro's) as
+(`CONFIG_MUSE_VIDEO`, `../../protocols/VIDEO.md`) and the opt-in personal
+avatar clip player (`CONFIG_MUSE_AVATAR_ANIMATIONS`,
+`../../esp32/docs/avatar-sources.md`). The ESP32-S3 and ESP32-P4 avatar paths use
+this same portable software decoder. It's the Android Open Source Project's
+software decoder (`h264bsd`, originally Hantro's) as
 packaged by [udevbe/tinyh264](https://github.com/udevbe/tinyh264) at
 `524a702`, Apache-2.0 (`LICENSE`); Espressif's `esp_h264` ships the same code
 as a prebuilt library. The ESP32 firmware builds it with its ESP-IDF
