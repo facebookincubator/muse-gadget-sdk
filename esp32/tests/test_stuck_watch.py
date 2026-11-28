@@ -19,10 +19,12 @@ stdout, both idle with no output. The fake below hangs that way on every OS (it 
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +93,9 @@ class StuckWatch(unittest.TestCase):
         self.assertIn("-- what the group has open (lsof -g) --", cap)
         msg = (self.d / "told").read_text().strip()
         self.assertTrue(msg.startswith("STUCK (not a pass): deadlock on "), msg)
-        pgid = int(msg.split("stopped process group ")[1].split(";")[0])
+        # Stopped by its TERM: a zombie left behind (a container init that doesn't reap) never turns it into a KILL.
+        self.assertRegex(msg, r"stopped process group \d+; ")
+        pgid = int(re.search(r"stopped process group (\d+); ", msg).group(1))
         self.assertEqual(stuck_watch.group_pids(pgid), [])   # nothing of its group is left
 
     def test_pass_and_fail_are_recorded_and_no_hook_is_a_no_op(self) -> None:
@@ -104,6 +108,18 @@ class StuckWatch(unittest.TestCase):
         r = self.watch("--suite", "sleep", "--cap", "1", "--", sys.executable, "-c", "import time; time.sleep(60)")
         self.assertEqual(r.returncode, 124)
         self.assertFalse((self.d / "told").exists())
+
+    def test_a_group_that_ignores_sigterm_gets_sigkill_after_the_grace(self) -> None:
+        child = subprocess.Popen([sys.executable, "-c", "import signal, sys, time; "
+                                  "signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); "
+                                  "time.sleep(60)"], stdout=subprocess.PIPE, text=True, start_new_session=True)
+        with child:
+            self.assertEqual(child.stdout.readline().strip(), "ready")   # SIGTERM is ignored from here
+            with unittest.mock.patch.object(stuck_watch, "GRACE_S", 1):
+                said = stuck_watch.stop_group(child, child.pid)
+        self.assertEqual(said, f"stopped process group {child.pid} (SIGKILL after the grace)")
+        self.assertEqual(child.returncode, -9)
+        self.assertEqual(stuck_watch.group_pids(child.pid), [])
 
     def test_unittest_runs_one_module_at_a_time(self) -> None:
         mods = self.d / "mods"
@@ -130,6 +146,43 @@ class StuckWatch(unittest.TestCase):
         r = self.watch("--", sys.executable, "-m", "unittest", "test_a")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+
+    def test_a_group_that_empties_at_the_end_of_the_grace_gets_no_sigkill(self) -> None:
+        child = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        child.wait()
+        child.returncode = None   # as an unreaped leader would look
+        self.addCleanup(setattr, child, "returncode", 0)
+        end = stuck_watch.time.monotonic() + 0.3   # alive through the grace, empty just as it ends
+        with unittest.mock.patch.object(stuck_watch, "GRACE_S", 0.3), \
+                unittest.mock.patch.object(stuck_watch, "group_alive",
+                                           side_effect=lambda pg: stuck_watch.time.monotonic() < end), \
+                unittest.mock.patch.object(stuck_watch.os, "killpg") as killpg:
+            child.wait = lambda timeout=None: 0
+            said = stuck_watch.stop_group(child, child.pid)
+        self.assertEqual(said, f"stopped process group {child.pid}")
+        self.assertNotIn(unittest.mock.call(child.pid, stuck_watch.signal.SIGKILL), killpg.call_args_list)
+
+    def test_ps_decides_only_for_a_group_it_lists(self) -> None:
+        header = "  PID  PPID  PGID %CPU STAT ELAPSED ARGS"
+        with unittest.mock.patch.object(stuck_watch.os, "killpg"):
+            for out, alive in ((header + "\n", True),                                     # listed nowhere: kernel
+                               (header + "\n   7     1    42  0.0 Z    00:01 x\n", False),  # zombies only
+                               (header + "\n   7     1    42  0.0 Zl   00:01 x\n", True),   # Linux: threads live
+                               (header + "\n   7     1    42  0.0 S    00:01 x\n", True),
+                               ("(ps failed)\n", True)):
+                with unittest.mock.patch.object(stuck_watch, "run_quiet", return_value=out):
+                    self.assertEqual(stuck_watch.group_alive(42), alive, out)
+
+    def test_waiting_without_waitid_or_kqueue_still_sees_the_exit_unreaped(self) -> None:
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"], start_new_session=True)
+        broken = unittest.mock.Mock()
+        broken.kqueue.side_effect = OSError("no kqueue")
+        with unittest.mock.patch.dict(stuck_watch.os.__dict__), unittest.mock.patch.object(stuck_watch, "select",
+                                                                                         broken):
+            stuck_watch.os.__dict__.pop("waitid", None)
+            self.assertTrue(stuck_watch.wait_unreaped(child, 20))
+            self.assertIsNone(child.returncode)   # seen exited, not reaped
+        self.assertEqual(child.wait(), 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,18 +39,36 @@
 
 static const char *TAG = "muse_pass";
 
-bool muse_passcode_platform_load(muse_pass_rec_t *rec)
+/* Only the store saying there's no record (no namespace yet, no key) is "no passcode". Any other error, or a blob of
+ * no known size or format, is a record that couldn't be read: the passcode starts locked, never off because of an
+ * error. The pairing's erase (Reset pairing, Forgot passcode's way out) erases the key whatever it holds. */
+muse_pass_load_t muse_passcode_platform_load(muse_pass_rec_t *rec)
 {
+    memset(rec, 0, sizeof(*rec));
     nvs_handle_t h;
-    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
-        return false;
+    esp_err_t err = nvs_open(NS, NVS_READONLY, &h);
+    if (err == ESP_OK) {
+        size_t n = sizeof(*rec);
+        err = nvs_get_blob(h, KEY, rec, &n);
+        nvs_close(h);
+        /* Format 1 (an earlier layout) is one byte shorter: the core migrates it. */
+        bool known = (n == sizeof(*rec) && (rec->format == MUSE_PASS_FORMAT || rec->format == 1)) ||
+                     (n == MUSE_PASS_FORMAT_1_SIZE && rec->format == 1);
+        if (err == ESP_OK && known) {
+            return MUSE_PASS_LOAD_OK;
+        }
+        if (err == ESP_OK) {
+            ESP_LOGE(TAG, "load: a record of no known size or format (%u bytes): locked", (unsigned)n);
+            memset(rec, 0, sizeof(*rec));
+            return MUSE_PASS_LOAD_UNREADABLE;
+        }
     }
     memset(rec, 0, sizeof(*rec));
-    size_t n = sizeof(*rec);
-    esp_err_t err = nvs_get_blob(h, KEY, rec, &n);
-    nvs_close(h);
-    /* Format 1 (an earlier layout) is one byte shorter: the core migrates it. */
-    return err == ESP_OK && (n == sizeof(*rec) || (n == MUSE_PASS_FORMAT_1_SIZE && rec->format == 1));
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return MUSE_PASS_LOAD_NONE;   /* no namespace yet, or no record: no passcode */
+    }
+    ESP_LOGE(TAG, "load: %s: locked", esp_err_to_name(err));
+    return MUSE_PASS_LOAD_UNREADABLE;
 }
 
 static bool is_default(const muse_pass_rec_t *rec)

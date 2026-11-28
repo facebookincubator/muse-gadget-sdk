@@ -16,7 +16,7 @@
  *
  *  Modified by Meta Platforms, Inc.: speed and size optimizations (fast
  *  symmetric DCT, small CRC table, mono-only and 4-subband trimming,
- *  optional concealment); bit-exact with upstream. Dual-channel encoding
+ *  optional concealment, mergeable constant tables); bit-exact with upstream. Dual-channel encoding
  *  doesn't write past its scale factors, concealment uses the last good
  *  frame's channel count, a frame description with an out-of-range
  *  frequency, mode or allocation method is rejected, and no signed value is
@@ -25,6 +25,35 @@
 
 #include <sbc.h>
 #include <string.h>
+
+/* OPT: SBC_MERGE_TABLES=1 (GCC, ELF targets, 4-byte int): the small constant tables
+ * that are identical (the header's decode and encode maps, the two
+ * frequency tables, the two cos(i*pi/8) tables) keep their static
+ * definitions, each in its own mergeable section ("aM") whose entity is the
+ * whole table, so the linker keeps one copy of each. One table per section:
+ * GCC may address tables that share a section from one anchor plus an
+ * offset, which merging would break. The same definitions and code; off (the
+ * default), nothing changes. */
+#if defined(SBC_MERGE_TABLES) && SBC_MERGE_TABLES && \
+    defined(__GNUC__) && !defined(__clang__) && defined(__ELF__) && \
+    defined(__SIZEOF_INT__) && __SIZEOF_INT__ == 4
+#if defined(__arm__)
+#define SBC_MERGE_ARGS_(bytes) ",\"aM\",%progbits," #bytes " @"
+#elif defined(__aarch64__)
+#define SBC_MERGE_ARGS_(bytes) ",\"aM\",@progbits," #bytes " //"
+#else
+#define SBC_MERGE_ARGS_(bytes) ",\"aM\",@progbits," #bytes " #"
+#endif
+/* The flags the compiler appends to the section name land in the comment */
+#define SBC_MERGE(name, bytes) \
+    __attribute__((aligned(4), section(".rodata.sbc_" name SBC_MERGE_ARGS_(bytes))))
+/* The header's decode maps hold ints here, as the encode maps do: their
+ * entity sizes then hold whatever size an enum has (-fshort-enums) */
+#define SBC_HDR_MAP(type) int
+#else
+#define SBC_MERGE(name, bytes)
+#define SBC_HDR_MAP(type) type
+#endif
 
 #undef  SBC_BITS_TRACE
 #include "bits.h"
@@ -389,7 +418,7 @@ static void compute_nbits(const struct sbc_frame *frame,
  */
 int sbc_get_freq_hz(enum sbc_freq freq)
 {
-    static const int freq_hz[SBC_NUM_FREQ] = {
+    static const int freq_hz[SBC_NUM_FREQ] SBC_MERGE("freq_hz_get", 16) = {
         [SBC_FREQ_16K ] = 16000, [SBC_FREQ_32K ] = 32000,
         [SBC_FREQ_44K1] = 44100, [SBC_FREQ_48K ] = 48000,
     };
@@ -436,7 +465,7 @@ unsigned sbc_get_frame_bitrate(const struct sbc_frame *frame)
  */
 int sbc_get_frame_bps(enum sbc_freq freq)
 {
-    static const int freq_hz[SBC_NUM_FREQ] = {
+    static const int freq_hz[SBC_NUM_FREQ] SBC_MERGE("freq_hz_bps", 16) = {
         [SBC_FREQ_16K ] = 16000, [SBC_FREQ_32K ] = 32000,
         [SBC_FREQ_44K1] = 44100, [SBC_FREQ_48K ] = 48000,
     };
@@ -466,14 +495,14 @@ void sbc_reset(struct sbc *sbc)
  */
 static bool decode_header(sbc_bits_t *bits, struct sbc_frame *frame, int *crc)
 {
-    static const enum sbc_freq dec_freq[] =
+    static const SBC_HDR_MAP(enum sbc_freq) dec_freq[] SBC_MERGE("hdr16_dec_freq", 16) =
         { SBC_FREQ_16K, SBC_FREQ_32K, SBC_FREQ_44K1, SBC_FREQ_48K };
 
-    static const enum sbc_mode dec_mode[] =
+    static const SBC_HDR_MAP(enum sbc_mode) dec_mode[] SBC_MERGE("hdr16_dec_mode", 16) =
         { SBC_MODE_MONO, SBC_MODE_DUAL_CHANNEL,
           SBC_MODE_STEREO, SBC_MODE_JOINT_STEREO };
 
-    static const enum sbc_bam dec_bam[] =
+    static const SBC_HDR_MAP(enum sbc_bam) dec_bam[] SBC_MERGE("hdr8_dec_bam", 8) =
         { SBC_BAM_LOUDNESS, SBC_BAM_SNR };
 
     /* --- Decode header ---
@@ -665,7 +694,7 @@ static inline void dct4(const int16_t *in, int scale,
 {
      /* cos(i*pi/8)  for i = [0;3], in fixed 0.13 */
 
-    static const int16_t cos8[] = { 8192, 7568, 5793, 3135 };
+    static const int16_t cos8[] SBC_MERGE("cos8_dct4", 8) = { 8192, 7568, 5793, 3135 };
 
     /* --- DCT of subbands samples ---
      *          ___
@@ -1125,16 +1154,16 @@ static void compute_scale_factors(const struct sbc_frame *frame,
  */
 static void encode_header(sbc_bits_t *bits, const struct sbc_frame *frame)
 {
-    static const int enc_freq[SBC_NUM_FREQ] = {
+    static const int enc_freq[SBC_NUM_FREQ] SBC_MERGE("hdr16_enc_freq", 16) = {
         /* SBC_FREQ_16K  */ 0, /* SBC_FREQ_32K  */ 1,
         /* SBC_FREQ_44K1 */ 2, /* SBC_FREQ_48K  */ 3
     };
 
-    static const int enc_mode[SBC_NUM_MODE] = {
+    static const int enc_mode[SBC_NUM_MODE] SBC_MERGE("hdr16_enc_mode", 16) = {
         /* SBC_MODE_MONO   */ 0, /* SBC_MODE_DUAL_CHANNEL */ 1,
         /* SBC_MODE_STEREO */ 2, /* SBC_MODE_JOINT_STEREO */ 3 };
 
-    static const int enc_bam[SBC_NUM_BAM] = {
+    static const int enc_bam[SBC_NUM_BAM] SBC_MERGE("hdr8_enc_bam", 8) = {
         /* SBC_BAM_LOUDNESS */ 0, /* SBC_BAM_SNR */ 1 };
 
     /* Two possible headers :
@@ -1405,7 +1434,7 @@ static void analyze_4(
      *
      *  h(k,i) = cos( (i + 1/2) (k - 4/2) pi/8 ) */
 
-    static const int16_t cos8[4] = { 8192, 7568, 5793, 3135 };
+    static const int16_t cos8[4] SBC_MERGE("cos8_analyze4", 8) = { 8192, 7568, 5793, 3135 };
     int s0, s1, s2, s3;
 
     s0 =  y[0] * cos8[2] + y[1] * cos8[1] + y[2] * cos8[3] + y[3] * 8192;

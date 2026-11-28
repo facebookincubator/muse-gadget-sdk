@@ -12,10 +12,16 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
-from test_power_test import arm
-import test_power_test as core_tests
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from test_power_test import arm  # noqa: E402
+import test_power_test as core_tests  # noqa: E402
+
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
+
 ROOT = Path(__file__).resolve().parents[1]
 class GenericPowerTest(unittest.TestCase):
     @classmethod
@@ -46,8 +52,8 @@ class GenericPowerTest(unittest.TestCase):
         cls.addClassCleanup(core_tests.PowerTest.tearDownClass)
     def run_commands(self, *commands, profile="175c", target="generic"):
         binary = core_tests.PowerTest.binary if target == "watcher" else Path(self.tmp.name) / ("mosaico" if profile == "mosaico" else "generic")
-        proc = subprocess.run([str(binary), profile], input="\n".join(commands) + "\n",
-                              text=True, capture_output=True, timeout=3, check=True)
+        proc = run_child([str(binary), profile], input="\n".join(commands) + "\n",
+                         text=True, capture_output=True, timeout=3, check=True)
         self.assertEqual(proc.stderr, "")
         return [row for line in proc.stdout.splitlines() if line.startswith("PTEST ")
                 if (row := json.loads(line[6:]))["type"] != "ready"]

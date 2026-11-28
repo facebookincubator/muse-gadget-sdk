@@ -17,23 +17,22 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get(
-    "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"
-))
+JSON = cjson_dir()
 
 
 class BleCommandsTest(unittest.TestCase):
     def test_commands_against_a_fake_client(self) -> None:
-        if not (JSON / "cJSON.c").exists():
-            raise unittest.SkipTest("cJSON sources not available (run idf.py build once)")
+        require_cjson(JSON)
         cc = shlex.split(os.environ.get("CC", "cc"))
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "ble_commands"

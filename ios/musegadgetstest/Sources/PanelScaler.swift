@@ -32,9 +32,9 @@ import Foundation
  */
 final class PanelScaler {
     let nIn: Int, nOut: Int
-    private var start: [Int32]
-    private var taps: [Int32]
-    private let len: Int
+    private(set) var start: [Int32]
+    private(set) var taps: [Int32]   /* nOut x len Q12 weights from start[o], each row summing to 4096 */
+    let len: Int
     private var tmp: [Int32]
 
     init(nIn: Int, nOut: Int, panel: Int, lambda: Double, halfTaps: Int) {
@@ -73,13 +73,19 @@ final class PanelScaler {
                 sum += r[o][i]
             }
             start[o] = Int32(lo)
+            /* An output the panel doesn't show (a panel smaller than the picture, as a 16x16 display
+             * makes the chroma's 8) has no weights to normalize (0/0): the box over its window. */
+            var wt = (lo..<hi).map { r[o][$0] / sum }
+            if abs(sum) < 1e-9 || !wt.allSatisfy({ $0.isFinite && abs($0) <= 64 }) {
+                wt = [Double](repeating: 1 / Double(hi - lo), count: hi - lo)
+            }
             var acc: Int32 = 0
             var big = lo
             for i in lo..<hi {
-                let w = Int32((r[o][i] / sum * 4096).rounded())
+                let w = Int32((wt[i - lo] * 4096).rounded())
                 taps[o * len + i - lo] = w
                 acc += w
-                if r[o][i] > r[o][big] {
+                if wt[i - lo] > wt[big - lo] {
                     big = i
                 }
             }

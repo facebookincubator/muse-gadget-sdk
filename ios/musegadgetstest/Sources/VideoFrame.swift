@@ -23,6 +23,7 @@ enum VideoFrame {
     static let magic: UInt8 = 0x56   /* 'V' */
     static let headerLen = 8
     static let keyframe: UInt8 = 1
+    static let still: UInt8 = 2   /* a UI stream's lossless still patch (mg_video_frame_still) */
 
     static func make(_ au: Data, number: Int, key: Bool) -> Data {
         var fr = Data(count: headerLen)

@@ -21,9 +21,12 @@ muse_call_poll every 100 ms), and what muse_call.c does when one is due.
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
@@ -108,8 +111,8 @@ class ConnectingBackstop(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_lines(self, lines: list[str]) -> list[str]:
-        out = subprocess.run([str(self.exe)], input="\n".join(lines) + "\n", text=True, capture_output=True,
-                             check=True).stdout
+        out = run_child([str(self.exe)], input="\n".join(lines) + "\n", text=True, capture_output=True,
+                        check=True).stdout
         return out.splitlines()
 
     def test_a_silent_client_is_ended_at_60s(self) -> None:

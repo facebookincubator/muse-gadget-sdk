@@ -47,7 +47,7 @@ final class AppScreen {
     private final List<View> navDots = new ArrayList<>();
     private final FrameLayout content;
     private final View chipDot, nowDot;
-    private final TextView chipText, nowTitle, nowSub, nowButton, placeholder;
+    private final TextView chipText, nowTitle, nowSub, nowButton, placeholder, linkButton;
     private final LinearLayout header, nav;
     private final FrameLayout placeholderBox, box;
     private final LinearLayout now;
@@ -84,6 +84,11 @@ final class AppScreen {
         chipText.setMaxWidth(dp(170));
         chip.addView(chipText);
         header.addView(chip);
+        /* Disconnect / Connect: always in view, on every tab. */
+        linkButton = Ui.pill(a, "Disconnect", Ui.BAD, Ui.SURFACE_HI);
+        LinearLayout.LayoutParams ll = new LinearLayout.LayoutParams(-2, -2);
+        ll.leftMargin = dp(8);
+        header.addView(linkButton, ll);
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         /* The display: preview, stats, what's playing */
@@ -257,10 +262,24 @@ final class AppScreen {
         String name = app.gadgetName();
         Ui.tintDot(chipDot, connected ? Ui.GOOD : Ui.WARN);
         String shortName = name != null && name.startsWith("MuseGadget-") ? name.substring(11) : name;
-        chipText.setText(connected ? shortName : name != null ? "Connecting…" : "No gadget");
+        boolean off = app.gadgetOff();
+        chipText.setText(off ? "Not connected" : connected ? shortName : name != null ? "Connecting…" : "No gadget");
+        if (off) {
+            Ui.tintDot(chipDot, Ui.TEXT3);
+            setLinkButton("Connect", Ui.ACCENT, app.lastGadget() != null ? "Connect " + app.lastGadget()
+                    : "Choose a gadget", app.lastGadget() != null ? app::connectLast : app::showPicker);
+        } else {
+            setLinkButton("Disconnect", Ui.BAD, name != null ? "Disconnect " + name : "Stop looking for a gadget",
+                    app::disconnectGadget);
+        }
 
         boolean playing = app.streamingOrPreparing();
-        if (!connected) {
+        if (off) {
+            Ui.tintDot(nowDot, Ui.TEXT3);
+            nowTitle.setText("Not connected");
+            nowSub.setText(app.lastGadget() != null ? "Disconnected from " + app.lastGadget() : "Choose a gadget to connect");
+            setButton("Choose", Ui.TEXT, Ui.SURFACE_HI, app::showPicker);
+        } else if (!connected) {
             Ui.tintDot(nowDot, Ui.TEXT3);
             nowTitle.setText(name != null ? "Connecting to " + name : "Looking for a gadget");
             nowSub.setText(app.connectionLine());
@@ -283,7 +302,7 @@ final class AppScreen {
             box.getLayoutParams().height = h;
             box.requestLayout();
         }
-        boolean picture = playing && !app.preparing() && (app.cameraPreview() || app.decoderShown());
+        boolean picture = playing && !app.preparing() && (app.cameraPreview() || app.decoderShown() || app.uiPreview());
         placeholderBox.setVisibility(picture ? View.GONE : View.VISIBLE);
         /* The bars in two bands can't be decoded into one preview: show a test card instead. */
         boolean card = playing && app.sourceIs("pattern") && !picture;
@@ -292,7 +311,7 @@ final class AppScreen {
             placeholderBox.setBackground(card ? Icons.bars() : new android.graphics.drawable.ColorDrawable(0xFF050607));
             placeholder.setVisibility(card ? View.GONE : View.VISIBLE);
         }
-        placeholder.setText(!connected ? "No gadget yet" : playing ? (app.preparing() ? "Preparing the clip…"
+        placeholder.setText(off ? "Not connected" : !connected ? "No gadget yet" : playing ? (app.preparing() ? "Preparing the clip…"
                 : "Sending " + app.sourceLabel()) : "Not streaming");
         for (int i = 0; i < tabs.size(); i++) {
             navDots.get(i).setVisibility(tabs.get(i).live.getAsBoolean() ? View.VISIBLE : View.INVISIBLE);
@@ -300,6 +319,18 @@ final class AppScreen {
         if (selected >= 0) {
             tabs.get(selected).list.refresh();
         }
+    }
+
+    private void setLinkButton(String label, int fg, String description, Runnable r) {
+        if (!label.contentEquals(linkButton.getText())) {
+            linkButton.setText(label);
+            linkButton.setTextColor(fg);
+        }
+        linkButton.setContentDescription(description);
+        linkButton.setOnClickListener(v -> {
+            r.run();
+            refresh();
+        });
     }
 
     private void setButton(String label, int fg, int bg, Runnable r) {

@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_muse_battery import build_harness  # noqa: E402
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components" / "muse"
@@ -85,8 +86,8 @@ class NeverCutsPowerOnUsb(unittest.TestCase):
         cls.tmp.cleanup()
 
     def events(self, *commands: str) -> list[str]:
-        r = subprocess.run([str(self.binary)], input="\n".join(commands) + "\n", capture_output=True, text=True,
-                           timeout=30)
+        r = run_child([str(self.binary)], input="\n".join(commands) + "\n", capture_output=True, text=True,
+                      timeout=30)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return [ln for ln in r.stdout.splitlines() if ln.startswith(("@ui.", "@poweroff", "level"))]
 

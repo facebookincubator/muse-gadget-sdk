@@ -40,6 +40,14 @@ extern "C" {
 int mgx264_available(void);
 void *mgx264_open(int w, int h, int fps, int kbps, const char *preset, const char *params);
 int mgx264_encode(void *enc, const uint8_t *i420, int64_t pts, int idr, const uint8_t **out, int info[2]);
+/* The same with this frame's quantizer forced (qp < 0: the rate control's)
+ * and, with the psnr option, the reconstruction's luma PSNR in dB (UI
+ * streams: progressive refinement). */
+int mgx264_encode_qp(void *enc, const uint8_t *i420, int64_t pts, int idr, int qp, const uint8_t **out, int info[2],
+                     double *psnr_y);
+/* The picture the last frame decodes to (I420 w x h: what the gadget's
+ * decoder has; deblocking off, opened with full-recon=1). 0: none. */
+int mgx264_recon_i420(void *enc, uint8_t *dst);
 void mgx264_set_bitrate(void *enc, int kbps);
 void mgx264_close(void *enc);
 

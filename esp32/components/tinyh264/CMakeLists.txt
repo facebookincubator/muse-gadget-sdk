@@ -13,16 +13,18 @@
 # limitations under the License.
 
 # H.264 constrained baseline decoder for video streaming
-# (CONFIG_MUSE_VIDEO). See README.md.
+# (CONFIG_MUSE_VIDEO). The sources are the one copy in xplat/tinyh264 (see its
+# README.md); this component only builds them for ESP-IDF.
+set(src_dir "${CMAKE_CURRENT_LIST_DIR}/../../../xplat/tinyh264/src")
 if(CONFIG_MUSE_VIDEO OR CONFIG_MUSE_AVATAR_ANIMATIONS)
-    file(GLOB srcs "${CMAKE_CURRENT_LIST_DIR}/src/*.c")
+    file(GLOB srcs "${src_dir}/*.c")
     if(CONFIG_MUSE_VIDEO_SIMD_MC)
         # The luma 6-tap filters on the S31's SIMD (h264bsd_reconstruct.c checks them).
-        list(APPEND srcs "${CMAKE_CURRENT_LIST_DIR}/src/h264bsd_interp_pie_s31.S")
+        list(APPEND srcs "${src_dir}/h264bsd_interp_pie_s31.S")
     endif()
     idf_component_register(
         SRCS ${srcs}
-        INCLUDE_DIRS "src"
+        INCLUDE_DIRS "${src_dir}"
         LDFRAGMENTS "linker.lf")
     # Upstream code, warnings and all. -O2, not the -O3 the host bench liked:
     # -O3's inlining makes the hot code 2.3 times bigger (110 KB), more than

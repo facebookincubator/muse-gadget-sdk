@@ -1,0 +1,40 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# MCUboot's development keys (bootloader/mcuboot/root-*.pem)
+# are public, so anyone can sign images a unit built with one accepts. A build
+# signed with one fails at configure time unless it says it's for development
+# (sysbuild-dev.conf); production sets SB_CONFIG_BOOT_SIGNATURE_KEY_FILE to its
+# own private key, kept out of the repository (sysbuild.cmake,
+# tools/check_signing_key.py).
+config MG_DEV_SIGNING_KEY
+	bool "Development build: sign with MCUboot's public development key"
+	help
+	  Allows SB_CONFIG_BOOT_SIGNATURE_KEY_FILE to be one of MCUboot's public
+	  development keys (the default). Units built with it accept any image
+	  signed with that key, which anyone can do: for benches and development
+	  units only, never for units in users' hands.
+
+# A board with a separate network core names its board (NET_CORE_BOARD, in
+# the board's own Kconfig.sysbuild); the Bluetooth controller (Zephyr's
+# hci_ipc sample) is then built for it beside the application.
+config NET_CORE_BOARD
+	string
+
+config NET_CORE_IMAGE_HCI_IPC
+	bool "Bluetooth controller image (hci_ipc) on the network core"
+	default y
+	depends on NET_CORE_BOARD != ""
+
+source "share/sysbuild/Kconfig"

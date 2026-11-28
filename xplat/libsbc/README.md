@@ -20,8 +20,7 @@ Google's SBC (Bluetooth subband codec) encoder and decoder, the default codec
 of the musegadgets BLE protocol: 16 kHz mono, 16 blocks, 8 subbands, loudness
 allocation. One copy serves both SDKs: the ESP32 component
 [`esp32/components/libsbc`](../../esp32/components/libsbc) compiles these
-sources with the options below for the ESP32 BLE gadgets, and the Zephyr
-gadgets (in a later change) use the same ones.
+sources with the options below, and the Zephyr gadgets use the same ones.
 
 | | |
 |---|---|
@@ -44,7 +43,7 @@ are left out.
 | File | From |
 |---|---|
 | `include/sbc.h` | upstream, modified: trimming options (`SBC_MAX_CHANNELS`, `SBC_PLC`) |
-| `src/sbc.c` | upstream, modified: symmetric DCT (`SBC_FAST_DCT`), 16-entry CRC table (`SBC_SMALL_CRC`), Arm dual-MAC windowing (`SBC_DSP`), mono and 8-subband trimming; dual-channel encoding no longer computes the second channel's scale factors twice (upstream writes past the array); concealment takes the channel count from the last good frame and refuses before one; a frame description with an out-of-range frequency, mode or allocation method is rejected (upstream indexes its tables with them); no left shift of a negative value |
+| `src/sbc.c` | upstream, modified: symmetric DCT (`SBC_FAST_DCT`), 16-entry CRC table (`SBC_SMALL_CRC`), Arm dual-MAC windowing (`SBC_DSP`), mergeable constant tables (`SBC_MERGE_TABLES`), mono and 8-subband trimming; dual-channel encoding no longer computes the second channel's scale factors twice (upstream writes past the array); concealment takes the channel count from the last good frame and refuses before one; a frame description with an out-of-range frequency, mode or allocation method is rejected (upstream indexes its tables with them); no left shift of a negative value |
 | `src/bits.c`, `src/bits.h` | upstream, modified: optional single-unit inlining (`SBC_UNITY`) |
 | `LICENSE` | upstream, unmodified |
 | `README.md` | Meta |
@@ -59,7 +58,11 @@ are left out.
 | `SBC_FAST_DCT=1` | symmetric analysis matrixing | on | on |
 | `SBC_DSP=1` | Armv7E-M/Armv8-M dual-MAC windowing | off (Xtensa, RISC-V) | on with a DSP extension (Cortex-M33) |
 | `SBC_UNITY=1` | `bits.c` compiled into `sbc.c` so the bit writer inlines | off | with `SBC_DSP` |
+| `SBC_MERGE_TABLES=1` | identical constant tables (the header maps, the frequency and cos(i*pi/8) tables) in mergeable sections, so the linker keeps one copy; GCC on ELF targets with a 4-byte `int`, a no-op elsewhere. 8 B of 924 on RISC-V, 24 of 940 on Xtensa (the SDKs' build) | off | off |
 | `SBC_PLC` | packet loss concealment: a lost frame replays the last good one, 6 dB quieter each time; changes `struct sbc` | off | off |
+
+Building it for another MCU (its own -O2 archive, what to put in RAM):
+[`../PORTING-PERF.md`](../PORTING-PERF.md).
 
 `SBC_MAX_CHANNELS` and `SBC_PLC` change the size and layout
 of `sbc_t`, so they are public definitions: build every file that includes

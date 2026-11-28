@@ -290,6 +290,14 @@ final class WifiLink extends VideoLink {
                     out = o;
                     connected = addr;
                     connectedName = name;
+                    ready = false;   /* this connection's own hello, nothing left from the last */
+                    caps.set(new Caps());
+                    streaming = false;
+                    frameQ.clear();
+                    controlQ.clear();
+                    cur = null;
+                    tail = null;
+                    queuedBytes = 0;
                 }
                 stopDiscovery();
                 readLoop(new DataInputStream(in));
@@ -299,7 +307,7 @@ final class WifiLink extends VideoLink {
             boolean wasReady = ready;
             drop();
             if (wasReady || !closed) {
-                l.onDisconnected();
+                l.onDisconnected(wasReady);
             }
             if (!closed) {
                 SystemClock.sleep(1000);
@@ -412,7 +420,7 @@ final class WifiLink extends VideoLink {
     private void onMessage(JSONObject m) {
         switch (m.optString("type")) {
             case "hello":
-                parseHello(m);
+                caps.set(helloCaps(m, caps));
                 synchronized (lock) {
                     bufferSize = caps.buffer;
                 }
@@ -465,7 +473,9 @@ final class WifiLink extends VideoLink {
         }
     }
 
-    private void parseHello(JSONObject m) {
+    /** The hello's caps, parsed and clamped on a copy of old: the link's caps (read by other threads) only ever take clamped values. */
+    static Caps helloCaps(JSONObject m, Caps old) {
+        Caps caps = old.copy();
         JSONObject d = m.optJSONObject("display"), x = m.optJSONObject("max"), s = m.optJSONObject("suggested");
         if (d != null) {
             caps.dispW = d.optInt("width");
@@ -487,13 +497,14 @@ final class WifiLink extends VideoLink {
         caps.maxPlayoutMs = m.optInt("max_playout_ms");
         caps.maxTiles = Math.max(1, m.optInt("max_bands", 1));
         caps.tileSplitPct = m.optInt("band_split_pct");
-        caps.clamp();   /* anything on the network can answer as a gadget */
+        caps.clamp(VideoLink.Caps.WIFI_MIN_BUFFER);   /* anything on the network can answer as a gadget */
         org.json.JSONArray codecs = m.optJSONArray("codecs");
         caps.vp8 = false;
         for (int i = 0; codecs != null && i < codecs.length(); i++) {
             caps.vp8 |= "vp8".equals(codecs.optString(i));
         }
         caps.video = true;
+        return caps;
     }
 
     private void clearStream() {
@@ -536,8 +547,6 @@ final class WifiLink extends VideoLink {
         playoutMs = Math.min(playoutMs, caps.maxPlayoutMs);
         Log.i(TAG, "start " + (vp8 ? "VP8 " : "H.264 ") + w + "x" + h + "@" + fps + " " + kbps + " kb/s, playout " + playoutMs + " ms"
                 + (bands > 1 ? ", " + bands + " bands" : "") + " (was streaming: " + streaming + ")");
-        /* The device holds the playout delay's worth unread on top. */
-        maxAhead = Math.max(12288, kbps * 1000L / 8 * (150 + playoutMs) / 1000);
         JSONObject m = new JSONObject();
         try {
             m.put("type", "start").put("codec", vp8 ? "vp8" : "h264").put("width", w).put("height", h).put("fps", fps)
@@ -552,6 +561,12 @@ final class WifiLink extends VideoLink {
             throw new IllegalStateException(e);
         }
         synchronized (lock) {
+            if (!ready || out == null) {   /* under the lock drop() takes: never queued for whoever connects next */
+                Log.i(TAG, "start ignored: no gadget connected");
+                return;
+            }
+            /* The device holds the playout delay's worth unread on top. */
+            maxAhead = Math.max(12288, kbps * 1000L / 8 * (150 + playoutMs) / 1000);
             frameQ.clear();
             cutFrame();
             queuedBytes = 0;

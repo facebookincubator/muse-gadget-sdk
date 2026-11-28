@@ -18,13 +18,17 @@
 // Your own settings go in Local.xcconfig next to this file (git-ignored),
 // so they stay out of the project:
 //   DEVELOPMENT_TEAM = ABCDE12345          // your team (Xcode > Settings > Accounts)
-//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.musegadgetstest
+//   MG_APP_BUNDLE_ID = com.yourname.musegadgetstest
 // Bundle IDs are unique across all teams: with a free Personal Team pick
-// your own. Choosing the team in Signing & Capabilities works too.
+// your own. Choosing the team in Signing & Capabilities works too. The
+// broadcast extension (Broadcast/) is MG_APP_BUNDLE_ID.broadcast.
 
-PRODUCT_BUNDLE_IDENTIFIER = com.musegadgets.test
+MG_APP_BUNDLE_ID = com.musegadgets.test
+PRODUCT_BUNDLE_IDENTIFIER = $(MG_APP_BUNDLE_ID)
 DEVELOPMENT_TEAM =
 CODE_SIGN_STYLE = Automatic
+// The keychain group the app and the broadcast extension share (UiShared.swift).
+CODE_SIGN_ENTITLEMENTS = MuseGadgetsTest.entitlements
 
 // The optional encoders (README.md): stubs unless native/build_x264.sh or
 // native/build_vpx.sh has written lib/codecs.xcconfig. They're built for

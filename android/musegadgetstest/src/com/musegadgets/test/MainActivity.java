@@ -41,6 +41,12 @@ import android.view.WindowManager;
  * Intent extras (adb shell am start -n com.musegadgets.test/.MainActivity
  * --es target A1B2C3 --ei fps 24 --ei kbps 1000 --ez auto true --ez front false;
  * --es host 192.168.1.20 skips mDNS).
+ *
+ * Over musegadgets BLE instead (GadgetLink, mgcommands.h): --es link ble, or
+ * the Link button; the choice is kept. BLE-only bench options: --es device
+ * <address>, --ez tone true (an SBC loop beside the video; --es tonecodec
+ * lc3), --es mic sbc|lc3 (capture the gadget's mic too), --ei bench SECS
+ * (raw throughput), --ez l2cap true, --ei air BYTES, --ei wmax BYTES.
  */
 public final class MainActivity extends Activity
         implements VideoLink.Listener, CameraStreamer.Sink, ClipStreamer.Sink {
@@ -55,10 +61,72 @@ public final class MainActivity extends Activity
     private final Handler ui = new Handler(Looper.getMainLooper());
     private VideoLink link;
     private CameraStreamer cam;
+    /* UI streams (protocols/UI.md): a web page or the screen at the gadget's own size. */
+    private UiSession uiSession;
+
+    UiSession ui() {
+        return uiSession;
+    }
+
+    /* UI stream extras: --es uiurl URL, --ez fisheye, --ez refine, --ei uicss, --ez uidry (no gadget: files/ui_dump.264),
+     * --ei uisize (dry size), --ei hid 0-3, --ef wx/wy/ws (the mirror window), --ei qp/qr1/qr2 (the QP ladder). */
+    private Bundle uiExtras;
+
+    private void applyUiExtras() {
+        Bundle e = uiExtras;
+        if (e == null || uiSession == null) {
+            return;
+        }
+        if (e.containsKey("uiurl")) uiSession.url = e.getString("uiurl");
+        if (e.containsKey("fisheye")) uiSession.fisheye = e.getBoolean("fisheye");
+        if (e.containsKey("refine")) uiSession.refine = e.getBoolean("refine");
+        if (e.containsKey("sharp")) uiSession.sharp = e.getBoolean("sharp");
+        if (e.containsKey("overscroll")) {
+            int i = java.util.Arrays.asList(UiSession.OVERSCROLL_NAMES).indexOf(e.getString("overscroll"));
+            if (i >= 0) uiSession.overscroll = i;
+        }
+        if (e.containsKey("uicss")) uiSession.cssPx = e.getInt("uicss");
+        if (e.containsKey("uifast")) uiSession.fastFps = e.getInt("uifast");
+        if (e.containsKey("uilegacy")) uiSession.legacyPacing = e.getBoolean("uilegacy");
+        if (e.containsKey("hid")) uiSession.hidMode = e.getInt("hid");
+        if (e.containsKey("wx")) uiSession.winX = e.getFloat("wx");
+        if (e.containsKey("wy")) uiSession.winY = e.getFloat("wy");
+        if (e.containsKey("ws")) uiSession.winSize = e.getFloat("ws");
+        if (e.containsKey("wx") || e.containsKey("wy") || e.containsKey("ws")) {
+            uiSession.setWindow(uiSession.winX, uiSession.winY, uiSession.winSize);   /* kept on the screen */
+        }
+        uiSession.dry = e.getBoolean("uidry", false);
+        uiSession.drySize = e.getInt("uisize", 360);
+        uiSession.qp = e.getInt("qp", 0);
+        uiSession.qr1 = e.getInt("qr1", 0);
+        uiSession.qr2 = e.getInt("qr2", 0);
+        uiSession.twoBands = e.getBoolean("uibands2", false);
+        uiSession.save();
+    }
     /* What to connect to: --es target <name part> (first match), --es host
      * <address[:port]>, else the gadget last picked on the Gadget tab. */
     private String target, deviceAddr;
-    private static final String PREFS = "musegadgetstest", PREF_ADDR = "wifi_addr", PREF_NAME = "wifi_name";
+    private static final String PREFS = "musegadgetstest", PREF_LINK = "link";
+    /* BLE (GadgetLink) instead of Wi-Fi: --es link ble|wifi, or the Link button. */
+    private boolean ble;
+    private String prefAddr() { return ble ? "device_addr" : "wifi_addr"; }
+    private String prefOff() { return ble ? "gadget_off" : "wifi_gadget_off"; }
+    /* Disconnect (the header's button, the Gadget tab): the user let the gadget go. No link,
+     * no scanning and no reconnecting (after a drop, coming back to the foreground or a
+     * restart) until they pick a gadget or press Connect. The last gadget stays remembered,
+     * for Connect. Remembered across restarts. */
+    private boolean gadgetOff, linkStarted;
+    private String lastAddr, lastName;
+    private boolean explicitTarget;   /* the launch named a gadget (--es target/host/device) */
+    private String prefName() { return ble ? "device_name" : "wifi_name"; }
+    /** The link as a GadgetLink, or null over Wi-Fi. */
+    private GadgetLink bleLink() { return link instanceof GadgetLink ? (GadgetLink) link : null; }
+
+    /* BLE bench options (see the class comment). */
+    private int air = 3072, benchSecs;
+    private boolean airSet, l2cap, tone;
+    private String mic, toneCodec;
+    private long lastDataIn, lastAudio;
     private int fps = 30, kbps = 450, size = 0;
     private boolean noBands;   /* --ez nobands true: one stream even where the gadget takes two bands */
     /* The Codec button (or --es codec h264|vp8): VP8 for the camera and the
@@ -69,6 +137,13 @@ public final class MainActivity extends Activity
     private boolean camVp8;     /* the camera stream that's on is VP8 */
     private static final String PREF_CODEC = "codec";
     private boolean auto, front, pattern, intraRefresh = true, adaptive = true;
+    /* The user's own start (a pick, a codec change, Start automatically turned on), for one
+     * connection; a stream that starts on its own on another waits for the token proof. UI thread. */
+    private final VideoLink.StartGrant grant = new VideoLink.StartGrant();
+
+    private boolean userStart() {
+        return grant.held();
+    }
     /* What streams: "camera", "pattern" or "clip:<name>" (--es source, or the buttons). */
     private String source = "camera";
     /* Sample clips (SampleClips): fetched, decoded and encoded for the gadget when first played. */
@@ -91,7 +166,7 @@ public final class MainActivity extends Activity
     private int heldSeconds, clipCalmSeconds;
     private int lastSize = 232;
     private int aeFps = 30, sensorFps = 30;
-    private volatile boolean wanted;
+    private volatile boolean wanted;   /* the gadget's ask on this connection; written on the UI thread */
     private String linkStatus = "", deviceLine = "";
     private volatile long devAvail, devRecv;
     private volatile int devShown, devDropped, devMs;
@@ -116,6 +191,7 @@ public final class MainActivity extends Activity
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setIntent(benchOnly(getIntent()));
         readExtras(getIntent());
+        importProofKeyFile(getIntent());
         /* Edge to edge, dark: AppScreen pads the app bar and tab bar by the system bars. */
         getWindow().setDecorFitsSystemWindows(false);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -124,6 +200,9 @@ public final class MainActivity extends Activity
         if (!getIntent().hasExtra("front")) {
             front = up.getBoolean(PREF_FRONT, false);
         }
+        uiSession = new UiSession(this);
+        uiSession.onStopRequested = () -> pick("stop");
+        applyUiExtras();
         screen = new AppScreen(this);
         screen.overlay.setMode(up.getInt(PREF_OVERLAY, StatsOverlay.COMPACT));
         preview = screen.preview;
@@ -154,7 +233,7 @@ public final class MainActivity extends Activity
             @Override
             public void onSurfaceTextureUpdated(SurfaceTexture st) {}
         });
-        String[] perms = {Manifest.permission.CAMERA};
+        String[] perms = {Manifest.permission.CAMERA};   /* Nearby devices: when the BLE link starts */
         boolean all = true;
         for (String p : perms) {
             all &= checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED;
@@ -174,8 +253,22 @@ public final class MainActivity extends Activity
         if (i.hasExtra("target")) {
             target = i.getStringExtra("target");
             deviceAddr = null;
+            explicitTarget = true;
+        }
+        if (i.hasExtra("link")) {
+            ble = "ble".equals(i.getStringExtra("link"));
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_LINK, ble ? "ble" : "wifi").apply();
         }
         if (i.hasExtra("host")) deviceAddr = i.getStringExtra("host");
+        if (i.hasExtra("device")) deviceAddr = i.getStringExtra("device");
+        explicitTarget |= i.hasExtra("host") || i.hasExtra("device");
+        mic = i.getStringExtra("mic");
+        airSet = i.hasExtra("air");
+        air = i.getIntExtra("air", air);
+        benchSecs = i.getIntExtra("bench", 0);
+        l2cap = i.getBooleanExtra("l2cap", false);
+        tone = i.getBooleanExtra("tone", false);
+        toneCodec = i.getStringExtra("tonecodec");   /* sbc (default) or lc3 */
         fps = i.getIntExtra("fps", fps);
         kbpsSet = i.hasExtra("kbps");
         kbps = i.getIntExtra("kbps", kbps);
@@ -193,6 +286,7 @@ public final class MainActivity extends Activity
         intraRefresh = i.getBooleanExtra("ir", true);
         if (i.hasExtra("source")) source = i.getStringExtra("source");
         if (i.hasExtra("clip")) source = CLIP + i.getStringExtra("clip");
+        uiExtras = i.getExtras() != null ? new Bundle(i.getExtras()) : null;
         clipTopKbps = i.getIntExtra("clipkbps", clipTopKbps);
         clipKbpsSet = i.hasExtra("clipkbps");
         clipKbps = clipTopKbps;
@@ -218,15 +312,31 @@ public final class MainActivity extends Activity
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        boolean all = res.length > 0;
         for (int r : res) {
-            if (r != PackageManager.PERMISSION_GRANTED) {
-                connStatus = "Needs camera permission";
-                refreshUi();
-                return;
+            all &= r == PackageManager.PERMISSION_GRANTED;
+        }
+        if (code == REQ_BLUETOOTH) {
+            if (all && ble && linkStarted && link != null) {
+                link.close();   /* its scan stopped at the missing permission: start over */
+                makeLink();
+                startLink();
+                if (picker != null && picker.isShowing()) {
+                    link.scanForPicker();
+                }
             }
+            refreshUi();
+            return;
+        }
+        if (!all) {
+            connStatus = "Needs camera permission";
+            refreshUi();
+            return;
         }
         begin();
     }
+
+    private static final int REQ_BLUETOOTH = 2;
 
     /*
      * The extras (gadget address, source, auto start, ...) are for testing
@@ -234,24 +344,138 @@ public final class MainActivity extends Activity
      * any app could otherwise point the camera at a server of its choosing.
      */
     private Intent benchOnly(Intent i) {
-        if (i == null || (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+        if (i == null) {
+            return null;
+        }
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+            if (i.getExtras() != null) {
+                Log.w(TAG, "launch extras ignored: not a debuggable build");
+            }
+            return new Intent(i).replaceExtras((Bundle) null);
+        }
+        if (i.getExtras() == null || benchMarker()) {
             return i;
         }
-        if (i.getExtras() != null) {
-            Log.w(TAG, "launch extras ignored: not a debuggable build");
+        Intent o = null;
+        for (String k : MARKED_HOOKS) {
+            if (i.hasExtra(k)) {
+                if (o == null) {
+                    o = new Intent(i);
+                }
+                o.removeExtra(k);
+                Log.w(TAG, "--e " + k + " ignored: no files/" + BENCH_MARKER + " (adb shell run-as " + getPackageName()
+                        + " touch files/" + BENCH_MARKER + ")");
+            }
         }
-        return new Intent(i).replaceExtras((Bundle) null);
+        return o != null ? o : i;
     }
+
+    /*
+     * Debug builds are exported to every app on the phone, so the hooks that
+     * record, read a file, load a URL, pick the gadget or link, or change what
+     * streams, plays or starts on its own act only while files/bench exists in
+     * this app's private storage: adb can create it (run-as), other apps can't.
+     */
+    private static final String BENCH_MARKER = "bench";
+
+    private boolean benchMarker() {
+        return new java.io.File(getFilesDir(), BENCH_MARKER).exists();
+    }
+    private static final String[] MARKED_HOOKS = {
+        "rec_secs", "proofkeyfile", "proofgadget", "uiurl", "volume", "spkvol", "play_wav", "pick",
+        "link", "host", "device", "target", "source", "clip", "pattern", "auto", "mic", "tone", "swparams",
+        "dump", "front", "wx", "wy", "ws", "hid", "sw", "swpreset", "venc", "bench", "uidry",
+        "saveclips", "benchdump", "latlog",
+    };
 
     /* `am start ... --es pick <what>` on the running app presses a button (what: as in pick()). */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         intent = benchOnly(intent);
+        if (intent.getExtras() != null) {
+            uiExtras = new Bundle(intent.getExtras());
+            applyUiExtras();
+        }
         String what = intent.getStringExtra("pick");
         if (what != null) {
             pick(what);
         }
+        /* Test hooks act only on a fresh `am start`, never on an intent Android replays
+         * (from recents or a restored task): a replayed hook once acted again. */
+        boolean replayed = (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+        if (replayed) {
+            return;
+        }
+        importProofKeyFile(intent);
+        if (intent.hasExtra("volume")) {
+            setSpeakerVolume(intent.getIntExtra("volume", 0));   /* the gadget's speaker, 0-100 */
+        }
+        String pw = intent.getStringExtra("play_wav");   /* bench: speak a WAV from the phone's speaker (into a gadget's mic) */
+        if (pw != null) {
+            playWavOnPhone(new java.io.File(getFilesDir(), new java.io.File(pw).getName()));
+        }
+        if (intent.hasExtra("rec_secs")) {
+            recordMic(intent.getIntExtra("rec_secs", 5));   /* measuring a gadget's speaker */
+        }
+    }
+
+    /*
+     * --es proofkeyfile <name> [--es proofgadget <advertised name>]: a gadget's
+     * token proof key (mg_ble_client's proof_key) from a file in the app's
+     * files/, read once and deleted, so the key is never on a command line.
+     * Without proofgadget it goes with the gadget connected over BLE now.
+     */
+    private void importProofKeyFile(Intent i) {
+        String f = i != null ? i.getStringExtra("proofkeyfile") : null;
+        if (f == null) {
+            return;
+        }
+        java.io.File file = new java.io.File(getFilesDir(), new java.io.File(f).getName());
+        String gadget = i.hasExtra("proofgadget") ? i.getStringExtra("proofgadget") : proofGadget();
+        try {
+            String hex = new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.US_ASCII);
+            if (gadget == null || !setProofKey(gadget, hex)) {
+                Log.w(TAG, "proof key file " + file.getName() + ": " + (gadget == null
+                        ? "no gadget (connect over BLE, or give --es proofgadget)" : "not a key") + "; nothing saved");
+            }
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "proof key file " + file.getName() + ": can't read it");
+        }
+        if (file.exists() && !file.delete()) {
+            Log.w(TAG, "proof key file " + file.getName() + ": couldn't delete it");
+        }
+    }
+
+    /** The gadget a proof key set now goes with: the one connected over BLE (its advertised name), else null. */
+    String proofGadget() {
+        GadgetLink g = bleLink();
+        return g != null ? g.gadgetName() : null;
+    }
+
+    /** Sets (or with "" removes) a gadget's token proof key; false if it isn't one. The connected gadget proves it again. */
+    boolean setProofKey(String gadget, String hex) {
+        if (!ProofKeys.set(this, gadget, hex)) {
+            return false;
+        }
+        GadgetLink g = bleLink();
+        if (g != null && gadget.equals(g.gadgetName())) {
+            if (uiSession != null && uiSession.active() && UiSession.MIRROR.equals(uiSession.source())) {
+                pick("stop");   /* the screen goes only to a gadget proved with the key kept now */
+            }
+            g.proofKeyChanged();
+        }
+        refreshUi();
+        return true;
+    }
+
+    /** Where the connected gadget's token proof stands, for the UI tab. */
+    String proofLine() {
+        GadgetLink g = bleLink();
+        if (g == null) {
+            return "Screen mirror needs the BLE link";
+        }
+        return g.proofLine();
     }
 
     /* What the lists and adb's "pick" do: switch what streams, or stop. */
@@ -264,6 +488,14 @@ public final class MainActivity extends Activity
             showPicker();
             return;
         }
+        if ("disconnect".equals(what)) {
+            disconnectGadget();
+            return;
+        }
+        if ("connect".equals(what)) {
+            connectLast();
+            return;
+        }
         if ("rate".equals(what)) {
             screen.show("Video", "Encoding");
             return;
@@ -274,20 +506,47 @@ public final class MainActivity extends Activity
         }
         if (what.startsWith(CLIP) && isClip() && link.streaming()) {
             source = what;   /* one clip to another: the stream goes on, the clip switches */
+            grant.grant();
             startClip(lastSize, link.caps());
             return;
         }
-        if (link.streaming()) {
+        if ("tone".equals(what)) {
+            toggleTone();
+            return;
+        }
+        if ("flushmic".equals(what)) {
+            flushMic();
+            return;
+        }
+        if ("link".equals(what)) {
+            switchLink();
+            return;
+        }
+        if ("uisnap".equals(what)) {
+            uiSession.snapshot(getExternalFilesDir(null));   /* bench: files/ui_snap_*.png, ui_snap_sent.yuv */
+            return;
+        }
+        if ("uimenu".equals(what)) {
+            uiSession.setMenu(!uiSession.menuOpen());   /* bench: as the gadget's menu button */
+            return;
+        }
+        if (link.streaming() || uiSession.active()) {
             stopStream();
         }
         if ("stop".equals(what)) {
             auto = false;
+            grant.revoke();
             return;
         }
         source = what;
         auto = true;
-        if (link.ready()) {
+        grant.grant();
+        if (UiSession.isUi(what) && uiSession.dry) {
             ui.postDelayed(this::startStream, 300);
+            return;
+        }
+        if (link.ready()) {
+            startStreamSoon();
         }
     }
 
@@ -310,21 +569,40 @@ public final class MainActivity extends Activity
         }
         refreshUi();
         if (!wantVp8Set) {
-            wantVp8 = rp.getBoolean(PREF_CODEC, false);
+            wantVp8 = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_CODEC, false);
         }
         refreshUi();
-        if (target == null && deviceAddr == null) {
-            android.content.SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
-            deviceAddr = p.getString(PREF_ADDR, null);
-            target = p.getString(PREF_NAME, null);
+        android.content.SharedPreferences lp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (getIntent() == null || !getIntent().hasExtra("link")) {
+            ble = "ble".equals(lp.getString(PREF_LINK, "wifi"));
         }
-        link = new WifiLink(this, this);
-        link.setTarget(deviceAddr, target);
-        cam = new CameraStreamer(this, front, this);
+        if (target == null && deviceAddr == null) {
+            deviceAddr = lp.getString(prefAddr(), null);
+            target = lp.getString(prefName(), null);
+        }
+        lastAddr = deviceAddr;
+        lastName = target;
+        gadgetOff = !explicitTarget && lp.getBoolean(prefOff(), false);
+        if (explicitTarget) {
+            lp.edit().putBoolean(prefOff(), false).apply();
+        }
+        if (gadgetOff) {
+            grant.close();   /* nothing starts until a gadget is picked */
+            Log.i(TAG, "disconnected by the user last time: not connecting to " + lastName + " until a gadget is picked");
+            deviceAddr = null;
+            target = null;
+            connStatus = "Not connected";
+        }
+        /* The meter before the link: makeLink() hands it to the link, and a
+         * link made without one never reports latency. */
         meter = new LatencyMeter();
         meter.perFrame = latLog;
+        makeLink();
+        if (getIntent() != null && getIntent().getBooleanExtra("auto", false)) {
+            grant.grant();   /* a bench's --ez auto true (it needs files/bench): the first connection */
+        }
+        cam = new CameraStreamer(this, front, this);
         cam.meter = meter;
-        link.meter = meter;
         cam.benchDump = benchDump;
         cam.encParams = getIntent() != null ? getIntent().getStringExtra("venc") : null;
         cam.intraRefreshFrames = getIntent() != null ? getIntent().getIntExtra("irframes", 0) : 0;
@@ -347,11 +625,117 @@ public final class MainActivity extends Activity
         cam.intraRefresh = intraRefresh;
         cam.minAeFps = aeFps;
         cam.sensorFps = sensorFps;
-        link.start();
+        if (!gadgetOff) {
+            startLink();
+        }
+        if (auto && UiSession.isUi(source) && uiSession.dry) {
+            ui.postDelayed(this::startStream, 500);
+        }
+    }
+
+    private void makeLink() {
+        grant.linkRemade();   /* closing a link reports no disconnect */
+        wanted = false;
+        if (ble) {
+            GadgetLink g = new GadgetLink(this, target, this);
+            g.airCap = air;
+            g.writeMax = getIntent() != null ? getIntent().getIntExtra("wmax", 495) : 495;
+            g.bufferOverride = getIntent() != null ? getIntent().getIntExtra("vbuf", 0) : 0;   /* bench: a small gadget's ring */
+            g.fpsOverride = getIntent() != null ? getIntent().getIntExtra("vfps", 0) : 0;
+            g.audioParams = getIntent() != null ? getIntent().getIntExtra("aparams", 3) : 3;   /* 2 full 251-byte LL packets (495 + 4 L2CAP + 3 ATT): 512 adds a 17-byte third packet and measured ~20% slower */
+            g.useL2cap = l2cap;
+            link = g;
+        } else {
+            link = new WifiLink(this, this);
+        }
+        link.setTarget(deviceAddr, target);
+        link.meter = meter;
+    }
+
+    /* The Link button: BLE <-> Wi-Fi, each with the gadget last picked on it. */
+    private void switchLink() {
+        if (link.streaming()) {
+            stopStream();
+        }
+        link.close();
+        ble = !ble;
+        android.content.SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+        p.edit().putString(PREF_LINK, ble ? "ble" : "wifi").apply();
+        deviceAddr = p.getString(prefAddr(), null);
+        target = p.getString(prefName(), null);
+        micStarted = false;
+        makeLink();
+        linkStatus = ble ? "BLE" : "Wi-Fi";
+        lastAddr = deviceAddr;
+        lastName = target;
+        gadgetOff = p.getBoolean(prefOff(), false);
+        if (gadgetOff) {
+            grant.close();
+            deviceAddr = null;
+            target = null;
+            link.setTarget(null, null);
+            linkStarted = false;
+        } else {
+            grant.reopen();
+            startLink();
+        }
+    }
+
+    /*
+     * The gadget's link only while the app is in the foreground or streams UI: a link kept (or
+     * a reconnect attempt left pending) in the background holds the gadget, which then stops
+     * advertising to anything else. 30 s after the app leaves the foreground with no UI
+     * stream (or after one ends there), the link closes; it opens again when the app comes back.
+     */
+    private boolean visible, parked;
+    private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable park = () -> {
+        if (visible || parked || gadgetOff || link == null) return;
+        if (uiSession != null && uiSession.active()) {
+            /* A UI stream (the screen mirror above all: the user went to another app to show it)
+             * holds the link while it runs; look again once it may have ended. */
+            mainHandler.postDelayed(this.park, 30000);
+            return;
+        }
+        Log.i(TAG, "background, no UI stream: closing the link to the gadget");
+        if (link.streaming()) stopStream();
+        link.close();
+        parked = true;
+        refreshUi();
+    };
+
+    private void parkLater() {
+        mainHandler.removeCallbacks(park);
+        if (!visible && !parked) mainHandler.postDelayed(park, 30000);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        visible = true;
+        mainHandler.removeCallbacks(park);
+        if (parked && link != null && !gadgetOff) {
+            parked = false;
+            Log.i(TAG, "foreground: opening the link to the gadget again");
+            makeLink();
+            startLink();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        visible = false;
+        parkLater();
+        super.onStop();
     }
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacks(park);
+        ui.removeCallbacksAndMessages(null);
+        if (uiSession != null) {
+            uiSession.stop();   /* its encoder, GL thread, offscreen page or screen capture */
+        }
         previewDecoder.stop();
         synchronized (clipLock) {
             if (clipThread != null) {
@@ -369,12 +753,49 @@ public final class MainActivity extends Activity
     /* ---- streaming ------------------------------------------------------ */
 
     private void startStream() {
-        VideoLink.Caps c = link.caps();
+        if (grant.closed()) {
+            return;   /* Disconnect: nothing starts until a gadget is picked */
+        }
+        VideoLink.Caps c = link.caps().snapshot();
+        if (UiSession.isUi(source)) {
+            if (!uiSession.dry && bleLink() == null) {
+                linkStatus = "UI streams need the BLE link";
+                return;
+            }
+            mirrorAfterProof = false;
+            GadgetLink pg = bleLink();
+            if (UiSession.MIRROR.equals(source) && !uiSession.dry && !pg.proven()) {
+                /* The screen goes only to a gadget that proved this phone's key on this connection. */
+                mirrorAfterProof = pg.proofPending();
+                linkStatus = mirrorAfterProof ? "Screen mirror waits for the gadget's token proof" : "No screen mirror: " + pg.proofLine();
+                connStatus = linkStatus;
+                Log.i(TAG, "ui: screen mirror not started: " + pg.proofLine());
+                refreshUi();
+                return;
+            }
+            previewDecoder.stop();
+            cam.stop();
+            cam.setPreview(null);
+            screen.cameraTransform(false);
+            if (previewTexture != null) {
+                int ps = Math.max(240, c.uiW > 0 ? c.uiW : 360);
+                previewTexture.setDefaultBufferSize(ps, ps);
+                uiSession.setPreview(previewSurface, ps, ps);
+            }
+            if (!uiSession.start(link, source)) {
+                linkStatus = "UI stream failed to start (see the log)";
+            }
+            return;
+        }
         int s = size > 0 ? size : c.sugW;
         s = Math.min(s, Math.min(c.maxW, c.maxH)) & ~7;
         lastSize = s;
         if (isClip()) {
             startClip(s, c);
+            return;
+        }
+        if ("camera".equals(source) && bleLink() != null && grant.needsCameraAsk(auto && benchMarker())) {
+            askCamera();   /* the gadget's ask starts this phone's camera only on the user's yes */
             return;
         }
         int f = Math.min(fps, c.maxFps);
@@ -401,6 +822,22 @@ public final class MainActivity extends Activity
             Log.i(TAG, "VP8 picked, but " + (c.vp8 ? "this build has no libmgvpx" : "the gadget doesn't decode it") + ": H.264");
         }
         cam.swEncoder = camVp8 ? "vp8" : baseSw;
+        /* On BLE, every frame within half the gadget's ring. Under 16 KB (a tiny-RAM gadget) the
+         * phone's encoder's keyframes (5-8 times a delta frame) don't fit: x264 holds them. */
+        cam.maxFrameBytes = bleLink() != null ? (int) Math.max(0, c.maxFrame() - VideoFrame.HEADER_LEN) : 0;
+        cam.vbvCeilKbps = maxKbps;
+        boolean hwAsked = getIntent() != null && "hw".equals(getIntent().getStringExtra("sw"));   /* --es sw hw: test the fallback */
+        if (cam.swEncoder == null && bleLink() != null && c.maxFrame() < 16384 && X264.available() && !hwAsked) {
+            cam.swEncoder = "x264";
+            Log.i(TAG, "a " + c.buffer + " B ring: x264, frames up to " + cam.maxFrameBytes + " B");
+        }
+        GadgetLink g = bleLink();
+        if (g != null) {
+            /* Bytes in the air before the gadget's credit comes back: 3 KB holds a
+             * 15 ms link to ~800 kb/s, 6 KB lets it carry ~870 (more adds only
+             * latency). Smaller pictures (under 600 kb/s suggested) keep 3 KB. */
+            g.airCap = airSet ? air : c.sugKbps >= 600 ? 6144 : air;
+        }
         /* Past 240 px on a gadget that decodes bands in parallel (one per
          * core), send two: x264 or VP8 only (one encoder per band). */
         int bands = c.maxTiles >= 2 && s > 240 && s % 32 == 0 && cam.swEncoder != null && !noBands ? 2 : 1;
@@ -409,6 +846,7 @@ public final class MainActivity extends Activity
         Log.i(TAG, "starting " + s + "x" + s + " @" + f + " " + kbps + " kb/s (adaptive up to " + maxKbps + ")"
                 + (bands > 1 ? ", two bands" : ""));
         link.startStreaming(s, s, f, kbps, 0, bands, camVp8);
+        startMic();
         setLiveBudget();
         try {
             cam.pattern = "pattern".equals(source);
@@ -448,7 +886,10 @@ public final class MainActivity extends Activity
     }
 
     private String clipKey(String name, int size, int kbps) {
-        return name + "|" + size + "|" + kbps + (clipVp8() ? "|vp8" : "");
+        /* A small gadget's frame cap and frame rate make other encodes of the same clip. */
+        int cap = ClipStreamer.maxFrameBytes;
+        return name + "|" + size + "|" + kbps + (clipVp8() ? "|vp8" : "") + (cap > 0 && cap < 16384 ? "|max" + cap : "")
+                + (ClipStreamer.maxFps > 0 && ClipStreamer.maxFps < 24 ? "|fps" + ClipStreamer.maxFps : "");
     }
 
     /* Clips as VP8: picked, the gadget decodes it, and the build has libvpx. */
@@ -456,19 +897,13 @@ public final class MainActivity extends Activity
         return wantVp8 && link != null && link.caps().vp8 && Vpx.available();
     }
 
-    /* The Codec button: H.264 or VP8 from now on, for whatever streams; the stream starts over in it. */
+    /* The Codec button: H.264 or VP8 from now on; a camera or clip stream that runs starts over in it. */
     void setCodec(boolean vp8) {
         wantVp8 = vp8;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_CODEC, vp8).apply();
         refreshUi();
         Log.i(TAG, "codec: " + (vp8 ? "VP8" : "H.264"));
-        if (link != null && link.streaming()) {
-            String src = source;
-            stopStream();
-            source = src;
-            auto = true;
-            ui.postDelayed(this::startStream, 300);
-        }
+        restartRunning(VideoLink.Running.CAMERA, VideoLink.Running.CLIP);
     }
 
     void refreshUi() {
@@ -491,8 +926,10 @@ public final class MainActivity extends Activity
     int[] clipLevels() {
         int[] l = clipSize > 320 ? new int[] {clipTopKbps, clipTopKbps * 90 / 100, clipTopKbps * 80 / 100, clipTopKbps * 70 / 100}
                 : new int[] {clipTopKbps, clipTopKbps * 78 / 100, clipTopKbps * 60 / 100, clipTopKbps * 45 / 100};
+        /* 180, or less for a BLE gadget suggesting under 400 */
+        int floor = bleLink() != null ? Math.min(180, clipTopKbps * 45 / 100) : 180;
         for (int i = 0; i < l.length; i++) {
-            l[i] = Math.max(180, l[i]);
+            l[i] = Math.max(floor, l[i]);
         }
         return l;
     }
@@ -580,11 +1017,11 @@ public final class MainActivity extends Activity
      */
     private ClipStreamer.Clip bestClip(String name, int s) {
         ClipStreamer.Clip exact = clips.get(clipKey(name, s, clipKbps)), below = null, above = null;
-        if (exact != null) {
+        if (exact != null && exact.fits()) {
             return exact;
         }
         for (ClipStreamer.Clip c : clips.values()) {
-            if (!c.name.equals(name) || c.size != s || c.vp8 != clipVp8()) {
+            if (!c.name.equals(name) || c.size != s || c.vp8 != clipVp8() || !c.fits()) {
                 continue;
             }
             if (c.kbps < clipKbps && (below == null || c.kbps > below.kbps)) {
@@ -600,6 +1037,9 @@ public final class MainActivity extends Activity
     private void playWanted() {
         if (!isClip() || player == null || !link.ready()) {
             return;
+        }
+        if (!link.streaming() && !grant.allows(auto || wanted, askOk())) {
+            return;   /* a late encode starts only what this connection still allows; a running clip just switches */
         }
         String name = source.substring(CLIP.length());
         ClipStreamer.Clip best = bestClip(name, clipSize);
@@ -664,8 +1104,70 @@ public final class MainActivity extends Activity
         refreshUi();
     }
 
+    /* --es mic sbc|lc3 (BLE): also capture the gadget's mic (start_mic), saved as files/mic.<codec>. */
+    private boolean micStarted, micAfterProof;
+    private int spkvolAfterProof = -1;
+
+    private void startMic() {
+        GadgetLink g = bleLink();
+        if (g != null && mic != null && !micStarted && g.proofPending()) {
+            micAfterProof = true;
+            Log.i(TAG, "mic capture waits for the token proof");
+            return;
+        }
+        if (g != null && mic != null && !micStarted) {
+            micStarted = true;
+            int codec = "lc3".equals(mic) ? 19 : 1;
+            try {
+                g.micOut = new java.io.BufferedOutputStream(new java.io.FileOutputStream(
+                        new java.io.File(getExternalFilesDir(null), "mic." + mic)));
+            } catch (java.io.IOException e) {
+                Log.w(TAG, "mic file", e);
+            }
+            g.sendControl(new byte[] {(byte) Mg.CMD_START_MIC, (byte) codec});
+            Log.i(TAG, "mic capture on, codec " + mic);
+        }
+    }
+
+    private void flushMic() {
+        GadgetLink g = bleLink();
+        java.io.OutputStream mo = g == null ? null : g.micOut;
+        if (mo != null) {
+            try {
+                mo.flush();
+            } catch (java.io.IOException e) {
+                Log.w(TAG, "mic file", e);
+            }
+        }
+    }
+
+    /* An SBC tone loop played on the gadget beside the video, over BLE (its
+     * speaker volume decides whether it's heard). */
+    private void toggleTone() {
+        GadgetLink g = bleLink();
+        if (g == null) {
+            return;
+        }
+        if (g.audioOn()) {
+            g.stopAudio();
+            return;
+        }
+        boolean lc3 = "lc3".equals(toneCodec);
+        try (java.io.InputStream in = getAssets().open(lc3 ? "tone.lc3" : "tone.sbc")) {
+            g.startAudio(in.readAllBytes(), lc3 ? 40 : 60, lc3);
+        } catch (java.io.IOException e) {
+            Log.e(TAG, "tone asset", e);
+        }
+    }
+
     private void stopStream() {
+        uiSession.stop();
         previewDecoder.stop();
+        GadgetLink g = bleLink();
+        if (g != null) {
+            g.stopAudio();
+        }
+        flushMic();
         cam.stop();
         if (player != null) {
             player.stop();
@@ -730,6 +1232,173 @@ public final class MainActivity extends Activity
     private android.app.AlertDialog picker;
     private android.widget.ArrayAdapter<String> pickerRows;
     private final java.util.ArrayList<String> pickerAddrs = new java.util.ArrayList<>();
+    /* The picker's rows in a fixed order while it's open: the connected (or last
+     * used) gadget first, then those already seen by name, then each new one at
+     * the end. Signal and name update a row in place; a gadget that stops
+     * advertising stays, greyed. Only Rescan rebuilds the order. */
+    private final java.util.ArrayList<String> pickerOrder = new java.util.ArrayList<>();
+    private final java.util.ArrayList<Boolean> pickerGrey = new java.util.ArrayList<>();
+    private static final long PICKER_STALE_MS = 15000;
+    private final Runnable pickerTick = new Runnable() {
+        @Override
+        public void run() {
+            if (picker != null) {
+                refreshPicker();
+                ui.postDelayed(this, 2000);
+            }
+        }
+    };
+
+    private void startLink() {
+        if (ble && !GadgetLink.permitted(this)) {
+            requestPermissions(GadgetLink.PERMISSIONS, REQ_BLUETOOTH);
+        }
+        linkStarted = true;
+        link.start();
+    }
+
+    boolean gadgetOff() {
+        return gadgetOff;
+    }
+
+    /** The gadget Connect goes back to after a Disconnect (null: none remembered). */
+    String lastGadget() {
+        return lastName != null ? lastName : lastAddr;
+    }
+
+    /**
+     * Disconnect: ends what's running on the gadget cleanly (a UI or video
+     * stream, the mic), then closes the link and stays off (gadgetOff). Doesn't
+     * unpair or forget: Connect, or picking the gadget again, comes back to it.
+     */
+    void disconnectGadget() {
+        if (gadgetOff || link == null) {
+            return;
+        }
+        /* First: nothing from before the Disconnect (the gadget's ask during the close's grace, a retry,
+         * the camera's yes, a proof ending) starts anything again. */
+        grant.close();
+        wanted = false;
+        startAfterProof = -1;
+        askAfterProof = false;
+        mirrorAfterProof = false;
+        if (cameraAsk != null) {
+            android.app.AlertDialog a = cameraAsk;
+            cameraAsk = null;
+            a.dismiss();
+        }
+        String name = gadgetName();
+        Log.i(TAG, "disconnect " + name + " (the user's choice): no reconnecting until a gadget is picked");
+        if (link.streaming() || uiSession.active()) {
+            stopStream();     /* UI stream stop, stop_streaming */
+        }
+        GadgetLink g = bleLink();
+        if (g != null && micStarted) {
+            g.sendControl(new byte[] {(byte) Mg.CMD_STOP_MIC});
+            micStarted = false;
+        }
+        gadgetOff = true;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(prefOff(), true).apply();
+        mainHandler.removeCallbacks(park);
+        parked = false;
+        lastAddr = link.connectedAddress() != null ? link.connectedAddress() : deviceAddr;
+        Seen seenAs = lastAddr != null ? seen.get(lastAddr) : null;
+        lastName = seenAs != null && seenAs.name != null ? seenAs.name : name;
+        if (lastAddr != null || lastName != null) {
+            /* Connect comes back to this one, after a restart too. */
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(prefAddr(), lastAddr)
+                    .putString(prefName(), lastName).apply();
+        }
+        deviceAddr = null;
+        target = null;
+        connStatus = "Disconnecting from " + name + "…";
+        refreshUi();
+        VideoLink old = link;
+        /* A moment for the stop writes to go out before the link closes. */
+        ui.postDelayed(() -> {
+            old.close();
+            if (link == old && gadgetOff) {
+                makeLink();          /* no gadget, not started: nothing scans or connects */
+                linkStarted = false;
+                connStatus = "Not connected";
+            }
+            Log.i(TAG, "disconnected from " + name + " (stays off until a gadget is picked)");
+            refreshUi();
+        }, 600);
+    }
+
+    /** Connect after a Disconnect: the last gadget, or the picker when there's none. */
+    void connectLast() {
+        if (!gadgetOff) {
+            return;
+        }
+        if (lastAddr == null && lastName == null) {
+            showPicker();
+            return;
+        }
+        gadgetOff = false;
+        grant.reopen();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(prefOff(), false).apply();
+        deviceAddr = lastAddr;
+        target = lastName;
+        Log.i(TAG, "connect to " + lastGadget() + " again");
+        link.close();
+        makeLink();
+        startLink();
+        refreshUi();
+    }
+
+    /** Forget: Disconnect, unpair it from this phone if it's paired, and forget it here. */
+    void forgetGadget() {
+        String name = gadgetOff ? lastGadget() : gadgetName();
+        if (name == null) {
+            return;
+        }
+        new android.app.AlertDialog.Builder(this, Ui.DIALOG_THEME)
+                .setTitle("Forget " + name + "?")
+                .setMessage("The app disconnects from it and forgets it, its proof key included. If it's paired with "
+                        + "this phone (for touch input), that pairing is removed too. To use it again, choose it from "
+                        + "the list.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Forget", (d, w) -> {
+                    String addr = link.connectedAddress() != null ? link.connectedAddress() : lastAddr;
+                    disconnectGadget();
+                    ui.postDelayed(() -> {
+                        boolean unpaired = unpair(addr);
+                        lastAddr = null;
+                        lastName = null;
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(prefAddr()).remove(prefName()).apply();
+                        if (ProofKeys.fingerprint(this, name) != null) {
+                            ProofKeys.set(this, name, "");   /* set up again, it needs its new key */
+                        }
+                        Log.i(TAG, "forgot " + name + (unpaired ? ", and unpaired it" : ""));
+                        connStatus = "Not connected";
+                        refreshUi();
+                    }, 800);
+                })
+                .show();
+    }
+
+    /** Removes this phone's pairing with addr, if any; false when there's none or it can't. */
+    private boolean unpair(String addr) {
+        if (!ble || addr == null) {
+            return false;
+        }
+        try {
+            android.bluetooth.BluetoothAdapter a = getSystemService(android.bluetooth.BluetoothManager.class).getAdapter();
+            android.bluetooth.BluetoothDevice d = a.getRemoteDevice(addr);
+            if (d.getBondState() == android.bluetooth.BluetoothDevice.BOND_NONE) {
+                return false;
+            }
+            Object ok = d.getClass().getMethod("removeBond").invoke(d);
+            return Boolean.TRUE.equals(ok);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "couldn't unpair " + addr + ": " + e);
+            android.widget.Toast.makeText(this, "Remove it in Bluetooth settings too: it's still paired",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
 
     /* Lists the gadgets found on the network; tapping one connects to it
      * (and drops the current link). The choice is remembered. */
@@ -746,6 +1415,9 @@ public final class MainActivity extends Activity
                 String row = getItem(pos);
                 int nl = row.indexOf('\n');
                 android.text.SpannableString sp = new android.text.SpannableString(row);
+                if (pos < pickerGrey.size() && pickerGrey.get(pos)) {
+                    sp.setSpan(new android.text.style.ForegroundColorSpan(Ui.TEXT2), 0, row.length(), 0);
+                }
                 if (nl > 0) {
                     sp.setSpan(new android.text.style.RelativeSizeSpan(0.8f), nl, row.length(), 0);
                     sp.setSpan(new android.text.style.ForegroundColorSpan(Ui.TEXT2), nl, row.length(), 0);
@@ -764,10 +1436,15 @@ public final class MainActivity extends Activity
             }
             String addr = pickerAddrs.get(pos);
             Seen s = seen.get(addr);
-            String name = s != null ? s.name : addr;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_ADDR, addr).putString(PREF_NAME, name).apply();
+            String name = s != null ? s.name : addr.equalsIgnoreCase(lastAddr) && lastName != null ? lastName : addr;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(prefAddr(), addr).putString(prefName(), name)
+                    .putBoolean(prefOff(), false).apply();
             deviceAddr = addr;
             target = name;
+            lastAddr = addr;
+            lastName = name;
+            gadgetOff = false;
+            grant.reopen();
             Log.i(TAG, "picked " + name + " " + addr);
             if (link.streaming()) {
                 stopStream();
@@ -779,41 +1456,113 @@ public final class MainActivity extends Activity
                 .setTitle("Choose a gadget")
                 .setView(list)
                 .setNegativeButton("Cancel", null)
+                .setNeutralButton("Rescan", null)
                 .create();
+        picker.setOnShowListener(d -> picker.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            /* The one way to reorder: forget what was seen, start the list over. */
+            String keep = pinnedPickerAddr();
+            seen.keySet().removeIf(a -> !a.equalsIgnoreCase(keep));
+            buildPickerOrder();
+            refreshPicker();
+            link.scanForPicker();
+        }));
         picker.setOnDismissListener(d -> {
             link.pickerClosed();
             picker = null;
+            ui.removeCallbacks(pickerTick);
+            if (gadgetOff) {
+                /* Closed without a choice after a Disconnect: stop the picker's scan, stay off. */
+                link.close();
+                makeLink();
+                linkStarted = false;
+                connStatus = "Not connected";
+                refreshUi();
+            }
         });
         picker.show();
+        buildPickerOrder();
         refreshPicker();
+        ui.removeCallbacks(pickerTick);
+        ui.postDelayed(pickerTick, 2000);
+        if (!linkStarted) {
+            startLink();   /* after a Disconnect: a link with no gadget, for the picker's scan */
+        }
         link.scanForPicker();
     }
 
+    /* The connected gadget, else the last one used (null: none): pinned at the top from the start. */
+    private String pinnedPickerAddr() {
+        String cur = link.connectedAddress();
+        return cur != null ? cur : lastAddr;
+    }
+
+    /* The order at opening (or Rescan): the pinned gadget, then those seen lately by name. */
+    private void buildPickerOrder() {
+        pickerOrder.clear();
+        String pin = pinnedPickerAddr();
+        if (pin != null) {
+            pickerOrder.add(pin);   /* from the start, seen yet or not, so it never pushes the rows down later */
+        }
+        long now = SystemClock.elapsedRealtime();
+        java.util.List<java.util.Map.Entry<String, Seen>> rows = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Seen> e : seen.entrySet()) {
+            if (now - e.getValue().at < PICKER_STALE_MS && !e.getKey().equalsIgnoreCase(pin)) {
+                rows.add(e);
+            }
+        }
+        rows.sort((a, b) -> {
+            int c = String.valueOf(a.getValue().name).compareToIgnoreCase(String.valueOf(b.getValue().name));
+            return c != 0 ? c : a.getKey().compareToIgnoreCase(b.getKey());
+        });
+        for (java.util.Map.Entry<String, Seen> e : rows) {
+            pickerOrder.add(e.getKey());
+        }
+    }
+
+    /* Rows in pickerOrder; a gadget seen for the first time goes at the end. Never reorders. */
     private void refreshPicker() {
         if (picker == null) {
             return;
         }
         long now = SystemClock.elapsedRealtime();
         String cur = link.connectedAddress();
-        java.util.List<java.util.Map.Entry<String, Seen>> rows = new java.util.ArrayList<>();
+        String pin = pinnedPickerAddr();
         for (java.util.Map.Entry<String, Seen> e : seen.entrySet()) {
-            if (now - e.getValue().at < 15000 || e.getKey().equalsIgnoreCase(cur)) {
-                rows.add(e);
+            if (now - e.getValue().at < PICKER_STALE_MS && !pickerOrder.contains(e.getKey())) {
+                pickerOrder.add(e.getKey());
             }
         }
-        rows.sort((a, b) -> b.getValue().rssi - a.getValue().rssi);
         pickerAddrs.clear();
-        pickerRows.clear();
-        for (java.util.Map.Entry<String, Seen> e : rows) {
-            boolean on = e.getKey().equalsIgnoreCase(cur);
-            pickerAddrs.add(e.getKey());
-            int rssi = e.getValue().rssi;
-            pickerRows.add(String.format(java.util.Locale.US, "%s%s\n%s%s", e.getValue().name,
-                                         on ? "  (connected)" : "", e.getKey(), rssi != 0 ? " · " + rssi + " dBm" : ""));
+        pickerGrey.clear();
+        java.util.ArrayList<String> rows = new java.util.ArrayList<>();
+        for (String addr : pickerOrder) {
+            Seen sn = seen.get(addr);
+            if (sn == null) {
+                /* The pinned gadget, not heard from yet. */
+                pickerAddrs.add(addr);
+                pickerGrey.add(true);
+                rows.add((lastName != null && addr.equalsIgnoreCase(lastAddr) ? lastName : addr) + "  (last used)\n"
+                        + addr + " · looking…");
+                continue;
+            }
+            boolean on = addr.equalsIgnoreCase(cur);
+            long age = now - sn.at;
+            boolean stale = !on && age >= PICKER_STALE_MS;
+            String tag = on ? "  (connected)" : addr.equalsIgnoreCase(pin) ? "  (last used)" : "";
+            String detail = stale ? " · not seen for " + age / 1000 + " s"
+                    : sn.rssi != 0 ? " · " + sn.rssi + " dBm" : "";
+            pickerAddrs.add(addr);
+            pickerGrey.add(stale);
+            rows.add(String.format(java.util.Locale.US, "%s%s\n%s%s", sn.name, tag, addr, detail));
         }
         if (rows.isEmpty()) {
-            pickerRows.add("Looking for gadgets…");
+            rows.add("Looking for gadgets…");
         }
+        /* In place: same rows, new text; the list keeps its scroll and the rows their places. */
+        pickerRows.setNotifyOnChange(false);
+        pickerRows.clear();
+        pickerRows.addAll(rows);
+        pickerRows.notifyDataSetChanged();
     }
 
     @Override
@@ -845,16 +1594,21 @@ public final class MainActivity extends Activity
 
     @Override
     public void onReady(VideoLink.Caps caps) {
+        VideoLink from = link;
         linkStatus = "Connected: " + caps;
         connStatus = "Connected over " + link.kind();
         clipSize = Math.min(size > 0 ? size : caps.sugW, Math.min(caps.maxW, caps.maxH)) & ~7;
         clipRound = caps.round;
+        ClipStreamer.maxFrameBytes = bleLink() != null ? (int) Math.max(0, caps.maxFrame() - VideoFrame.HEADER_LEN) : 0;
+        ClipStreamer.maxFps = bleLink() != null ? caps.maxFps : 0;
         /* A gadget suggesting a high bitrate (a big picture, or Wi-Fi) gets
          * clips aimed at 92% of it, peaks held under the link
          * (ClipStreamer.encodeLoopsX264), and a 300 ms playout delay for
          * the peaks' queue. */
         if (!clipKbpsSet) {
-            clipTopKbps = caps.sugKbps >= 600 ? caps.sugKbps * 92 / 100 : 450;
+            /* Below 450 over BLE (a small gadget's link or decoder): its own suggestion. */
+            clipTopKbps = caps.sugKbps >= 600 ? caps.sugKbps * 92 / 100
+                    : bleLink() != null && caps.sugKbps > 0 && caps.sugKbps < 450 ? caps.sugKbps : 450;
         }
         if (!playoutSet) {
             playoutMs = caps.sugKbps >= 600 && caps.maxPlayoutMs >= 300 ? 300 : 200;
@@ -865,19 +1619,196 @@ public final class MainActivity extends Activity
             clipKbps = clipLevels()[0];
         }
         wakeClipWorker();
+        GadgetLink g = bleLink();
+        if (g != null) {
+            /* --ei spkvol N: the gadget's speaker_volume set on connect, before any playback (benches). */
+            int sv = getIntent() != null ? getIntent().getIntExtra("spkvol", -1) : -1;
+            spkvolAfterProof = -1;
+            micAfterProof = false;
+            if (sv >= 0 && sv <= 100 && g.proofPending()) {
+                spkvolAfterProof = sv;   /* a set-up gadget takes the setting only after the proof */
+            } else if (sv >= 0 && sv <= 100) {
+                g.setSpeakerVolume(sv);
+                Log.i(TAG, "speaker_volume " + sv + " sent (--ei spkvol)");
+            }
+            g.askSpeakerVolume();
+        }
+        if (g != null && tone && !g.audioOn()) {
+            ui.postDelayed(() -> {
+                startMic();
+                toggleTone();
+            }, 1500);
+        }
+        if (g != null && benchSecs > 0) {
+            g.benchReceive(benchSecs);
+            return;
+        }
         ui.post(() -> {
-            if ((auto || wanted) && !link.streaming()) {
+            if (from != link) {
+                return;   /* a link already replaced */
+            }
+            if ((userStart() || (auto || wanted) && askAllowed()) && !link.streaming()) {
                 startStream();
             }
         });
     }
 
+    /* A screen mirror asked for before the token proof finished: it starts on a match. */
+    private boolean mirrorAfterProof;
+    /* A start the gadget refused until the proof (the connection's epoch, -1: none): asked again on a match. */
+    private int startAfterProof = -1;
+    /* The gadget's own ask to stream, before the token proof finished: it starts on a match. */
+    private boolean askAfterProof;
+
+    /*
+     * Whether the gadget's ask, or Start automatically on a new connection, may
+     * start a stream (the user's own start on this connection needs none): only
+     * after this connection's token proof matched; a gadget without a proof key,
+     * or any gadget over Wi-Fi (nothing proves it there), streams only on a tap.
+     * A proof still running holds the ask until it ends. On the UI thread.
+     */
+    private boolean askOk() {
+        return link != null && link.proven();
+    }
+
+    private boolean askAllowed() {
+        GadgetLink g = bleLink();
+        if (askOk()) {
+            askAfterProof = false;
+            return true;
+        }
+        if (g == null) {
+            askAfterProof = false;
+            linkStatus = "Tap a source to stream: over Wi-Fi the gadget proves nothing, so only your own start streams";
+            Log.i(TAG, "gadget's ask held: Wi-Fi");
+            refreshUi();
+            return false;
+        }
+        askAfterProof = g.proofPending();
+        linkStatus = askAfterProof ? "The gadget's stream waits for its token proof"
+                : g.hasProofKey() ? "Not streaming on the gadget's ask: " + g.proofLine()
+                : "Tap a source to stream: no proof key for this gadget";
+        Log.i(TAG, "gadget's ask held: " + g.proofLine());
+        refreshUi();
+        return false;
+    }
+
+    @Override
+    public void onProof(TokenProof.Outcome o) {
+        ui.post(() -> {
+            GadgetLink g = bleLink();
+            if (g == null) {
+                return;
+            }
+            if (spkvolAfterProof >= 0) {
+                g.setSpeakerVolume(spkvolAfterProof);
+                Log.i(TAG, "speaker_volume " + spkvolAfterProof + " sent after the token proof (--ei spkvol)");
+                spkvolAfterProof = -1;
+            }
+            if (micAfterProof) {
+                micAfterProof = false;
+                startMic();
+            }
+            if (askAfterProof) {
+                askAfterProof = false;
+                if (g.proven() && (wanted || auto) && !link.streaming() && !uiSession.active()) {
+                    startStream();
+                } else if (!g.proven()) {
+                    linkStatus = "Not streaming on the gadget's ask: " + g.proofLine();
+                }
+            }
+            if (startAfterProof >= 0) {
+                int ep = startAfterProof;
+                startAfterProof = -1;
+                if (g.proven()) {
+                    askAgain(ep);
+                } else if (ep == grant.epoch()) {
+                    refused("The gadget refused the stream: " + g.proofLine());
+                }
+            }
+            if (mirrorAfterProof) {
+                mirrorAfterProof = false;
+                if (g.proven() && UiSession.MIRROR.equals(source) && !link.streaming() && !uiSession.active()) {
+                    startStream();
+                } else if (!g.proven()) {
+                    linkStatus = "No screen mirror: " + g.proofLine();
+                    connStatus = linkStatus;
+                }
+            }
+            refreshUi();
+        });
+    }
+
+    @Override
+    public void onRefused(int cmd, int code) {
+        if (cmd != Mg.CMD_START_MIC) {
+            return;
+        }
+        ui.post(() -> {
+            if (micStarted) {
+                closeMic();
+                linkStatus = "The gadget refused the mic" + (code == Mg.ERROR_PROOF_REQUIRED ? ": it needs the token proof"
+                        : " (" + Mg.errorName(code) + ")");
+                Log.w(TAG, linkStatus);
+                refreshUi();
+            }
+        });
+    }
+
+    /*
+     * The gadget's ask for the camera over BLE (or Start automatically on a new connection): the user's
+     * yes holds for the rest of this connection; a no answers the gadget as a camera that can't start does
+     * (stop_streaming, buffer_drop). Main thread.
+     */
+    private android.app.AlertDialog cameraAsk;
+
+    private void askCamera() {
+        if (cameraAsk != null) {
+            return;
+        }
+        int ep = grant.epoch();
+        String name = gadgetName() != null ? gadgetName() : "The gadget";
+        Log.i(TAG, "camera: " + name + " asks to start the camera; asking the user");
+        cameraAsk = new android.app.AlertDialog.Builder(this, Ui.DIALOG_THEME)
+                .setTitle("Start the camera?")
+                .setMessage(name + " asks to show this phone's camera. Allow it until it disconnects?")
+                .setNegativeButton("Don't allow", (d, w) -> cameraAnswered(false, ep))
+                .setPositiveButton("Allow", (d, w) -> cameraAnswered(true, ep))
+                .setOnCancelListener(d -> cameraAnswered(false, ep))
+                .show();
+    }
+
+    private void cameraAnswered(boolean yes, int ep) {
+        cameraAsk = null;
+        if (ep != grant.epoch()) {
+            return;   /* another connection by now: it asks again */
+        }
+        Log.i(TAG, "camera: the user " + (yes ? "allowed" : "declined") + " the gadget's ask");
+        if (yes) {
+            grant.allowCamera();
+            if (link.ready() && !link.streaming() && !uiSession.active() && (wanted || auto)) {
+                startStream();
+            }
+            return;
+        }
+        wanted = false;
+        GadgetLink g = bleLink();
+        if (g != null) {
+            g.sendControl(new byte[] {(byte) Mg.CMD_STREAM_VIDEO, (byte) Mg.V_STOP_STREAMING, (byte) Mg.BUFFER_DROP});
+        }
+        linkStatus = "Camera not started: you declined the gadget's ask";
+        refreshUi();
+    }
+
     @Override
     public void onRequestStreaming(boolean want) {
         Log.i(TAG, "gadget asks for streaming: " + want);
-        wanted = want;
         ui.post(() -> {
-            if (want && !link.streaming()) {
+            wanted = want;
+            if (!want) {
+                askAfterProof = false;
+            }
+            if (want && link.ready() && !link.streaming() && (userStart() || askAllowed())) {
                 startStream();
             } else if (!want && link.streaming()) {
                 stopStream();
@@ -888,6 +1819,7 @@ public final class MainActivity extends Activity
     @Override
     public void onKeyframeRequest() {
         Log.i(TAG, "keyframe requested");
+        uiSession.requestKeyframe();
         cam.requestKeyframe();
         if (player != null) {
             player.requestKeyframe();
@@ -898,6 +1830,7 @@ public final class MainActivity extends Activity
     public void onStreamStopped() {
         Log.i(TAG, "gadget stopped the stream");
         ui.post(() -> {
+            uiSession.stop();
             previewDecoder.stop();
             cam.stop();
             if (player != null) {
@@ -915,24 +1848,98 @@ public final class MainActivity extends Activity
             connStatus = linkStatus;
             return;
         }
+        GadgetLink g = bleLink();
+        if ("proof required".equals(reason) && g != null && g.proofPending()) {
+            /* A set-up gadget takes a stream only after this connection's proof: ask again on a match. */
+            Log.i(TAG, "gadget refused the stream until the token proof matches");
+            ui.post(() -> {
+                if (!g.proofPending()) {   /* it ended meanwhile: act on its outcome now */
+                    if (g.proven()) {
+                        askAgain(grant.epoch());
+                    } else {
+                        refused("The gadget refused the stream: " + g.proofLine());
+                    }
+                    return;
+                }
+                startAfterProof = grant.epoch();
+                linkStatus = "The stream waits for the gadget's token proof";
+                refreshUi();
+            });
+            return;
+        }
+        if (!"busy".equals(reason)) {
+            /* Only busy passes (the gadget booting, or its screen waking): anything else stays refused. */
+            Log.w(TAG, "gadget refused the stream (" + reason + ")");
+            ui.post(() -> refused("The gadget refused the stream (" + reason + ")"));
+            return;
+        }
         Log.i(TAG, "gadget refused the stream (" + reason + "); trying again in 1 s");
+        ui.post(() -> {
+            int ep = grant.epoch();
+            ui.postDelayed(() -> askAgain(ep), uiSession.active() ? 500 : 1000);
+        });
+    }
+
+    /* A start that stays refused: what fed the stream stops, nothing restarts it on its own, a tap starts it again. UI thread. */
+    private void refused(String why) {
+        uiSession.stop();
+        previewDecoder.stop();
+        cam.stop();
+        if (player != null) {
+            player.stop();
+        }
+        auto = false;
+        wanted = false;   /* the gadget's ask went with the refusal */
+        grant.revoke();
+        startAfterProof = -1;
+        linkStatus = why;
+        connStatus = linkStatus;
+        refreshUi();
+    }
+
+    /* startStream() in 300 ms, only if it is still the same connection and ready: a stream meant for one
+     * connection never goes to the next. UI thread. */
+    private void startStreamSoon() {
+        int ep = grant.epoch();
         ui.postDelayed(() -> {
-            if (!(auto || wanted) || !link.ready() || link.streaming()) {
+            if (ep != grant.epoch() || !link.ready() || link.streaming()) {
                 return;
             }
-            if (isClip() && player != null && player.clip() != null) {
-                ClipStreamer.Clip clip = player.clip();
-                link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs, 1,
-                        clip.vp8);
-                player.requestKeyframe();
-            } else if (!isClip() && cam.running()) {
-                /* The camera and encoder keep going: just ask again and start on a keyframe. */
-                link.startStreaming(lastSize, lastSize, curFps, kbps, 0, cam.bands, camVp8);   /* the same bands and codec as the frames */
-                cam.requestKeyframe();
-            } else {
+            if (grant.allows(auto || wanted, askOk())) {
                 startStream();
+            } else if (!linkStatus.startsWith("The gadget refused")) {   /* a refusal keeps its own reason */
+                linkStatus = "Stopped: tap a source to start again";   /* a Stop or Start automatically off meanwhile */
+                connStatus = linkStatus;
+                refreshUi();
             }
-        }, 1000);
+        }, 300);
+    }
+
+    /* A refused start (busy, or waiting for the proof) asked for again on the same connection. UI thread. */
+    private void askAgain(int ep) {
+        if (ep != grant.epoch() || !link.ready() || link.streaming()) {
+            return;
+        }
+        if (!grant.allows(uiSession.active() || auto || wanted, askOk())) {
+            return;   /* a saved UI source, too, needs the user's start or the proof */
+        }
+        if (uiSession.active()) {
+            /* A UI stream: the encoder keeps going and starts on a keyframe. */
+            uiSession.restartLink();
+            return;
+        }
+        if (isClip() && player != null && player.clip() != null) {
+            ClipStreamer.Clip clip = player.clip();
+            link.startStreaming(clip.size, clip.size, clip.fps, Math.max(clip.kbps, clip.steadyKbps()), playoutMs, 1,
+                    clip.vp8);
+            player.requestKeyframe();
+        } else if (!isClip() && cam.running()) {
+            /* The camera and encoder keep going: just ask again and start on a keyframe. */
+            link.startStreaming(lastSize, lastSize, curFps, kbps, 0, cam.bands, camVp8);   /* the same bands and codec as the frames */
+            cam.requestKeyframe();
+        } else {
+            startStream();
+        }
     }
 
     @Override
@@ -945,8 +1952,59 @@ public final class MainActivity extends Activity
     }
 
     @Override
+    public void onShown(int frameNo, int ageMs, long rxNs) {
+        uiSession.onShown(frameNo, ageMs, rxNs);
+    }
+
+    @Override
+    public void onTouch(int action, int x, int y, int timeMs, int id) {
+        uiSession.onTouch(action, x, y, id);
+    }
+
+    @Override
+    public void onHidStatus(int mode, int flags) {
+        uiSession.onHidStatus(mode, flags);
+    }
+
+    @Override
+    public void onUiControl(int id, int value) {
+        uiSession.onUiControl(id, value);
+        ui.post(this::refreshUi);
+    }
+
+    @Override
+    protected void onActivityResult(int req, int code, Intent data) {
+        super.onActivityResult(req, code, data);
+        if (req == UiSession.REQ_PROJECTION) {
+            uiSession.onProjectionResult(code, data);
+        }
+    }
+
+    /** The connected gadget's bond state (BluetoothDevice.BOND_*), -1 without a BLE link. */
+    int bondState() {
+        GadgetLink g = bleLink();
+        return g != null ? g.bondState() : -1;
+    }
+
+    /* Pairing makes the gadget a keyboard and pointer for the whole phone: with a proof key saved
+     * for it, only once it has proved that key on this connection. */
+    void bond() {
+        GadgetLink g = bleLink();
+        if (g == null) {
+            return;
+        }
+        if (g.hasProofKey() && !g.proven()) {
+            linkStatus = "Pair once the gadget has proved its key: " + g.proofLine();
+            Log.w(TAG, linkStatus);
+            refreshUi();
+            return;
+        }
+        g.bond();
+    }
+
+    @Override
     public void onDeviceLog(String line) {
-        if (line.contains("video")) {
+        if (line.contains("video") || line.contains("mg.ble") || line.contains("mg.ui") || line.contains("hid")) {
             Log.i(TAG, "gadget: " + line.trim());
             if (line.contains("fps decoded")) {
                 deviceLine = line.trim();
@@ -955,9 +2013,20 @@ public final class MainActivity extends Activity
     }
 
     @Override
-    public void onDisconnected() {
+    public void onDisconnected(boolean wasReady) {
         Log.i(TAG, "disconnected");
         ui.post(() -> {
+            grant.connectionEnded(wasReady);   /* the next connection proves its token first, capabilities or not */
+            wanted = false;   /* the gadget's ask was this connection's */
+            if (cameraAsk != null) {
+                android.app.AlertDialog a = cameraAsk;
+                cameraAsk = null;   /* the next connection asks again */
+                a.dismiss();
+            }
+            if (micStarted) {
+                closeMic();   /* the next connection starts it again */
+            }
+            uiSession.stop();
             previewDecoder.stop();
             cam.stop();
             if (player != null) {
@@ -1014,10 +2083,7 @@ public final class MainActivity extends Activity
         fps = f;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_FPS, f).apply();
         Log.i(TAG, "camera frame rate " + f + " fps");
-        if (link != null && link.streaming() && !isClip()) {
-            stopStream();
-            ui.postDelayed(this::startStream, 300);
-        }
+        restartRunning(VideoLink.Running.CAMERA);
         refreshUi();
     }
 
@@ -1025,11 +2091,31 @@ public final class MainActivity extends Activity
         size = k;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(PREF_SIZE, k).apply();
         Log.i(TAG, "picture size " + (k > 0 ? k + " px" : "auto"));
-        if (link != null && link.streaming()) {
-            stopStream();
-            ui.postDelayed(this::startStream, 300);
-        }
+        restartRunning(VideoLink.Running.CAMERA, VideoLink.Running.CLIP);
         refreshUi();
+    }
+
+    /* What streams now: a UI stream, the camera (or the bars), a clip, or nothing. */
+    private VideoLink.Running running() {
+        if (link == null) {
+            return VideoLink.Running.NOTHING;
+        }
+        if (uiSession.active() || UiSession.isUi(source) && link.streaming()) {
+            return VideoLink.Running.UI;
+        }
+        return !link.streaming() ? VideoLink.Running.NOTHING : isClip() ? VideoLink.Running.CLIP : VideoLink.Running.CAMERA;
+    }
+
+    /*
+     * A setting's restart: only the stream of those kinds that runs now, as it was started (the start it
+     * already had: no new grant), and nothing when it isn't running; a UI stream keeps going.
+     */
+    private void restartRunning(VideoLink.Running... kinds) {
+        if (!running().restarts(kinds)) {
+            return;
+        }
+        stopStream();
+        startStreamSoon();
     }
 
     private static String clipLabel(String name) {
@@ -1151,10 +2237,18 @@ public final class MainActivity extends Activity
      * suggestion a 480 px picture turns blocky (a smaller one, chosen with
      * Rate, looks better on a link that slow); minKbps for small pictures. */
     private int camFloorKbps() {
-        return lastSize > 320 ? Math.max(minKbps, maxKbps * 2 / 3) : minKbps;
+        int f = lastSize > 320 ? Math.max(minKbps, maxKbps * 2 / 3) : minKbps;
+        /* A BLE gadget suggesting less than twice the floor (a tiny one, ~80 kb/s): half its suggestion. */
+        int sug = bleLink() != null ? link.caps().sugKbps : 0;
+        if (sug > 0 && sug < 2 * f) {
+            f = Math.max(24, sug / 2);
+        }
+        return f;
     }
 
     /* ---- stats ---------------------------------------------------------- */
+
+    private long lastUiLogMs, lastUiBytes;
 
     private void tick() {
         ui.postDelayed(this::tick, 1000);
@@ -1162,6 +2256,15 @@ public final class MainActivity extends Activity
             return;
         }
         long now = android.os.SystemClock.elapsedRealtime();
+        if (uiSession.active() && uiSession.streamer() != null) {
+            if (now - lastUiLogMs >= 2000) {
+                long b = link.statBytes;
+                Log.i(TAG, String.format(java.util.Locale.US, "ui stats: %.1f kb/s on the link, %s, gadget shown %d, decode %d ms",
+                        (b - lastUiBytes) * 8.0 / Math.max(1, now - lastUiLogMs), uiSession.streamer().describe(), devShown, devMs));
+                lastUiBytes = b;
+                lastUiLogMs = now;
+            }
+        }
         long dt = Math.max(1, now - lastStatMs);
         long bytes = link.statBytes;
         boolean av = isClip() && player != null;
@@ -1176,6 +2279,21 @@ public final class MainActivity extends Activity
         lastEncUs = encUs;
         lastConv = conv;
         lastGate = link.statGateUs;
+        GadgetLink gl = bleLink();
+        if (gl != null) {
+            long abytes = gl.statAudioBytes;
+            lat += String.format(java.util.Locale.US, "  audio out %.0f kb/s, %d type switches",
+                    (abytes - lastAudio) * 8.0 / dt, gl.statTypeSwitches);
+            lastAudio = abytes;
+            long din = gl.statDataIn;
+            lat += String.format(java.util.Locale.US, "  mic in %.0f kb/s", (din - lastDataIn) * 8.0 / dt);
+            uiAudioKbps = (abytes - lastAudioUi) * 8.0 / dt;
+            uiMicKbps = (din - lastDataIn) * 8.0 / dt;
+            lastAudioUi = abytes;
+            lastDataIn = din;
+        } else {
+            uiAudioKbps = uiMicKbps = 0;
+        }
         String s = String.format(java.util.Locale.US,
                 "%s\n%s  %d kb/s target  %s\nsend %.0f kb/s  in flight %d  queued %d\ncamera->enc %.1f fps  encoded %.1f fps"
                         + "  skipped %d  keys %d\n%s\ngadget shown %.1f fps  dropped %d  decode %d ms  free %d\n%s",
@@ -1190,6 +2308,10 @@ public final class MainActivity extends Activity
         }
         if (link.streaming()) {
             Log.i(TAG, "stats: " + s.replace('\n', '|'));
+            GadgetLink lg = bleLink();
+            if (lg != null) {
+                Log.i(TAG, lg.linkLine());
+            }
         }
         adaptBitrate(dt, bytes - lastBytes, (enc - lastEnc) * 1000.0 / dt, (shown - lastShown) * 1000.0 / dt);
         adaptClip();
@@ -1202,6 +2324,10 @@ public final class MainActivity extends Activity
         st.camToEncMs = camEncMs;
         st.convertMs = convMs;
         st.encodeMs = encMs;
+        if (gl != null && (gl.audioOn() || micStarted)) {
+            st.extra("AUDIO", "tone out", String.format(java.util.Locale.US, "%.0f kb/s", uiAudioKbps), false);
+            st.extra("AUDIO", "mic in", String.format(java.util.Locale.US, "%.0f kb/s", uiMicKbps), false);
+        }
         fillStats(st);
         screen.overlay.update(st);
         refreshUi();
@@ -1299,6 +2425,7 @@ public final class MainActivity extends Activity
             return clipLabel(source.substring(CLIP.length()));
         }
         return "pattern".equals(source) ? "Color bars" : source.startsWith("file:") ? "File " + source.substring(5)
+                : UiSession.WEB.equals(source) ? "Web page" : UiSession.MIRROR.equals(source) ? "Screen mirror"
                 : (front ? "Front camera" : "Camera");
     }
 
@@ -1309,7 +2436,7 @@ public final class MainActivity extends Activity
 
     /** The wanted clip isn't encoded yet. */
     boolean preparing() {
-        if (!isClip() || link == null || !link.ready() || !(auto || wanted)) {
+        if (!isClip() || link == null || !link.ready() || !grant.allows(auto || wanted, askOk())) {
             return false;
         }
         String name = source.substring(CLIP.length());
@@ -1332,6 +2459,12 @@ public final class MainActivity extends Activity
 
     boolean cameraPreview() {
         return "camera".equals(source) && cam != null && cam.running();
+    }
+
+    /** The UI stream's renderer draws into the preview. */
+    boolean uiPreview() {
+        return UiSession.isUi(source) && uiSession != null && uiSession.active() && uiSession.renderer() != null
+                && previewSurface != null;
     }
 
     boolean decoderShown() {
@@ -1387,9 +2520,8 @@ public final class MainActivity extends Activity
             cam.setFront(f);
         }
         Log.i(TAG, "camera: " + (f ? "front" : "back"));
-        if (link != null && link.streaming() && "camera".equals(source)) {
-            stopStream();
-            ui.postDelayed(this::startStream, 300);
+        if ("camera".equals(source)) {
+            restartRunning(VideoLink.Running.CAMERA);
         }
     }
 
@@ -1477,10 +2609,7 @@ public final class MainActivity extends Activity
 
     /* A live stream (the camera, the bars) starts over with new settings. */
     private void restartLive() {
-        if (link != null && link.streaming() && !isClip()) {
-            stopStream();
-            ui.postDelayed(this::startStream, 300);
-        }
+        restartRunning(VideoLink.Running.CAMERA);
         refreshUi();
     }
 
@@ -1490,6 +2619,11 @@ public final class MainActivity extends Activity
 
     void setAutoStart(boolean on) {
         auto = on;
+        if (on) {
+            grant.grant();   /* this connection's, or the one coming up */
+        } else {
+            grant.revoke();
+        }
         if (on && link != null && link.ready() && !link.streaming()) {
             startStream();
         }
@@ -1511,5 +2645,174 @@ public final class MainActivity extends Activity
         } catch (PackageManager.NameNotFoundException e) {
             return "";
         }
+    }
+
+    /* ---- musegadgets BLE, for the screen (BleTab) ----------------------- */
+
+    private double uiAudioKbps, uiMicKbps;
+    private long lastAudioUi;
+
+    boolean ble() {
+        return ble;
+    }
+
+    /** Wi-Fi or BLE, each with the gadget last picked on it (the old Link button). */
+    void setBle(boolean on) {
+        if (on != ble && link != null) {
+            switchLink();
+        }
+        refreshUi();
+    }
+
+    boolean bleReady() {
+        return bleLink() != null && link.ready();
+    }
+
+    boolean toneOn() {
+        GadgetLink g = bleLink();
+        return g != null && g.audioOn();
+    }
+
+    void setTone(boolean on) {
+        if (on != toneOn()) {
+            toggleTone();
+        }
+    }
+
+    boolean toneLc3() {
+        return "lc3".equals(toneCodec);
+    }
+
+    /** SBC or LC3 for the tone; a tone that's playing starts over in it. */
+    void setToneLc3(boolean lc3) {
+        toneCodec = lc3 ? "lc3" : "sbc";
+        if (toneOn()) {
+            toggleTone();
+            toggleTone();
+        }
+    }
+
+    int speakerVolume() {
+        GadgetLink g = bleLink();
+        return g != null ? g.speakerVolume : -1;
+    }
+
+    /** The gadget's speaker_volume setting (mgcommands set_settings; 0 turns its speaker off). */
+    /* Bench: the phone's own mic, unprocessed, 48 kHz mono PCM16 to files/rec.raw (for measuring a
+     * gadget's speaker: level, distortion, response). */
+    @SuppressWarnings("MissingPermission")
+    private void recordMic(int asked) {
+        int secs = Math.max(1, Math.min(60, asked));   /* any app can send the extra to a debuggable build */
+        new Thread(() -> {
+            int rate = 48000;
+            int src = android.media.MediaRecorder.AudioSource.UNPROCESSED;
+            android.media.AudioManager am = getSystemService(android.media.AudioManager.class);
+            if (am == null || am.getProperty(android.media.AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) == null) {
+                src = android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION;
+            }
+            int min = android.media.AudioRecord.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT);
+            android.media.AudioRecord r = new android.media.AudioRecord(src, rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
+            byte[] buf = new byte[rate / 10 * 2];
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(getFilesDir(), "rec.raw"))) {
+                r.startRecording();
+                Log.i(TAG, "rec: " + secs + " s from source " + src);
+                long end = SystemClock.elapsedRealtime() + secs * 1000L;
+                while (SystemClock.elapsedRealtime() < end) {
+                    int n = r.read(buf, 0, buf.length);
+                    if (n > 0) out.write(buf, 0, n);
+                }
+                Log.i(TAG, "rec: done");
+            } catch (Exception e) {
+                Log.w(TAG, "rec: " + e);
+            } finally {
+                r.release();
+            }
+        }, "rec").start();
+    }
+
+    private void playWavOnPhone(java.io.File f) {
+        new Thread(() -> {
+            try {
+                byte[] all = java.nio.file.Files.readAllBytes(f.toPath());
+                int rate = (all[24] & 0xff) | (all[25] & 0xff) << 8 | (all[26] & 0xff) << 16;
+                android.media.AudioTrack t = new android.media.AudioTrack.Builder()
+                        .setAudioAttributes(new android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
+                        .setAudioFormat(new android.media.AudioFormat.Builder().setSampleRate(rate)
+                                .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                                .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setTransferMode(android.media.AudioTrack.MODE_STATIC).setBufferSizeInBytes(all.length - 44).build();
+                t.write(all, 44, all.length - 44);
+                t.play();
+                Log.i(TAG, "play_wav: " + f.getName() + " " + (all.length - 44) / 2 / rate + " s");
+                Thread.sleep((all.length - 44) * 1000L / 2 / rate + 300);
+                t.release();
+            } catch (Exception e) {
+                Log.w(TAG, "play_wav: " + e);
+            }
+        }, "play_wav").start();
+    }
+
+    void setSpeakerVolume(int v) {
+        GadgetLink g = bleLink();
+        if (g == null) {
+            return;
+        }
+        if (g.proofPending()) {
+            spkvolAfterProof = v;   /* a set-up gadget takes settings only after the proof */
+            Log.i(TAG, "speaker volume " + v + " sent once the token proof ends");
+            return;
+        }
+        g.setSpeakerVolume(v);
+        Log.i(TAG, "speaker volume " + v);
+    }
+
+    private void closeMic() {
+        GadgetLink g = bleLink();
+        if (g != null) {
+            flushMic();
+            java.io.OutputStream mo = g.micOut;
+            g.micOut = null;
+            if (mo != null) {
+                try {
+                    mo.close();
+                } catch (java.io.IOException e) {
+                    Log.w(TAG, "mic file", e);
+                }
+            }
+        }
+        micStarted = false;
+    }
+
+    String micCodec() {
+        return micStarted ? mic : null;
+    }
+
+    /** Capture the gadget's mic as sbc or lc3 into files/mic.<codec>, or stop (null). */
+    void setMic(String codec) {
+        GadgetLink g = bleLink();
+        if (g == null) {
+            return;
+        }
+        micAfterProof = false;
+        if (micStarted) {
+            g.sendControl(new byte[] {(byte) Mg.CMD_STOP_MIC});
+            closeMic();
+            Log.i(TAG, "mic capture off");
+        }
+        mic = codec;
+        if (codec != null) {
+            startMic();
+        }
+    }
+
+    double audioKbps() {
+        return uiAudioKbps;
+    }
+
+    double micKbps() {
+        return uiMicKbps;
     }
 }

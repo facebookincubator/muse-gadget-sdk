@@ -18,14 +18,15 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get(
-    "CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"
-))
+JSON = cjson_dir()
 
 
 class AppFilesTest(unittest.TestCase):
@@ -33,8 +34,7 @@ class AppFilesTest(unittest.TestCase):
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             raise unittest.SkipTest("C compiler not available")
-        if not (JSON / "cJSON.c").exists():
-            raise unittest.SkipTest("cJSON sources not available (run idf.py build once)")
+        require_cjson(JSON)
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "app_files"
             store = Path(tmp) / "files"

@@ -32,6 +32,13 @@ int mgx264_encode(void *enc, const uint8_t *i420, int64_t pts, int idr, const ui
     (void)enc; (void)i420; (void)pts; (void)idr; (void)out; (void)info;
     return 0;
 }
+int mgx264_encode_qp(void *enc, const uint8_t *i420, int64_t pts, int idr, int qp, const uint8_t **out, int info[2],
+                     double *psnr_y)
+{
+    (void)enc; (void)i420; (void)pts; (void)idr; (void)qp; (void)out; (void)info; (void)psnr_y;
+    return 0;
+}
+int mgx264_recon_i420(void *enc, uint8_t *dst) { (void)enc; (void)dst; return 0; }
 void mgx264_set_bitrate(void *enc, int kbps) { (void)enc; (void)kbps; }
 void mgx264_close(void *enc) { (void)enc; }
 #endif

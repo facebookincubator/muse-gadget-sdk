@@ -58,15 +58,24 @@ _Static_assert(sizeof(CONFIG_MUSE_BOARD_ID) <= 32, "board id fits muse_board_des
 #else
 #define FLAG_BLE_SMP 0
 #endif
+/* The device model's hash, from CMakeLists.txt (SHA-256 of CONFIG_MUSE_DEVICE_MODEL_ID, its first 8 bytes). */
+#ifdef MUSE_DEVICE_MODEL_HASH
+#define FLAG_MODEL MUSE_BOARD_DESC_F_MODEL
+#define MODEL_HASH { MUSE_DEVICE_MODEL_HASH }
+#else
+#define FLAG_MODEL 0
+#define MODEL_HASH { 0 }
+#endif
 
 /* Kept in every image by the component's `-u muse_board_desc` (CMakeLists.txt). */
 const muse_board_desc_t muse_board_desc BOARD_DESC_SECTION = {
     .magic = MUSE_BOARD_DESC_MAGIC,
     .layout = MUSE_BOARD_DESC_LAYOUT,
-    .flags = FLAG_GADGET | FLAG_BLE_SMP,
+    .flags = FLAG_GADGET | FLAG_BLE_SMP | FLAG_MODEL,
     .chip_id = CONFIG_IDF_FIRMWARE_CHIP_ID,
     .product_code = CONFIG_HOMEHUB_BLE_PRODUCT_CODE,
     .board_id = CONFIG_MUSE_BOARD_ID,
+    .model_hash = MODEL_HASH,
 };
 
 static uint16_t rd16(const uint8_t *p)
@@ -132,8 +141,32 @@ muse_image_verdict_t muse_image_check(const uint8_t *head, size_t n, bool board,
         || strncmp((const char *)bd + 24, muse_board_desc.board_id, 32) != 0) {
         return MUSE_IMAGE_WRONG_BOARD;
     }
+    /* The model only when both carry one: an image from before it (or a build without one) is judged as before. */
+    if ((muse_board_desc.flags & MUSE_BOARD_DESC_F_MODEL) && (in->flags & MUSE_BOARD_DESC_F_MODEL)
+        && memcmp(bd + 56, muse_board_desc.model_hash, sizeof(muse_board_desc.model_hash)) != 0) {
+        return MUSE_IMAGE_WRONG_MODEL;
+    }
     if ((muse_board_desc.flags & MUSE_BOARD_DESC_F_BLE_SMP) && !(in->flags & MUSE_BOARD_DESC_F_BLE_SMP)) {
         return MUSE_IMAGE_NO_BLE_UPDATE;
+    }
+    return MUSE_IMAGE_OK;
+}
+
+muse_image_verdict_t muse_image_check_model(const uint8_t *head, size_t n, muse_image_info_t *info)
+{
+    muse_image_info_t scratch;
+    muse_image_info_t *in = info ? info : &scratch;
+    muse_image_verdict_t v = muse_image_check(head, n, false, in);
+    if (v != MUSE_IMAGE_OK) {
+        return v;
+    }
+    if (!in->has_board) {
+        return MUSE_IMAGE_NO_BOARD;
+    }
+    if ((muse_board_desc.flags & MUSE_BOARD_DESC_F_MODEL) && (in->flags & MUSE_BOARD_DESC_F_MODEL)
+        && memcmp(head + MUSE_IMAGE_BOARD_DESC_OFFSET + 56, muse_board_desc.model_hash,
+                  sizeof(muse_board_desc.model_hash)) != 0) {
+        return MUSE_IMAGE_WRONG_MODEL;
     }
     return MUSE_IMAGE_OK;
 }
@@ -148,6 +181,7 @@ const char *muse_image_verdict_text(muse_image_verdict_t v)
     case MUSE_IMAGE_NO_BOARD: return "no board description (an older build, or not this firmware)";
     case MUSE_IMAGE_WRONG_BOARD: return "built for another board";
     case MUSE_IMAGE_NO_BLE_UPDATE: return "it has no Bluetooth update (the BLE recovery tier)";
+    case MUSE_IMAGE_WRONG_MODEL: return "built for another device model";
     default: return "unknown";
     }
 }

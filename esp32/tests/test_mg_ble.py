@@ -24,9 +24,12 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MG = ROOT / "components/muse_gadget_ble"
@@ -375,8 +378,8 @@ class MgBleTest(unittest.TestCase):
         # 1-byte setting last, values cut short, start_mic's rate and bitrate
         # cut short (the XIAO's set_one read 2 bytes for 1-byte settings).
         cc = shlex.split(os.environ.get("CC", "cc"))
-        probe = subprocess.run([*cc, "-fsanitize=address", "-x", "c", "-", "-o", os.devnull],
-                               input="int main(void){return 0;}", text=True, capture_output=True)
+        probe = run_child([*cc, "-fsanitize=address", "-x", "c", "-", "-o", os.devnull],
+                          input="int main(void){return 0;}", text=True, capture_output=True)
         if probe.returncode != 0:
             self.skipTest("no AddressSanitizer here")
         with tempfile.TemporaryDirectory(prefix="mg-gen-") as gen:

@@ -1,0 +1,271 @@
+/*
+ * Copyright (C) 2009 The Android Open Source Project
+ * Modified for use by h264bsd standalone library
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*------------------------------------------------------------------------------
+
+    Table of contents
+
+    1. Include headers
+    2. Module defines
+    3. Data types
+    4. Function prototypes
+
+------------------------------------------------------------------------------*/
+
+#ifndef H264SWDEC_UTIL_H
+#define H264SWDEC_UTIL_H
+
+/*------------------------------------------------------------------------------
+    1. Include headers
+------------------------------------------------------------------------------*/
+
+#include <stdint.h>
+#include "basetype.h"
+#include "h264bsd_cfg.h"
+#include "h264bsd_stream.h"
+#include "h264bsd_image.h"
+
+#ifdef _ASSERT_USED
+#include <assert.h>
+#endif
+
+#if defined(_RANGE_CHECK) || defined(_DEBUG_PRINT) || defined(_ERROR_PRINT)
+#include <stdio.h>
+#endif
+
+/*------------------------------------------------------------------------------
+    2. Module defines
+------------------------------------------------------------------------------*/
+
+#define HANTRO_OK   0
+#define HANTRO_NOK  1
+
+#define HANTRO_TRUE     (1)
+#define HANTRO_FALSE    (0)
+
+#ifndef NULL
+#define NULL 0
+#endif
+
+#define MEMORY_ALLOCATION_ERROR 0xFFFF
+#define PARAM_SET_ERROR 0xFFF0
+
+/* value to be returned by GetBits if stream buffer is empty */
+#define END_OF_STREAM 0xFFFFFFFFU
+
+#define EMPTY_RESIDUAL_INDICATOR 0xFFFFFF
+
+/* macro to mark a residual block empty, i.e. contain zero coefficients */
+#define MARK_RESIDUAL_EMPTY(residual) ((residual)[0] = EMPTY_RESIDUAL_INDICATOR)
+/* macro to check if residual block is empty */
+#define IS_RESIDUAL_EMPTY(residual) ((residual)[0] == EMPTY_RESIDUAL_INDICATOR)
+
+/* macro for assertion, used only if compiler flag _ASSERT_USED is defined */
+#ifdef _ASSERT_USED
+#define ASSERT(expr) assert(expr)
+#else
+#define ASSERT(expr)
+#endif
+
+/* macro for range checking an value, used only if compiler flag _RANGE_CHECK
+ * is defined */
+#ifdef _RANGE_CHECK
+#define RANGE_CHECK(value, minBound, maxBound) \
+{ \
+    if ((value) < (minBound) || (value) > (maxBound)) \
+        fprintf(stderr, "Warning: Value exceeds given limit(s)!\n"); \
+}
+#else
+#define RANGE_CHECK(value, minBound, maxBound)
+#endif
+
+/* macro for range checking an array, used only if compiler flag _RANGE_CHECK
+ * is defined */
+#ifdef _RANGE_CHECK
+#define RANGE_CHECK_ARRAY(array, minBound, maxBound, length) \
+{ \
+    i32 i; \
+    for (i = 0; i < (length); i++) \
+        if ((array)[i] < (minBound) || (array)[i] > (maxBound)) \
+            fprintf(stderr,"Warning: Value [%d] exceeds given limit(s)!\n",i); \
+}
+#else
+#define RANGE_CHECK_ARRAY(array, minBound, maxBound, length)
+#endif
+
+/* macro for debug printing, used only if compiler flag _DEBUG_PRINT is
+ * defined */
+#ifdef _DEBUG_PRINT
+#define DEBUG(args) printf args
+#else
+#define DEBUG(args)
+#endif
+
+/* macro for error printing, used only if compiler flag _ERROR_PRINT is
+ * defined */
+#ifdef _ERROR_PRINT
+#define EPRINT(msg) fprintf(stderr,"ERROR: %s\n",msg)
+#else
+#define EPRINT(msg)
+#endif
+
+/* macro to get smaller of two values */
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+/* macro to get greater of two values */
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+/* macro to get absolute value */
+#define ABS(a) (((a) < 0) ? -(a) : (a))
+
+/* macro to clip a value z, so that x <= z =< y */
+#define CLIP3(x,y,z) (((z) < (x)) ? (x) : (((z) > (y)) ? (y) : (z)))
+
+/* macro to clip a value z, so that 0 <= z =< 255 */
+#define CLIP1(z) (((z) < 0) ? 0 : (((z) > 255) ? 255 : (z)))
+
+/* clp[v] through the clip table h264bsdClip (+512), for v in -512..767 */
+#define H264BSD_CLP(clp, v) (clp)[v]
+
+/* OPT: TINYH264_XPULP=1, on RISC-V cores with Xpulp: ABS, CLIP3, CLIP1
+ * and the clip table lookups become abs, min/max and clipu (xplat/include/
+ * rv_xpulp.h; build with -DRV_XPULP=1 and xplat/include on the include
+ * path, or the header's plain-C twins run, with the same results). The
+ * arguments are i32 values; CLIP3's bounds have x <= y. */
+#if defined(TINYH264_XPULP) && TINYH264_XPULP
+#include "rv_xpulp.h"
+#undef ABS
+#undef CLIP3
+#undef CLIP1
+#undef H264BSD_CLP
+#define ABS(a) rv_xpulp_abs((i32)(a))
+#define CLIP3(x,y,z) rv_xpulp_min(rv_xpulp_max((i32)(z), (i32)(x)), (i32)(y))
+#define CLIP1(z) rv_xpulp_clipu8((i32)(z))
+#define H264BSD_CLP(clp, v) ((void)(clp), (u8)rv_xpulp_clipu8(v))
+#endif
+
+/* Muse gadget port: where the decoder's memory comes from. On ESP-IDF boards
+ * with PSRAM every block goes to PSRAM (behind the data cache). Through plain
+ * malloc the small ones would go to internal RAM (CONFIG_SPIRAM_MALLOC_
+ * ALWAYSINTERNAL) and, once main SRAM runs low, to LP RAM, which the heap
+ * also hands out (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP) and which is
+ * several times slower: on the ESP32-S31 a 480 px stream with three such
+ * blocks in LP RAM took 170 ms a frame instead of 30. Falls back to main
+ * SRAM (MALLOC_CAP_DMA, which LP RAM lacks). Elsewhere plain malloc. Blocks
+ * are freed with free() either way.
+ *
+ * OPT: with TINYH264_CUSTOM_ALLOC every block comes from the port's own
+ * allocator instead: tinyh264_alloc, tinyh264_alloc_hot (the blocks read for
+ * every macroblock, where a port may hand out faster memory) and
+ * tinyh264_free, which the port defines. Blocks are aligned as malloc's
+ * are (the decoder keeps pointers and 32-bit fields in them; it aligns its
+ * pictures itself). A fixed arena, say: the decoder then never touches a
+ * system heap, and h264bsdSetLimits bounds what it allocates for a
+ * sequence (h264bsd_decoder.h). */
+#if TINYH264_CUSTOM_ALLOC
+#include <stddef.h>
+void *tinyh264_alloc(size_t n);
+void *tinyh264_alloc_hot(size_t n);
+void tinyh264_free(void *p);
+#define h264bsdMalloc(n) tinyh264_alloc(n)
+#define h264bsdMallocHot(n) tinyh264_alloc_hot(n)
+#define h264bsdRelease(p) tinyh264_free(p)
+#else
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#endif
+#if defined(ESP_PLATFORM) && CONFIG_SPIRAM
+#include "esp_heap_caps.h"
+static inline void *h264bsdMalloc(size_t n)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+}
+/* The two small blocks used for every macroblock (the macroblock layer and
+ * the slice group map): main SRAM when it has room, which is a little faster
+ * than PSRAM, else PSRAM; never LP RAM. */
+#define H264BSD_HOT_FLOOR (32 * 1024)   /* main SRAM kept free for everything else (BLE, tasks) */
+static inline void *h264bsdMallocHot(size_t n)
+{
+    /* Main SRAM only while it stays well stocked: on the S3, with BLE, the UI
+     * and video, a few KB here is the difference between headroom and a
+     * failed BLE or task allocation. */
+    void *p = NULL;
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) >= n + H264BSD_HOT_FLOOR) {   /* main SRAM, as below */
+        p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+    }
+    return p ? p : heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+#else
+#define h264bsdMalloc(n) malloc(n)
+#define h264bsdMallocHot(n) malloc(n)
+#endif
+#define h264bsdRelease(p) free(p)
+#endif /* TINYH264_CUSTOM_ALLOC */
+
+/* OPT: the alignment of each picture buffer, bytes (a power of two, at
+ * least 16): 64, say, where a GPU or DMA engine reads the planes straight
+ * from the decoder's pictures. */
+#ifndef TINYH264_PIC_ALIGN
+#define TINYH264_PIC_ALIGN 16
+#endif
+#if TINYH264_PIC_ALIGN < 16 || (TINYH264_PIC_ALIGN & (TINYH264_PIC_ALIGN - 1))
+#error "TINYH264_PIC_ALIGN must be a power of two, at least 16"
+#endif
+
+/* macro to allocate memory */
+#define ALLOCATE(ptr, count, type) \
+{ \
+    (ptr) = h264bsdMalloc((count) * sizeof(type)); \
+}
+
+/* macro to free allocated memory */
+#define FREE(ptr) \
+{ \
+    h264bsdRelease((ptr)); (ptr) = NULL; \
+}
+
+#define ALIGN(ptr, bytePos) \
+        (ptr + ( ((bytePos - (uintptr_t)ptr) & (bytePos - 1)) / sizeof(*ptr) ))
+
+extern const u32 h264bsdQpC[52];
+
+/*------------------------------------------------------------------------------
+    3. Data types
+------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------
+    4. Function prototypes
+------------------------------------------------------------------------------*/
+#ifndef H264DEC_NEON
+u32 h264bsdCountLeadingZeros(u32 value, u32 length);
+#else
+u32 h264bsdCountLeadingZeros(u32 value);
+#endif
+u32 h264bsdRbspTrailingBits(strmData_t *strmData);
+
+u32 h264bsdMoreRbspData(strmData_t *strmData);
+
+u32 h264bsdNextMbAddress(u32 *pSliceGroupMap, u32 picSizeInMbs, u32 currMbAddr);
+
+void h264bsdSetCurrImageMbPointers(image_t *image, u32 mbNum);
+
+i32 abs(i32 a);
+i32 clip(i32 x, i32 y, i32 z);
+
+#endif /* #ifdef H264SWDEC_UTIL_H */
+

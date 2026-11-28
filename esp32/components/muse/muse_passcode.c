@@ -82,12 +82,18 @@ void muse_passcode_init(void)
 {
     if (!s_mu) s_mu = xSemaphoreCreateMutex();
     muse_pass_rec_t rec;
-    bool have = muse_passcode_platform_load(&rec);
+    muse_pass_load_t got = muse_passcode_platform_load(&rec);
     take();
-    muse_pass_init(&s_p, have ? &rec : NULL, now_ms());
+    if (got == MUSE_PASS_LOAD_UNREADABLE) {
+        muse_pass_init_unreadable(&s_p);   /* locked until the pairing's erase (Forgot passcode: Reset pairing) */
+    } else {
+        muse_pass_init(&s_p, got == MUSE_PASS_LOAD_OK ? &rec : NULL, now_ms());
+    }
     s_inited = true;
     memset(&rec, 0, sizeof(rec));
-    ESP_LOGI(TAG, "passcode %s", s_p.rec.on ? "on: locked at boot" : "off");
+    ESP_LOGI(TAG, "passcode %s", s_p.unreadable ? "unreadable: locked at boot until a reset"
+                                 : s_p.rec.on   ? "on: locked at boot"
+                                                : "off");
     give();
 }
 

@@ -81,7 +81,10 @@ int muse_settings_sleep_s(void) { return 120; }
 static bool sleep_when_charged = true;   /* Display > Sleep when charged: Always (true, the default) or Never */
 bool muse_settings_sleep_when_charged(void) { return sleep_when_charged; }
 void muse_ble_status(muse_ble_status_t *p) { memset(p,0,sizeof(*p)); }
-muse_link_state_t muse_link_state(void) { return MUSE_LINK_ONLINE; }
+static muse_link_state_t link_state = MUSE_LINK_ONLINE;
+muse_link_state_t muse_link_state(void) { return link_state; }
+static int confirm_keys;   /* a confirm key's press taken by the pairing prompt */
+bool muse_link_confirm_key_press(void) { if (link_state != MUSE_LINK_CONFIRM) return false; ++confirm_keys; return true; }
 bool muse_link_talk_press(void) { return pairing; }
 bool muse_link_confirm_press(int64_t released_us, uint32_t down_seq) { (void)released_us; (void)down_seq; return pairing; }
 uint32_t muse_link_prompt_seq(void) { return 0; }   /* the press-before-the-prompt rule: test_pairing_fresh_press */
@@ -117,6 +120,29 @@ const muse_board_t *muse_board=&board;
 static muse_power_t pw(bool usb, int pct, bool done) { return (muse_power_t){.usb=usb,.battery_pct=pct,.charge_done=done}; }
 static void reading(bool usb, int pct, bool done) { muse_power_t p=pw(usb,pct,done); note_power(&p,true); }
 
+/* What one poll of the input task reaches (input_poll): quiet, on battery, nothing else under way. */
+void esp_restart(void) { assert(0); }
+const char *muse_audio_lock_holder(void) { return NULL; }
+void muse_battery_note_power(const muse_power_t *p, bool on) { (void)p; (void)on; }
+void muse_battery_note_state(bool screen_off, bool resting) { (void)screen_off; (void)resting; }
+void muse_state_set_as_if_battery(bool on) { (void)on; }
+void muse_state_set_power(const muse_power_t *p) { (void)p; }
+uint32_t muse_voice_quiet_ms(void) { return 0; }
+const char *muse_voice_where(uint32_t *ms) { if (ms) *ms = 0; return "idle"; }
+bool muse_link_confirm_dismiss(void) { return false; }
+void muse_touch_poll(void) {}
+bool muse_voice_notes_waiting(void) { return false; }
+void muse_wifi_nap(bool nap) { (void)nap; }
+/* An aux board with a poll: no key of its own down (the bench's are the only presses). */
+static unsigned no_keys(void) { return 0; }
+static const muse_board_t aux_board={.touch=true,.talk_button="yellow",.aux_button="blue",.power_off=board_off,
+    .mic_init=board_mic,.poll_buttons=no_keys};
+/* One poll of the input task: its loop runs to the watchdog feed (its locals start again at each poll). */
+static void input_poll(void) {
+    jmp_buf back; test_wdt_jump=&back;
+    if(!setjmp(back)) input_task(NULL);
+    test_wdt_jump=NULL;
+}
 static void tap(void) { aux_button(true,true); aux_button(false,true); }
 static void ticks(int n) { for(int i=0;i<n;i++) aux_button(false,false); }
 /* The production poll path: dedicated_buttons() runs once per 10 ms poll. */
@@ -180,6 +206,26 @@ int main(int argc,char **argv) {
          * and opens the keypad; it never talks. */
         asleep=true; lapse_due=true; talk_button(MUSE_BTN_TALK_PRESS|MUSE_BTN_TALK_RELEASE);
         assert(!asleep && locked && !queue.n && keypads==1);
+    } else if(scenario==30 || scenario==31) {
+        /* The console's key=aux, a Nordic UART line's (30) or the wired console's (31), queued while no prompt is
+         * up; the setup prompt arms before the input task takes the press. On a release image the wireless press
+         * confirms nothing; the wired console's confirms; test and automation images confirm both. */
+        muse_board=&aux_board;
+        s_line_wireless = scenario==30; link_state=MUSE_LINK_ONLINE;
+        bench_key("aux");   /* the console's key=aux */
+        s_line_wireless=false;
+        link_state=MUSE_LINK_CONFIRM;   /* the prompt arms (its first frame) */
+        input_poll(); input_poll(); input_poll();
+        bool confirms = scenario==31 || MUSE_NO_PERSON;
+        assert(confirm_keys==(confirms ? 1 : 0) && !slept && !asleep);
+        /* With no prompt up the wireless key presses as before: on a dark screen the aux button's press wakes it. */
+        if(scenario==30) {
+            link_state=MUSE_LINK_ONLINE; asleep=true; s_line_wireless=true;
+            bench_key("aux");   /* the console's key=aux */
+            s_line_wireless=false;
+            input_poll();
+            assert(confirm_keys==(confirms ? 1 : 0) && !asleep);
+        }
     } else if(scenario==8) {
         /* The routing is StopWatch-with-calls only; other builds keep mute. */
         muse_board=&stopwatch_board;

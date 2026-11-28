@@ -90,10 +90,9 @@ The `mg_smp.c` line below is smp-v11's: this copy's code differs from it by that
 
 ## Code hashes
 
-The SHA-256 of each file's code: a C file's tokens without its comments,
-one per line; a Python file's syntax tree without docstrings. A comment edit
-leaves them as they are; a code change no longer matches until the copy is a
-release again and these lines name it.
+The SHA-256 of each file's code, to compare a copy with the release: a C
+file's tokens without its comments, one per line; a Python file's syntax tree
+without docstrings. A comment edit leaves them as they are.
 
 ```
 5e93ba881deeaaf00fbc423a10e86868de112a35b4e0d60615455f04e3987316  mg_smp_backend.h

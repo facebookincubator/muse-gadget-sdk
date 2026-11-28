@@ -41,6 +41,19 @@ func mlog(_ s: String) {
  * settings live under other keys (Prefs), so an argument never shadows one.
  */
 enum Extras {
+    /* A development build: its profile is in the app (an App Store build has none). */
+    static let devBuild = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil
+
+    /* The bench marker, as Android's files/bench: a development build with Documents/bench in the app's
+     * private storage, which only the developer tools reach (xcrun devicectl device copy to
+     * --domain-type appDataContainer). */
+    static var benchMarker: Bool {
+        guard devBuild, let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: d.appendingPathComponent("bench").path)
+    }
+
     static func has(_ k: String) -> Bool {
         UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[k] != nil
     }

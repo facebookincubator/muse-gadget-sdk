@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import unittest
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_mg_ble import MG, PROTOCOLS, ROOT, compile_and_run
 
 

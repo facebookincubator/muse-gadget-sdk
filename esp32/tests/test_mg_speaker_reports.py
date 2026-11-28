@@ -26,9 +26,11 @@ muse_settings.c does (each write notifies once, on the writer's task).
 
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_mg_ble import MG, ROOT, compile_and_run
 
 MUSE = ROOT / "components/muse"

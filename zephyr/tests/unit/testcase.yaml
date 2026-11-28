@@ -1,0 +1,43 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags: muse_gadget
+tests:
+  muse_gadget.unit:
+  muse_gadget.unit.rram:
+    # The queue on rewritable media without erase, like the nRF54L's RRAM.
+    extra_configs:
+      - CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE=n
+  muse_gadget.unit.slot1:
+    # The queue in MCUboot's secondary slot, shared with OTA, on RRAM-style flash.
+    extra_args:
+      - DTC_OVERLAY_FILE=slot1.overlay
+    extra_configs:
+      - CONFIG_MG_AUDIO_QUEUE=y
+      - CONFIG_MG_QUEUE_IN_SLOT1=y
+      - CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE=n
+      - CONFIG_MG_HAPTICS=n
+  muse_gadget.unit.tap:
+    # Tap to talk (a board whose button can't be held).
+    extra_configs:
+      - CONFIG_MG_TAP_TO_TALK=y
+      - CONFIG_MG_TAP_TO_TALK_MAX_MS=2000
+      # the hold contract's suite (core) doesn't run on a tap board
+      - CONFIG_ZTEST_VERIFY_RUN_ALL=n

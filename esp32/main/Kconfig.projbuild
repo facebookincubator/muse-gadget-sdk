@@ -32,7 +32,9 @@ menu "ESP32 Device SDK"
             muse-gadget-<board>, the board's overlay id; 1 to 64 lowercase
             letters, digits and hyphens. Profiles of the same hardware share
             one id. Each board overlay in devices/ sets its own. See
-            protocols/DEVICE.md.
+            protocols/DEVICE.md. Every image carries it in its board
+            description (components/muse_image_id), and updates refuse
+            another model's image.
 
     config MUSE_DEVICE_MODEL_NAME
         string "Device model name"

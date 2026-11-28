@@ -16,5 +16,5 @@
 # Builds tinyhost: the gadget's own decoder (tinyh264) on the host, for score.py.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-tiny="$here/../../../../esp32/components/tinyh264/src"
+tiny="$here/../../../../xplat/tinyh264/src"
 cc -O2 -w -I"$tiny" -o "$here/tinyhost" "$here/tinyhost.c" "$tiny"/*.c

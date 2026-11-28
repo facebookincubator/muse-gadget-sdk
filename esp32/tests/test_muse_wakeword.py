@@ -24,10 +24,14 @@ import os
 import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from collections import deque
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 WW = ROOT / 'components/muse_wakeword'
@@ -161,9 +165,9 @@ class WakeWordCore(unittest.TestCase):
         end = self.END if end is None else end
         cap = self.CAP if cap is None else cap
         data = ''.join(f'{e}{v}{d}{u}{p}{n}\n' for e, v, d, u, p, n in ticks)
-        ran = subprocess.run([str(self.binary), 'core', str(start), str(end),
+        ran = run_child([str(self.binary), 'core', str(start), str(end),
                               str(cap), str(energy)],
-                             input=data.encode(), capture_output=True, env=ENV)
+                        input=data.encode(), capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         self.assertEqual(ran.stderr, b'')
         lines = ran.stdout.decode().splitlines()
@@ -302,9 +306,9 @@ class WakeWordCore(unittest.TestCase):
         self.run_ring(cap=4, chunk=4, pushes=1, pops=3)      # pop past empty
 
     def run_energy(self, samples, threshold):
-        ran = subprocess.run([str(self.binary), 'energy', str(threshold)],
-                             input=(' '.join(map(str, samples))).encode(),
-                             capture_output=True, env=ENV)
+        ran = run_child([str(self.binary), 'energy', str(threshold)],
+                        input=(' '.join(map(str, samples))).encode(),
+                        capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         want = bool(samples) and sum(s * s for s in samples) >= threshold * threshold * len(samples)
         self.assertEqual(int(ran.stdout.decode().strip()), int(want))
@@ -556,8 +560,8 @@ class WakeWordDetector(unittest.TestCase):
             raise AssertionError(result.stdout + result.stderr)
 
     def run_detector(self, lines, sensitivity='default'):
-        ran = subprocess.run([str(self.binary), sensitivity], input='\n'.join(lines) + '\n',
-                             capture_output=True, text=True, env=ENV)
+        ran = run_child([str(self.binary), sensitivity], input='\n'.join(lines) + '\n',
+                        capture_output=True, text=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         out = ran.stdout.split()
         return float(out[1]), [int(x) for x in out[2:]]

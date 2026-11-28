@@ -22,6 +22,9 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 lib=$(cd "${LIB_DIR:-$here/../lib}" && pwd)
 defines="" flags=""
+for a in "$lib/libmgx264.a" "$lib/sim/libmgx264.a"; do
+    [ ! -f "$a" ] || "$here/check_x264.sh" "$a"   # an older build stops here, not at the link
+done
 for c in x264 vpx; do
     if [ -f "$lib/libmg$c.a" ]; then
         flags="$flags \"$lib/libmg$c.a\""
@@ -35,4 +38,12 @@ cat > "$here/../lib/codecs.xcconfig" <<XC
 MG_CODEC_DEFINES[sdk=iphoneos*] =$defines
 MG_CODEC_LDFLAGS[sdk=iphoneos*] =$flags
 XC
+# A Simulator build of x264 (lib/sim/libmgx264.a, for testing the encoders
+# in an arm64 Simulator) is linked there too; else the Simulator gets the stubs.
+if [ -f "$lib/sim/libmgx264.a" ]; then
+    cat >> "$here/../lib/codecs.xcconfig" <<XC
+MG_CODEC_DEFINES[sdk=iphonesimulator*][arch=arm64] = MG_STUB_VPX=1
+MG_CODEC_LDFLAGS[sdk=iphonesimulator*][arch=arm64] = "$lib/sim/libmgx264.a"
+XC
+fi
 echo "$here/../lib/codecs.xcconfig:${flags:- no encoders}"

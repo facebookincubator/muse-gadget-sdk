@@ -21,9 +21,7 @@
 #include "sdkconfig.h"
 #include "ota.h"
 #include "esp_app_desc.h"
-#if CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD
 #include "muse_image_id.h"
-#endif
 
 static esp_app_desc_t running = { .version = "1.2.0+g1234abcd" };
 static int callbacks;
@@ -48,6 +46,14 @@ static void on_result(const ota_event_t *event, void *user) {
 #define GADGET_REFUSES (CONFIG_MUSE_GADGET_BLE_AUDIO && !CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD)
 #define SAME_BOARD (CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD \
                     && CONFIG_HOMEHUB_OTA_ENABLED)
+/* A Home Link build: ota.c reads the download's first bytes for the device model check too. */
+#define IMAGE_HEAD (SAME_BOARD || (!CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_HOMEHUB_OTA_ENABLED))
+/* The test sends real image heads (a board description) to a Home Link build: LINK_MODEL_TEST,
+ * with this build's model in muse_image_id.c (MUSE_DEVICE_MODEL_HASH). */
+#ifndef LINK_MODEL_TEST
+#define LINK_MODEL_TEST 0
+#endif
+#define STREAMS (SAME_BOARD || LINK_MODEL_TEST)
 
 #if CONFIG_HOMEHUB_OTA_ENABLED || VIBE_MODE_BUILD
 #include "esp_ota_ops.h"
@@ -152,18 +158,21 @@ void esp_restart(void) { reboots++; }
 void stack_monitor_record(stack_monitor_t *state) { (void)state; }
 const char *esp_err_to_name(esp_err_t err) { (void)err; return "fake error"; }
 
-#if SAME_BOARD
+#if IMAGE_HEAD
 /* The HTTP client's side: the event handler esp_https_ota hands it, which
  * sees each response body's bytes (HTTP_EVENT_ON_DATA) as they're read. */
 static esp_http_client_event_cb_t http_cb;
 static void *http_user;
 static int http_status;
-static uint8_t streamed[1024];   /* the image's first 1 KB, as get_img_desc reads it */
-static bool redirect_first;      /* a 302 with a body before the image */
 int esp_http_client_get_status_code(esp_http_client_handle_t client) {
     (void)client;
     return http_status;
 }
+#endif
+#if STREAMS
+static uint8_t streamed[1024];   /* the image's first 1 KB, as get_img_desc reads it */
+static bool redirect_first;      /* a 302 with a body before the image */
+static const uint8_t *image_model;   /* the board description's device model (8 bytes), or none */
 static void http_event(esp_http_client_event_id_t id, const void *data, int len) {
     esp_http_client_event_t ev = { .event_id = id, .user_data = http_user,
                                    .data = (void *)data, .data_len = len };
@@ -185,6 +194,10 @@ static void make_image(uint16_t chip, const char *product, const char *board, ui
         muse_board_desc_t d = { .magic = MUSE_BOARD_DESC_MAGIC, .layout = 1, .flags = flags, .chip_id = chip };
         snprintf(d.product_code, sizeof(d.product_code), "%s", product);
         snprintf(d.board_id, sizeof(d.board_id), "%s", board);
+        if (image_model) {
+            d.flags |= MUSE_BOARD_DESC_F_MODEL;
+            memcpy(d.model_hash, image_model, sizeof(d.model_hash));
+        }
         memcpy(streamed + MUSE_IMAGE_BOARD_DESC_OFFSET, &d, sizeof(d));
     }
 }
@@ -195,7 +208,7 @@ static const char *expected_url = "https://example.com/update.bin";
 esp_err_t esp_https_ota_begin(const esp_https_ota_config_t *config,
                              esp_https_ota_handle_t *handle) {
     assert(strcmp(config->http_config->url, expected_url) == 0);
-#if SAME_BOARD
+#if IMAGE_HEAD
     http_cb = config->http_config->event_handler;
     http_user = config->http_config->user_data;
     assert(http_cb && http_user);
@@ -208,7 +221,7 @@ esp_err_t esp_https_ota_begin(const esp_https_ota_config_t *config,
 esp_err_t esp_https_ota_get_img_desc(esp_https_ota_handle_t handle,
                                     esp_app_desc_t *desc) {
     assert(handle == &incoming);
-#if SAME_BOARD
+#if STREAMS
     if (redirect_first) {   /* its body is not the image's */
         http_status = 302;
         http_event(HTTP_EVENT_HEADERS_SENT, NULL, 0);
@@ -372,10 +385,10 @@ static void check_vibe_mode(void) {
 #endif
 }
 
-#if SAME_BOARD
-/* The opt-in: only an image whose board description names this board is
- * downloaded; the check runs before esp_https_ota_perform (esp_ota_begin and
- * the first write), so a refused image never reaches flash. */
+#if STREAMS
+/* One attempt with a real image head (the same-board opt-in, or a Home Link
+ * build's model check): the check runs before esp_https_ota_perform
+ * (esp_ota_begin and the first write), so a refused image never reaches flash. */
 static void same_board_attempt(uint16_t chip, const char *product, const char *board, uint8_t flags,
                                ota_result_t expected, const char *detail) {
     snprintf(incoming.version, sizeof(incoming.version), "%s", "1000.0.0");
@@ -398,7 +411,9 @@ static void same_board_attempt(uint16_t chip, const char *product, const char *b
     }
     printf("attempt: %s\n", last_detail);
 }
+#endif
 
+#if SAME_BOARD
 static void check_same_board(void) {
     assert(ota_is_enabled() && !ota_wifi_refused());
     /* The default Home Link image, built for the C5. */
@@ -428,6 +443,31 @@ static void check_same_board(void) {
 }
 #endif
 
+#if LINK_MODEL_TEST
+/* A Home Link build (this one: an S3 with no product code, board "none", its own device model):
+ * another model's image is refused before anything is written; its own model's, an image without
+ * a model (an older build) and one without a board description install; another chip's is refused. */
+static const uint8_t other_model[8] = { 0x6f, 0x74, 0x68, 0x65, 0x72, 0x21, 0x21, 0x21 };
+static void check_link_model(void) {
+    assert(ota_is_enabled() && !ota_wifi_refused());
+    assert(muse_board_desc.flags & MUSE_BOARD_DESC_F_MODEL);
+    image_model = other_model;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another device model");
+    image_model = muse_board_desc.model_hash;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_APPLIED, NULL);
+    same_board_attempt(23, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another chip");
+    image_model = NULL;
+    same_board_attempt(9, "", "none", 0, OTA_RESULT_APPLIED, NULL);     /* no model: an older image */
+    same_board_attempt(9, NULL, NULL, 0, OTA_RESULT_APPLIED, NULL);     /* no board description at all */
+    /* A redirect's body before the image's doesn't count as the image. */
+    redirect_first = true;
+    image_model = other_model;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another device model");
+    redirect_first = false;
+    image_model = NULL;
+}
+#endif
+
 int main(void) {
 #if GADGET_REFUSES
     /* Refused at once: no task, no download, nothing written; logged. */
@@ -441,6 +481,11 @@ int main(void) {
     assert(!pending_task && starts == 0 && ota_owner() == OTA_OWNER_NONE);
 #endif
     ota_start("https://example.com/update.bin", false, NULL, NULL);
+    puts("OTA harness passed");
+    return 0;
+#endif
+#if LINK_MODEL_TEST
+    check_link_model();
     puts("OTA harness passed");
     return 0;
 #endif

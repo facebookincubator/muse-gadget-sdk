@@ -34,13 +34,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
 TESTS = ROOT / 'tests'
 FAKES = TESTS / 'voice_call_fakes'
-JSON_SRC = Path(os.environ.get('CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'))
+JSON_SRC = cjson_dir()
 SANITIZE = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
 WARN = ['-Wall', '-Wextra', '-Werror']
 # cJSON's sprintf calls trip Apple's deprecation warning; they aren't this code's.
@@ -114,12 +116,12 @@ class VoiceCallCore(unittest.TestCase):
                 '-lm', '-o', str(cls.binary)]])
 
     def run_raw(self, *args, data=b''):
-        result = subprocess.run([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
+        result = run_child([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         return result.stdout
 
     def run_mode(self, *args, data=b''):
-        result = subprocess.run([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
+        result = run_child([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         return result.stdout.decode()
 
@@ -710,6 +712,7 @@ class VoiceCallWiring(unittest.TestCase):
     it neither names an app ID nor calls into the call."""
 
     def compile_session(self, calls, *extra):
+        require_cjson(JSON_SRC)
         inc = ['-I', str(FAKES / 'session'), '-I', str(FAKES), '-I', str(JSON_SRC), '-I', str(TESTS / 'link_fakes'),
                '-I', str(TESTS), '-I', str(MUSE), '-I', str(ROOT / 'components/noise_core/include'),
                '-I', str(ROOT / 'components/minimp3/include')]

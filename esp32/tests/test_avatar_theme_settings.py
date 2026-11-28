@@ -13,8 +13,10 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_muse_ptt_ui import FAKE_HEADERS, LINK_GC
 
 ROOT = Path(__file__).resolve().parents[1]

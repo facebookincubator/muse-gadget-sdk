@@ -31,6 +31,7 @@ from tools.power.ppk2_backend import PPK2Backend
 from tools.power.ppk2_control import ControlServer, send_command
 from tools.power.ppk2_receiver import FastRawReceiver, ReceiverStopTimeout, TransportFault
 from tools.power.ppk2_session import PPK2Session
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_ppk2_profile import ACK, Clock, MemoryWriter
 import test_ppk2_backend as adapter_tests
 

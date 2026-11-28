@@ -50,6 +50,7 @@ An expressive desktop AI companion pairing the **M5Stack CoreS3** with the **Sta
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
 | [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
+| [**Zephyr Device SDK**](zephyr) | A push-to-talk Bluetooth gadget for the Seeed XIAO nRF54L15 Sense: hold the button and talk to Muse, even offline. Built for that board; other Zephyr boards with a button and a microphone need a port. |
 | [**Muse Gadgets Test**](android/musegadgetstest) ([iPhone](ios/musegadgetstest)) | Stream your phone's camera, or a clip, to an ESP32 gadget's screen over Wi-Fi: H.264 or VP8 decoded on the board, 30 fps on the round 466 px boards. [`protocols/VIDEO.md`](protocols/VIDEO.md) explains how. |
 
 Before you flash or pair a gadget, get an
@@ -65,8 +66,8 @@ ESP32 and Linux gadgets pair with the Muse app on iOS and Android, via
 Settings > Devices. Turn on Developer mode there first, then look for devices
 prefixed with "MuseGadget".
 
-ESP32 boards with musegadgets BLE audio turned on talk to the Muse app over
-the BLE protocol in [`protocols/`](protocols).
+The Zephyr gadget, and ESP32 boards with musegadgets BLE audio turned on,
+talk to the Muse app over the BLE protocol in [`protocols/`](protocols).
 Each SDK directory has a `README.md` to get started and an `AGENTS.md` for coding
 agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
 [`protocols/DEVICE.md`](protocols/DEVICE.md) says how a gadget describes itself
@@ -120,13 +121,14 @@ upstream licenses:
 | [`esp32/main/uc8179_gray4_lut.h`](esp32/main/uc8179_gray4_lut.h) | Seeed_GFX2's UC8179 four-gray waveforms | MIT, retained in the file header |
 | [`esp32/main/epd_it8951.c`](esp32/main/epd_it8951.c) | Seeed_GFX2's IT8951 command framing and ED103TC2 one-bit and four-bit modes | MIT, retained in the file header |
 | SSD1681 initialization sequence and waveform LUT in [`esp32/main/epd_ssd1681.c`](esp32/main/epd_ssd1681.c) | [waveshareteam/ESP32-S3-ePaper-1.54](https://github.com/waveshareteam/ESP32-S3-ePaper-1.54/tree/7bde32a670379d815618cbee374332c2c1a42c6c/02_Example/XiaoZhi)'s XiaoZhi V2 source, 78/xiaozhi-esp32 with Waveshare's board | MIT, see [`xiaozhi-esp32.txt`](esp32/devices/licenses/xiaozhi-esp32.txt) |
-| [`esp32/components/tinyh264/src`](esp32/components/tinyh264) | the Android Open Source Project's H.264 decoder, via [udevbe/tinyh264](https://github.com/udevbe/tinyh264) | Apache-2.0, AOSP's copyright, see [`LICENSE`](esp32/components/tinyh264/LICENSE) |
-| [`esp32/components/libvpx_vp8/src`](esp32/components/libvpx_vp8) | [libvpx](https://chromium.googlesource.com/webm/libvpx) v1.16.0's VP8 decoder, trimmed | BSD-3-Clause, the WebM Project authors' copyright, see [`LICENSE`](esp32/components/libvpx_vp8/LICENSE), with Google's patent grant in [`PATENTS`](esp32/components/libvpx_vp8/PATENTS) |
+| [`xplat/tinyh264/src`](xplat/tinyh264) (built by `esp32/components/tinyh264`) | the Android Open Source Project's H.264 decoder, via [udevbe/tinyh264](https://github.com/udevbe/tinyh264) | Apache-2.0, AOSP's copyright, see [`LICENSE`](xplat/tinyh264/LICENSE) |
+| [`xplat/libvpx_vp8/src`](xplat/libvpx_vp8) (built by `esp32/components/libvpx_vp8`) | [libvpx](https://chromium.googlesource.com/webm/libvpx) v1.16.0's VP8 decoder, trimmed | BSD-3-Clause, the WebM Project authors' copyright, see [`LICENSE`](xplat/libvpx_vp8/LICENSE), with Google's patent grant in [`PATENTS`](xplat/libvpx_vp8/PATENTS) |
 | libwebp v1.6.0's WebP decoder, for the opt-in avatar sync (fetched at build time from a pinned archive, not vendored; see [`avatar_webp.cmake`](esp32/cmake/avatar_webp.cmake)) | [webmproject/libwebp](https://github.com/webmproject/libwebp) | BSD-3-Clause, Google's copyright, with Google's patent grant, see [`libwebp.txt`](esp32/licenses/libwebp.txt) |
 | [`esp32/tests/vectors/esp_lvgl_adapter/pause_0.6.4.c`](esp32/tests/vectors/esp_lvgl_adapter/pause_0.6.4.c) | `esp_lv_adapter_pause()` from [espressif/esp_lvgl_adapter](https://components.espressif.com/components/espressif/esp_lvgl_adapter) 0.6.4, a test input for its pause fix | Apache-2.0, Espressif's copyright, as its header says |
 | [`esp32/tests/vectors/h264/regress/`](esp32/tests/vectors/h264/regress) | tinyh264 regression corpus: frames of an x264 encode of [Big Buck Bunny](https://www.bigbuckbunny.org), (c) 2008 Blender Foundation | CC BY 3.0, credited in its [`README.md`](esp32/tests/vectors/h264/regress/README.md) |
-| [`xplat/libsbc`](xplat/libsbc) (built by `esp32/components/libsbc`; the ESP32 BLE gadgets use it, the Zephyr gadgets in a later change) | [google/libsbc](https://github.com/google/libsbc) | Apache-2.0, Google's copyright, see [`LICENSE`](xplat/libsbc/LICENSE) |
-| [`xplat/liblc3`](xplat/liblc3) (built by `esp32/components/liblc3`; the ESP32 BLE gadgets use it, the Zephyr gadgets in a later change) | [google/liblc3](https://github.com/google/liblc3) | Apache-2.0, Google's copyright, see [`LICENSE`](xplat/liblc3/LICENSE) |
+| [`zephyr/src/zephyr/smp.c`](zephyr/src/zephyr/smp.c) | [Zephyr](https://github.com/zephyrproject-rtos/zephyr) v4.4.2 `subsys/mgmt/mcumgr/transport/src/smp.c`, with three changes marked in the file | Apache-2.0, Runtime.io's and Nordic Semiconductor's copyright, in the file header |
+| [`xplat/libsbc`](xplat/libsbc) (built by `esp32/components/libsbc`; the ESP32 and Zephyr gadgets use it) | [google/libsbc](https://github.com/google/libsbc) | Apache-2.0, Google's copyright, see [`LICENSE`](xplat/libsbc/LICENSE) |
+| [`xplat/liblc3`](xplat/liblc3) (built by `esp32/components/liblc3`; the ESP32 and Zephyr gadgets use it) | [google/liblc3](https://github.com/google/liblc3) | Apache-2.0, Google's copyright, see [`LICENSE`](xplat/liblc3/LICENSE) |
 | [`xplat/lc3fx`](xplat/lc3fx) (built by `esp32/components/liblc3` for chips without an FPU; for the same BLE gadgets) | fixed-point port of [google/liblc3](https://github.com/google/liblc3) (the Muse Gadgets copy, see `VENDORED.md`) | Apache-2.0, a derivative of liblc3, see [`LICENSE`](xplat/lc3fx/LICENSE) |
 | [`android/lc3-kotlin`](android/lc3-kotlin) | Kotlin translation of [google/liblc3](https://github.com/google/liblc3) v1.1.3+5 (8e1e722c) | Apache-2.0, a derivative of liblc3 (Google's copyright), see [`LICENSE`](android/lc3-kotlin/LICENSE) and [`NOTICE`](android/lc3-kotlin/NOTICE) |
 | Gradle wrapper in [`android/lc3-kotlin`](android/lc3-kotlin) (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`) | [Gradle](https://github.com/gradle/gradle) 8.13; `gradle-wrapper.jar` SHA-256 `81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f`, Gradle's published checksum, and the wrapper checks the distribution's (`distributionSha256Sum`) | Apache-2.0, the Gradle authors' copyright, in the script headers |

@@ -22,7 +22,10 @@ runner before the container starts) the first run maps fine and setarch is never
 used. Before the first run, a probe binary (two threads, built
 with the same compiler) checks that the ThreadSanitizer runtime runs here at all; if
 it doesn't (it crashes, or the compiler can't build it), every TSan test skips with
-the reason instead of failing on a crash that isn't the code's."""
+the reason instead of failing on a crash that isn't the code's. In CI (the CI
+environment variable set, as GitHub Actions sets it) TSan must run: there each of
+those reasons fails the test instead, so CI can never pass with its race checks
+skipped."""
 
 import os
 import platform
@@ -71,6 +74,18 @@ def _run_maybe_setarch(argv, **kw) -> subprocess.CompletedProcess:
     return r
 
 
+def in_ci() -> bool:
+    """CI is set (GitHub Actions sets CI=true); "", "0" and "false" count as unset."""
+    return os.environ.get("CI", "").strip().lower() not in ("", "0", "false")
+
+
+def unavailable(test: unittest.TestCase, why: str) -> None:
+    """ThreadSanitizer can't run here: in CI the test fails with the reason, elsewhere it skips with it."""
+    if in_ci():
+        test.fail("ThreadSanitizer must run in CI, but " + why)
+    test.skipTest(why)
+
+
 def probe() -> str:
     """'' when a ThreadSanitizer binary runs here, else the reason it doesn't (computed once)."""
     global _probe_reason
@@ -109,7 +124,7 @@ def probe() -> str:
 def run(test: unittest.TestCase, argv, **kw) -> subprocess.CompletedProcess:
     why = probe()
     if why:
-        test.skipTest(why)
+        unavailable(test, why)
     kw.setdefault("capture_output", True)
     kw.setdefault("text", True)
     r = subprocess.run(argv, **kw)
@@ -121,9 +136,9 @@ def run(test: unittest.TestCase, argv, **kw) -> subprocess.CompletedProcess:
         out = (r2.stderr or "") + (r2.stdout or "")
         if "failed to set personality" in out:
             # A container that refuses personality(2) (EPERM): TSan already failed without it.
-            test.skipTest("ThreadSanitizer can't map its memory on this kernel, and setarch -R isn't "
-                          "permitted here: " + out.strip().splitlines()[0] + _mapping_hint())
+            unavailable(test, "ThreadSanitizer can't map its memory on this kernel, and setarch -R isn't "
+                              "permitted here: " + out.strip().splitlines()[0] + _mapping_hint())
         if MAPPING not in out:
             return r2
-    test.skipTest("ThreadSanitizer can't map its memory on this kernel (setarch -R unavailable or not enough)"
-                  + _mapping_hint())
+    unavailable(test, "ThreadSanitizer can't map its memory on this kernel (setarch -R unavailable or not enough)"
+                + _mapping_hint())

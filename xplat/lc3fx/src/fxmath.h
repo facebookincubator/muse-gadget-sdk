@@ -51,10 +51,25 @@ static inline int32_t lc3fx_mul31(int32_t a, int32_t b) {
 }
 
 /**
+ * OPT: LC3FX_XPULP=1, on RISC-V cores with Xpulp: the leading-zero count
+ * through fl1 and the 16-bit saturation through clip (xplat/include/
+ * rv_xpulp.h; build with -DRV_XPULP=1 and xplat/include on the include
+ * path, or the header's plain-C twins run, with the same results)
+ */
+#if defined(LC3FX_XPULP) && LC3FX_XPULP
+#include "rv_xpulp.h"
+#ifndef LC3FX_SAT16
+#define LC3FX_SAT16(v) rv_xpulp_clip16(v)
+#endif
+#endif
+
+/**
  * Count leading zeros, 32 for 0
  */
 static inline int lc3fx_clz(uint32_t x) {
-#if defined(LC3FX_SWCLZ) && LC3FX_SWCLZ
+#if defined(LC3FX_XPULP) && LC3FX_XPULP
+    return x ? 31 - rv_xpulp_fl1(x) : 32;
+#elif defined(LC3FX_SWCLZ) && LC3FX_SWCLZ
     /* No count instruction: branchless and inline (libgcc's __clzsi2 is a
      * call, with branches). Three halvings, then the top nibble through
      * a 2-bit per entry constant (the entry of 0 counts 3, corrected for
@@ -126,13 +141,38 @@ static inline int32_t lc3fx_shift(int32_t x, int s) {
 }
 
 /**
+ * OPT: LC3FX_MERGE_TABLES=1 (GCC, ELF targets): every unit that inlines
+ * lc3fx_log2_q16_u32() or lc3fx_pow2_q27() keeps its static table, as
+ * before, but in a mergeable section ("aM") whose entity is the whole
+ * table, so the linker keeps one copy of the identical tables. The same
+ * definitions and code; off (the default), nothing changes.
+ */
+#if defined(LC3FX_MERGE_TABLES) && LC3FX_MERGE_TABLES && \
+    defined(__GNUC__) && !defined(__clang__) && defined(__ELF__)
+#if defined(__arm__)
+#define LC3FX_MERGE_ARGS_(bytes) ",\"aM\",%progbits," #bytes " @"
+#elif defined(__aarch64__)
+#define LC3FX_MERGE_ARGS_(bytes) ",\"aM\",@progbits," #bytes " //"
+#else
+#define LC3FX_MERGE_ARGS_(bytes) ",\"aM\",@progbits," #bytes " #"
+#endif
+/* The flags the compiler appends to the section name land in the comment */
+#define LC3FX_MERGE(name, bytes) \
+    __attribute__((aligned(4), section(".rodata." name LC3FX_MERGE_ARGS_(bytes))))
+#define LC3FX_LOG2_PAD 1   /* an entity is whole words: 33 entries -> 34, never read */
+#else
+#define LC3FX_MERGE(name, bytes)
+#define LC3FX_LOG2_PAD 0
+#endif
+
+/**
  * log2 of an unsigned 32 / 64 bits integer, in Q16
  * Linear interpolation over 32 segments, max abs error ~2e-4
  * Return a large negative value (-2^30) for 0
  */
 static inline int32_t lc3fx_log2_q16_u32(uint32_t x)
 {
-    static const uint16_t t[33] = {
+    static const uint16_t t[33 + LC3FX_LOG2_PAD] LC3FX_MERGE("lc3fx_log2_q16", 68) = {
             0,  2909,  5732,  8473, 11136, 13727, 16248, 18704, 21098,
         23433, 25711, 27936, 30109, 32234, 34312, 36346, 38336, 40286,
         42196, 44068, 45904, 47705, 49472, 51207, 52911, 54584, 56229,
@@ -169,7 +209,7 @@ static inline int32_t lc3fx_log2_q16_u64(uint64_t x)
  */
 static inline int lc3fx_pow2_q27(int32_t x, int32_t *mant)
 {
-    static const int32_t t[32] = {
+    static const int32_t t[32] LC3FX_MERGE("lc3fx_pow2_q27", 128) = {
         1073741824, 1097253708, 1121280436, 1145833280, 1170923762,
         1196563654, 1222764986, 1249540052, 1276901417, 1304861917,
         1333434672, 1362633090, 1392470869, 1422962010, 1454120821,

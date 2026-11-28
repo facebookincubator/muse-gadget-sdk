@@ -1,0 +1,26 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The board hooks' stand-in for the tests (tests/app_ext.cmake,
+# tests/board_hooks.c): what a board's own directory beside the app would
+# bring, found the same way (zephyr/Kconfig's orsource "*/Kconfig.ext",
+# CMakeLists.txt's */app_ext.cmake). Simulation only.
+config MG_TEST_BOARD_HOOKS
+	bool "The board hooks' test stand-in (simulation only)"
+	depends on ARCH_POSIX
+	help
+	  Builds tests/board_hooks.c into the app: every board hook
+	  (mg_app.h) defined as a board would, logging when it's called, and
+	  with CONFIG_MG_AUDIO_SRC_BOARD the synthetic source as the board's
+	  own. tests/run_all.sh's BabbleSim gadget-homelink build turns it on.

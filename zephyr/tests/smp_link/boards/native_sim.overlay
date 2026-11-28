@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* The XIAO nRF54L15's RRAM map (nrf54l15_cpuapp_partition.dtsi): 1524 KB,
+ * 16-byte words, MCUboot's slots at the board's offsets. */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &scratch_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	reg = <0x00000000 0x17d000>;
+	write-block-size = <16>;
+	erase-block-size = <4096>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x00000000 0x0000f800>;
+		};
+		slot0_partition: partition@10000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x00010000 0x000b2000>;
+		};
+		slot1_partition: partition@c2000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x000c2000 0x000b2000>;
+		};
+		storage_partition: partition@174000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x00174000 0x00009000>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};

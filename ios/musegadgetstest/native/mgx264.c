@@ -31,6 +31,8 @@ typedef struct {
     x264_t *enc;
     x264_param_t p;
     int w, h;
+    x264_picture_t last;   /* the last encode's output: its reconstructed picture (mgx264_recon_i420) */
+    int have_last;
 } mgx264_t;
 
 static void logcb(void *priv, int level, const char *fmt, va_list ap)
@@ -93,11 +95,16 @@ void *mgx264_open(int w, int h, int fps, int kbps, const char *preset, const cha
             }
             if (!strcmp(kv, "vbv-ms")) {
                 set_rate(p, kbps, eq ? atoi(eq + 1) : 200);
+            } else if (!strcmp(kv, "full-recon")) {
+                p->b_full_recon = eq ? atoi(eq + 1) : 1;   /* mgx264_recon_i420: the whole decoded picture */
             } else if (x264_param_parse(p, kv, eq ? eq + 1 : NULL) < 0) {
                 fprintf(stderr, "MuseCam x264: bad option %s\n", kv);
             }
         }
         free(buf);
+    }
+    if (p->analyse.b_psnr) {
+        p->i_log_level = X264_LOG_INFO;   /* x264 computes PSNR only from this level (logcb still prints warnings only) */
     }
     x264_param_apply_profile(p, "baseline");
     m->enc = x264_encoder_open(p);
@@ -109,6 +116,12 @@ void *mgx264_open(int w, int h, int fps, int kbps, const char *preset, const cha
 }
 
 int mgx264_encode(void *enc, const uint8_t *i420, int64_t pts, int idr, const uint8_t **out, int info[2])
+{
+    return mgx264_encode_qp(enc, i420, pts, idr, -1, out, info, NULL);
+}
+
+int mgx264_encode_qp(void *enc, const uint8_t *i420, int64_t pts, int idr, int qp, const uint8_t **out, int info[2],
+                     double *psnr_y)
 {
     mgx264_t *m = enc;
     x264_picture_t in, pic;
@@ -128,6 +141,9 @@ int mgx264_encode(void *enc, const uint8_t *i420, int64_t pts, int idr, const ui
         in.img.i_plane = 3;
         in.i_pts = pts;
         in.i_type = idr ? X264_TYPE_IDR : X264_TYPE_AUTO;
+        if (qp >= 0) {
+            in.i_qpplus1 = qp + 1;   /* this frame's quantizer, whatever the rate control */
+        }
         in.img.plane[0] = (uint8_t *)i420;
         in.img.plane[1] = (uint8_t *)i420 + m->w * m->h;
         in.img.plane[2] = (uint8_t *)i420 + m->w * m->h * 5 / 4;
@@ -136,14 +152,51 @@ int mgx264_encode(void *enc, const uint8_t *i420, int64_t pts, int idr, const ui
         bytes = x264_encoder_encode(m->enc, &nal, &nn, &in, &pic);
     }
     if (bytes <= 0) {
+        m->have_last = 0;
         return 0;
     }
+    m->last = pic;
+    m->have_last = 1;
     *out = nal[0].p_payload;   /* the payloads are contiguous in x264's buffer */
     if (info) {
         info[0] = pic.i_type == X264_TYPE_IDR;
         info[1] = pic.i_qpplus1 - 1;
     }
+    if (psnr_y) {
+        *psnr_y = m->p.analyse.b_psnr ? pic.prop.f_psnr[0] : 0;   /* the reconstruction's, against the input */
+    }
     return bytes;
+}
+
+int mgx264_recon_i420(void *enc, uint8_t *dst)
+{
+    mgx264_t *m = enc;
+    if (!m || !m->have_last || !dst) {
+        return 0;
+    }
+    const x264_image_t *im = &m->last.img;
+    int csp = im->i_csp & X264_CSP_MASK;
+    if (csp != X264_CSP_NV12 && csp != X264_CSP_I420) {
+        return 0;
+    }
+    int w = m->w, h = m->h, cw = w / 2, ch = h / 2;
+    for (int r = 0; r < h; r++) {
+        memcpy(dst + r * w, im->plane[0] + r * im->i_stride[0], w);
+    }
+    uint8_t *ou = dst + w * h, *ov = ou + cw * ch;
+    for (int r = 0; r < ch; r++) {
+        if (csp == X264_CSP_NV12) {
+            const uint8_t *s = im->plane[1] + r * im->i_stride[1];
+            for (int c = 0; c < cw; c++) {
+                ou[r * cw + c] = s[2 * c];
+                ov[r * cw + c] = s[2 * c + 1];
+            }
+        } else {
+            memcpy(ou + r * cw, im->plane[1] + r * im->i_stride[1], cw);
+            memcpy(ov + r * cw, im->plane[2] + r * im->i_stride[2], cw);
+        }
+    }
+    return 1;
 }
 
 void mgx264_set_bitrate(void *enc, int kbps)

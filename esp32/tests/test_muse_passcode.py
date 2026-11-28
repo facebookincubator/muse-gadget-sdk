@@ -334,3 +334,205 @@ class Wiring(unittest.TestCase):
             for m in re.finditer(r"(ESP_LOG[EWIDV]|printf)\([^;]*;", src, re.S):
                 args = re.sub(r'"(\\.|[^"\\])*"', '""', m.group(0))   # the arguments, not the words
                 self.assertNotRegex(args, r"\b(digits|salt|hash|rec\.hash|rec\.salt|s_entry|s_code)\b", name)
+
+
+# The gadget's platform (muse_passcode_esp.c) and muse_passcode.c on a fake NVS: what a boot finds when the store
+# can't be read, and the way back.
+STORE_FAKES = {
+    "sdkconfig.h": "#pragma once\n#define CONFIG_MUSE_VIDEO 0\n",
+    "esp_log.h": "#pragma once\n#include <stdio.h>\n"   # the arguments still evaluated, the line dropped
+                 "#define ESP_LOGE(tag, ...) ((void)(tag), (void)snprintf(NULL, 0, __VA_ARGS__))\n"
+                 "#define ESP_LOGW(tag, ...) ((void)(tag), (void)snprintf(NULL, 0, __VA_ARGS__))\n"
+                 "#define ESP_LOGI(tag, ...) ((void)(tag), (void)snprintf(NULL, 0, __VA_ARGS__))\n",
+    "esp_timer.h": "#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n",
+    "freertos/FreeRTOS.h": "#pragma once\n#define portMAX_DELAY 0xffffffffu\n",
+    "freertos/semphr.h": "#pragma once\ntypedef int *SemaphoreHandle_t;\nstatic int test_mutex;\n"
+                         "static inline SemaphoreHandle_t xSemaphoreCreateMutex(void) { return &test_mutex; }\n"
+                         "static inline int xSemaphoreTake(SemaphoreHandle_t m, unsigned t) { (void)m; (void)t; return 1; }\n"
+                         "static inline int xSemaphoreGive(SemaphoreHandle_t m) { (void)m; return 1; }\n",
+    "psa/crypto.h": "#pragma once\n#include <stddef.h>\n#include <stdint.h>\n#define PSA_SUCCESS 0\n#define PSA_ALG_SHA_256 1\n"
+                    "static inline int psa_crypto_init(void) { return PSA_SUCCESS; }\n"
+                    "int psa_hash_compute(int alg, const uint8_t *in, size_t n, uint8_t *out, size_t cap, size_t *got);\n",
+    "secure_random.h": "#pragma once\n#include <stdbool.h>\n#include <stddef.h>\n"
+                       "static inline bool secure_random(void *b, size_t n) { unsigned char *p = b; "
+                       "for (size_t i = 0; i < n; i++) p[i] = (unsigned char)(0x40 + i); return true; }\n",
+    "nvs.h": "#pragma once\n#include <stddef.h>\ntypedef int esp_err_t;\ntypedef int nvs_handle_t;\n"
+             "typedef enum { NVS_READONLY, NVS_READWRITE } nvs_open_mode_t;\n#define ESP_OK 0\n#define ESP_FAIL (-1)\n"
+             "#define ESP_ERR_NVS_NOT_FOUND 0x1102\n#define ESP_ERR_NVS_INVALID_LENGTH 0x110c\n"
+             "esp_err_t nvs_open(const char *ns, nvs_open_mode_t mode, nvs_handle_t *h);\nvoid nvs_close(nvs_handle_t h);\n"
+             "esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t *len);\n"
+             "esp_err_t nvs_set_blob(nvs_handle_t h, const char *key, const void *v, size_t len);\n"
+             "esp_err_t nvs_erase_key(nvs_handle_t h, const char *key);\nesp_err_t nvs_commit(nvs_handle_t h);\n"
+             "const char *esp_err_to_name(esp_err_t e);\n",
+}
+
+STORE_HARNESS = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "muse_passcode.h"
+#include "nvs.h"
+#include "esp_timer.h"
+#include "psa/crypto.h"
+/* The store: one blob, or none; what open and read answer (an error to inject). */
+static unsigned char blob[128];
+static size_t blob_n;
+static bool have_blob;
+static esp_err_t open_err, get_err;
+static int sets, erases;
+static int64_t clock_us;
+int64_t esp_timer_get_time(void) { return clock_us; }
+int psa_hash_compute(int alg, const uint8_t *in, size_t n, uint8_t *out, size_t cap, size_t *got)
+{
+    (void)alg;
+    uint32_t h = 2166136261u;   /* FNV, spread: a stand-in hash (the core's rules only need one) */
+    for (size_t i = 0; i < cap; i++) {
+        for (size_t j = 0; j < n; j++) h = (h ^ in[j]) * 16777619u;
+        h = (h ^ (uint32_t)i) * 16777619u;
+        out[i] = (uint8_t)(h >> 24);
+    }
+    *got = cap;
+    return 0;
+}
+esp_err_t nvs_open(const char *ns, nvs_open_mode_t mode, nvs_handle_t *h)
+{
+    (void)ns;
+    *h = 1;
+    return mode == NVS_READONLY ? open_err : ESP_OK;
+}
+void nvs_close(nvs_handle_t h) { (void)h; }
+esp_err_t nvs_get_blob(nvs_handle_t h, const char *key, void *out, size_t *len)
+{
+    (void)h; (void)key;
+    if (get_err) return get_err;
+    if (!have_blob) return ESP_ERR_NVS_NOT_FOUND;
+    if (blob_n > *len) return ESP_ERR_NVS_INVALID_LENGTH;
+    memcpy(out, blob, blob_n);
+    *len = blob_n;
+    return ESP_OK;
+}
+esp_err_t nvs_set_blob(nvs_handle_t h, const char *key, const void *v, size_t len)
+{
+    (void)h; (void)key;
+    memcpy(blob, v, len); blob_n = len; have_blob = true; sets++;
+    return ESP_OK;
+}
+esp_err_t nvs_erase_key(nvs_handle_t h, const char *key)
+{
+    (void)h; (void)key;
+    bool had = have_blob;
+    have_blob = false; blob_n = 0; erases++;
+    return had ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t nvs_commit(nvs_handle_t h) { (void)h; return ESP_OK; }
+const char *esp_err_to_name(esp_err_t e) { (void)e; return "err"; }
+
+static void boot(void)
+{
+    muse_passcode_init();
+    muse_passcode_set_supported(true);
+}
+
+static void line(const char *what)
+{
+    char st[64];
+    muse_passcode_status(st, sizeof(st));
+    printf("%s: %s locked=%d sets=%d erases=%d blob=%d\n", what, st, muse_passcode_locked(), sets, erases, have_blob);
+}
+
+int main(int argc, char **argv)
+{
+    const char *c = argc > 1 ? argv[1] : "";
+    if (!strcmp(c, "none")) {             /* no namespace yet, then no key: no passcode */
+        open_err = ESP_ERR_NVS_NOT_FOUND; boot(); line("no namespace");
+        open_err = ESP_OK; boot(); line("no key");
+    } else if (!strcmp(c, "set")) {       /* a passcode set, then a reboot reads it back: locked, its code unlocks */
+        boot();
+        muse_passcode_set("1234"); line("set");
+        boot(); line("reboot");
+        printf("check %d\n", (int)muse_passcode_check("1234")); line("right code");
+    } else if (!strncmp(c, "err", 3)) {   /* a passcode stored, then the store can't be read */
+        boot(); muse_passcode_set("1234");
+        if (!strcmp(c, "err-open")) open_err = ESP_FAIL;
+        else if (!strcmp(c, "err-read")) get_err = ESP_FAIL;
+        else if (!strcmp(c, "err-length")) blob_n = 100;
+        else if (!strcmp(c, "err-format")) blob[0] = 9;
+        int before = sets;
+        boot(); line("boot");
+        /* No code unlocks it, the stored one either; wrong codes count to the wait in RAM, nothing written. */
+        printf("check %d\n", (int)muse_passcode_check("1234"));
+        for (int i = 0; i < 4; i++) muse_passcode_check("0000");
+        printf("wait %d\n", muse_passcode_wait_left_ms() > 0);
+        printf("written %d\n", sets - before);
+        line("tries");
+        /* The way back: the pairing's erase (Reset pairing, from Forgot passcode on the wait screen) clears it and
+         * erases the stored record; the next boot has no passcode. */
+        open_err = get_err = ESP_OK;
+        muse_passcode_forget("Reset pairing"); line("reset");
+        boot(); line("after reset");
+    } else if (!strcmp(c, "clear")) {     /* the bench's `pass clear` clears an unreadable one too */
+        boot(); muse_passcode_set("1234");
+        get_err = ESP_FAIL; boot(); line("boot");
+        get_err = ESP_OK; muse_passcode_clear(); line("clear");
+        boot(); line("after clear");
+    }
+    return 0;
+}
+"""
+
+
+class UnreadableStore(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        d = Path(cls.tmp.name)
+        for name, text in STORE_FAKES.items():
+            (d / "inc" / name).parent.mkdir(parents=True, exist_ok=True)
+            (d / "inc" / name).write_text(text)
+        (d / "h.c").write_text(STORE_HARNESS)
+        cls.exe = d / "store"
+        cc = shlex.split(os.environ.get("CC", "cc"))
+        r = subprocess.run(cc + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(d / "inc"), "-I", str(MUSE),
+                                 str(d / "h.c"), str(MUSE / "muse_passcode_esp.c"), str(MUSE / "muse_passcode.c"),
+                                 str(MUSE / "muse_passcode_core.c"), "-lm", "-o", str(cls.exe)],
+                           capture_output=True, text=True)
+        if r.returncode:
+            raise AssertionError(r.stdout + r.stderr)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_case(self, case):
+        return subprocess.run([str(self.exe), case], check=True, capture_output=True, text=True).stdout.splitlines()
+
+    def test_no_record_is_no_passcode(self):
+        self.assertEqual(self.run_case("none"), [
+            "no namespace: off locked=0 sets=0 erases=0 blob=0",
+            "no key: off locked=0 sets=0 erases=0 blob=0"])
+
+    def test_a_readable_record_boots_locked_and_its_code_unlocks(self):
+        out = self.run_case("set")
+        self.assertEqual(out[1], "reboot: on locked tries=0 wait=0 locked=1 sets=1 erases=0 blob=1")
+        self.assertEqual(out[2:], ["check 0", "right code: on unlocked tries=0 wait=0 locked=0 sets=1 erases=0 blob=1"])
+
+    def test_a_read_error_boots_locked_and_the_reset_clears_it(self):
+        # Only "no record" (ESP_ERR_NVS_NOT_FOUND) is no passcode: an open or read error, or a blob of no known size
+        # or format, boots locked, never unlocked. No code is right, not even the stored one; wrong codes reach the
+        # wait screen (its Forgot passcode leads to Reset pairing), counted in RAM, nothing written over the record.
+        # Reset pairing (the pairing's erase) clears the lock and erases the record: the next boot has no passcode.
+        for case in ("err-open", "err-read", "err-length", "err-format"):
+            with self.subTest(case=case):
+                out = self.run_case(case)
+                self.assertTrue(out[0].startswith("boot: on locked ") and " locked=1 " in out[0], out[0])
+                self.assertEqual(out[1:4], ["check 1", "wait 1", "written 0"])
+                self.assertIn(" locked=1 ", out[4])
+                self.assertTrue(out[5].startswith("reset: off ") and " locked=0 " in out[5] and out[5].endswith("blob=0"),
+                                out[5])
+                self.assertTrue(out[6].startswith("after reset: off ") and " locked=0 " in out[6], out[6])
+
+    def test_pass_clear_clears_an_unreadable_record_too(self):
+        out = self.run_case("clear")
+        self.assertIn(" locked=1 ", out[0])
+        self.assertTrue(out[1].startswith("clear: off ") and out[1].endswith("blob=0"), out[1])
+        self.assertTrue(out[2].startswith("after clear: off ") and " locked=0 " in out[2], out[2])

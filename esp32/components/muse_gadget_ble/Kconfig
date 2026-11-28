@@ -424,10 +424,10 @@ menu "Muse Gadget BLE audio (musegadgets protocol)"
             (never its query). An image built for an ESP32-S3 with the dev
             key would pass both the chip id and the signature checks. On, an
             image is installed only when its board description (components/
-            muse_image_id) names this exact board, the same product code and
-            board profile, read from the download's first bytes before
-            anything is written; ESP-IDF's chip id and signature checks
-            stay. Either way a re-setup of a set-up gadget never takes an
+            muse_image_id) names this exact board, the same product code,
+            board profile and device model (when both carry one), read from
+            the download's first bytes before anything is written; ESP-IDF's
+            chip id and signature checks stay. Either way a re-setup of a set-up gadget never takes an
             ota_url (ble_server.c ignores it).
 
     config MUSE_GADGET_BLE_MANUFACTURER

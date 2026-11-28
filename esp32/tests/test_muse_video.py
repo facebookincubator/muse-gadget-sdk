@@ -23,24 +23,25 @@ import re
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
-import tsan_run
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
+import tsan_run  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
 VSTREAM = ROOT / "components/muse_vstream"
 # CI supplies pinned upstream sources; local IDF builds already have cJSON.
-JSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
+JSON = cjson_dir()
 
 
 class MuseVideoTest(unittest.TestCase):
     def test_ring_and_wire(self) -> None:
-        if not (JSON / "cJSON.c").exists():
-            self.skipTest("cJSON not found: run idf.py build once, or set CJSON_SOURCE_DIR")
+        require_cjson(JSON)
         cc = shlex.split(os.environ.get("CC", "cc"))
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp, "video")

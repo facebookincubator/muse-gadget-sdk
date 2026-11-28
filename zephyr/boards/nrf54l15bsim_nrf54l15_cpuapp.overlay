@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * BabbleSim nRF54L15. No PDM model: the synthetic source stands in for the
+ * microphone, and the test hooks press the button. The 512 KiB storage
+ * partition is split into settings and the offline clip queue.
+ */
+
+/ {
+	leds {
+		compatible = "gpio-leds";
+		led0: led_0 {
+			gpios = <&gpio2 9 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	/* The GPIO model has no pull resistors: an active-low button would read
+	 * pressed at boot (and take the setup-reset hold). Presses come from
+	 * the test hooks (mg_button_inject), not the pin. */
+	buttons {
+		compatible = "gpio-keys";
+		usr_btn: usr-btn {
+			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+			zephyr,code = <INPUT_KEY_ENTER>;
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+		sw0 = &usr_btn;
+	};
+};
+
+/delete-node/ &storage_partition;
+
+&cpuapp_rram {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		storage_partition: partition@0 {
+			label = "storage";
+			reg = <0x0 DT_SIZE_K(36)>;
+		};
+
+		audio_queue_partition: partition@9000 {
+			label = "audio-queue";
+			reg = <0x9000 DT_SIZE_K(256)>;
+		};
+	};
+};

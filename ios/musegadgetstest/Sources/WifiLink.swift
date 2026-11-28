@@ -255,6 +255,14 @@ final class WifiLink: VideoLink {
             connected = remote
             connectedName = name
             rx.removeAll()
+            isReady = false   /* this connection's own hello, nothing left from the last */
+            theCaps.set(Caps())
+            isStreaming = false
+            frameQ.removeAll()
+            controlQ.removeAll()
+            cur = nil
+            tail = nil
+            queued = 0
             connDone = done
             lock.unlock()
             stopDiscovery()
@@ -263,7 +271,7 @@ final class WifiLink: VideoLink {
             let wasReady = ready()
             drop()
             if wasReady || !closed {
-                l?.onDisconnected()
+                l?.onDisconnected(wasReady: wasReady)
             }
             if !closed {
                 Thread.sleep(forTimeInterval: 1)
@@ -342,6 +350,13 @@ final class WifiLink: VideoLink {
     private func receive(_ c: NWConnection) {
         c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, complete, err in
             guard let self else { return }
+            self.lock.lock()
+            let current = c === self.conn
+            self.lock.unlock()
+            guard current else {   /* a connection already dropped: its late bytes count for nothing */
+                c.cancel()
+                return
+            }
             if let d = data, !d.isEmpty {
                 self.rx.append(d)
                 if !self.parse() {
@@ -390,7 +405,7 @@ final class WifiLink: VideoLink {
     private func onMessage(_ m: [String: Any]) {
         switch m["type"] as? String ?? "" {
         case "hello":
-            parseHello(m)
+            theCaps.set(Self.helloCaps(m, over: theCaps))
             lock.lock()
             bufferSize = theCaps.buffer
             isReady = true
@@ -434,8 +449,10 @@ final class WifiLink: VideoLink {
         }
     }
 
-    private func parseHello(_ m: [String: Any]) {
-        let c = theCaps
+    /* The hello's caps, parsed and clamped on a copy of old: the link's caps (read by other
+     * threads) only ever take clamped values. */
+    static func helloCaps(_ m: [String: Any], over old: Caps) -> Caps {
+        let c = old.copy()
         if let d = m["display"] as? [String: Any] {
             c.dispW = Self.i(d, "width")
             c.dispH = Self.i(d, "height")
@@ -457,8 +474,9 @@ final class WifiLink: VideoLink {
         c.maxTiles = max(1, Self.i(m, "max_bands", 1))
         c.tileSplitPct = Self.i(m, "band_split_pct")
         c.vp8 = (m["codecs"] as? [String] ?? []).contains("vp8")
-        c.clamp()
+        c.clamp(minBuffer: Caps.wifiMinBuffer)
         c.video = true
+        return c
     }
 
     private func clearStream() {
@@ -504,6 +522,11 @@ final class WifiLink: VideoLink {
             m["bands"] = bands
         }
         lock.lock()
+        guard isReady, conn != nil else {   /* under the lock drop() takes: never queued for whoever connects next */
+            lock.unlock()
+            mlog("start ignored: no gadget connected")
+            return
+        }
         /* The device holds the playout delay's worth unread on top. */
         maxAhead = max(12288, Int64(kbps) * 1000 / 8 * Int64(150 + playout) / 1000)
         frameQ.removeAll()
