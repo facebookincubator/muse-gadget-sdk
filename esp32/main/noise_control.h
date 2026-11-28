@@ -229,6 +229,12 @@ int64_t noise_ctrl_req_open_hdr(const char *verb, const char *path,
                                 const char *const *headers, bool end_body,
                                 noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb,
                                 void *ctx);
+// noise_ctrl_req_open() on the VM's Gadget API (ServiceType::Gadget) instead of
+// the daemon, for paths under /api/gadget/. Send, cancel and the bounds below
+// are shared.
+int64_t noise_ctrl_req_open_gadget_api(const char *verb, const char *path,
+                                       const char *const *headers, bool end_body,
+                                       noise_ctrl_req_cb cb, void *ctx);
 // Queues body bytes (copied). Waits up to wait_ms for room; false if none.
 bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
                          bool end_body, int wait_ms);

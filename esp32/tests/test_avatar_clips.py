@@ -192,14 +192,18 @@ class AvatarClips(unittest.TestCase):
 #include <string.h>
 int main(void) {
     avatar_clip_refs_t refs;
-    const char *good="{\"ok\":true,\"result\":{\"avatar\":{\"image_exists\":true,\"image_path\":\"workspace/a.webp\",\"assets_revision\":\"r1\",\"video_variants\":{\"idle\":\"workspace/idle.mp4\",\"working\":\"workspace/work.mp4\",\"secret\":\"ignored\"}}}}";
+#define AV "/api/gadget/identity/avatar?"
+#define STILL "\"image\":{\"light\":\"" AV "variant=base&media=image&appearance=light\"}"
+    const char *good="{\"ok\":true,\"result\":{\"updated_ms\":7,\"avatar\":{" STILL ",\"video_variants\":{\"idle\":{\"light\":\"" AV "variant=idle&media=video&appearance=light\",\"dark\":\"" AV "variant=idle&media=video&appearance=dark\"},\"working\":{\"dark\":\"" AV "variant=working&media=video&appearance=dark\"},\"secret\":\"ignored\"}}}}";
     assert(avatar_clip_refs_parse(good,strlen(good),&refs));
-    assert(!strcmp(refs.path[MUSE_CLIP_IDLE],"workspace/idle.mp4"));
-    assert(!refs.path[MUSE_CLIP_WAKING][0]);assert(!strcmp(refs.path[MUSE_CLIP_WORKING],"workspace/work.mp4"));
-    const char *missing="{\"ok\":true,\"result\":{\"avatar\":{\"image_exists\":true,\"image_path\":\"a.webp\",\"video_variants\":{\"idle\":42}}}}";
+    assert(!strcmp(refs.path[MUSE_CLIP_IDLE],AV "variant=idle&media=video&appearance=light"));
+    assert(!refs.path[MUSE_CLIP_WAKING][0]);assert(!strcmp(refs.path[MUSE_CLIP_WORKING],AV "variant=working&media=video&appearance=dark"));
+    const char *missing="{\"ok\":true,\"result\":{\"avatar\":{" STILL ",\"video_variants\":{\"idle\":42}}}}";
     assert(!avatar_clip_refs_parse(missing,strlen(missing),&refs));
+    const char *file="{\"ok\":true,\"result\":{\"avatar\":{" STILL ",\"video_variants\":{\"idle\":{\"light\":\"workspace/idle.mp4\"}}}}}";
+    assert(!avatar_clip_refs_parse(file,strlen(file),&refs));
     char large[1024],path[514];memset(path,'a',512);path[512]=0;
-    snprintf(large,sizeof(large),"{\"ok\":true,\"result\":{\"avatar\":{\"image_exists\":true,\"image_path\":\"a.webp\",\"video_variants\":{\"idle\":\"%s\"}}}}",path);
+    snprintf(large,sizeof(large),"{\"ok\":true,\"result\":{\"avatar\":{" STILL ",\"video_variants\":{\"idle\":{\"light\":\"" AV "%s\"}}}}}",path);
     assert(!avatar_clip_refs_parse(large,strlen(large),&refs));
     assert(!avatar_clip_refs_parse("{}[]",4,&refs));
     puts("PASS bounded identity animation references and missing variants");

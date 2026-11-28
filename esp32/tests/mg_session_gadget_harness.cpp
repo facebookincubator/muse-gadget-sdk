@@ -754,6 +754,7 @@ struct device_msg {
     ServiceFrameKind kind;
     std::string verb, path, body;
     bool end_body;
+    ServiceType service;
 };
 static std::vector<device_msg> device_messages(size_t from = 0, size_t *largest = nullptr) {
     std::vector<device_msg> out;
@@ -777,7 +778,7 @@ static std::vector<device_msg> device_messages(size_t from = 0, size_t *largest 
         HeaderView headers[8];
         CHECK(DecodeServiceRequestEnvelopeDetailed(ConstByteSpan(cur.data(), cur.size()), env).ok());
         CHECK(DecodeServiceFrameDetailed(env.payload, Span<HeaderView>(headers, 8), f).ok());
-        device_msg m = {cur, f.stream_id, f.kind, "", "", "", false};
+        device_msg m = {cur, f.stream_id, f.kind, "", "", "", false, env.service};
         if (f.kind == ServiceFrameKind::Request) {
             m.verb.assign(f.request.verb.data(), f.request.verb.size());
             m.path.assign(f.request.path.data(), f.request.path.size());
@@ -1277,7 +1278,30 @@ static void test_extra() {
         CHECK(b.calls == 2 && b.status == -1 && b.end);   // failed at the end, as before
         acked = reopen(16);
         for (const auto &m : device_messages(m3)) CHECK(m.stream != ib);
+
+        // (e) A Gadget API GET goes again on the Gadget API, as it went the first time.
+        static const char *const IDENT = "/api/gadget/identity";
+        auto on_gadget_api = [&](size_t from, int64_t id) {
+            for (const auto &m : device_messages(from)) {
+                if (m.stream == id && m.kind == ServiceFrameKind::Request && m.path == IDENT) {
+                    return m.service == ServiceType::Gadget;
+                }
+            }
+            return false;
+        };
+        req_log e;
+        size_t m5 = notes.size();
+        int64_t ie = noise_ctrl_req_open_gadget_api("GET", IDENT, nullptr, true, on_req, &e);
+        CHECK(ie);
+        settle();
+        CHECK(on_gadget_api(m5, ie));
         write(state_frame(mg_session_state_closed, 16));
+        CHECK(e.calls == 0);
+        acked = reopen(17);
+        CHECK(on_gadget_api(acked, ie) && e.calls == 0);
+        client_send(vm_response(ie, 200, "{}", true));
+        CHECK(e.status == 200 && e.end && e.body == "{}" && e.calls == 1);
+        write(state_frame(mg_session_state_closed, 17));
     }
 
     // ...but never while one is open.
@@ -1684,7 +1708,7 @@ static std::vector<device_msg> relay_messages(size_t from = 0) {
         bytes_t envb(cur.begin() + 4, cur.begin() + 4 + plain);
         CHECK(DecodeServiceRequestEnvelopeDetailed(ConstByteSpan(envb.data(), envb.size()), env).ok());
         CHECK(DecodeServiceFrameDetailed(env.payload, Span<HeaderView>(headers, 8), f).ok());
-        device_msg m = {envb, f.stream_id, f.kind, "", "", "", false};
+        device_msg m = {envb, f.stream_id, f.kind, "", "", "", false, env.service};
         if (f.kind == ServiceFrameKind::Request) {
             m.path.assign(f.request.path.data(), f.request.path.size());
         } else if (f.kind == ServiceFrameKind::BodyChunk) {

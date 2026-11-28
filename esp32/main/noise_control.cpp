@@ -1209,6 +1209,7 @@ struct req_op {
     int64_t opened_us;   // Open: when noise_ctrl_req_open() made it (the 10 s wait counts from there)
     bool resent;         // Open: re-sent after a session's unasked end (once only)
     noise_ctrl_req_hdr_cb hdr_cb;   // Open: the response head's headers (nullptr: not wanted)
+    bool gadget_api;     // Open: the request goes to the Gadget API, not the daemon
 };
 
 // The BLE device session keeps what a GET or HEAD request sent (its Open and
@@ -1233,7 +1234,16 @@ struct req_stream {
     bool resent;         // this is the re-send: a second unasked end fails it
     int64_t opened_us;
     noise_ctrl_req_hdr_cb hdr_cb;   // the response head's headers, before cb (nullptr: none)
+    bool gadget_api;     // every frame of the stream, a re-send's too, names the service its open did
 };
+
+static ServiceType req_service(bool gadget_api) {
+    return gadget_api ? ServiceType::Gadget : ServiceType::Daemon;
+}
+
+static int64_t req_open_on(bool gadget_api, const char *verb, const char *path,
+                           const char *const *headers, bool end_body,
+                           noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb, void *ctx);
 
 static QueueHandle_t s_req_q = nullptr;
 static std::atomic<uint32_t> s_req_next_id{REQ_STREAM_BASE};
@@ -1337,7 +1347,7 @@ static int req_streams_requeue(int64_t *oldest_us) {
         if (body_len) memcpy(body, s->replay + s->open_len, body_len);
         bool ok = true;
         if (body_len || (s->body_end && !s->open_end)) {
-            req_op b = {req_op_kind::Body, s->body_end, s->id, body, body_len, nullptr, nullptr, 0, false, nullptr};
+            req_op b = {req_op_kind::Body, s->body_end, s->id, body, body_len, nullptr, nullptr, 0, false, nullptr, false};
             s_req_queued_bytes += (int32_t)body_len;
             ok = xQueueSendToFront(s_req_q, &b, 0) == pdTRUE;
             if (!ok) {
@@ -1345,7 +1355,7 @@ static int req_streams_requeue(int64_t *oldest_us) {
                 free(body);
             }
         }
-        req_op o = {req_op_kind::Open, s->open_end, s->id, open, s->open_len, s->cb, s->ctx, s->opened_us, true, s->hdr_cb};
+        req_op o = {req_op_kind::Open, s->open_end, s->id, open, s->open_len, s->cb, s->ctx, s->opened_us, true, s->hdr_cb, s->gadget_api};
         s_req_queued_bytes += (int32_t)s->open_len;
         if (!ok || xQueueSendToFront(s_req_q, &o, 0) != pdTRUE) {
             s_req_queued_bytes -= (int32_t)s->open_len;
@@ -1387,7 +1397,7 @@ static bool req_open(esp_tls_t *tls, Session &session, req_op &op,
     req.headers = Span<const HeaderView>(hdrs, nh);
     req.end_body = op.end_body;
     auto sws = session.StartOutboundApplicationRequest(
-        ServiceType::Daemon, op.id, req,
+        req_service(op.gadget_api), op.id, req,
         ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
         ByteSpan(env_scratch, OUT_ENV_SCRATCH));
     if (!sws.ok()) {
@@ -1402,6 +1412,7 @@ static bool req_open(esp_tls_t *tls, Session &session, req_op &op,
     slot->cb = op.cb;
     slot->ctx = op.ctx;
     slot->hdr_cb = op.hdr_cb;
+    slot->gadget_api = op.gadget_api;
     slot->resent = op.resent;
     slot->opened_us = op.opened_us;
     slot->open_end = op.end_body;
@@ -1446,7 +1457,7 @@ static bool req_pump_tx(esp_tls_t *tls, Session &session,
         chunk.data = ConstByteSpan(op.data, op.len);
         chunk.end_body = op.end_body;
         auto sws = session.StartOutboundBodyChunk(
-            ServiceType::Daemon, op.id, chunk,
+            req_service(s->gadget_api), op.id, chunk,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) {
@@ -1472,10 +1483,11 @@ static bool req_pump_tx(esp_tls_t *tls, Session &session,
             req_fail(s);
         }
     } else if (s) {
+        ServiceType service = req_service(s->gadget_api);
         req_clear(s);
         ResetView rv{ResetCode::Cancelled, StringView("cancelled")};
         auto sws = session.StartOutboundReset(
-            ServiceType::Daemon, op.id, rv,
+            service, op.id, rv,
             ByteSpan(svc_scratch, OUT_SVC_SCRATCH),
             ByteSpan(env_scratch, OUT_ENV_SCRATCH));
         if (sws.ok()) ok = flush_outbound(tls, session, ws_buf);
@@ -4765,6 +4777,18 @@ extern "C" int64_t noise_ctrl_req_open_hdr(const char *verb, const char *path,
                                            const char *const *headers, bool end_body,
                                            noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb,
                                            void *ctx) {
+    return req_open_on(false, verb, path, headers, end_body, cb, hdr_cb, ctx);
+}
+
+extern "C" int64_t noise_ctrl_req_open_gadget_api(const char *verb, const char *path,
+                                                  const char *const *headers, bool end_body,
+                                                  noise_ctrl_req_cb cb, void *ctx) {
+    return req_open_on(true, verb, path, headers, end_body, cb, nullptr, ctx);
+}
+
+static int64_t req_open_on(bool gadget_api, const char *verb, const char *path,
+                           const char *const *headers, bool end_body,
+                           noise_ctrl_req_cb cb, noise_ctrl_req_hdr_cb hdr_cb, void *ctx) {
     bool waits = false;
 #if CONFIG_MUSE_GADGET_BLE_SESSION
     // The BLE device session: a request made while it isn't ready (open, its
@@ -4796,7 +4820,7 @@ extern "C" int64_t noise_ctrl_req_open_hdr(const char *verb, const char *path,
     *p = '\0';
     int64_t id = s_req_next_id.fetch_add(1);
     req_op op = {req_op_kind::Open, end_body, id,
-                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, esp_timer_get_time(), false, hdr_cb};
+                 reinterpret_cast<uint8_t *>(blob), len, cb, ctx, esp_timer_get_time(), false, hdr_cb, gadget_api};
     if (!req_put(op, 0)) {
         free(blob);
         return 0;
@@ -4819,7 +4843,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
     uint8_t *copy = static_cast<uint8_t *>(malloc(len ? len : 1));
     if (!copy) return false;
     if (len) memcpy(copy, data, len);
-    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr, 0, false, nullptr};
+    req_op op = {req_op_kind::Body, end_body, id, copy, len, nullptr, nullptr, 0, false, nullptr, false};
     int64_t deadline = esp_timer_get_time() + (int64_t)wait_ms * 1000;
     while (s_req_queued_bytes > 0
            && s_req_queued_bytes + (int32_t)len > REQ_QUEUE_BYTES) {
@@ -4840,7 +4864,7 @@ extern "C" bool noise_ctrl_req_send(int64_t id, const void *data, size_t len,
 
 extern "C" void noise_ctrl_req_cancel(int64_t id) {
     if (!s_req_q || id < REQ_STREAM_BASE) return;
-    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr, 0, false, nullptr};
+    req_op op = {req_op_kind::Cancel, false, id, nullptr, 0, nullptr, nullptr, 0, false, nullptr, false};
     req_put(op, pdMS_TO_TICKS(100));
 }
 

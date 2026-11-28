@@ -16,7 +16,6 @@
 #include "muse_state.h"
 #include "muse_voice.h"
 #include "noise_control.h"
-#include "vm_file_path.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -41,7 +40,7 @@ static bool stop(uintptr_t unused) {
         mode==MUSE_MODE_LISTENING || mode==MUSE_MODE_SPEAKING || mode==MUSE_MODE_THINKING;
 }
 static void yield(void) {vTaskDelay(pdMS_TO_TICKS(20));}
-static const avatar_request_ops_t ops={noise_ctrl_req_open,noise_ctrl_req_cancel,alloc,heap_caps_free,esp_timer_get_time,yield,stop};
+static const avatar_request_ops_t ops={noise_ctrl_req_open_gadget_api,noise_ctrl_req_cancel,alloc,heap_caps_free,esp_timer_get_time,yield,stop};
 static bool source_key(const avatar_identity_t *id,uint8_t key[32]) {
     mbedtls_md_context_t ctx;mbedtls_md_init(&ctx);
     bool ok=!mbedtls_md_setup(&ctx,mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),0) && !mbedtls_md_starts(&ctx) &&
@@ -73,7 +72,7 @@ static void export_task(void *arg) {
         muse_avatar_release(image);
     } else if(s_kind<0) {
         if(!s_refs)s_refs=alloc(sizeof(*s_refs));
-        avatar_response_t *r=avatar_request_get("/identity",NULL,8192,0,&ops);
+        avatar_response_t *r=avatar_request_get(AVATAR_IDENTITY_PATH,NULL,8192,0,&ops);
         bool ok=s_refs && r && avatar_clip_refs_parse((const char *)r->body,r->len,s_refs);
         if(!ok) {
             snprintf(detail,sizeof(detail),"metadata_status_%d_len_%u_mode_%d_sleep_%d_call_%d_online_%d",r?r->status:0,r?(unsigned)r->len:0,
@@ -88,7 +87,7 @@ static void export_task(void *arg) {
                 printf("@avatar_assets {\"source\":\"%s\",\"coverage\":%u,\"path_classes\":[",hex,mask);
                 for(unsigned i=0;i<MUSE_AVATAR_CLIPS;i++) {
                     const char *p=s_refs->path[i];
-                    const char *kind=!p[0]?"missing":strstr(p,"://")?"url":p[0]=='/'?"absolute":p[0]=='~'?"home":strchr(p,'/')?"relative":"basename";
+                    const char *kind=!p[0]?"missing":!strncmp(p,AVATAR_IDENTITY_FILE_PREFIX,sizeof(AVATAR_IDENTITY_FILE_PREFIX)-1)?"gadget":strstr(p,"://")?"url":p[0]=='/'?"absolute":p[0]=='~'?"home":strchr(p,'/')?"relative":"basename";
                     printf("%s\"%s\"",i?",":"",kind);
                 }
                 printf("]}\n");error=NULL;
@@ -97,7 +96,7 @@ static void export_task(void *arg) {
     } else if(s_refs && same_source() && s_kind<MUSE_AVATAR_CLIPS && s_refs->path[s_kind][0] && s_offset<2*1024*1024) {
         char range[64];snprintf(range,sizeof(range),"bytes=%u-%u",s_offset,s_offset+4095);
         const char *headers[]={"Range",range,NULL};
-        char *url=vm_file_request_path(s_refs->path[s_kind]);
+        char *url=avatar_identity_url_ok(s_refs->path[s_kind],sizeof(s_refs->path[s_kind]))?strdup(s_refs->path[s_kind]):NULL;
         avatar_response_t *r=url?avatar_request_get_status(url,headers,4096,0,&ops):NULL;free(url);
         if(r && same_source() && (r->status==206 || r->status==416 || (r->status==200 && !s_offset))) {
             size_t size=r->status==416?0:r->len;

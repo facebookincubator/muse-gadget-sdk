@@ -69,8 +69,21 @@ class GadgetTransportTest(unittest.TestCase):
 
     def test_daemon_requests_and_control_rejection_policy_are_preserved(self):
         source = (ROOT / "main/noise_control.cpp").read_text()
-        for name in ("static bool req_open(", "static bool req_pump_tx("):
-            self.assertIn("ServiceType::Daemon, op.id", function_source(source, name))
+        # A request names the service its open chose on every frame: the daemon
+        # for noise_ctrl_req_open, the Gadget API for noise_ctrl_req_open_gadget_api.
+        self.assertIn("return gadget_api ? ServiceType::Gadget : ServiceType::Daemon;",
+                      function_source(source, "static ServiceType req_service("))
+        self.assertIn("req_service(op.gadget_api), op.id", function_source(source, "static bool req_open("))
+        pump = function_source(source, "static bool req_pump_tx(")
+        self.assertIn("req_service(s->gadget_api), op.id", pump)
+        self.assertIn("ServiceType service = req_service(s->gadget_api);\n        req_clear(s);", pump)
+        self.assertIn("return noise_ctrl_req_open_hdr(", function_source(source, 'extern "C" int64_t noise_ctrl_req_open('))
+        self.assertIn("return req_open_on(false,", function_source(source, 'extern "C" int64_t noise_ctrl_req_open_hdr('))
+        self.assertIn("return req_open_on(true,",
+                      function_source(source, 'extern "C" int64_t noise_ctrl_req_open_gadget_api('))
+        # A request the BLE session sends again after its unasked end keeps its service.
+        self.assertIn("s->opened_us, true, s->hdr_cb, s->gadget_api};",
+                      function_source(source, "static int req_streams_requeue("))
         session = function_source(source, "static session_result_t run_session(")
         # Only Wi-Fi's session left the daemon routes: the device session over
         # BLE (ble_session_begin) still opens POST /link-control on the daemon,

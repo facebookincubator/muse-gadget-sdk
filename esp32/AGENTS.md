@@ -759,9 +759,11 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
 
 Link's control stream, tunnel and agent-name fetch use the VM's Gadget API
 (`ServiceType::Gadget`: `/api/gadget/control`, `/api/gadget/tunnel` and
-`/api/gadget/me`). The device session over BLE (BLE-only gadgets, through the
-phone's relay) keeps its control stream on the daemon's `POST /link-control`.
-The requests below go to the VM's daemon.
+`/api/gadget/me`), and avatar sync and its clip export read
+`/api/gadget/identity` and its avatar files through
+`noise_ctrl_req_open_gadget_api()`. The device session over BLE (BLE-only
+gadgets, through the phone's relay) keeps its control stream on the daemon's
+`POST /link-control`. The requests below go to the VM's daemon.
 
 `CONFIG_HOMEHUB_DAEMON_REQUESTS` (on by default, on every board, Link-only
 builds included) lets firmware open its own HTTP requests to the VM's daemon
@@ -793,8 +795,9 @@ call's `POST /voice/realtime` and `POST /voice/end-call`:
   `file` part. Send the body in pieces (below); the `file` part has no size
   cap of its own, and each text field is capped at 64 KB. There's no append:
   a file is written in one upload.
-- `GET /identity`: the user's Muse identity, whose avatar the avatar face and
-  avatar sync follow (`main/mg_face.c`, `main/avatar_sync.c`).
+- `GET /identity`: the user's Muse identity, whose avatar the avatar face
+  follows (`main/mg_face.c`). Avatar sync reads `/api/gadget/identity`
+  instead (above).
 
 `POST /fs/read` and `POST /fs/write` are owner-only: a gadget's credentials
 get 403 there. There are no list or stat routes for gadgets.

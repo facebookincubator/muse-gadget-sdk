@@ -12,5 +12,6 @@
 #include "avatar_identity.h"
 #include "muse_avatar_pack.h"
 typedef struct { avatar_identity_t identity; char path[MUSE_AVATAR_CLIPS][512]; } avatar_clip_refs_t;
-/* Bounded /identity parsing; only the documented animation fields are used. */
+/* Bounded GET /api/gadget/identity parsing; only the documented animation
+ * fields are used. */
 bool avatar_clip_refs_parse(const char *json, size_t len, avatar_clip_refs_t *out);
