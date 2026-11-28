@@ -39,7 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / "components/muse"
-TINY = ROOT / "components/tinyh264/src"
+TINY = ROOT.parent / "xplat/tinyh264/src"
 VEC = ROOT / "tests/vectors/h264"
 MAX_CELLS = 32
 WINDOWS, NONE, FULL_AREA, FULL_MANY = range(4)

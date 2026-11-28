@@ -120,10 +120,10 @@ class AvatarClips(unittest.TestCase):
     def compile(self,tmp,source,decoder=False):
         src=Path(tmp)/'harness.c';src.write_text(source);exe=Path(tmp)/'harness'
         command=[*shlex.split(os.environ.get('CC','cc')),'-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
-            '-I',str(MUSE),'-I',str(ROOT/'components/muse_vstream/include'),'-I',str(ROOT/'components/tinyh264/src')]
+            '-I',str(MUSE),'-I',str(ROOT/'components/muse_vstream/include'),'-I',str(ROOT.parent/'xplat/tinyh264/src')]
         if decoder:
             (Path(tmp)/'sdkconfig.h').write_text('#define CONFIG_MUSE_VIDEO_VP8 0\n')
-            command+=['-I',tmp,'-w','-fno-sanitize=shift-base',str(MUSE/'muse_vdec.c'),str(MUSE/'muse_vdec_same.c')]+[str(p) for p in sorted((ROOT/'components/tinyh264/src').glob('*.c'))]
+            command+=['-I',tmp,'-w','-fno-sanitize=shift-base',str(MUSE/'muse_vdec.c'),str(MUSE/'muse_vdec_same.c')]+[str(p) for p in sorted((ROOT.parent/'xplat/tinyh264/src').glob('*.c'))]
         else:command+=['-Wall','-Wextra','-Werror']
         subprocess.run(command+[str(src),str(MUSE/'muse_avatar_pack.c'),'-o',str(exe)],check=True,capture_output=True)
         return exe

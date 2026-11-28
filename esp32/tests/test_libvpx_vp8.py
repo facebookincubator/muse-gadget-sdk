@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""components/libvpx_vp8 on the host: the trimmed, sped-up decoder against
+"""xplat/libvpx_vp8 on the host: the trimmed, sped-up decoder against
 stock libvpx (MD5s of its output in tests/vectors/vp8/md5.txt, from libvpx
 v1.16.0's vpxdec) on streams covering versions 0 to 3, the normal, simple and
 no loop filter, segmentation, four token partitions, error resilience, an
-alt-ref (hidden) frame and repeated keyframes; its row progress hook
+alt-ref (hidden) frame and repeated keyframes, also built with VPX_XPULP
+(rv_xpulp.h's plain-C twins); its row progress hook
 (tests/libvpx_vp8_harness.c); and several decoders at once, one thread each
 (tests/libvpx_vp8_threads_harness.c), as the gadget's two bands run. tests/vectors/vp8/make_vectors.py makes the
 streams from a synthetic picture."""
@@ -31,7 +32,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "components/libvpx_vp8/src"
+SRC = ROOT.parent / "xplat/libvpx_vp8/src"
 VEC = ROOT / "tests/vectors/vp8"
 
 
@@ -114,13 +115,17 @@ class LibvpxVp8Test(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
         cls.exe = Path(cls.tmp.name, "vp8dec")
+        cls.exe_xpulp = Path(cls.tmp.name, "vp8dec_xpulp")
         cc = os.environ.get("CC", "cc")
         srcs = sorted(str(p) for p in SRC.rglob("*.c"))
-        build = subprocess.run(
-            [cc, "-O2", "-w", f"-I{SRC}", "-o", str(cls.exe), str(ROOT / "tests/libvpx_vp8_harness.c"), *srcs, "-lm"],
-            capture_output=True, text=True)
-        if build.returncode:
-            raise AssertionError(build.stdout + build.stderr)
+        # VPX_XPULP with rv_xpulp.h's plain-C twins: the same pictures
+        for exe, flags in ((cls.exe, []), (cls.exe_xpulp, ["-DVPX_XPULP=1", f"-I{ROOT.parent / 'xplat/include'}"])):
+            build = subprocess.run(
+                [cc, "-O2", "-w", *flags, f"-I{SRC}", "-o", str(exe), str(ROOT / "tests/libvpx_vp8_harness.c"), *srcs,
+                 "-lm"],
+                capture_output=True, text=True)
+            if build.returncode:
+                raise AssertionError(build.stdout + build.stderr)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -129,14 +134,15 @@ class LibvpxVp8Test(unittest.TestCase):
     def test_bit_exact_with_libvpx(self) -> None:
         want = dict(line.split() for line in (VEC / "md5.txt").read_text().splitlines() if line.strip())
         self.assertGreaterEqual(len(want), 7)
-        for name, md5 in want.items():
-            with self.subTest(stream=name):
-                out = Path(self.tmp.name, name + ".yuv")
-                run = subprocess.run([str(self.exe), str(VEC / name), str(out)], capture_output=True, text=True,
-                                     timeout=120)
-                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-                self.assertIn("progress ok", run.stdout)
-                self.assertEqual(hashlib.md5(out.read_bytes()).hexdigest(), md5)
+        for exe in (self.exe, self.exe_xpulp):
+            for name, md5 in want.items():
+                with self.subTest(build=exe.name, stream=name):
+                    out = Path(self.tmp.name, name + ".yuv")
+                    run = subprocess.run([str(exe), str(VEC / name), str(out)], capture_output=True, text=True,
+                                         timeout=120)
+                    self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                    self.assertIn("progress ok", run.stdout)
+                    self.assertEqual(hashlib.md5(out.read_bytes()).hexdigest(), md5)
 
 
     def test_decoders_side_by_side(self) -> None:

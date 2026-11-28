@@ -34,10 +34,9 @@ with very efficient CPU and memory use. This is the copy this SDK vendors
 - **Source:** the Muse Gadgets fixed-point port of Google liblc3 (see
   VENDORED.md). In this SDK: `xplat/lc3fx`, which `esp32/components/liblc3`
   builds for chips without an FPU; the ESP32 and Zephyr gadgets use it.
-- **Porting notes:** targets whose ROM keeps the stack 4-byte aligned need
-  `-mpreferred-stack-boundary=2`; put the hot tables and
-  tns/sns/spec/mdct in RAM when code runs from XIP flash; pointer tables are
-  `* const`.
+- **Porting notes:** put the hot tables and tns/sns/spec/mdct in RAM when
+  code runs from XIP flash; pointer tables are `* const`. The build, the hot lists, the section-name hooks and the
+  optimization switches: [`../PORTING-PERF.md`](../PORTING-PERF.md).
 - **Use FPU float liblc3 instead** only where the chip has a fast FPU and the
   float build is already in place (`xplat/liblc3` in this repo); both decode each
   other's streams.
