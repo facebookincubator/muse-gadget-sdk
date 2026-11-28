@@ -32,9 +32,9 @@ command.
 - **A Raspberry Pi with Bluetooth**: a 3B+, 4, 5 or Zero 2 W. Other Linux
   computers work too, as long as they have Bluetooth LE.
 - **Raspberry Pi OS Bullseye or later**, Debian 11 or later, Ubuntu 22.04
-  or later, Arch, [Fedora](docs/fedora.md), or openSUSE Tumbleweed or Leap 16,
+  or later, Arch, [Fedora](docs/fedora.md), openSUSE Tumbleweed or Leap 16, or [NixOS](docs/nixos.md),
   already on your network. Debian/Ubuntu support 32-bit and 64-bit;
-  Arch/Fedora/openSUSE require x86_64 or aarch64.
+  Arch/Fedora/openSUSE/NixOS require x86_64 or aarch64.
 - **Python 3.9 or later**, using the distro's Python and Bluetooth bindings.
 - **An account with sudo** on the machine.
 - **An SDK token** from [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens)
@@ -553,6 +553,8 @@ for). Once the program itself exits, inherited pipes are drained for at most
 - [Raspberry Pi 2](docs/raspberry-pi-2-headless.md): running the gadget on a
   board with no Bluetooth, by pairing once on another machine and copying
   the pairing state.
+- [NixOS](docs/nixos.md): declarative install with the NixOS module
+  in linux/nixos.
 
 ## Manage it
 

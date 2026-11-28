@@ -1,0 +1,18 @@
+Resolve the shell from PATH instead of hardcoding /bin/bash.
+
+Upstream executor.py spawns ["/bin/bash", "-c", command], which fails
+on any system without an FHS /bin/bash (NixOS, Termux). shutil is
+already imported in the file. Same change as the local
+termux-shell-resolution fix; drop this patch when upstream resolves
+the shell dynamically.
+--- a/src/musegadget/executor.py
++++ b/src/musegadget/executor.py
+@@ -214,7 +214,7 @@
+         started = time.monotonic()
+         try:
+             stdout, stderr, exit_code, timed_out = self._run_child(
+-                ["/bin/bash", "-c", command], cwd, timeout_s)
++                [shutil.which("bash") or "/bin/bash", "-c", command], cwd, timeout_s)
+         except OSError as exc:
+             return error(f"could not start command: {exc}")
+         out, out_cut = _clip(stdout)
