@@ -32,20 +32,6 @@ We open sourced the SDKs and firmware here. It's built by hackers, for hackers,
 just for fun. Side effects of tinkering may include bricked boards, voided
 warranties, brownouts, or bankruptcies. Proceed at your own risk!
 
----
-
-### 🤖 Featured Port: M5Stack Stack-Chan (Desktop Robot)
-
-<p align="center">
-  <img src="esp32/devices/images/m5stack-stackchan.jpg" width="600" alt="M5Stack Stack-Chan running Muse Gadget">
-</p>
-
-An expressive desktop AI companion pairing the **M5Stack CoreS3** with the **Stack-Chan pan/tilt motorized base**. Features voice-synchronized head kinematics, dynamic RGB LED animations, interactive acoustic feedback, dynamic text sizing, and auto-torque power management.
-
-👉 **[Read the Full Stack-Chan Setup Guide & Media](esp32/devices/m5stack-stackchan.md)**
-
----
-
 | | |
 |---|---|
 | [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |

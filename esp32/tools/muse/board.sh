@@ -122,10 +122,8 @@ if [ "$target" = esp32s31 ]; then
     echo "ESP-Mosaico: building for Vibe Mode ${vibe2:-0.1} (utils at $MOSAICO_UTILS)" >&2
 fi
 if [ -n "${IDF_EXPORT:-}" ]; then
-    [ -d "/opt/homebrew/opt/python@3.11/libexec/bin" ] && export PATH="/opt/homebrew/opt/python@3.11/libexec/bin:$PATH"
     . "$IDF_EXPORT" >/dev/null 2>&1
 elif ! command -v idf.py >/dev/null 2>&1; then
-    [ -d "/opt/homebrew/opt/python@3.11/libexec/bin" ] && export PATH="/opt/homebrew/opt/python@3.11/libexec/bin:$PATH"
     for d in "$HOME/.espressif/esp-idf-v6.0.3" "${IDF_PATH:-}" "$HOME/esp/esp-idf-v6.0.3" "$HOME/esp/esp-idf-v6" "$HOME/esp/esp-idf"; do
         [ -n "$d" ] && [ -f "$d/export.sh" ] && { . "$d/export.sh" >/dev/null 2>&1; break; }
     done

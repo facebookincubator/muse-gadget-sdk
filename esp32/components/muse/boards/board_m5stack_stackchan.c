@@ -18,11 +18,11 @@
  * M5Stack Stack-Chan (CoreS3 + Stack-Chan motorized base).
  * Core unit: 320x240 ILI9342C LCD, FT6336U touch, AW88298 speaker, ES7210 dual mic,
  * AXP2101 PMU and AW9523B IO expander (via espressif/m5stack_core_s3 BSP).
- * Stack-Chan base:
- * - 5V power bus enabled via CoreS3 AW9523B USB_EN (bsp_feature_enable(BSP_FEATURE_USB, true)).
+ * Stack-Chan base (M5Stack's firmware: https://github.com/m5stack/StackChan, firmware/main/hal/):
+ * - Servo power (VM_EN) on pin 0 of the base's PY32L020 IO expander (py32_init()).
  * - 2x Feetech SCS0009 serial bus servos (Yaw ID 1, Pitch ID 2) over half-duplex UART (1 Mbps).
  *   Connected to Port C (GPIO 17 TX, GPIO 18 RX) and/or internal base lines (GPIO 6/7).
- * - 12x WS2812C RGB LEDs driven by the base PY32L020 MCU at I2C address 0x6F (or direct fallback).
+ * - 12x WS2812C RGB LEDs driven by the base PY32L020 MCU at I2C address 0x6F.
  */
 
 #include "bsp/esp-bsp.h"
@@ -668,6 +668,14 @@ static esp_err_t power_off(void)
     return muse_pmu_power_off();
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off on the AXP2101. */
+static void safe_display_off(void)
+{
+    if (bsp_i2c_init() == ESP_OK) {
+        bsp_display_backlight_off();   /* the AXP2101's backlight LDO off (the BSP opens the PMU itself) */
+    }
+}
+
 static const muse_board_t s_board = {
     .name = "M5Stack Stack-Chan",
     .width = BSP_LCD_H_RES,
@@ -684,11 +692,13 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = bsp_display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
     .mic_slot = -1,
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .read_power = read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the AXP2101's charge-done state */
     .power_off = power_off,
 };
 
