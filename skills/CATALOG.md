@@ -1,11 +1,15 @@
 # Skill Catalog
 
-54 active skills: 53 device/family skills and one shared Google Cast skill.
+55 active skills: 54 device/family skills and one shared Google Cast skill.
 Use the matching device skill for model compatibility, setup, safety and supported operations.
 
 ## Shared protocol
 
 - [Google Cast](gadget-google-cast/SKILL.md) — media, volume and existing speaker groups.
+
+## Computing
+
+- [Android phone](gadget-android-phone/SKILL.md) — owner-built companion app: verified-ack reporting loop, allowlisted-template commands, plugin host.
 
 ## Lights and plugs
 
