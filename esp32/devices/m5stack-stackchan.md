@@ -29,7 +29,7 @@ This port brings Muse's conversational AI presence into a physical robot with ex
 | Component | Specification |
 |---|---|
 | **SoC** | ESP32-S3 (Dual-core Xtensa LX7 @ 240 MHz, 2.4 GHz Wi-Fi 4, BLE 5.0) |
-| **Memory** | 16 MB Octal SPI Flash, 8 MB Quad PSRAM |
+| **Memory** | 16 MB Quad SPI Flash, 8 MB Quad PSRAM |
 | **Display** | 2.0-inch 320x240 ILI9342C IPS LCD (Capacitive Touch via FT6336U) |
 | **Audio Input** | Dual ES7210 PDM Microphones |
 | **Audio Output** | AW88298 1W I2S Class-D Power Amplifier + Internal Cavity Speaker |
