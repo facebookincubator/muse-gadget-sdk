@@ -40,6 +40,7 @@
 
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_lvgl_hold.h"   /* every pause bounded (muse_lvgl_hold.h) */
 #include "muse_lcd_bands.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
@@ -179,9 +180,9 @@ static void panel_sleep(bool sleep)
 static void display_pause(bool pause)
 {
     if (pause) {
-        esp_lv_adapter_pause(-1);
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true);
     } else {
-        esp_lv_adapter_resume();
+        muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false);
     }
 }
 

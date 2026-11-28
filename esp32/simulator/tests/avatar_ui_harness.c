@@ -56,7 +56,8 @@ int main(void) {
     muse_avatar_select(MUSE_AVATAR_PERSONAL);frame_tick(NULL);
     int x=s_w/2,y=s_h/2;
     touch(x,y,true);touch(x,y,false);assert(muse_state_happiness()>0);
-    touch(x,y,true);touch(x,y-80,true);assert(muse_ui_volume_swiping());
+    /* The v1.0 home has no volume drag (volume_swipe_harness: the compact faces). */
+    touch(x,y,true);touch(x,y-80,true);assert(!muse_ui_volume_swiping());
     touch(x,y-80,false);assert(!muse_ui_volume_swiping());
     muse_state_set_mode(MUSE_MODE_LISTENING);frame_tick(NULL);assert(s_avatar_visible);
     muse_state_set_mode(MUSE_MODE_SPEAKING);muse_state_set_level(1);frame_tick(NULL);assert(s_avatar_visible);

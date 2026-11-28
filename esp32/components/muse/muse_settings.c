@@ -45,6 +45,10 @@ static struct {
     uint8_t mic_gain;
     uint8_t brightness;
     uint16_t sleep_s;
+    bool sleep_charged;   /* Display > Sleep when charged: true = Always (the default), false = Never */
+    uint8_t talk;       /* muse_talk_mode_t */
+    bool haptics;       /* the motor's buzz at the talk threshold */
+    bool developer;     /* Developer mode: off by default */
     uint8_t text_size;
     bool wifi_on;
     bool ble_on;
@@ -56,9 +60,12 @@ static struct {
 } s = {
     .volume = CONFIG_MUSE_DEFAULT_VOLUME,
     .speaker_on = true,
-    .mic_gain = 30,
+    .mic_gain = MUSE_MIC_GAIN_TUNED,
     .brightness = 100,
-    .sleep_s = 120,
+    .sleep_s = 120,   /* desk and dev boards: 2 min */
+    .sleep_charged = true,
+    .talk = MUSE_TALK_BUTTON,   /* "Button only" by default; boards without the choice ignore it */
+    .haptics = true,
     .text_size = TEXT_SIZE_UNSET,
     .wifi_on = true,
     .host = DEFAULT_HOST,
@@ -82,6 +89,7 @@ static int s_text_default = MUSE_TEXT_SMALL;
 #if CONFIG_MUSE_AVATAR_SYNC
 static atomic_uint s_avatar_source;
 #endif
+static muse_setting_cb_t s_observer;   /* a second listener: the musegadgets client's reports */
 
 #define LOCKED(body) do { xSemaphoreTake(s_lock, portMAX_DELAY); body; xSemaphoreGive(s_lock); } while (0)
 
@@ -118,6 +126,9 @@ static void notify(muse_setting_t what)
 {
     if (s_listener) {
         s_listener(what);
+    }
+    if (s_observer) {
+        s_observer(what);
     }
 }
 
@@ -179,6 +190,19 @@ esp_err_t muse_settings_init(void)
 #endif
     load_u8("bright", &s.brightness);
     nvs_get_u16(s_nvs, "sleep_s", &s.sleep_s);
+    if (nvs_get_u8(s_nvs, "sleep_chg", &b) == ESP_OK) {
+        s.sleep_charged = b != 0;
+    }
+    load_u8("talk", &s.talk);
+    if (s.talk > MUSE_TALK_BUTTON) {
+        s.talk = MUSE_TALK_BUTTON;
+    }
+    if (nvs_get_u8(s_nvs, "haptics", &b) == ESP_OK) {
+        s.haptics = b;
+    }
+    if (nvs_get_u8(s_nvs, "developer", &b) == ESP_OK) {
+        s.developer = b != 0;
+    }
     load_text_size();
     if (nvs_get_u8(s_nvs, "wifi_on", &b) == ESP_OK) {
         s.wifi_on = b;
@@ -261,11 +285,98 @@ esp_err_t muse_settings_set_avatar_source(muse_avatar_source_t source) {
 }
 #endif
 
+void muse_settings_set_observer(muse_setting_cb_t cb)
+{
+    s_observer = cb;
+}
+
 int muse_settings_volume(void) { return s.volume; }
 bool muse_settings_speaker_on(void) { return s.speaker_on; }
 int muse_settings_mic_gain(void) { return s.mic_gain; }
 int muse_settings_brightness(void) { return s.brightness; }
 int muse_settings_sleep_s(void) { return s.sleep_s; }
+bool muse_settings_sleep_when_charged(void) { return s.sleep_charged; }
+muse_talk_mode_t muse_settings_talk_mode(void) { return (muse_talk_mode_t)s.talk; }
+bool muse_settings_haptics(void) { return s.haptics; }
+
+void muse_settings_set_talk_mode(muse_talk_mode_t mode)
+{
+    s.talk = mode <= MUSE_TALK_BUTTON ? mode : MUSE_TALK_BUTTON;
+    save_u8("talk", s.talk);
+    notify(MUSE_SETTING_TALK);
+}
+
+void muse_settings_set_haptics(bool on)
+{
+    s.haptics = on;
+    save_u8("haptics", on);
+    notify(MUSE_SETTING_HAPTICS);
+}
+bool muse_settings_developer(void) { return s.developer; }
+
+void muse_settings_set_developer(bool on)
+{
+    if (s.developer == on) {
+        return;
+    }
+    s.developer = on;
+    if (on) {
+        save_u8("developer", 1);
+    } else {
+        /* Off is the default: the key goes, as after a factory reset. */
+        nvs_erase_key(s_nvs, "developer");
+        nvs_commit(s_nvs);
+    }
+    ESP_LOGI(TAG, "developer mode %s", on ? "on" : "off");
+    notify(MUSE_SETTING_DEVELOPER);
+}
+void muse_settings_factory_reset(void)
+{
+    s.developer = false;
+    nvs_handle_t h;
+    if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = nvs_erase_key(h, "developer");
+    if (err == ESP_OK) {
+        nvs_commit(h);
+    }
+    nvs_close(h);
+    ESP_LOGI(TAG, "factory reset: developer mode off");
+}
+
+/* An erase took: the key is gone, or was never there. */
+static bool forget_erased(esp_err_t err) { return err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND; }
+
+bool muse_settings_forget_server(void)
+{
+    if (s_lock) {
+        LOCKED({
+            strlcpy(s.host, DEFAULT_HOST, sizeof(s.host));
+            s.vm[0] = '\0';
+            memset(s.token, 0, sizeof(s.token));
+        });
+    }
+    nvs_handle_t h;
+    bool ok = nvs_open(NS, NVS_READWRITE, &h) == ESP_OK;
+    if (ok) {
+        bool host = forget_erased(nvs_erase_key(h, "host"));
+        bool vm = forget_erased(nvs_erase_key(h, "vm"));
+        bool token = forget_erased(nvs_erase_key(h, "token"));
+        ok = host && vm && token;
+        ok = nvs_commit(h) == ESP_OK && ok;
+        nvs_close(h);
+    }
+    if (ok) {
+        ESP_LOGI(TAG, "reset: Muse server, VM and device token back to their defaults");
+    } else {
+        ESP_LOGE(TAG, "reset: the stored Muse server, VM or device token wasn't erased");
+    }
+    if (s_lock) {
+        notify(MUSE_SETTING_HATCH);
+    }
+    return ok;
+}
 int muse_settings_text_size(void) { return s.text_size == TEXT_SIZE_UNSET ? s_text_default : s.text_size; }
 bool muse_settings_wifi_on(void) { return s.wifi_on; }
 bool muse_settings_ble_on(void) { return s.ble_on; }
@@ -339,18 +450,111 @@ size_t muse_settings_hatch_token_len(void)
     return n;
 }
 
-void muse_settings_set_volume(int pct)
+/* The bench volume (bench and
+ * test mutes are RAM-only): vol=N sets the speaker in RAM, never in NVS, and
+ * the saved values wait here until vol=saved or the next user or app change.
+ * A reboot comes back at the saved volume (nothing was written). */
+static bool s_vol_ram;              /* a bench volume is in effect */
+static volatile uint32_t s_vol_changes;   /* every speaker change since boot */
+static volatile muse_vol_by_t s_vol_by;   /* ...and who made the latest */
+static uint8_t s_saved_volume;      /* ...and what NVS holds meanwhile */
+static bool s_saved_speaker_on;
+
+/* A user's or the app's change ends the bench volume: the saved values come
+ * back (silently: the change that follows notifies), then the change applies
+ * and is saved, so the saved volume never holds a bench value. */
+static bool end_bench_volume(void)
 {
+    if (!s_vol_ram) {
+        return false;
+    }
+    s_vol_ram = false;
+    bool level = s.volume != s_saved_volume;
+    s.volume = s_saved_volume;
+    s.speaker_on = s_saved_speaker_on;
+    return level;   /* the level moved back: a speaker-only change notifies it too */
+}
+
+static void count_change(muse_vol_by_t by)
+{
+    s_vol_by = by;   /* before the count, so a reader that sees the count sees who */
+    s_vol_changes = s_vol_changes + 1;
+}
+
+uint32_t muse_settings_volume_changes(muse_vol_by_t *by)
+{
+    uint32_t n = s_vol_changes;
+    if (by) {
+        *by = s_vol_by;
+    }
+    return n;
+}
+
+void muse_settings_set_volume_by(int pct, muse_vol_by_t by)
+{
+    end_bench_volume();
     s.volume = clampi(pct, 0, 100);
     save_u8("volume", s.volume);
+    count_change(by);
     notify(MUSE_SETTING_VOLUME);
+}
+
+void muse_settings_set_speaker_on_by(bool on, muse_vol_by_t by)
+{
+    bool level = end_bench_volume();
+    s.speaker_on = on;
+    save_u8("speaker", on);
+    count_change(by);
+    notify(MUSE_SETTING_SPEAKER);
+    if (level) {
+        notify(MUSE_SETTING_VOLUME);   /* the codec follows the saved level again */
+    }
+}
+
+void muse_settings_set_volume(int pct)
+{
+    muse_settings_set_volume_by(pct, MUSE_VOL_BY_DEVICE);
 }
 
 void muse_settings_set_speaker_on(bool on)
 {
-    s.speaker_on = on;
-    save_u8("speaker", on);
-    notify(MUSE_SETTING_SPEAKER);
+    muse_settings_set_speaker_on_by(on, MUSE_VOL_BY_DEVICE);
+}
+
+void muse_settings_set_volume_ram(int pct)
+{
+    pct = clampi(pct, 0, 100);
+    if (!s_vol_ram) {
+        s_saved_volume = s.volume;
+        s_saved_speaker_on = s.speaker_on;
+        s_vol_ram = true;
+    }
+    if (pct > 0) {
+        s.volume = (uint8_t)pct;
+    }
+    s.speaker_on = pct > 0;   /* 0 is off, the level kept, as a mute */
+    count_change(MUSE_VOL_BY_BENCH);
+    notify(MUSE_SETTING_VOLUME);
+}
+
+void muse_settings_volume_restore(void)
+{
+    if (!s_vol_ram) {
+        return;
+    }
+    end_bench_volume();
+    count_change(MUSE_VOL_BY_BENCH);   /* a bench restore is a change the gadget shows */
+    notify(MUSE_SETTING_VOLUME);
+}
+
+bool muse_settings_volume_is_ram(void) { return s_vol_ram; }
+
+int muse_settings_saved_speaker_volume(void)
+{
+    if (s_vol_ram) {
+        return s_saved_speaker_on ? s_saved_volume : 0;
+    }
+    return s.speaker_on ? s.volume : 0;
 }
 
 void muse_settings_set_mic_gain(int db)
@@ -373,6 +577,13 @@ void muse_settings_set_sleep_s(int secs)
     nvs_set_u16(s_nvs, "sleep_s", s.sleep_s);
     nvs_commit(s_nvs);
     notify(MUSE_SETTING_SLEEP);
+}
+
+/* Device-local (no protocol field), so no listener hears it. */
+void muse_settings_set_sleep_when_charged(bool always)
+{
+    s.sleep_charged = always;
+    save_u8("sleep_chg", always);
 }
 
 void muse_settings_set_text_size(int size)

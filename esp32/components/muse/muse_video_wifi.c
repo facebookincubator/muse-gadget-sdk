@@ -34,6 +34,7 @@
 #include "muse_mem.h"
 #include "muse_video.h"
 #include "muse_video_wire.h"
+#include "muse_video_wifi_gate.h"
 #include "muse_link.h"
 #include "muse_wifi.h"
 
@@ -54,6 +55,13 @@ static const char *TAG = "muse_video_wifi";
  * send a whole message within FIRST_MSG_MS, and while the client has sent
  * something within ACTIVE_MS a new connection is turned away rather than
  * taking its place. */
+/* A bench build that takes starts with the view closed (never shipped): it
+ * also keeps the port announced. */
+#if CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME
+#define START_ANYTIME 1
+#else
+#define START_ANYTIME 0
+#endif
 #define FIRST_MSG_MS 5000
 #define ACTIVE_MS 10000
 
@@ -75,6 +83,12 @@ static volatile int s_sock = -1;        /* the client's connection */
 static int64_t s_conn_us, s_last_rx_us; /* when it connected, and last sent a whole message */
 static volatile bool s_tx_failed;       /* a send gave up: the client isn't reading */
 static volatile bool s_want;            /* the view asks for a stream */
+/* Refused starts and the mDNS announcement (muse_video_wifi_gate.h): the
+ * server task's starts and the view's requests both change them. */
+static SemaphoreHandle_t s_gate_lock;
+static muse_vwg_backoff_t s_backoff;
+static muse_vwg_announce_t s_announce;
+static bool s_mdns_up;                  /* mDNS is running (the announcement can go up) */
 static volatile bool s_streaming;   /* ended with take_stream() */
 static char s_name[40];
 
@@ -152,9 +166,19 @@ static void on_stop(void)
     tx(m, muse_video_wire_simple(m, sizeof(m), "stop"));
 }
 
+static void announce_update(void);
+
 static void on_request(bool want)
 {
     s_want = want;
+    if (s_gate_lock) {
+        xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+        if (want) {
+            muse_vwg_reset(&s_backoff);   /* someone opened the view: starts are heard again */
+        }
+        xSemaphoreGive(s_gate_lock);
+        announce_update();
+    }
     uint8_t m[40];
     tx(m, muse_video_wire_want(m, sizeof(m), want));
 }
@@ -199,35 +223,60 @@ static void close_client(const char *why)
     }
 }
 
+/* A start refused for what it asked (closed, invalid, unsupported): counted
+ * towards a pause in listening to starts (muse_video_wifi_gate.h). */
+static void refuse_start(uint8_t *m, size_t cap, const char *why)
+{
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    int pause = muse_vwg_refused(&s_backoff, esp_timer_get_time());
+    xSemaphoreGive(s_gate_lock);
+    if (pause) {
+        ESP_LOGW(TAG, "starts refused in a row: not taking another for %d ms", pause);
+    }
+    tx(m, muse_video_wire_error(m, cap, "start", why));
+}
+
 static void on_start(const muse_video_params_t *p)
 {
     uint8_t m[96];
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    bool heard = muse_vwg_start_allowed(&s_backoff, esp_timer_get_time());
+    xSemaphoreGive(s_gate_lock);
+    if (!heard) {
+        /* Paused after refusals: the same answer as a board that can't take
+         * one now, and the stream that's on stays on. */
+        tx(m, muse_video_wire_error(m, sizeof(m), "start", "busy"));
+        return;
+    }
     end_stream();   /* a new start replaces the stream that's on */
 #if !CONFIG_MUSE_VIDEO_WIFI_START_ANYTIME
     /* Only while someone has the Phone camera view open on the board: the
      * client waits for "want" (VIDEO.md, Trust). */
-    if (!s_want && !muse_video_is_open()) {
-        tx(m, muse_video_wire_error(m, sizeof(m), "start", "closed"));
+    if (!s_want && !muse_video_view_open()) {   /* the user's view, not a BLE client's start */
+        refuse_start(m, sizeof(m), "closed");
         return;
     }
 #endif
     if (!s_have_caps) {
-        tx(m, muse_video_wire_error(m, sizeof(m), "start", "unsupported"));
+        refuse_start(m, sizeof(m), "unsupported");
         return;
     }
     muse_video_start_check_t c = muse_video_wire_check(p, &s_caps);
     if (c != MUSE_VIDEO_START_OK) {
         ESP_LOGW(TAG, "start refused: %ux%u @%u, %u bands, playout %u ms (%s)", p->width, p->height, p->fps,
                  p->tiles, p->playout_ms, c == MUSE_VIDEO_START_UNSUPPORTED ? "codec" : "out of range");
-        tx(m, muse_video_wire_error(m, sizeof(m), "start", c == MUSE_VIDEO_START_UNSUPPORTED ? "unsupported" : "invalid"));
+        refuse_start(m, sizeof(m), c == MUSE_VIDEO_START_UNSUPPORTED ? "unsupported" : "invalid");
         return;
     }
     muse_vstream_start(&s_ring);
     if (!muse_video_begin(&s_transport, p)) {
         muse_vstream_stop(&s_ring);
-        tx(m, muse_video_wire_error(m, sizeof(m), "start", "busy"));
+        tx(m, muse_video_wire_error(m, sizeof(m), "start", "busy"));   /* the board's state, not the start's: not counted */
         return;
     }
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    muse_vwg_reset(&s_backoff);
+    xSemaphoreGive(s_gate_lock);
     ESP_LOGI(TAG, "video stream %ux%u %u fps %u kb/s%s", p->width, p->height, p->fps, p->kbps,
              p->tiles == 2 ? ", two bands" : "");
     s_streaming = true;
@@ -305,6 +354,9 @@ static bool accept_client(int lsock)
     s_conn_us = esp_timer_get_time();
     s_last_rx_us = 0;
     xSemaphoreGive(s_tx_lock);
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    muse_vwg_reset(&s_backoff);   /* the last connection's refusals aren't this one's */
+    xSemaphoreGive(s_gate_lock);
     ESP_LOGI(TAG, "client connected from %s", ip);
     greet();
     return true;
@@ -323,6 +375,45 @@ static void wait_for_ip(void)
     }
 }
 
+/* The _musevideo._tcp service: up only while the Phone camera view is open
+ * (muse_video_wifi_gate.h), always on a bench build that takes starts any time. */
+static int mdns_add(void *ctx)
+{
+    (void)ctx;
+    char w[8], h[8];
+    snprintf(w, sizeof(w), "%u", s_caps.display_w);
+    snprintf(h, sizeof(h), "%u", s_caps.display_h);
+    mdns_txt_item_t txt[] = {
+        { "version", "1" }, { "width", w }, { "height", h }, { "round", s_caps.round ? "1" : "0" },
+    };
+    esp_err_t err = mdns_service_add(s_name, MUSE_VIDEO_WIRE_SERVICE, MUSE_VIDEO_WIRE_PROTO, CONFIG_MUSE_VIDEO_WIFI_PORT,
+                                     txt, sizeof(txt) / sizeof(txt[0]));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS: %s (the phone can still connect by address)", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "announced as %s.%s.local port %d", MUSE_VIDEO_WIRE_SERVICE, MUSE_VIDEO_WIRE_PROTO,
+                 CONFIG_MUSE_VIDEO_WIFI_PORT);
+    }
+    return err == ESP_OK ? 0 : -1;
+}
+
+static int mdns_remove(void *ctx)
+{
+    (void)ctx;
+    esp_err_t err = mdns_service_remove(MUSE_VIDEO_WIRE_SERVICE, MUSE_VIDEO_WIRE_PROTO);
+    ESP_LOGI(TAG, "no longer announced (%s)", err == ESP_OK ? "view closed" : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : -1;
+}
+
+static const muse_vwg_announce_ops_t s_mdns_ops = { mdns_add, mdns_remove, NULL };
+
+static void announce_update(void)
+{
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    muse_vwg_announce(&s_announce, s_mdns_up, s_want || START_ANYTIME, &s_mdns_ops);
+    xSemaphoreGive(s_gate_lock);
+}
+
 static void start_mdns(void)
 {
     char host[40];
@@ -332,24 +423,17 @@ static void start_mdns(void)
     }
     host[k] = 0;
     esp_err_t err = mdns_init();
-    if (err == ESP_OK) {
-        mdns_hostname_set(host);
-        mdns_instance_name_set(s_name);
-        char w[8], h[8];
-        snprintf(w, sizeof(w), "%u", s_caps.display_w);
-        snprintf(h, sizeof(h), "%u", s_caps.display_h);
-        mdns_txt_item_t txt[] = {
-            { "version", "1" }, { "width", w }, { "height", h }, { "round", s_caps.round ? "1" : "0" },
-        };
-        err = mdns_service_add(s_name, MUSE_VIDEO_WIRE_SERVICE, MUSE_VIDEO_WIRE_PROTO, CONFIG_MUSE_VIDEO_WIFI_PORT, txt,
-                               sizeof(txt) / sizeof(txt[0]));
-    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS: %s (the phone can still connect by address)", esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "announced as %s.local, %s.%s.local port %d", host, MUSE_VIDEO_WIRE_SERVICE, MUSE_VIDEO_WIRE_PROTO,
-                 CONFIG_MUSE_VIDEO_WIFI_PORT);
+        return;
     }
+    mdns_hostname_set(host);
+    mdns_instance_name_set(s_name);
+    ESP_LOGI(TAG, "mDNS as %s.local: the video service is announced while the Phone camera view is open", host);
+    xSemaphoreTake(s_gate_lock, portMAX_DELAY);
+    s_mdns_up = true;
+    xSemaphoreGive(s_gate_lock);
+    announce_update();
 }
 
 static int listen_socket(void)
@@ -593,7 +677,8 @@ void muse_video_wifi_start(void)
     uint32_t size = muse_video_buffer_size();
     uint8_t *buf = heap_caps_malloc(size, MUSE_BIG_CAPS);
     s_tx_lock = xSemaphoreCreateMutex();
-    if (!buf || !s_tx_lock) {
+    s_gate_lock = xSemaphoreCreateMutex();
+    if (!buf || !s_tx_lock || !s_gate_lock) {
         ESP_LOGE(TAG, "no memory for the video ring");
         free(buf);
         return;

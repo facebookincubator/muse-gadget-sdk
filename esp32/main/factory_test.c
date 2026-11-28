@@ -25,9 +25,14 @@
 #include "host/ble_gatt.h"
 #include "cJSON.h"
 
+#include "config_store.h"
 #include "identity.h"
 #include "link_pairing.h"
 #include "customer_product_info.h"
+#include "sdkconfig.h"
+#if CONFIG_MUSE_ENABLED
+#include "muse_ble.h"
+#endif
 
 static const char *TAG = "link.factory_test";
 
@@ -52,9 +57,24 @@ static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool     s_armed;
 static uint8_t  s_button_value;
 
+bool factory_test_allowed(bool set_up, bool window_open) {
+    return !set_up || window_open;
+}
+
+static bool allowed_now(void) {
+#if CONFIG_MUSE_ENABLED
+    bool window_open = muse_ble_setup_window_open();
+#else
+    bool window_open = false;
+#endif
+    // An unreadable store counts as set up: never "unset" on an NVS error.
+    return factory_test_allowed(config_setup_complete_or_unreadable() || config_is_provisioned(), window_open);
+}
+
 static int ft_devinfo_access_cb(uint16_t conn_handle, uint16_t attr_handle,
                                 struct ble_gatt_access_ctxt *ctxt, void *arg) {
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_UNLIKELY;
+    // Device info is identity: open to any central. The button's read and press notification are the gated part.
 
     s_conn_handle = conn_handle;
     s_armed = true;
@@ -89,6 +109,7 @@ static int ft_devinfo_access_cb(uint16_t conn_handle, uint16_t attr_handle,
 static int ft_button_access_cb(uint16_t conn_handle, uint16_t attr_handle,
                                struct ble_gatt_access_ctxt *ctxt, void *arg) {
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_UNLIKELY;
+    if (!allowed_now()) return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
     int rc = os_mbuf_append(ctxt->om, &s_button_value, 1);
     return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
@@ -125,6 +146,14 @@ const struct ble_gatt_svc_def *factory_test_svcs(void) {
 void factory_test_on_button_press(void) {
     if (!s_armed) return;
     if (s_button_value != 0x00) return;
+#if !CONFIG_MUSE_GADGET_AUTOMATION && !CONFIG_MUSE_GADGET_TEST_BUILD
+    // A set-up release gadget's presses are the owner's: notified only while the service is open (unset, or the
+    // owner's setup window). Bench, test and automation builds notify every press (a set-up bench unit or jig).
+    if (!allowed_now()) {
+        s_armed = false;
+        return;
+    }
+#endif
 
     s_button_value = 0x01;
     ESP_LOGI(TAG, "button pressed, notifying");

@@ -41,12 +41,31 @@ typedef struct {
     int battery_mv;    /* 0 when the board can't measure it */
     bool charging;
     bool usb;
+    /* The charger reports charge done (its done or termination status), on
+     * boards whose muse_board_t.charged is MUSE_CHARGED_DONE
+     * (muse_charged.h). Never derived from the percentage. */
+    bool charge_done;
+    /* What a fuel gauge adds (the ESP-Mosaico's BQ27220); 0 / false where the
+     * board can't measure it. For report_battery_status. */
+    bool has_current;
+    int current_100ua;    /* negative discharging */
+    bool has_temp;
+    int temp_c;
+    int remaining_mah, full_mah;
 } muse_power_t;
 
 void muse_state_init(void);
 
 void muse_state_set_mode(muse_mode_t mode);
 muse_mode_t muse_state_mode(float *secs_in_mode);
+
+/* The turn on now is the gadget's own: its talk press started it
+ * (the panel stays lit through its thinking and responding until it's done;
+ * a phone's turn alone never wakes or holds the panel). The voice task sets
+ * it as a press's turn starts and clears it for a client's start_mic; a
+ * mode back to idle, boot or off clears it. */
+void muse_state_set_own_turn(bool own);
+bool muse_state_own_turn(void);
 
 /* Live audio level (mic while listening, playback while speaking), 0..1. */
 void muse_state_set_level(float level);
@@ -84,15 +103,65 @@ void muse_state_page(const char *text, int *cols, int *lines);
 
 void muse_state_set_power(const muse_power_t *power);
 muse_power_t muse_state_power(void);
-/* A battery and no USB power (charger or computer). Power saving asleep (the
- * voice task resting, the display paused, the Wi-Fi nap) is only for then;
- * a change nudges (muse_state_wait_awake). */
+/* A battery and no USB power (charger or computer), or a bench nap's as-if
+ * battery (below). Power saving asleep (the voice task resting, the display
+ * paused, the Wi-Fi nap) is only for then; a change nudges
+ * (muse_state_wait_awake). Never for cutting power: muse_state_on_battery_real. */
 bool muse_state_on_battery(void);
-/* Bench tests over USB (">nap"): count as on battery until turned off. */
+/* Really on battery: a battery and no USB power, whatever a bench nap says.
+ * Everything that cuts power (a power-off a board only allows on battery, the
+ * low-battery shutdown) goes by this, so a nap on USB makes the gadget
+ * behave as on battery but never power itself off. */
+bool muse_state_on_battery_real(void);
+/* Bench tests over USB (">nap"): count as on battery until turned off, or
+ * for MUSE_AS_IF_BATTERY_US at most (logged), so a bench that lost the
+ * device gets it back. */
 void muse_state_set_as_if_battery(bool on);
+
+/* ---- the pieces above as plain C (host tests) ---- */
+
+#define MUSE_AS_IF_BATTERY_US (10LL * 60 * 1000000)   /* a bench nap's as-if battery ends by itself */
+
+typedef struct {
+    bool on;
+    int64_t until_us;
+} muse_as_if_t;
+
+static inline void muse_as_if_set(muse_as_if_t *a, bool on, int64_t now_us)
+{
+    a->on = on;
+    if (on) {
+        a->until_us = now_us + MUSE_AS_IF_BATTERY_US;
+    }
+}
+
+/* Still on at now_us. Its time run out, it goes off; *expired says it did just now. */
+static inline bool muse_as_if_on(muse_as_if_t *a, int64_t now_us, bool *expired)
+{
+    *expired = a->on && now_us >= a->until_us;
+    if (*expired) {
+        a->on = false;
+    }
+    return a->on;
+}
+
+static inline bool muse_power_real_battery(const muse_power_t *p)
+{
+    return !p->usb && p->battery_pct >= 0;
+}
+
+/* A software power-off may go ahead: not on a board whose latch USB holds on
+ * (power_off_battery_only, the ESP-Mosaico) unless it's really on battery. */
+static inline bool muse_power_off_ok(bool battery_only, const muse_power_t *p)
+{
+    return !battery_only || muse_power_real_battery(p);
+}
 
 /* Any user interaction: keeps Muse awake. */
 void muse_state_poke(void);
+/* Called on every poke (a touch, a key, a wake, a call): the BLE link
+ * policy's actions. Any task; keep it cheap. */
+void muse_state_set_poke_listener(void (*fn)(void));
 float muse_state_idle_secs(void);
 
 /* Screen sleep (display dark, rendering paused). Waking also pokes. */
@@ -111,3 +180,6 @@ float muse_state_flash_level(void);   /* 0..1, 0 when no flash is running */
 /* Touch/pet reaction. */
 void muse_state_make_happy(void);
 float muse_state_happiness(void);
+/* Counts muse_state_make_happy calls: each one restarts the avatar's bounce,
+ * whichever control took the tap. */
+uint32_t muse_state_happy_seq(void);

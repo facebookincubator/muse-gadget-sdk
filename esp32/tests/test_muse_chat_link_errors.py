@@ -16,10 +16,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -127,6 +129,7 @@ size_t muse_hatch_base64(const uint8_t *p,size_t n,char *out) {
     (void)p; size_t len=(n+2)/3*4; memset(out,'A',len); return len;
 }
 void muse_hatch_tail_words(const char *text,char *out,size_t cap) { strlcpy(out,text,cap); }
+const char *muse_chat_node_id(void) { return "homelink-0a1b2c"; }
 bool muse_hatch_caption_at(const char *text,size_t at,char *out,size_t cap) {
     (void)at; strlcpy(out,text,cap); return text[0]!=0;
 }
@@ -331,9 +334,16 @@ static void transcript_and_lines(void) {
     assert(muse_hatch_turn_event(text,sizeof(text))==MUSE_HATCH_EV_REPLY);
 }
 static void text_modality(void) {
-    cJSON *text=cJSON_Parse(MUSE_HATCH_NOTE_HEAD MUSE_HATCH_NOTE_TAIL);
+    char body[MUSE_NOTE_HEAD_MAX+sizeof(MUSE_HATCH_NOTE_TAIL)];
+    size_t n=muse_note_head(body,sizeof(body),muse_chat_node_id());
+    assert(n);
+    memcpy(body+n,MUSE_HATCH_NOTE_TAIL,sizeof(MUSE_HATCH_NOTE_TAIL));
+    cJSON *text=cJSON_Parse(body);
     assert(text);
     assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(text,"output_modality")),"text"));
+    /* the gadget's node at the top level, never chat_context */
+    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(text,"node_id")),"homelink-0a1b2c"));
+    assert(!cJSON_GetObjectItem(text,"chat_context")&&!cJSON_GetObjectItem(text,"session_id")&&!cJSON_GetObjectItem(text,"thread_id"));
     const char *device=cJSON_GetStringValue(cJSON_GetObjectItem(text,"device"));
     assert(device && !strcmp(device,"mcu-wearable"));
     cJSON_Delete(text);
@@ -361,7 +371,7 @@ int main(int argc,char **argv) {
         c = Path(cls.tmp.name) / 'chat.c'
         c.write_text(code)
         cls.binary = c.with_suffix('')
-        cjson = ROOT / 'managed_components/espressif__cjson/cJSON'
+        cjson = cjson_dir()
         compiled = subprocess.run([
             os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
             '-I', str(cjson), '-I', str(ROOT / 'tests'), '-I', str(ROOT / 'components/muse'),

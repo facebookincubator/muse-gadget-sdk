@@ -28,7 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_muse_voice_note import (  # noqa: E402
     ENV, MUSE, ROOT, SANITIZE, NoteRequestAssertions, parse_run, pcm_bytes)
-from host_cjson import cjson_source  # noqa: E402
+from host_cjson import cjson_dir, cjson_source  # noqa: E402
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 CODE = r'''
 #include <stdbool.h>
@@ -41,6 +42,7 @@ CODE = r'''
 #include "cJSON.h"
 #include "muse_chat.h"
 #include "muse_chat_priv.h"
+const char *muse_chat_node_id(void) { return "homelink-0a1b2c"; }
 /* Not CHECK(): the fakes must still check under -DNDEBUG. */
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #c); exit(3); } } while (0)
 #define ESP_LOGW(tag, ...) ((void)(tag))
@@ -156,7 +158,7 @@ class LinkVoiceNote(NoteRequestAssertions, unittest.TestCase):
         # Platform includes only; the helpers it calls are the real ones.
         source = re.sub(r'^#include .*$', '', source, flags=re.MULTILINE)
         (out / 'link.c').write_text(CODE.replace('{source}', source))
-        cjson = ROOT / 'managed_components/espressif__cjson/cJSON'
+        cjson = cjson_dir()
         cc = [*shlex.split(os.environ.get('CC', 'cc')), '-std=gnu11', '-Wall', '-Wextra', '-Werror']
         helpers = ['-include', str(ROOT / 'tests/host_compat.h'), '-I', str(MUSE)]
         commands = [
@@ -176,8 +178,8 @@ class LinkVoiceNote(NoteRequestAssertions, unittest.TestCase):
         cls.binary = out / 'link'
 
     def talk(self, pcm, frames):
-        ran = subprocess.run([str(self.binary), ','.join(map(str, frames))],
-                             input=pcm, capture_output=True, env=ENV)
+        ran = run_child([str(self.binary), ','.join(map(str, frames))],
+                        input=pcm, capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         self.assertEqual(ran.stderr, b'')
         run = parse_run(ran.stdout)

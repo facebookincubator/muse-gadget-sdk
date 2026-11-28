@@ -13,8 +13,10 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_avatar_clips import clips
 from test_muse_ptt_ui import LINK_GC
 
@@ -96,7 +98,7 @@ muse_vdec_result_t muse_vdec_decode(muse_vdec_t *d,const uint8_t *data,uint32_t 
     assert(d && data && len);assert(decoded<64);starts[decoded++]=clock_us;
     if(phase==3) {assert(s_frame && s_frame->view.revision==frozen_revision);phase=4;}
     clock_us+=decode_cost;memset(y_plane,128,sizeof(y_plane));memset(uv_plane,128,sizeof(uv_plane));
-    *pic=(muse_pic_t){y_plane,uv_plane,uv_plane,d->width,d->width/2,d->width,d->height};return MUSE_VDEC_PICTURE;
+    *pic=(muse_pic_t){y_plane,uv_plane,uv_plane,d->width,d->width/2,d->width,d->height,0,NULL,0,0};return MUSE_VDEC_PICTURE;
 }
 void vTaskDelay(TickType_t ticks) {
     clock_us+=(int64_t)ticks*1000;

@@ -114,6 +114,7 @@ void muse_settings_set_brightness(int v) { (void)v; }
 void muse_settings_set_mic_gain(int v) { (void)v; }
 void muse_settings_set_sleep_s(int v) { (void)v; }
 void muse_settings_set_ble_on(bool v) { (void)v; }
+void muse_ble_phone_setup(bool on) { muse_settings_set_ble_on(on); }
 void muse_settings_set_wifi_on(bool v) { (void)v; }
 size_t muse_sim_strlcpy(char *dst, const char *src, size_t cap)
 {

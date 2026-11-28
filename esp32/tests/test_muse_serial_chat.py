@@ -30,6 +30,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "muse"))
@@ -86,7 +89,7 @@ class HarnessTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_harness(self, mode: str, data: bytes) -> bytes:
-        proc = subprocess.run([str(self.binary), mode], input=data, capture_output=True)
+        proc = run_child([str(self.binary), mode], input=data, capture_output=True)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr.decode())
         return proc.stdout
 

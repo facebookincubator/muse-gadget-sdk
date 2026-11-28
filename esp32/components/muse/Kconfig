@@ -276,6 +276,21 @@ menu "Muse"
             10 Hz awake and 4 Hz asleep. Battery use increases. Does not
             wake from a full power-off.
 
+    config MUSE_C6_DRAW_BUF_LINES
+        int "C6 display buffer height (lines)"
+        depends on MUSE_BOARD_WAVESHARE_C6_18
+        range 4 64
+        default 48 if MUSE_GADGET_BLE_STANDALONE && MUSE_PERF
+        default 16
+        help
+            Height of each of the two internal-RAM DMA buffers. More lines
+            reduce LVGL strip/walk overhead but take RAM from audio and offline
+            clips: every extra line costs 1472 bytes across the two buffers.
+            Keep the normal build at 16 until heap and gesture measurements
+            justify a larger value. BLE performance builds default to 48.
+            Set this in a per-build sdkconfig and rebuild to compare heights;
+            the live console cannot safely replace adapter-owned buffers.
+
     config MUSE_ENABLED
         bool
         default y if !MUSE_BOARD_NONE
@@ -364,7 +379,9 @@ menu "Muse"
         bool
         default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_CROWPANEL_ADVANCE_43 || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || MUSE_BOARD_RETERMINAL_STICKY || MUSE_BOARD_WAVESHARE_P4_LCD35 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
-    # A board overlay can raise this for a quiet speaker.
+    # A board overlay can raise this for a quiet speaker (the CoreS3 sets
+    # 100; the BLE gadget profiles 50). Used only until a volume is saved: a
+    # stored one always wins.
     config MUSE_DEFAULT_VOLUME
         int "Speaker volume until one is chosen in settings (percent)"
         range 0 100
@@ -482,6 +499,22 @@ menu "Muse"
             text, keep dropping them. Takes about 150 KB of flash and 48
             bytes of RAM.
 
+    config MUSE_UI_PANEL_TYPE
+        bool "UI type drawn at the panel's size"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        depends on MUSE_BOARD_M5STACK_STOPWATCH || MUSE_BOARD_ESP_MOSAICO || MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_C6_18
+        default n
+        help
+            The home, Settings and passcode screens in Montserrat Medium
+            subsets made for this board's panel (components/muse/fonts/type),
+            instead of LVGL's built-in Montserrat sizes. The board's
+            overlay turns it on. Flash: the set takes about 105 KB on the
+            Waveshare C6 1.8 (368 px), 107 KB on the SenseCAP Watcher
+            (412 px), 120 KB on the StopWatch (466 px) and 134 KB on the
+            ESP-Mosaico (480 px). Without it the home's time is LVGL's
+            Montserrat 28, or Montserrat 48 where a board's overlay turns
+            LV_FONT_MONTSERRAT_48 on (about 94 KB).
+
     choice MUSE_UI_LANGUAGE
         prompt "Language of the screen's own text"
         depends on MUSE_ENABLED && !MUSE_UI_FREEINK
@@ -555,12 +588,85 @@ menu "Muse"
             Places the zero-initialized statics of the avatar renderer
             (muse_pixel.c: its frame, mask and lookup tables) and the audio
             path (muse_audio.c: the I2S staging and chirp buffers), about
-            17 KB, in PSRAM instead of internal RAM (linker.lf). Only the
-            CPU touches them: the avatar is scaled into LVGL's draw buffer,
-            and the I2S driver copies to and from its own DMA buffers. Turn
-            it on where internal RAM is short, as the SenseCAP Watcher does
-            to pay for the CPU's light-sleep retention memory, which it
-            takes at boot and keeps.
+            17 KB, in PSRAM instead of internal RAM (linker.lf). The
+            captions' state (muse_subs.c, 4.7 KB) and the musegadgets
+            playback and encoder buffers (mg_ble.c, mg_voice.c, about 8 KB)
+            go too, on Wi-Fi and BLE-only builds alike. Only the CPU touches them: the avatar is
+            scaled into LVGL's draw buffer, and the I2S driver copies to and
+            from its own DMA buffers. Turn it on where internal RAM is
+            short: the SenseCAP Watcher (it pays for the CPU's light-sleep
+            retention memory, which it takes at boot and keeps) and the
+            Waveshare S3 1.75C (Wi-Fi and BLE audio together).
+
+    config MUSE_CHARGE_DARK
+        bool "Charge dark on a low cell after USB turns the gadget on"
+        depends on MUSE_ENABLED
+        default y
+        help
+            Plugging USB into a gadget that is off turns it on (its power
+            chip does). On a low cell it then charges dark, with no display
+            or radio, and boots by itself once the cell reads the board's
+            low-cell level (battery_shutdown_mv, the shutdown voltage)
+            plus 300 mV while charging; unplugged first, it powers off
+            again. Boards without early_power or battery_shutdown_mv boot
+            as before.
+            See muse_charge_dark.h.
+
+    config MUSE_CHARGE_DARK_TEST_MV
+        int "Bench: charge-dark threshold in mV (0: the board's)"
+        depends on MUSE_CHARGE_DARK
+        range 0 4400
+        default 0
+        help
+            Bench only: hold dark until the cell reads this instead of the
+            board's threshold, so the hold can be tested on a healthy
+            cell (4300: a USB power-up stays dark until a key, an unplug or
+            the 2 h limit). Never ship it.
+
+    config MUSE_PERF
+        bool "Log UI timing on mg.perf (bench)"
+        depends on MUSE_ENABLED && !MUSE_UI_FREEINK
+        default n
+        help
+            Frame time (render, panel wait, flush), frames per second,
+            touch-to-redraw and talk-button-to-face latency, and each task's
+            share of the CPU, logged on mg.perf (and so on the Nordic UART
+            mirror). The CPU shares need FREERTOS_USE_TRACE_FACILITY and
+            FREERTOS_GENERATE_RUN_TIME_STATS. devices/sdkconfig.muse-bench
+            turns all three on.
+
+    config MUSE_PERF_PERIOD_MS
+        int "UI timing report period (ms)"
+        depends on MUSE_PERF
+        range 1000 60000
+        default 5000
+
+    config MUSE_BENCH_IMAGE
+        bool "A bench/debug image (on-screen diagnostics)"
+        depends on MUSE_ENABLED
+        default n
+        help
+            Bench and debug images only (devices/sdkconfig.muse-bench,
+            MUSE_BENCH=1): on-screen diagnostics a shipping image keeps off,
+            such as the calling screen's step line (what the call start
+            is doing and the seconds since the tap). A shipping image shows
+            that line only while the console word call.steps=1 is set (RAM
+            only, off at every boot).
+
+    config MUSE_PAIR_CONFIRM_CONSOLE
+        bool "Test rigs: confirm Muse app setup from the serial console (bench)"
+        depends on MUSE_ENABLED
+        default n
+        help
+            The console line >pair.confirm presses the talk button for a Muse
+            app setup waiting for it, so a rig runs setup with nobody at the
+            bench (tools/mg_confirm.py, tools/mg_ble_client.py setup
+            --confirm-serial). It goes through the button's own confirm path,
+            never push-to-talk. Test and bench builds only: the Muse Gadget
+            setup contract lets a gadget simulate the press only there, and a
+            shipping build never confirms without the button.
+            devices/sdkconfig.muse-bench (MUSE_BENCH=1) turns it on. Off, the
+            line answers "@pair.confirm disabled".
 
     config MUSE_SMALL_FULL_REPLY
         bool "Full-screen replies on small screens"

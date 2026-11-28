@@ -1,0 +1,58 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+mainmenu "Muse Gadget SMP link harness"
+
+# The few Muse Gadget options src/mg_ota.c reads. ../../Kconfig.mg is the
+# source of truth (defaults and ranges copied from it; change both
+# together): there they depend on MG_DFU, which needs BOOTLOADER_MCUBOOT,
+# which native_sim doesn't build.
+config MG_DFU_RESET_DISCONNECT_MS
+	int "Delay from an SMP reset's answer to dropping the link (ms)"
+	default 100
+	range 20 400
+
+config MG_SMP_SESSION_IDLE_MS
+	int "Idle time after which SMP's work queue is freed (ms)"
+	default 2000
+
+config MG_SMP_RX_GAP_MS
+	int "Gap after which a partly received SMP request is dropped (ms)"
+	default 2000
+	range 0 10000
+
+config MG_SIM_LINK
+	bool
+	default y
+	select MCUMGR_TRANSPORT_REASSEMBLY
+	help
+	  src/link.c reassembles SMP requests from ATT-sized writes, as the
+	  BLE transport does (CONFIG_MCUMGR_TRANSPORT_BT_REASSEMBLY).
+
+config MG_AUTOMATION
+	bool "An automation build (the bench board's)"
+	default y
+	help
+	  mg_ota.c's update window rule for a gadget that isn't set up applies
+	  to release builds only, and this suite updates unset gadgets as CI
+	  does.
+
+config MG_BENCH_NO_CONFIRM
+	bool "Never confirm a new image (revert test)"
+
+module = MG
+module-str = Muse Gadget
+source "subsys/logging/Kconfig.template.log_config"
+
+source "Kconfig.zephyr"

@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "muse_battery_policy.h"
 #include "muse_state.h"
 
 /*
@@ -47,6 +48,32 @@ typedef struct {
 } muse_battery_t;
 
 void muse_battery_init(void);
+
+/* Called from the input task after each reading muse_battery_note_power()
+ * takes, outside the meter's lock: changed is true when charging or USB power
+ * came or went (report_battery_status goes unsolicited then). */
+typedef void (*muse_battery_listener_t)(const muse_power_t *p, bool changed);
+void muse_battery_set_listener(muse_battery_listener_t fn);
+/* esp_timer microseconds of the latest reading; 0 before the first. */
+int64_t muse_battery_reading_us(void);
+
+/*
+ * Low battery, only on battery, never with USB
+ * power: 15 % = MUSE_BATTERY_LEVEL_WARN15 (the UI shows its battery icon
+ * low), 10 % = WARN10 (the UI shows a "Battery low" toast once per
+ * discharge), and at the board's shutdown voltage (muse_board_t
+ * .battery_shutdown_mv, MUSE_BATTERY_SHUTDOWN_READINGS readings in a row) a
+ * clean power-off: muse_ui_notify_low_battery(CRITICAL), a marker in NVS
+ * that the next boot logs ("boot: after a low-battery shutdown"), then the
+ * board's power-off through muse_input_request_power_off() (settings are
+ * already saved as they change).
+ */
+void muse_battery_set_shutdown_mv(int mv);   /* from muse_app_run(), the board's threshold; 0: none */
+muse_battery_level_t muse_battery_low_level(void);   /* the level now, for the battery icon */
+/* The UI's hook (weak no-op here; the UI defines it): called from the input
+ * task when the level changes, WARN10 once per discharge, CRITICAL just
+ * before the power-off. pct is the battery percentage. Don't block. */
+void muse_ui_notify_low_battery(int pct, muse_battery_level_t level);
 
 /* From the input task: every battery reading, with muse_state_on_battery(),
  * which ">nap" sets on USB so the bench can measure; and the screen and CPU

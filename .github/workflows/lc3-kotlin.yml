@@ -1,0 +1,47 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: lc3-kotlin
+
+on:
+  pull_request:
+    paths:
+      - "android/lc3-kotlin/**"
+      - ".github/workflows/lc3-kotlin.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/lc3-kotlin/**"
+      - ".github/workflows/lc3-kotlin.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: Conformance with liblc3
+    # The runner image's JDK 17; the wrapper checks the Gradle download's SHA-256.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: android/lc3-kotlin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: JAVA_HOME="$JAVA_HOME_17_X64" ./gradlew --no-daemon test

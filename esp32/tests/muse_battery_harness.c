@@ -31,6 +31,8 @@
  *   k                      prints muse_battery_saved_json(), or null
  *   rtc                    prints the record in RTC memory now, as the next boot would find it
  *   save <file>            writes the RTC memory, for a later run to boot with
+ *   lowmv <mv>             muse_battery_set_shutdown_mv()
+ *   level                  prints muse_battery_low_level()
  * and before any of those, a boot:
  *   load <file>            the RTC memory a run saved
  *   flash <file>           the NVS, kept in the file as it's committed (none: no NVS)
@@ -44,7 +46,20 @@
 #include "esp_system.h"
 
 /* Built in, for its RTC memory (s_saved). */
+#define MUSE_BATTERY_HOST_HOOKS 1
 #include "muse_battery.c"
+
+/* Low battery: what the UI and the input task are told. */
+void muse_ui_notify_low_battery(int pct, muse_battery_level_t level)
+{
+    printf("@ui.lowbat %d %d\n", pct, (int)level);
+}
+
+static bool s_nap;   /* "nap 1": as if on battery (a bench nap) */
+void muse_input_request_power_off(void)
+{
+    printf("@poweroff\n");
+}
 
 static int64_t s_clock;
 static esp_reset_reason_t s_boot_reason = ESP_RST_POWERON;
@@ -236,7 +251,10 @@ int main(void)
             muse_power_t p = { 0 };
             sscanf(line + 2, "%d %d %d", &usb, &p.battery_pct, &p.battery_mv);
             p.usb = usb;
-            muse_battery_note_power(&p, !p.usb && p.battery_pct >= 0);
+            /* "nap 1": a bench nap's as-if battery, as muse_input.c passes muse_state_on_battery() */
+            muse_battery_note_power(&p, s_nap || (!p.usb && p.battery_pct >= 0));
+        } else if (!strncmp(line, "nap ", 4)) {
+            s_nap = atoi(line + 4) != 0;
         } else if (!strncmp(line, "s ", 2)) {
             int off, resting;
             sscanf(line + 2, "%d %d", &off, &resting);
@@ -261,6 +279,10 @@ int main(void)
             printf("%.*s\n", ok ? (int)s_saved.len : 4, ok ? s_saved.json : "null");
         } else if (!strcmp(line, "x")) {
             muse_battery_reset();
+        } else if (!strncmp(line, "lowmv ", 6)) {
+            muse_battery_set_shutdown_mv(atoi(line + 6));
+        } else if (!strcmp(line, "level")) {
+            printf("level %d\n", (int)muse_battery_low_level());
         } else if (!strcmp(line, "j") || !strncmp(line, "j ", 2)) {
             static char json[4096 + 1];   /* and a byte past cap, to check it's left alone */
             size_t cap = line[1] ? strtoul(line + 2, NULL, 10) : 2048;   /* muse_input's ">power" */

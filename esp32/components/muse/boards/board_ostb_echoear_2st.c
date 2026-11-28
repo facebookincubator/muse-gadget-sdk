@@ -260,6 +260,12 @@ static void panel_sleep(bool sleep)
     esp_lcd_panel_disp_sleep(s_panel, sleep); /* SLPIN/SLPOUT; GRAM is kept */
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold((gpio_num_t)LCD_BL, 0);
+}
+
 static const muse_board_t s_board = {
     .name = "OSTB EchoEar-2ST",
     .width = 360,
@@ -276,6 +282,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .audio_init = audio_init,
     .mic_slot = -1,

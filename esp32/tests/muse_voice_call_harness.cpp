@@ -564,6 +564,64 @@ static void barge_in(void)
     expect_event(MUSE_VOICE_CALL_EV_ENDED);
 }
 
+/* One audio event of exactly these 24 kHz samples (any count). */
+static std::string delta(const std::vector<int16_t> &pcm)
+{
+    return "{\"type\":\"continuous_audio_video.delta\",\"audio_delta\":{\"audio_frames\":\"" + b64(pcm) +
+           "\",\"format\":{\"rate\":24000,\"type\":\"\"},\"num_channels\":1,\"num_frames\":1},\"timestamp_ms\":0}";
+}
+
+static std::vector<int16_t> tone24(size_t n, double hz, double amplitude, size_t from)
+{
+    std::vector<int16_t> pcm(n);
+    for (size_t i = 0; i < n; i++) {
+        pcm[i] = (int16_t)lround(amplitude * sin(2 * M_PI * hz * (double)(from + i) / 24000.0));
+    }
+    return pcm;
+}
+
+/* A hands-free barge-in resyncs the downlink. The reply talked over ends
+ * mid-step of the 24 -> 16 kHz resampler (an event of 961 samples) on a loud sample; after the flush the
+ * next reply's speaker samples are bit-identical to the same reply on a fresh call. */
+static void barge_resync(void)
+{
+    std::vector<std::string> next;
+    for (size_t i = 0; i < 6; i++) {
+        next.push_back(delta(tone24(960, 330, 7000, i * 960)));
+    }
+    int64_t id = live_call();
+    for (const std::string &ev : next) {
+        line(id, ev);
+    }
+    std::vector<int16_t> ref;
+    read_all(&ref);
+    assert(ref.size() == 6 * 640);
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+
+    id = live_call();
+    for (size_t i = 0; i < 5; i++) {
+        line(id, delta(tone24(960, 440, 9000, i * 960)));
+    }
+    line(id, delta(tone24(961, 440, 9000, 5 * 960 + 37)));
+    line(id, "{\"type\":\"input_audio_buffer.speech_started\",\"event_id\":\"e\",\"item_id\":\"i\",\"audio_start_ms\":5}");
+    bool flushed = false;
+    read_all(nullptr, &flushed);
+    assert(flushed);
+    for (const std::string &ev : next) {
+        line(id, ev);
+    }
+    std::vector<int16_t> got;
+    flushed = false;
+    read_all(&got, &flushed);
+    assert(!flushed);
+    assert(got == ref);
+    muse_voice_call_end();
+    serve_ending(id);
+    expect_event(MUSE_VOICE_CALL_EV_ENDED);
+}
+
 static void hold(void)
 {
     int64_t id = live_call();
@@ -3077,7 +3135,7 @@ int main(int argc, char **argv)
                                     ptt_stale_completion, ptt_hold_clock_gap, ptt_abandoned_start,
                                     ptt_quiet_after_early_audio, ptt_cutover, ptt_many_edges_while_connecting,
                                     ptt_bad_turn_identity, ptt_playing_while_waiting, ptt_captions,
-                                    ptt_end_while_held_reply, ptt_end_mid_pump, ptt_stop_drains_deferred,
+                                    ptt_end_while_held_reply, ptt_end_mid_pump, barge_resync, ptt_stop_drains_deferred,
                                     ptt_stop_discards_ineligible, ptt_stop_paced_ack_only, ptt_stop_paced_ack_eof,
                                     ptt_stop_paced_eof_ack, ptt_stop_paced_output_only, ptt_stop_no_progress_deadline,
                                     ptt_stop_paced_interrupts, hands_free_working,

@@ -22,6 +22,15 @@ on:
 permissions:
   contents: read
 
+# The ESP-IDF release every job builds with: the release tag's commit (the
+# native install in the build jobs) and the espressif/idf:v6.0.3 image's digest
+# (the host tests).
+env:
+  IDF_VERSION: v6.0.3
+  IDF_COMMIT: 76f5dedd9950a3012fee8fb7d5586df21fc67802
+  IDF_IMAGE: espressif/idf
+  IDF_IMAGE_DIGEST: sha256:54278f2c01e6e759502e2f04c9103589c17528923426f4d63193490c7a08f555
+
 # PRs cancel superseded runs; main queues them so a web flasher deploy
 # always finishes.
 concurrency:
@@ -44,6 +53,13 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           df -h /
 
+      # ThreadSanitizer stops at start ("unexpected memory mapping") under the
+      # runner's default address-space randomization, and the container refuses
+      # setarch -R, so every TSan test would skip (tests/tsan_run.py). The
+      # container shares the runner's kernel: 28 bits is what it expects.
+      - name: Let ThreadSanitizer run (vm.mmap_rnd_bits=28)
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
       # Exercise the actual FreeInk router without a board or Arduino runtime.
       - name: Check out pinned FreeInk host-test source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -53,20 +69,28 @@ jobs:
           path: freeink-host-source
           persist-credentials: false
 
+      # The action pulls the image itself with no time limit; a stalled pull
+      # then used up the whole job. Pulled here, pinned, with a limit and retries.
+      - name: Pull the ESP-IDF image
+        run: .github/esp32/pull_idf_image.sh "$IDF_IMAGE" "$IDF_VERSION" "$IDF_IMAGE_DIGEST"
+
       - name: Run host tests in ESP-IDF
         uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         env:
           FREEINK_SOURCE_DIR: ../freeink-host-source
         with:
-          esp_idf_version: v6.0.3
+          esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32c5
           path: esp32
-          extra_docker_args: -e FREEINK_SOURCE_DIR
+          # CI (true on GitHub's runners) goes into the container too: there a ThreadSanitizer test that can't run
+          # fails instead of skipping (tests/tsan_run.py).
+          extra_docker_args: -e FREEINK_SOURCE_DIR -e CI
           command: |
             set -e
-            # test_noise_core links against the host PSA Crypto library.
+            # test_noise_core links against the host PSA Crypto library;
+            # test_web_flasher runs the web flasher logic in Node.
             apt-get update -qq
-            apt-get install -y -qq --no-install-recommends libmbedtls-dev pkg-config libssl-dev openssl ffmpeg
+            apt-get install -y -qq --no-install-recommends libmbedtls-dev libjpeg-dev pkg-config libssl-dev openssl ffmpeg nodejs procps lsof
             . "$IDF_PATH/export.sh" > /dev/null
             # Fetch cJSON from managed_components/ for discovery and pairing.
             idf.py -B build-host-tests -DSDKCONFIG=build-host-tests/sdkconfig reconfigure
@@ -79,7 +103,10 @@ jobs:
             IDF_TARGET=esp32s3 idf.py -B build-host-wakeword -DSDKCONFIG=build-host-wakeword/sdkconfig \
               -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-wakeword" \
               reconfigure
-            python -m unittest discover -s tests -p "test_*.py" -v
+            # One process per test module under the freeze watchdog: a module that hangs is stopped and
+            # reported as STUCK instead of holding the job until its timeout.
+            # A 900 s cap until a module has a typical time (CI keeps none), so a hang ends well inside the job timeout.
+            python tools/stuck_watch.py --cap 900 -- python -m unittest discover -s tests -p "test_*.py" -v
             cmake -S tests/avatar_webp -B build-host-avatar-webp -G Ninja
             cmake --build build-host-avatar-webp --parallel 2
             ctest --test-dir build-host-avatar-webp --output-on-failure
@@ -119,16 +146,33 @@ jobs:
       - name: Test
         run: ctest --test-dir build/simulator --output-on-failure
 
-  build:
-    name: Build ${{ matrix.board }}
+      # The Muse Gadgets test apps' protocol code (capabilities, the token proof), on the
+      # desktop JVM and as a macOS executable: the runner has the Android SDK, a JDK and Swift.
+      - name: Test app host tests
+        if: matrix.name == 'macOS (Apple silicon)'
+        run: |
+          android/musegadgetstest/tests/run.sh
+          ios/musegadgetstest/tests/run.sh
+
+  # The build groups: the board list below, a few boards per job.
+  plan:
+    name: Plan board builds
     runs-on: ubuntu-latest
-    # Healthy builds take 5-8 minutes; a stalled ESP-IDF image pull fails
-    # here instead of after GitHub's six-hour default.
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+      targets: ${{ steps.groups.outputs.targets }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Split the boards into build groups
+        id: groups
+        run: |
+          # Every board CI builds, in build-group order: add new boards at the
+          # end, so the other groups keep their build caches. overlays: the
+          # sdkconfig files after sdkconfig.defaults.
+          python3 .github/esp32/matrix.py > /tmp/matrix.json <<'BOARDS'
           - board: devkit
             target: esp32c5
             overlays: ""
@@ -198,6 +242,18 @@ jobs:
           - board: muse-waveshare-s3-175c
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c"
+          # The board's Muse Gadget profile (tools/muse/board.sh build s3-gadget).
+          - board: muse-waveshare-s3-175c-gadget
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget"
+          # The same gadget without firmware updates over BLE (SMP off, as the ESP-Mosaico's default).
+          - board: muse-waveshare-s3-175c-gadget-nosmp
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-gadget-nosmp"
+          # Lab and CI images: a BLE gadget profile with the bench overlay (MUSE_BENCH=1).
+          - board: muse-waveshare-s3-175c-bench
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-bench"
           - board: muse-waveshare-s3-175
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175"
@@ -271,6 +327,10 @@ jobs:
           - board: muse-waveshare-c6-18
             target: esp32c6
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18"
+          # The C6's BLE-only gadget (tools/muse/board.sh build c6ble).
+          - board: muse-waveshare-c6-18-ble
+            target: esp32c6
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-c6-18;devices/sdkconfig.muse-waveshare-c6-18-ble"
           - board: muse-waveshare-s3-18
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-18"
@@ -280,6 +340,10 @@ jobs:
           - board: muse-sensecap-watcher
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher"
+          # The board's Muse Gadget profile (tools/muse/board.sh build watcher-gadget).
+          - board: muse-sensecap-watcher-gadget
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-sensecap-watcher-gadget"
           - board: muse-watcher-power-test
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-watcher-power-test"
@@ -317,6 +381,20 @@ jobs:
           - board: muse-m5stack-stopwatch-video
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video"
+          # Video and UI streams over BLE (tools/muse/board.sh build stopwatch-video / watcher-video),
+          # HID beside them (MUSE_HID=1), and a BLE gadget without the offline clip queue.
+          - board: muse-m5stack-stopwatch-video-ble
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-m5stack-stopwatch-video-ble"
+          - board: muse-sensecap-watcher-video-ble
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-sensecap-watcher;devices/sdkconfig.muse-sensecap-watcher-gadget;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-sensecap-watcher-video-ble"
+          - board: muse-m5stack-stopwatch-video-ble-hid
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch;devices/sdkconfig.muse-video-ble;devices/sdkconfig.muse-m5stack-stopwatch-video-ble;devices/sdkconfig.muse-hid"
+          - board: muse-waveshare-s3-175c-no-queue
+            target: esp32s3
+            overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-waveshare-s3-175c;devices/sdkconfig.muse-waveshare-s3-175c-gadget;devices/sdkconfig.muse-ble-no-queue"
           - board: muse-m5stack-triviapod
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-triviapod"
@@ -365,56 +443,123 @@ jobs:
           - board: muse-dfrobot-unihiker-k10
             target: esp32s3
             overlays: ";devices/sdkconfig.muse;devices/sdkconfig.muse-dfrobot-unihiker-k10"
+          BOARDS
+          echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+          targets=$(jq -r '[.include[].boards[].target] | unique | join(",")' /tmp/matrix.json)
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          jq -r '.include[] | "\(.group): \(.names)"' /tmp/matrix.json
+
+  # Each job builds its group's boards in turn on one ESP-IDF setup: a native
+  # install of the release (the image's version and tools), restored from the
+  # Actions cache, so no job pulls the multi-GB image. ccache keeps each group's
+  # objects from the last push to main.
+  build:
+    name: Build ${{ matrix.group }} (${{ matrix.names }})
+    needs: plan
+    runs-on: ubuntu-latest
+    # A cold build takes about 4 minutes a board. Each board's build has its
+    # own limit (BUILD_TIMEOUT_S), and the job's covers three of them plus setup.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     defaults:
       run:
         shell: bash
         working-directory: esp32
+    env:
+      IDF_PATH: /home/runner/esp-idf
+      IDF_TOOLS_PATH: /home/runner/.espressif
+      IDF_CCACHE_ENABLE: "1"
+      # No CCACHE_BASEDIR: it would make the project's paths relative, and
+      # ESP-IDF's -fmacro-prefix-map would no longer apply to __FILE__. The
+      # runner's paths are fixed, so the cache hits anyway.
+      CCACHE_DIR: /home/runner/.ccache
+      # Each push to main saves 26 of these (about 150 MB each) and one
+      # ESP-IDF install (about 2 GB). Over the repository's cache limit GitHub
+      # evicts the least recently used entries first; every build job restores
+      # the ESP-IDF install, so older pushes' ccache entries go before it.
+      CCACHE_MAXSIZE: 250M
+      BUILD_TIMEOUT_S: "900"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      # Run on the host before ESP-IDF pulls its large container image.
-      - name: Free disk space (preinstalled Android SDK, ~12 GB)
+      - name: Install build prerequisites
         run: |
-          sudo rm -rf /usr/local/lib/android
-          df -h /
+          # ESP-IDF's Linux prerequisites that the runner image may not have.
+          timeout 300 sudo apt-get update -qq
+          timeout 300 sudo apt-get install -y -qq --no-install-recommends ccache flex bison gperf ninja-build > /dev/null
+
+      - name: Cache keys
+        id: keys
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+        run: |
+          py=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+          targets=$TARGETS   # a cache key can't hold commas
+          echo "idf=esp-idf-$IDF_VERSION-${IDF_COMMIT::12}-${{ runner.os }}-${{ runner.arch }}-$ImageOS-py$py-${targets//,/-}-${{ hashFiles('.github/esp32/setup_idf.sh') }}" >> "$GITHUB_OUTPUT"
+          echo "ccache=ccache-esp32-$IDF_VERSION-${{ matrix.group }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ESP-IDF
+        id: idf
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /home/runner/esp-idf
+            /home/runner/.espressif
+          key: ${{ steps.keys.outputs.idf }}
+
+      - name: Set up ESP-IDF
+        env:
+          TARGETS: ${{ needs.plan.outputs.targets }}
+        run: ../.github/esp32/setup_idf.sh "$IDF_VERSION" "$IDF_COMMIT" "$TARGETS"
+
+      # Only pushes to main save the install, as with ccache below, and only
+      # one group's job (they all install the same).
+      - name: Save ESP-IDF
+        if: github.event_name == 'push' && matrix.group == 'g01' && steps.idf.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /home/runner/esp-idf
+            /home/runner/.espressif
+          key: ${{ steps.keys.outputs.idf }}
+
+      # Pull requests start from main's objects. A push to main builds from
+      # scratch, so the firmware main publishes never reuses an earlier build's
+      # objects; it saves them for the pull requests after it.
+      - name: Restore ccache
+        if: github.event_name != 'push'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.ccache
+          key: ${{ steps.keys.outputs.ccache }}-${{ github.sha }}
+          restore-keys: ${{ steps.keys.outputs.ccache }}-
 
       # The build fails if the app no longer fits its partition.
       - name: Build
-        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         env:
-          TARGET: ${{ matrix.target }}
-          DEFAULTS: sdkconfig.defaults${{ matrix.overlays }}
+          BOARDS: ${{ toJSON(matrix.boards) }}
+        run: |
+          . "$IDF_PATH/export.sh" > /dev/null
+          ccache -z > /dev/null
+          ../.github/esp32/build_group.sh
+
+      - name: Save ccache
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          esp_idf_version: v6.0.3
-          target: ${{ matrix.target }}
-          path: esp32
-          extra_docker_args: -e TARGET -e DEFAULTS
-          command: |
-            set -e
-            . "$IDF_PATH/export.sh" > /dev/null
-            idf.py -B build -DIDF_TARGET="$TARGET" -DSDKCONFIG=build/sdkconfig \
-              -DSDKCONFIG_DEFAULTS="$DEFAULTS" build
+          path: /home/runner/.ccache
+          key: ${{ steps.keys.outputs.ccache }}-${{ github.sha }}
 
       # Boards listed in web-flasher/boards.json also go on the web flasher.
-      - name: Package for the web flasher
-        id: package
-        env:
-          BOARD: ${{ matrix.board }}
-        run: |
-          NAME=$(python3 -c 'import json, os; print(next((b["name"] for b in json.load(open("../web-flasher/boards.json")) if b["board"] == os.environ["BOARD"]), ""))')
-          [ -n "$NAME" ] || exit 0
-          python3 ../web-flasher/make_manifest.py build "out/$BOARD" \
-            "Muse Gadget ($NAME)" "$(cat version.txt)+${GITHUB_SHA::7}"
-          echo "listed=true" >> "$GITHUB_OUTPUT"
-
-      - if: steps.package.outputs.listed
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: firmware-${{ matrix.board }}
+          name: firmware-${{ matrix.group }}
           path: esp32/out/
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
   # The web flasher: a page on GitHub Pages that flashes the boards in

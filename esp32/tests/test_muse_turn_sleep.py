@@ -65,12 +65,20 @@ class TurnSleepTest(unittest.TestCase):
     def test_turn_end_restarts_the_reading_clock(self):
         idle = body(self.voice, "static void go_idle(const char *caption)")
         self.assertIn("muse_state_poke()", idle)
+        # set_mode() is muse_state_set_mode() plus the face's mg.face log for a BLE client.
         self.assertLess(idle.index("muse_state_poke()"),
-                        idle.index("muse_state_set_mode(MUSE_MODE_IDLE)"))
+                        idle.index("set_mode(MUSE_MODE_IDLE)"))
 
     def test_sleep_still_requires_idle_mode_and_timeout(self):
+        # Sleep needs the timeout untouched, in idle or in a turn that isn't
+        # the gadget's own (a phone's turn alone doesn't hold a lit
+        # panel), and the gadget's own turn, a reply on the gadget and Sleep
+        # when charged hold it (scenarios in tests/muse_ptt_input_harness.c,
+        # test_muse_ptt_ui: 17-21).
         check = body(self.input, "static void check_sleep(void)")
-        self.assertIn("muse_state_mode(&mode_t) == MUSE_MODE_IDLE", check)
+        self.assertIn("muse_mode_t mode = muse_state_mode(&mode_t);", check)
+        self.assertIn("(mode == MUSE_MODE_IDLE || turn)", check)
+        self.assertIn("(turn && muse_state_own_turn())", check)
         self.assertIn("muse_state_idle_secs() > after", check)
         self.assertIn('set_asleep(true, "auto-sleep")', check)
 

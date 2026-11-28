@@ -60,7 +60,7 @@ class MinimalProfile(unittest.TestCase):
             "    if (!led_status_init())", 1)[0]
         glue = (ROOT / "main/muse_glue.c").read_text()
         guard = "#if CONFIG_MUSE_WASM_APPS || CONFIG_MUSE_AVATAR_SYNC\n"
-        console = between(glue, guard + "// The console's setup lines:",
+        console = between(glue, guard + "// The console's lines:",
                           "void muse_glue_start(void)")
         hooks = between(glue, guard + "    muse_input_set_console_hook",
                         "    muse_ble_set_name")
@@ -82,12 +82,25 @@ static bool muse_apps_console(const char *s) { ++app_calls; return !strcmp(s, "a
 static void noise_ctrl_send_command_result(void) {}
 static void muse_apps_start(void (*send)(void)) { (void)send; ++apps_started; }
 #endif
-#if CONFIG_MUSE_WASM_APPS || CONFIG_MUSE_AVATAR_SYNC || CONFIG_GADGET_SDK_TOKEN_CONSOLE
 static void muse_input_set_console_hook(bool (*fn)(const char *)) { hook = fn; }
+/* The gadget's own console words come first and end with the SDK token's
+ * (glue_console_command, glue_link_console): none of the lines below is one. */
+static bool glue_link_console(const char *s) {
+#if CONFIG_GADGET_SDK_TOKEN_CONSOLE
+    return sdk_token_console_command(s);
+#else
+    (void)s;
+    return false;
 #endif
+}
+static bool glue_console_command(const char *s) { return glue_link_console(s); }
+static void muse_input_set_safe_console_hook(bool (*fn)(const char *)) { (void)fn; }
+#define CONFIG_MUSE_GADGET_BLE_AUDIO 0
 """
-        # Each line reaches the handlers in order (SDK token, avatar, apps)
-        # until one takes it; a disabled handler is neither compiled nor called.
+        # Each line reaches the handlers in order (the gadget's own words, which
+        # end with the SDK token's, then avatar, apps) until one takes it; a
+        # disabled handler is neither compiled nor called. The gadget's own
+        # words keep the hook in every build.
         checks = r"""
 #define CONSOLE CONFIG_GADGET_SDK_TOKEN_CONSOLE
 #define AVATAR CONFIG_MUSE_AVATAR_SYNC
@@ -96,7 +109,7 @@ int main(void) {
     boot();
     assert(starts == (CONSOLE && !CONFIG_MUSE_ENABLED));
     install_hook();
-    assert(!!hook == (CONSOLE || AVATAR || APPS));
+    assert(hook);
     assert(apps_started == APPS);
     if (hook) {
         assert(hook("sdk_token=test") == CONSOLE);

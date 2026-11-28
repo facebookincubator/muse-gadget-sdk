@@ -87,6 +87,34 @@ CTest uses SDL's dummy video driver, validates command-line and scenario error
 handling, renders every included scenario twice, and checks that each pair of
 framebuffer captures is identical while different scenarios remain distinct.
 
+It also checks C6 bezel clipping against the original floating-point hook:
+360 complete framebuffer comparisons across translations, indicator angles,
+4/16/32/48/64-line strips, and both RGB565 byte orders. The integer fallback is
+checked over every radius 1–1024. These are pixel/geometry regressions, not
+measurements of C6 gesture FPS.
+
+## The v1.0 screens and the ring's cost
+
+`MUSE_SIM_BOARD=stopwatch|w175|watcher|mosaico|c6` picks the panel (466 round,
+466 round with side keys, 412 round, 480 rounded square, 368x448). `render_screens.sh OUT_DIR`
+renders every v1.0 screen of those four boards (home with and without the
+clock, unpaired, mic ring, muted, captions, low battery, charging, Call
+unavailable, Status, Settings and its pages) into `OUT_DIR/<code>/`.
+Scenario keys it adds:
+`clock=HH:MM[/24]|none`, `call=none|asked|connecting|live|unavailable`,
+`talk=both|screen|button` (Settings > Talk; the simulator starts on both, the firmware on button), `bench.out=true|false` (the bench switch on for the connected central: "Bench" in the top row), `subs=TEXT` (a muted reply's subtitles as the phone sends them, all shown now; `subs.ms=N` paces its words), `subs.more=TEXT` (the same reply's next words: the tall band grows and scrolls), `subs=off`, `volume=N` (as restored at boot: no change shown), `phone.volume=N` and `bench.volume=N` (a speaker change made from outside, the phone's set_settings or the console's `vol=N`: the gadget shows it), `device.volume=N` (the gadget's own change), `ssid=NAME` (Wi-Fi connected to NAME: the Status row's name, to
+check its wrap), `page=status|settings[/<page>]`, `ring=true|false` (the mic
+ring), `avatar_face=FILE.ppm|none` (the avatar face: a panel-sized P6
+picture as the firmware draws it at either Size, which `tests/test_mg_face.py`'s
+`render()` writes; Settings > Watch face appears),
+`avatar_face.pick=avatar|pixel` and `avatar_face.size=large|small` (that page's
+state), and `bench=N`: N full redraws with the ring off and on, fastest of five
+rounds, plus the ring's spans alone per full frame (host CPU: the
+ratio is what carries over to a device, not the milliseconds). `dotbench=N` (after `face=thinking` and a
+page without Muse) times the turn dot's breath step, its box redrawn,
+against full redraws, with the host's own flush taken out; on a busy host
+the numbers swing, so read the best of several runs.
+
 For a checked build with AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh

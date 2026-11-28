@@ -21,8 +21,9 @@
 #include "sdkconfig.h"
 #include "ota.h"
 #include "esp_app_desc.h"
+#include "muse_image_id.h"
 
-static esp_app_desc_t running = { .version = "999.0.0" };
+static esp_app_desc_t running = { .version = "1.2.0+g1234abcd" };
 static int callbacks;
 static ota_result_t last_result;
 static char last_detail[96];
@@ -40,6 +41,19 @@ static void on_result(const ota_event_t *event, void *user) {
 }
 
 #define VIBE_MODE_BUILD (CONFIG_MUSE_BOARD_ESP_MOSAICO && CONFIG_ESP_IRIS_OTA_DEFAULT_VIA_RECOVERY)
+/* A Muse Gadget build: Wi-Fi OTA refused by policy, or (the opt-in) only an
+ * image of this board, checked before anything is written. */
+#define GADGET_REFUSES (CONFIG_MUSE_GADGET_BLE_AUDIO && !CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD)
+#define SAME_BOARD (CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_WIFI_OTA_SAME_BOARD \
+                    && CONFIG_HOMEHUB_OTA_ENABLED)
+/* A Home Link build: ota.c reads the download's first bytes for the device model check too. */
+#define IMAGE_HEAD (SAME_BOARD || (!CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_HOMEHUB_OTA_ENABLED))
+/* The test sends real image heads (a board description) to a Home Link build: LINK_MODEL_TEST,
+ * with this build's model in muse_image_id.c (MUSE_DEVICE_MODEL_HASH). */
+#ifndef LINK_MODEL_TEST
+#define LINK_MODEL_TEST 0
+#endif
+#define STREAMS (SAME_BOARD || LINK_MODEL_TEST)
 
 #if CONFIG_HOMEHUB_OTA_ENABLED || VIBE_MODE_BUILD
 #include "esp_ota_ops.h"
@@ -144,9 +158,61 @@ void esp_restart(void) { reboots++; }
 void stack_monitor_record(stack_monitor_t *state) { (void)state; }
 const char *esp_err_to_name(esp_err_t err) { (void)err; return "fake error"; }
 
+#if IMAGE_HEAD
+/* The HTTP client's side: the event handler esp_https_ota hands it, which
+ * sees each response body's bytes (HTTP_EVENT_ON_DATA) as they're read. */
+static esp_http_client_event_cb_t http_cb;
+static void *http_user;
+static int http_status;
+int esp_http_client_get_status_code(esp_http_client_handle_t client) {
+    (void)client;
+    return http_status;
+}
+#endif
+#if STREAMS
+static uint8_t streamed[1024];   /* the image's first 1 KB, as get_img_desc reads it */
+static bool redirect_first;      /* a 302 with a body before the image */
+static const uint8_t *image_model;   /* the board description's device model (8 bytes), or none */
+static void http_event(esp_http_client_event_id_t id, const void *data, int len) {
+    esp_http_client_event_t ev = { .event_id = id, .user_data = http_user,
+                                   .data = (void *)data, .data_len = len };
+    http_cb(&ev);
+}
+
+/* The image the server sends: a header naming `chip`, incoming's
+ * description (version, ELF SHA-256) and a board description, or none. */
+static void make_image(uint16_t chip, const char *product, const char *board, uint8_t flags) {
+    memset(streamed, 0x5a, sizeof(streamed));
+    streamed[0] = 0xE9;
+    streamed[12] = (uint8_t)chip;
+    streamed[13] = (uint8_t)(chip >> 8);
+    const uint32_t app_magic = 0xABCD5432u;
+    memcpy(streamed + 32, &app_magic, 4);
+    memcpy(streamed + 32 + 16, incoming.version, sizeof(incoming.version));
+    memcpy(streamed + 32 + 144, incoming.app_elf_sha256, sizeof(incoming.app_elf_sha256));
+    if (product) {
+        muse_board_desc_t d = { .magic = MUSE_BOARD_DESC_MAGIC, .layout = 1, .flags = flags, .chip_id = chip };
+        snprintf(d.product_code, sizeof(d.product_code), "%s", product);
+        snprintf(d.board_id, sizeof(d.board_id), "%s", board);
+        if (image_model) {
+            d.flags |= MUSE_BOARD_DESC_F_MODEL;
+            memcpy(d.model_hash, image_model, sizeof(d.model_hash));
+        }
+        memcpy(streamed + MUSE_IMAGE_BOARD_DESC_OFFSET, &d, sizeof(d));
+    }
+}
+#endif
+
+static const char *expected_url = "https://example.com/update.bin";
+
 esp_err_t esp_https_ota_begin(const esp_https_ota_config_t *config,
                              esp_https_ota_handle_t *handle) {
-    assert(strcmp(config->http_config->url, "https://example.com/update.bin") == 0);
+    assert(strcmp(config->http_config->url, expected_url) == 0);
+#if IMAGE_HEAD
+    http_cb = config->http_config->event_handler;
+    http_user = config->http_config->user_data;
+    assert(http_cb && http_user);
+#endif
     starts++;
     *handle = &incoming;
     return ESP_OK;
@@ -155,6 +221,20 @@ esp_err_t esp_https_ota_begin(const esp_https_ota_config_t *config,
 esp_err_t esp_https_ota_get_img_desc(esp_https_ota_handle_t handle,
                                     esp_app_desc_t *desc) {
     assert(handle == &incoming);
+#if STREAMS
+    if (redirect_first) {   /* its body is not the image's */
+        http_status = 302;
+        http_event(HTTP_EVENT_HEADERS_SENT, NULL, 0);
+        static const uint8_t page[400] = { 0xE9 };
+        http_event(HTTP_EVENT_ON_DATA, page, sizeof(page));
+    }
+    http_status = 200;
+    http_event(HTTP_EVENT_HEADERS_SENT, NULL, 0);
+    for (int off = 0; off < (int)sizeof(streamed); off += 150) {   /* in pieces, as TLS reads come */
+        int n = (int)sizeof(streamed) - off < 150 ? (int)sizeof(streamed) - off : 150;
+        http_event(HTTP_EVENT_ON_DATA, streamed + off, n);
+    }
+#endif
     *desc = incoming;
     return ESP_OK;
 }
@@ -184,6 +264,9 @@ esp_err_t esp_https_ota_abort(esp_https_ota_handle_t handle) {
 
 static void attempt(const char *version, bool force, ota_result_t expected) {
     snprintf(incoming.version, sizeof(incoming.version), "%s", version);
+#if SAME_BOARD
+    make_image(9, "W175", "waveshare_s3_175c", 3);   /* this board's */
+#endif
     record[0] = '\0';
     starts = downloads = finishes = aborts = reboots = callbacks = 0;
     ota_start("https://example.com/update.bin", force, on_result, &callbacks);
@@ -233,6 +316,39 @@ static void check_record(void) {
     assert(finishes == 0 && aborts == 1 && reboots == 0);
     record_set_fails = false;
 }
+
+/* One update at a time with the Bluetooth update (MCUmgr SMP). */
+static void check_claim(void) {
+    assert(ota_owner() == OTA_OWNER_NONE);
+    assert(ota_claim(OTA_OWNER_BLE) && ota_claim(OTA_OWNER_BLE));   /* its holder may claim again */
+    callbacks = 0;
+    ota_start("https://example.com/update.bin", false, on_result, &callbacks);
+    assert(!pending_task);   /* refused at once: no download task, nothing queued */
+    assert(callbacks == 1 && last_result == OTA_RESULT_FAILED);
+    assert(strstr(last_detail, "busy"));
+    ota_release(OTA_OWNER_WIFI);   /* not its claim: nothing changes */
+    assert(ota_owner() == OTA_OWNER_BLE);
+    ota_release(OTA_OWNER_BLE);
+    /* A download holds it until it ends; the Bluetooth update is refused meanwhile. */
+    snprintf(incoming.version, sizeof(incoming.version), "%s", "1000.0.0");
+    finish_result = ESP_FAIL;
+    callbacks = 0;
+    ota_start("https://example.com/update.bin", false, on_result, &callbacks);
+    assert(pending_task && ota_owner() == OTA_OWNER_WIFI);
+    assert(!ota_claim(OTA_OWNER_BLE));
+    TaskFunction_t task = pending_task;
+    pending_task = NULL;
+    /* A second Wi-Fi OTA meanwhile: refused at once, the first keeps the slot. */
+    ota_start("https://example.com/update.bin", false, on_result, &callbacks);
+    assert(!pending_task && callbacks == 1 && last_result == OTA_RESULT_FAILED && strstr(last_detail, "busy"));
+    assert(ota_owner() == OTA_OWNER_WIFI);
+    callbacks = 0;
+    task(pending_arg);   /* fails: the slot is free again */
+    assert(callbacks == 1 && last_result == OTA_RESULT_FAILED);
+    assert(ota_owner() == OTA_OWNER_NONE && ota_claim(OTA_OWNER_BLE));
+    ota_release(OTA_OWNER_BLE);
+    finish_result = ESP_OK;
+}
 #endif
 
 /* Only a Vibe Mode install, on the ESP-Mosaico's Vibe Mode build, passes. */
@@ -269,14 +385,124 @@ static void check_vibe_mode(void) {
 #endif
 }
 
+#if STREAMS
+/* One attempt with a real image head (the same-board opt-in, or a Home Link
+ * build's model check): the check runs before esp_https_ota_perform
+ * (esp_ota_begin and the first write), so a refused image never reaches flash. */
+static void same_board_attempt(uint16_t chip, const char *product, const char *board, uint8_t flags,
+                               ota_result_t expected, const char *detail) {
+    snprintf(incoming.version, sizeof(incoming.version), "%s", "1000.0.0");
+    memset(incoming.app_elf_sha256, 0x3c, sizeof(incoming.app_elf_sha256));
+    make_image(chip, product, board, flags);
+    record[0] = '\0';
+    starts = downloads = finishes = aborts = reboots = callbacks = 0;
+    ota_start("https://example.com/update.bin", false, on_result, &callbacks);
+    assert(pending_task);
+    TaskFunction_t task = pending_task;
+    pending_task = NULL;
+    task(pending_arg);
+    assert(callbacks == 1 && last_result == expected);
+    assert(starts == 1);
+    assert(downloads == (expected == OTA_RESULT_APPLIED));   /* no esp_ota_begin, no write */
+    assert(aborts == (expected != OTA_RESULT_APPLIED));
+    assert(reboots == (expected == OTA_RESULT_APPLIED));
+    if (detail) {
+        assert(strstr(last_detail, detail));
+    }
+    printf("attempt: %s\n", last_detail);
+}
+#endif
+
+#if SAME_BOARD
+static void check_same_board(void) {
+    assert(ota_is_enabled() && !ota_wifi_refused());
+    /* The default Home Link image, built for the C5. */
+    same_board_attempt(23, "", "none", 0, OTA_RESULT_REFUSED, "another chip");
+    /* A Home Link image for this chip: it would pass ESP-IDF's chip id check. */
+    same_board_attempt(9, "", "none", 0, OTA_RESULT_REFUSED, "another board");
+    same_board_attempt(9, "SCW1", "sensecap_watcher", 3, OTA_RESULT_REFUSED, "another board");
+    same_board_attempt(9, "W175", "waveshare_s3_175", 3, OTA_RESULT_REFUSED, "another board");
+    same_board_attempt(9, NULL, NULL, 0, OTA_RESULT_REFUSED, "no board description");
+    same_board_attempt(9, "W175", "waveshare_s3_175c", 1, OTA_RESULT_REFUSED, "no Bluetooth update");
+    same_board_attempt(9, "W175", "waveshare_s3_175c", 3, OTA_RESULT_APPLIED, NULL);
+    /* A redirect's body before the image's doesn't count as the image. */
+    redirect_first = true;
+    same_board_attempt(9, "W175", "waveshare_s3_175c", 3, OTA_RESULT_APPLIED, NULL);
+    same_board_attempt(23, "", "none", 0, OTA_RESULT_REFUSED, "another chip");
+    redirect_first = false;
+    /* What the client delivered must be what ESP-IDF read: else refused. */
+    make_image(9, "W175", "waveshare_s3_175c", 3);
+    streamed[32 + 144] ^= 1;
+    record[0] = '\0';
+    starts = downloads = finishes = aborts = reboots = callbacks = 0;
+    ota_start("https://example.com/update.bin", false, on_result, &callbacks);
+    TaskFunction_t task = pending_task;
+    pending_task = NULL;
+    task(pending_arg);
+    assert(callbacks == 1 && last_result == OTA_RESULT_REFUSED && downloads == 0 && aborts == 1);
+}
+#endif
+
+#if LINK_MODEL_TEST
+/* A Home Link build (this one: an S3 with no product code, board "none", its own device model):
+ * another model's image is refused before anything is written; its own model's, an image without
+ * a model (an older build) and one without a board description install; another chip's is refused. */
+static const uint8_t other_model[8] = { 0x6f, 0x74, 0x68, 0x65, 0x72, 0x21, 0x21, 0x21 };
+static void check_link_model(void) {
+    assert(ota_is_enabled() && !ota_wifi_refused());
+    assert(muse_board_desc.flags & MUSE_BOARD_DESC_F_MODEL);
+    image_model = other_model;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another device model");
+    image_model = muse_board_desc.model_hash;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_APPLIED, NULL);
+    same_board_attempt(23, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another chip");
+    image_model = NULL;
+    same_board_attempt(9, "", "none", 0, OTA_RESULT_APPLIED, NULL);     /* no model: an older image */
+    same_board_attempt(9, NULL, NULL, 0, OTA_RESULT_APPLIED, NULL);     /* no board description at all */
+    /* A redirect's body before the image's doesn't count as the image. */
+    redirect_first = true;
+    image_model = other_model;
+    same_board_attempt(9, "", "none", MUSE_BOARD_DESC_F_MODEL, OTA_RESULT_REFUSED, "another device model");
+    redirect_first = false;
+    image_model = NULL;
+}
+#endif
+
 int main(void) {
+#if GADGET_REFUSES
+    /* Refused at once: no task, no download, nothing written; logged. */
+    assert(ota_wifi_refused());
+    callbacks = 0;
+    ota_start("https://user:pw@ota.example.com:8443/fw/esp32c5/homelink-1.3.0.bin"
+              "?X-Amz-Signature=secret-token-value#frag", true, on_result, &callbacks);
+    assert(callbacks == 1 && last_result == OTA_RESULT_UNSUPPORTED);
+    assert(strstr(last_detail, "unsupported"));
+#if CONFIG_HOMEHUB_OTA_ENABLED
+    assert(!pending_task && starts == 0 && ota_owner() == OTA_OWNER_NONE);
+#endif
+    ota_start("https://example.com/update.bin", false, NULL, NULL);
+    puts("OTA harness passed");
+    return 0;
+#endif
+#if LINK_MODEL_TEST
+    check_link_model();
+    puts("OTA harness passed");
+    return 0;
+#endif
+#if SAME_BOARD
+    check_same_board();
+    attempt("1.0.1", false, OTA_RESULT_SKIPPED);   /* this board's image, older: the version gate still applies */
+    puts("OTA harness passed");
+    return 0;
+#endif
 #if CONFIG_HOMEHUB_OTA_ENABLED
     assert(ota_is_enabled());
     attempt("1.0.1", false, OTA_RESULT_SKIPPED);
-    attempt("999.0.0", false, OTA_RESULT_SKIPPED);
+    attempt("1.2.0+g1234abcd", false, OTA_RESULT_SKIPPED);   /* the same image */
     attempt("1000.0.0", false, OTA_RESULT_APPLIED);
     attempt("1.0.1", true, OTA_RESULT_APPLIED);
     check_record();
+    check_claim();
     finish_result = ESP_FAIL;
     attempt("1000.0.0", false, OTA_RESULT_FAILED);   /* and forgets the record */
 #else

@@ -18,8 +18,12 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_freeink import freeink_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,10 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class MuseEinkNavigationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        source = Path(os.environ.get("FREEINK_SOURCE_DIR", ROOT / "managed_components/freeink-sdk"))
+        source = freeink_dir()
         ui_root = source / "libs/ui/FreeInkUI"
-        if not (ui_root / "include/FreeInkApp.h").is_file():
-            raise AssertionError("Pinned FreeInk source missing: set FREEINK_SOURCE_DIR to its checkout")
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         out = Path(cls.temp.name)
@@ -148,8 +150,8 @@ class MuseEinkNavigationTest(unittest.TestCase):
         block = config[config.index("    config MUSE_VIDEO\n"):config.index("    config MUSE_VIDEO_WIFI\n")]
         dependency = re.search(r"depends on (.+)", block).group(1)
         self.assertIn("!MUSE_UI_FREEINK", dependency)
-        self.assertIn("MUSE_ENABLED && SPIRAM", dependency)
-        self.assertIn("IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31", dependency)
+        # PSRAM S3/S31 boards.
+        self.assertIn("MUSE_ENABLED && SPIRAM && (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S31)", dependency)
 
     def test_ci_freeink_source_matches_dependency_pin_and_read_only_checkout(self):
         manifest = (ROOT / "components/muse/idf_component.yml").read_text()

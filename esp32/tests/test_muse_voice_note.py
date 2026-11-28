@@ -24,10 +24,14 @@ import random
 import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import wave
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
@@ -48,7 +52,8 @@ def riff_header(rate):
 
 # The POST /chat/stream envelope around the base64 WAV, written out rather than
 # read from muse_chat_priv.h: changing what the device sends must change this.
-HEAD = (b'{"message":"","output_modality":"text","device":"mcu-wearable","items":[{"type":"file",'
+HEAD = (b'{"node_id":"homelink-0a1b2c","message":"","output_modality":"text","device":"mcu-wearable",'
+        b'"items":[{"type":"file",'
         b'"mime_type":"audio/wav","filename":"voice_note.wav","data_base64":"')
 TAIL = b'"}]}'
 
@@ -121,7 +126,7 @@ class VoiceNoteHelpers(unittest.TestCase):
                                MUSE / 'muse_chat_text.c', MUSE / 'muse_text.c'])
 
     def run_harness(self, *args, data=b''):
-        ran = subprocess.run([str(self.binary), *args], input=data, capture_output=True, env=ENV)
+        ran = run_child([str(self.binary), *args], input=data, capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         self.assertEqual(ran.stderr, b'')
         return ran.stdout
@@ -198,7 +203,8 @@ class VoiceNoteHelpers(unittest.TestCase):
         self.assertEqual(body, HEAD + base64.b64encode(riff_header(16000) + pcm) + TAIL)
         request = json.loads(body)
         wav = base64.b64decode(request['items'][0].pop('data_base64'), validate=True)
-        self.assertEqual(request, {'message': '', 'output_modality': 'text', 'device': 'mcu-wearable', 'items': [
+        self.assertEqual(request, {'node_id': 'homelink-0a1b2c', 'message': '', 'output_modality': 'text',
+                                   'device': 'mcu-wearable', 'items': [
             {'type': 'file', 'mime_type': 'audio/wav', 'filename': 'voice_note.wav'}]})
         self.assertEqual(wav, riff_header(16000) + pcm)
         with wave.open(io.BytesIO(wav)) as w:
@@ -207,6 +213,8 @@ class VoiceNoteHelpers(unittest.TestCase):
 
 
 HATCH_DRIVER = r'''
+extern "C" const char *muse_chat_node_id(void) { return "homelink-0a1b2c"; }
+
 static StreamBufferHandle_t s_in;
 static turn_t s_turn;
 
@@ -350,9 +358,9 @@ typedef struct fake_stream *StreamBufferHandle_t;
         cls.binary = out / 'note'
 
     def record(self, pcm, step, release=True, sched=()):
-        ran = subprocess.run([str(self.binary), str(step), '1' if release else '0',
-                              ','.join(map(str, sched)) or '-'],
-                             input=pcm, capture_output=True, env=ENV)
+        ran = run_child([str(self.binary), str(step), '1' if release else '0',
+                         ','.join(map(str, sched)) or '-'],
+                        input=pcm, capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         self.assertEqual(ran.stderr, b'')
         return parse_run(ran.stdout)
@@ -568,8 +576,8 @@ typedef struct fake_stream *StreamBufferHandle_t;
         cls.binary = out / 'photo'
 
     def record(self, pcm, photo_len, how='note', fail_at=-1, cancel_at=-1, step=4000):
-        ran = subprocess.run([str(self.binary), str(step), str(photo_len), str(fail_at), str(cancel_at), how],
-                             input=pcm, capture_output=True, env=ENV)
+        ran = run_child([str(self.binary), str(step), str(photo_len), str(fail_at), str(cancel_at), how],
+                        input=pcm, capture_output=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr.decode(errors='replace'))
         self.assertEqual(ran.stderr, b'')
         meta, body = ran.stdout.split(b'\n', 1)
@@ -729,7 +737,7 @@ class HatchPhotoAttach(unittest.TestCase):
         cls.binary = out / 'attach'
 
     def attach(self, photo, how='-'):
-        ran = subprocess.run([str(self.binary), how], input=photo, capture_output=True, text=True, env=ENV)
+        ran = run_child([str(self.binary), how], input=photo, capture_output=True, text=True, env=ENV)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         return dict(item.split('=', 1) for item in ran.stdout.split())
 

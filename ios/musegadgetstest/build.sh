@@ -40,15 +40,21 @@ setting() {   # the last value of an xcconfig setting, Local.xcconfig first
         [ -n "$v" ] && { echo "$v"; return; }
     done
 }
-bundle=${BUNDLE_ID:-$(setting PRODUCT_BUNDLE_IDENTIFIER)}
+bundle=${BUNDLE_ID:-$(setting MG_APP_BUNDLE_ID)}
+case "$bundle" in ''|*'$('*) bundle=$(setting PRODUCT_BUNDLE_IDENTIFIER) ;; esac
 out=${OUT:-/tmp/mgcam-ios-build}
 if [ -n "${LIB_DIR:-}" ]; then
     LIB_DIR="$LIB_DIR" "$here/native/codecs_xcconfig.sh" >/dev/null
+elif [ -f "$here/lib/codecs.xcconfig" ]; then
+    # the libraries an earlier codecs_xcconfig.sh linked: an older x264 build stops here, not at the link
+    for a in $(grep -oE '"[^"]*libmgx264\.a"' "$here/lib/codecs.xcconfig" | tr -d '"'); do
+        [ ! -f "$a" ] || "$here/native/check_x264.sh" "$a"
+    done
 fi
 sdk=iphoneos
 [ -n "${SIM:-}" ] && sdk=iphonesimulator
 xcodebuild -project "$here/MuseGadgetsTest.xcodeproj" -scheme MuseGadgetsTest -configuration Release \
-    -sdk $sdk -derivedDataPath "$out" PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGNING_ALLOWED=NO \
+    -sdk $sdk -derivedDataPath "$out" MG_APP_BUNDLE_ID="$bundle" CODE_SIGNING_ALLOWED=NO \
     build > "$out.log" 2>&1 || { grep -E "error:" "$out.log" | sort -u >&2; echo "build failed: $out.log" >&2; exit 1; }
 app="$out/Build/Products/Release-$sdk/MuseGadgetsTest.app"
 if [ -n "${SIM:-}" ]; then
@@ -62,11 +68,18 @@ udid=""
 if [ -n "${DEVICE:-}" ]; then
     udid=$(xcrun devicectl list devices 2>/dev/null | grep -F "$DEVICE" | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}' | head -1 || true)
 fi
+# The broadcast extension first (its own profile and entitlements), then the app around it.
+appex="$app/PlugIns/MuseGadgetsBroadcast.appex"
+if [ -d "$appex" ]; then
+    xsha=$(python3 "$here/signing.py" "$bundle.broadcast" "$appex" "${PROFILE:-}" "$udid")
+    mv "$appex/app.entitlements" "$out/broadcast.entitlements"
+    codesign -f -s "${IDENTITY:-$xsha}" --entitlements "$out/broadcast.entitlements" --timestamp=none "$appex" >/dev/null 2>&1
+fi
 sha=$(python3 "$here/signing.py" "$bundle" "$app" "${PROFILE:-}" "$udid")
 mv "$app/app.entitlements" "$out/app.entitlements"
 codesign -f -s "${IDENTITY:-$sha}" --entitlements "$out/app.entitlements" --timestamp=none "$app" >/dev/null 2>&1
 codesign -v "$app"
-codecs=$(grep -oE 'libmg(x264|vpx)\.a' "$here/lib/codecs.xcconfig" 2>/dev/null | tr '\n' ' ' || true)
+codecs=$(grep 'iphoneos' "$here/lib/codecs.xcconfig" 2>/dev/null | grep -oE 'libmg(x264|vpx)\.a' 2>/dev/null | tr '\n' ' ' || true)
 echo "$app (encoders: ${codecs:-none})"
 if [ "${1:-}" = install ]; then
     : "${DEVICE:?set DEVICE (xcrun devicectl list devices)}"

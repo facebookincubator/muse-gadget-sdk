@@ -435,9 +435,10 @@ def cmd_info(args: argparse.Namespace) -> int:
     ident = identity.load_or_create()
     pairing = config.load_json(config.PAIRING_FILE)
     try:
-        sdk_token = config.sdk_token_hint(config.sdk_token())
+        token = config.sdk_token()
+        sdk_token, hint = config.sdk_token_fingerprint(token), config.sdk_token_hint(token)
     except ValueError:
-        sdk_token = "not valid"
+        sdk_token = hint = "not valid"
     paired_with = (pairing or {}).get("sdk_token_hint")
     print(f"version:   {__version__}")
     print(f"node id:   {ident.node_id}{'' if pairing else ' (when paired)'}")
@@ -445,8 +446,8 @@ def cmd_info(args: argparse.Namespace) -> int:
     print(f"SDK token: {sdk_token}")
     if pairing is None:
         print("paired:    no")
-    elif paired_with is not None and paired_with != sdk_token:
-        print(f"paired:    yes, with SDK token {paired_with}; run `musegadget pair --force` to use this one")
+    elif paired_with is not None and paired_with != hint:
+        print("paired:    yes, with another SDK token; run `musegadget pair --force` to use this one")
     else:
         print("paired:    yes")
     return 0

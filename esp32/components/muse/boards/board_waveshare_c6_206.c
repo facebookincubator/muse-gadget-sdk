@@ -106,6 +106,18 @@ static unsigned poll_buttons(void)
     return ev;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the AMOLED held in reset (it drops its frame and stays dark; no backlight). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(BSP_LCD_RST, 0);   /* GPIO11 (its BSP 2.0.0) */
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): BOOT (GPIO9, the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(BOOT_GPIO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-C6-Touch-AMOLED-2.06",
     .width = BSP_LCD_H_RES,
@@ -124,11 +136,14 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = bsp_display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
     .mic_slot = -1,             /* ES7210 MIC1 and MIC2: mix the two microphones */
     .poll_buttons = poll_buttons,
     .read_power = muse_pmu_read_power,
+    .charged = MUSE_CHARGED_DONE,   /* the AXP2101's charge-done state */
     .power_off = muse_pmu_power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

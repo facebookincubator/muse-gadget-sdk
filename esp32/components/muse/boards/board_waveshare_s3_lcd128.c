@@ -298,6 +298,12 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
 static const muse_board_t s_board = {
     .name = "Waveshare ESP32-S3-Touch-LCD-1.28",
     .width = LCD_RES,
@@ -312,6 +318,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = esp_lv_adapter_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .panel_sleep = panel_sleep,
     .poll_buttons = poll_buttons,
     .read_power = read_power,

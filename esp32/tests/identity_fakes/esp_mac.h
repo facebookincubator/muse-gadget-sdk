@@ -21,5 +21,6 @@
 #include "nvs.h"
 
 #define ESP_MAC_WIFI_STA 0
+#define ESP_MAC_BT 2
 
 esp_err_t esp_read_mac(uint8_t *mac, int type);

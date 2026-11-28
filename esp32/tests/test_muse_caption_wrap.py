@@ -26,10 +26,14 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unicodedata
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,7 +79,7 @@ class CaptionWrapTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def wrap(self, text: str, cols: int) -> list[str]:
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary), "caption", str(cols)],
             input=text.encode(),
             capture_output=True,
@@ -119,7 +123,7 @@ class CaptionWrapTest(unittest.TestCase):
         self.assertEqual(self.wrap("Muse 说 hello world", 8), ["Muse 说", "hello", "world"])
 
     def page(self, text: str) -> str:
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary), "page"], input=text.encode(), capture_output=True, check=True
         )
         return proc.stdout.decode().strip()
@@ -140,13 +144,13 @@ class CaptionWrapTest(unittest.TestCase):
         self.assertEqual(self.shown("\u115f\u1160\u3164한\uffa0글"), "한글")
 
     def shown(self, text: str) -> str:
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary), "ascii"], input=text.encode(), capture_output=True, check=True
         )
         return proc.stdout.decode()
 
     def pages(self, text: str, cols: int, px: int, lines: int, mode: str = "pages") -> list[list[str]]:
-        proc = subprocess.run(
+        proc = run_child(
             [str(self.binary), mode, str(cols), str(px), str(lines)],
             input=text.encode(),
             capture_output=True,
@@ -267,7 +271,7 @@ class CaptionWrapTest(unittest.TestCase):
 
     def test_the_latin_font_keeps_accented_letters(self) -> None:
         def latin(text: str) -> str:
-            proc = subprocess.run(
+            proc = run_child(
                 [str(self.binary), "latin"], input=text.encode(), capture_output=True, check=True
             )
             return proc.stdout.decode()

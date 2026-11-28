@@ -1,0 +1,148 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menu "Recovery (boot guard, gadget watchdog)"
+
+    config MUSE_BOOTGUARD
+        bool "Boot guard: escape a crash loop by itself"
+        default y if MUSE_GADGET_BLE_STANDALONE || MUSE_GADGET_BLE_AUDIO
+        default n
+        help
+            The boot guard (muse_bootguard.h): three boots in a row
+            that never get healthy (BLE up and 30 s without a reset) send
+            the chip to its ROM download mode when a USB host is attached
+            (flash it as usual), else boot SAFE mode: no Muse UI, audio or
+            input; Link setup, musegadgets BLE and the BLE update stay up.
+            Two crash resets within 10 minutes of each other turn Muse off
+            (SAFE mode) until re-enabled (the BLE console's safe.off) or a
+            new firmware image boots. On a Wi-Fi + BLE build SAFE mode is
+            Bluetooth only: Wi-Fi, the Muse session and Wi-Fi OTA stay off
+            (app.c run_safe_bluetooth_only). On a build without musegadgets
+            (Wi-Fi Muse, Link only) SAFE keeps Link up: Wi-Fi and the Noise
+            session with device.health (MUSE_BOOTGUARD_SAFE_LINK_QUIET
+            on Link-only builds). Leaving SAFE: safe.off, the USB console's
+            >safe=0, a new image, or a 5 s hold of the talk / boot key. On by
+            default only in the BLE gadget builds (musegadgets BLE audio, the
+            standalone gadget profiles), whose overlays set it too; other
+            builds leave it off and never stay in SAFE. On the
+            ESP-Mosaico it sits beside ESP-Iris's own counter (3 crashes
+            without 30 s up: Vibe Mode): SAFE comes at the second crash and is
+            decided at boot (no restart), so Iris still catches a SAFE boot
+            that crashes too.
+
+    config MUSE_BOOTGUARD_BLE_REACHABLE
+        bool "The healthy mark needs BLE reachable (and the stay-reachable check)"
+        depends on MUSE_BOOTGUARD
+        default y if MUSE_GADGET_BLE_STANDALONE || MUSE_GADGET_BLE_AUDIO
+        default n
+        help
+            On builds with musegadgets BLE, BLE is the recovery tier: a boot
+            counts healthy only once it advertised or connected (else it's a
+            failed boot), and a running gadget that stays out of reach 30 s
+            restarts. Off (the builds without musegadgets, whose BLE
+            is off or silent once set up): healthy is 30 s of uptime alone,
+            and nothing restarts the gadget for being out of reach (a Wi-Fi
+            or VM outage is not a crash).
+
+    config MUSE_BOOTGUARD_SAFE_LINK_QUIET
+        bool "SAFE on a build without musegadgets: Link's commands off"
+        depends on MUSE_BOOTGUARD && !MUSE_GADGET_BLE_AUDIO
+        default y
+        help
+            SAFE on a build without musegadgets keeps Link up for recovery.
+            Its commands are off: on a
+            Link-only build they're all the build does (relay, sensors,
+            discover, display, camera, the BLE commands), and on a Wi-Fi
+            Muse build several reach Muse's display and session, which SAFE
+            never starts. link.register lists only device.health; Wi-Fi,
+            the Noise session with device.health (which says safe: true),
+            the VM management
+            commands, Link setup BLE, the console and the button stay, and
+            a Link-only build's status light or screen shows the error
+            state.
+
+    config MUSE_GADGET_WDT
+        bool "Gadget watchdog over the BLE host, the musegadgets worker, the Muse input task and the Link session"
+        depends on ESP_TASK_WDT_EN
+        default y if MUSE_GADGET_BLE_STANDALONE || (MUSE_GADGET_BLE_AUDIO && !MUSE_BOARD_ESP_MOSAICO)
+        default n
+        help
+            The gadget watchdog (muse_wdt.h): each of those threads feeds
+            the task watchdog from its own loop; one that stops for longer
+            than ESP_TASK_WDT_TIMEOUT_S panics the chip (a crash record),
+            and the boot guard counts the restart. Needs the task watchdog
+            on (ESP_TASK_WDT_EN; the BLE gadget profiles turn it on: 15 s,
+            idle tasks watched, a panic). Each user is
+            fed at least every 10 s. On a Wi-Fi build the Link session task is watched too,
+            in its session loop only: its connect, handshake and reconnect
+            waits have their own timeouts and aren't watched.
+
+    config MUSE_HEAP_WATCH
+        bool "Bench: log internal-heap lows and each task's heap peaks"
+        default n
+        select HEAP_USE_HOOKS
+        help
+            Diagnostics (muse_heapwatch.h): a low-priority task samples the
+            free internal heap every 10 ms and logs each new low (512 B
+            steps) on heap.watch, to line up with the log around it; with
+            ESP-IDF's HEAP_TASK_TRACKING also on, the console's >heap.tasks
+            prints each task's internal current and peak use. (Tracking
+            costs ~6.7 KB of internal RAM on the StopWatch and panicked in
+            its free path from the esp_timer task on IDF v6.0.1:
+            use it only for a boot-time look.) Through ESP-IDF's heap hooks
+            it also records every internal allocation of 512 B or more
+            (time, size, when freed, six return addresses) in a ring the
+            console's >heap.allocs prints, for addr2line. Never in a
+            release.
+
+endmenu
+
+menu "Task stacks"
+
+    config MUSE_STACKS_IN_PSRAM
+        bool "Keep the long-lived app tasks' stacks in PSRAM"
+        depends on FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+        depends on SPI_FLASH_AUTO_SUSPEND || (SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA)
+        default n
+        help
+            muse_stack.h: the Noise session's task (12 KB, and no 12 KB
+            internal block held for it from boot), Muse's keeper (6 KB),
+            boot (8 KB, until the UI is up) and Wi-Fi scan tasks, the
+            musegadgets player (4 KB) and the tunnel's send task (4 KB) put
+            their stacks in PSRAM, which hands internal RAM back to Wi-Fi,
+            BLE, the codecs' DMA and TLS. Their TCBs stay internal.
+
+            Safe for flash writes, not for flash mapping. With code and
+            read-only data in PSRAM (SPIRAM_FETCH_INSTRUCTIONS and
+            SPIRAM_RODATA) or flash auto-suspend, ESP-IDF leaves the cache on
+            during a flash write (SPI_FLASH_CACHE_NO_DISABLE in
+            spi_flash_os_func_app.c), so these tasks may write NVS or flash;
+            without them a write turns the cache off and a PSRAM stack
+            asserts (the reTerminal Sticky's LVGL note in AGENTS.md), hence
+            the dependency. Mapping flash freezes the cache whatever the
+            option (esp_mmu_map, and asserts s_task_stack_is_sane_when_cache_frozen
+            on a PSRAM stack): esp_partition_mmap, spi_flash_mmap,
+            bootloader_mmap, and through them esp_ota_get_state_partition,
+            esp_ota_get_boot_partition, esp_ota_mark_app_valid_cancel_rollback,
+            esp_ota_mark_app_invalid_rollback_and_reboot,
+            esp_ota_set_boot_partition, esp_ota_end, esp_image_verify,
+            esp_https_ota and reads of encrypted partitions. So every task
+            that can reach one of those stays internal: the musegadgets
+            worker (SMP: OTA states, the image check, the healthy mark), the
+            Wi-Fi OTA and its verify task, the bug report, Muse's console and
+            input tasks (the input task also powers the chip off and waits in
+            light sleep), and ESP-IDF's own. tests/test_muse_stack.py checks
+            the moved tasks' files call none of them.
+
+endmenu

@@ -117,7 +117,7 @@ static bool sdk_changed;
 static muse_hatch_status_t chat_state{};
 static muse_ble_status_t ble_state{};
 static muse_battery_t battery_state{};
-static muse_power_t power_state{-1, 0, false, false};
+static muse_power_t power_state{-1, 0, false, false, false, false, 0, false, 0, 0, 0};
 static int pairing_resets, phone_forgets, battery_resets;
 static bool muse_link_hatch_linked() { return true; }
 static bool muse_link_sdk_token_changed() { return sdk_changed; }
@@ -128,7 +128,8 @@ static const char *muse_hatch_state_name(muse_hatch_state_t) { return "Ready"; }
 static void muse_settings_hatch_host(char *out) { out[0] = 0; }
 static void muse_settings_hatch_vm(char *out) { out[0] = 0; }
 static size_t muse_settings_hatch_token_len() { return 0; }
-static const char *muse_link_sdk_token() { return nullptr; }
+#define MUSE_LINK_FP_HEX 9
+static bool muse_link_sdk_token_fp(unsigned *len, char hex[MUSE_LINK_FP_HEX]) { *len = 0; hex[0] = '\0'; return false; }
 static void muse_ble_status(muse_ble_status_t *out) { *out = ble_state; }
 static bool muse_settings_ble_on() { return true; }
 static void muse_battery_read(muse_battery_t *out) { *out = battery_state; }

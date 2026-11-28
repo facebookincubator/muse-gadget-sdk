@@ -116,17 +116,35 @@ final class ClipStreamer {
             pictures = [key: frames!]   /* the latest only: ~15 MB at 232 px */
             picLock.unlock()
         }
+        /* A gadget that shows fewer frames a second (e.g. 15) gets the clip at its rate:
+         * the source frame nearest each of its frame times (24 -> 15 fps keeps 5 of every 8). */
+        var fps = fps
+        let top = maxFps   /* once: a capability report may change it while this runs */
+        if top > 0 && fps > top, let all = frames {
+            let n = max(1, all.count * top / fps)
+            frames = (0..<n).map { all[min(all.count - 1, $0 * fps / top)] }
+            fps = top
+        }
         let t1 = nowMs()
         let c = Clip(name: name, size: size, fps: fps, kbps: kbps)
         c.vp8 = vp8
         if vp8 {
             try encodeLoopsVp8(frames!, c)
-        } else if size > 240 && X264.available {
+        } else if (size > 240 || (maxFrameBytes > 0 && maxFrameBytes < 16384)) && X264.available {
             try encodeLoopsX264(frames!, c)
         } else {
             try encodeLoopsVT(frames!, c)
+            c.measure()
+            if !fits(c) && X264.available {
+                mlog("\(name): a \(c.maxFrame) B frame from the phone's encoder is over the gadget's \(maxFrameBytes) B: x264")
+                try encodeLoopsX264(frames!, c)
+            }
         }
         c.measure()
+        if !fits(c) {
+            throw NSError(domain: "MuseCam", code: 23, userInfo: [NSLocalizedDescriptionKey:
+                "a \(c.maxFrame) B frame is over the gadget's \(maxFrameBytes) B" + (vp8 ? ": pick H.264" : "")])
+        }
         c.info = String(format: "%@: %d frames @%d fps (%.1f s), keyframe %d B, loop %d kb/s; decode+scale %lld ms, encode %lld ms (%@)",
                         name, c.steady.count, c.fps, Double(c.steady.count) / Double(c.fps), c.keyed.first?.count ?? 0,
                         c.steadyKbps(), t1 - t0, nowMs() - t1, vp8 ? "VP8" : "H.264")
@@ -241,11 +259,44 @@ final class ClipStreamer {
      * no scene-cut keyframes (the clip's wrap-around, where the steady loop
      * starts, looks like a scene cut to x264).
      */
+    /* The largest access unit the gadget's ring takes (Caps.maxFrame less the header), 0: no cap; its most frames a second, 0: any. */
+    static var maxFrameBytes = 0, maxFps = 0
+
+    /* The clip suits this gadget: every frame within maxFrameBytes, its rate within maxFps (cached or new). */
+    static func fits(_ c: Clip) -> Bool {
+        (maxFrameBytes <= 0 || c.maxFrame <= maxFrameBytes) && (maxFps <= 0 || c.fps <= maxFps)
+    }
+
     private static func encodeLoopsX264(_ frames: [Data], _ c: Clip) throws {
+        let cap = maxFrameBytes
+        var kbps = c.kbps
+        /* Under a small gadget's cap: again at a lower rate if a frame (the keyframe, mostly) didn't fit; a clip
+         * that still doesn't fit isn't played (the gadget can't take the frame). */
+        for attempt in 0..<4 {
+            try encodeLoopsX264(frames, c, kbps: kbps, cap: cap)
+            let big = (c.keyed + c.steady).map { $0.count }.max() ?? 0
+            if cap <= 0 || big <= cap {
+                return
+            }
+            if attempt == 3 {
+                throw NSError(domain: "MuseCam", code: 22, userInfo: [NSLocalizedDescriptionKey:
+                    "a \(big) B frame at \(kbps) kb/s is still over the gadget's \(cap) B"])
+            }
+            mlog("\(c.name): a \(big) B frame at \(kbps) kb/s is over the gadget's \(cap) B: \(kbps * 7 / 10) kb/s")
+            kbps = max(16, kbps * 7 / 10)
+        }
+    }
+
+    private static func encodeLoopsX264(_ frames: [Data], _ c: Clip, kbps: Int, cap: Int) throws {
         let n = frames.count
-        let maxK = c.kbps * 102 / 100, buf = maxK * 300 / 1000
-        guard let e = X264(w: c.size, h: c.size, fps: c.fps, kbps: c.kbps, preset: "fast",
-                           params: CameraStreamer.withMvCheap("no-deblock=1:intra-refresh=0:keyint=infinite:scenecut=0:rc-lookahead=40:mbtree=1:vbv-maxrate=\(maxK):vbv-bufsize=\(buf)", width: c.size)) else {
+        let maxK = kbps * 102 / 100
+        var buf = maxK * 300 / 1000
+        if cap > 0 {
+            buf = min(buf, cap * 8 / 1000)
+        }
+        buf = max(1, buf)
+        guard let e = X264(w: c.size, h: c.size, fps: c.fps, kbps: kbps, preset: "fast",
+                           params: CameraStreamer.withSmallMvRange(CameraStreamer.withMvCheap("no-deblock=1:intra-refresh=0:keyint=infinite:scenecut=0:rc-lookahead=40:mbtree=1:vbv-maxrate=\(maxK):vbv-bufsize=\(buf)", width: c.size), maxFrame: cap)) else {
             throw NSError(domain: "MuseCam", code: 18, userInfo: [NSLocalizedDescriptionKey: "x264 open failed"])
         }
         defer { e.close() }

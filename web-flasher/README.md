@@ -38,6 +38,54 @@ the page, so it's needed once per gadget. The firmware side is
 console, other boards on the console UART and the chip's USB Serial/JTAG
 port. It's serial-only, so it can't be set over BLE.
 
+The page keeps the token only until the tab closes, unless the maker ticks
+**Remember this token on this computer**
+(`token-memory.js`): off by default, with a disclaimer that the token is
+saved in this browser's local storage, unencrypted. While it's ticked the
+token is saved (key `muse-web-flasher:sdk-token`) once it has reached a
+gadget, and a reload fills it in; unticking, **Forget saved token** and
+**Clear** delete it. Older pages saved the token without asking
+(`muse-sdk-token`): that copy is deleted at load, never taken as consent.
+The token never reaches the session log or Save log, only its length and
+SHA-256 prefix.
+
+## Updates say what happened
+
+- **Done only after reading the version back.** Once ESP Web Tools has
+  written the firmware, the page takes over its "Installation complete!",
+  closes the installer and reads the gadget's version over the same port
+  (`version-read.js`, 115200, paced on boards with `pacing`): it asks with
+  the console's `>version`, answered `@version X`
+  (`esp32/main/sdk_token_console.c`, every board), and also takes the boot
+  log's `link.app: Version: X`. It says Done only if that matches the
+  manifest's `version`, which `make_manifest.py` reads from the app image
+  itself; otherwise it says plainly that the update didn't take, or that it
+  couldn't confirm it. Then it sends the token as before.
+- **A stop says what state the gadget is in.** The page reads the version
+  the gadget runs when the installer connects. Closing the installer before
+  installing says "Nothing was installed; your gadget still runs X"; a
+  failure before anything was written says "The update stopped before it
+  finished. Nothing was installed; ..."; after an erase or a partial write
+  it says the gadget may not start until it's installed again.
+- **No touching during the transfer:** "Don't unplug or touch the gadget
+  until this says Done." under the installer's progress and on the page,
+  and leaving the page asks first.
+- **Wrist-worn products** (`worn` in `boards.json`) also get "Take the
+  gadget off your wrist..." beside the board and during the transfer.
+- **Save log** downloads the session's log as a .txt: ESP Web Tools' and
+  esptool-js's console output, the install's states, every console line the
+  version reads saw, and the token step, with every secret masked as
+  `esp32/tools/redact.py` masks it (length and SHA-256 prefix).
+
+The pure logic (version compare, masking, stop messages, the log) is in
+`flasher-core.js`, which `esp32/tests/test_web_flasher.py` runs in Node,
+against `tools/redact.py` for the masking. What these steps say is in
+`i18n.js` in English and Japanese like the rest of the page (`install.*`,
+`stop.*`, `transfer.*`, `version.*`, `log.*`); the lines the page adds to the
+installer's dialog follow the page's language, while the dialog's own text
+stays English. The session log's own lines are English; status lines go in
+as shown.
+
 ## Catching the wrong board
 
 ESP Web Tools refuses a board whose chip doesn't match the build's. On top of
@@ -66,9 +114,10 @@ go one at a time, and a failed one shows what the gadget has instead.
   what the gadget sends as text and keeps none of it.
 - It picks the port and paces writes like the token step, from the selected
   board. Changing the board closes its port. While it holds a port, or is
-  still closing one, Connect & install and Send token are off (their port
-  pickers need the click itself, so the card can't close first), and while the
-  token goes out the card can't connect.
+  still closing one, Connect & install, Send token and Check version are off
+  (their port pickers need the click itself, so the card can't close first),
+  and while the token goes out or a version read holds a port the card can't
+  connect.
 - The `ok` line is logged at INFO, every board's default. A build that logs
   less makes each save time out rather than report success.
 
@@ -107,6 +156,7 @@ languages, with `**bold**` and `` `code` ``.
 | `name`   | yes      | Name shown in the board picker. |
 | `usb`    | no       | USB devices the board's console can show up as, as `"vid:pid"` strings (see `esp32/tools/muse/ports.py`). The port picker shows only these; leave it out if you're not sure, so the right port isn't hidden. |
 | `pacing` | no       | Paced serial writes for USB bridges that drop bytes, as `{"chunk": 32, "factor": 2}`: bytes per write, and how many times as long as a chunk takes on the wire to wait after it. Leave it out for boards that flash fine without. |
+| `worn`   | no       | `true` for a wrist-worn product: the page asks to take it off the wrist before and during the transfer, since a wake can stall the update. |
 
 ## Testing locally
 
@@ -121,7 +171,9 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/flasher/site
 ```
 
 To try changes to the page itself, copy `index.html` and the `.js` and
-`boards.json` files over the unpacked site and reload.
+`boards.json` files over the unpacked site and reload. A manifest made before
+the page read versions back says `X.Y.Z+<7 hex>`; the page matches it with the
+image's `X.Y.Z+g<8 hex>` by commit prefix.
 
 Run the offline regression tests (the installer hooks, the Device settings
 protocol and the languages) with Node.js 22.7 or later, which loads the
@@ -130,3 +182,8 @@ page's modules as ES modules (no board or package installation needed):
 ```sh
 node --test web-flasher/tests/*.test.mjs
 ```
+
+The updater rules (`flasher-core.js`, `version-read.js`,
+`token-memory.js`, and the page itself in a headless Chrome for Testing) are
+in `esp32/tests/test_web_flasher.py`; from `esp32/`:
+`python3 -m unittest -v tests.test_web_flasher`.

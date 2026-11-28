@@ -77,6 +77,7 @@ static int page_more;   /* Down presses a page has left to scroll */
 static bool page_scroll(int d) { if (d > 0 && page_more > 0) { --page_more; return true; } return false; }
 static void page_hint(void) {}
 static void activate(int item, int dir) { activated = item; direction = dir; }
+static bool item_shown(int i) { (void)i; return true; }   /* every row offered */
 static void muse_input_request_power_off(void) { ++power_count; }
 static void muse_link_reset_setup(void) { ++reset_count; }
 static void muse_state_set_caption(const char *p) { (void)p; }

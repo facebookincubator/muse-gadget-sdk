@@ -21,7 +21,27 @@ CONFIG_IDF_TARGET="esp32c6"
 CONFIG_MUSE_DEVICE_MODEL_ID="muse-gadget-waveshare-c6-18"
 CONFIG_MUSE_DEVICE_MODEL_NAME="Waveshare ESP32-C6-Touch-AMOLED-1.8"
 CONFIG_MUSE_BOARD_WAVESHARE_C6_18=y
+# The UI's type drawn at this panel's size (fonts/type, 368 px).
+CONFIG_MUSE_UI_PANEL_TYPE=y
+
+# Muse Gadgets catalog model code: advertises
+# MuseGadget-WC6-XXXXXX. ESP32 catalog boards keep the Wi-Fi MAC tail, the
+# same digits as before the code. The BLE-only
+# c6ble profile loads after this overlay and keeps it.
+CONFIG_HOMEHUB_BLE_PRODUCT_CODE="WC6"
+# link.register metadata.model_name: the product name.
+CONFIG_HOMEHUB_MODEL_NAME="C6"
+CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
+# Room for every circle radius on screen at once (the bezel ring's two, the
+# settings cards', the icons'): with the default 4 they evict each other and
+# the 180 px ring's mask tables are rebuilt for every strip it crosses.
+CONFIG_LV_DRAW_SW_CIRCLE_CACHE_SIZE=16
+
+# Touch: read at 400 kHz, like the PMU on the same bus (the BSP's default is
+# 100 kHz), and only the one point the UI uses.
+CONFIG_BSP_I2C_CLK_SPEED_HZ=400000
+CONFIG_ESP_LCD_TOUCH_MAX_POINTS=1
 
 CONFIG_SPIRAM=n
 CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
@@ -51,6 +71,11 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
 CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=15
+# Link policy: the C6 controller has no live
+# peripheral-latency switch, so latency is renegotiated (mg_linkpol.h); this
+# makes it at least keep listening at the next event after a received data
+# packet instead of going back to skipping events.
+CONFIG_BT_LE_CTRL_SLV_FAST_RX_CONN_DATA_EN=y
 
 # On the C6, IRAM and DRAM share SRAM, so code kept in IRAM is heap the voice
 # upload doesn't get. Move driver ISRs, the heap and the BLE controller to

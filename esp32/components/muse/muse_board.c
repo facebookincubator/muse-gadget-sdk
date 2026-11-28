@@ -64,9 +64,33 @@ static esp_err_t button_init(muse_gpio_button_t *b, gpio_num_t gpio, bool active
     return gpio_intr_disable(gpio);
 }
 
+void muse_board_pin_hold(gpio_num_t pin, int level)
+{
+    if (pin == GPIO_NUM_NC) {
+        return;
+    }
+    gpio_reset_pin(pin);
+    gpio_set_level(pin, level);
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pin, level);
+}
+
 esp_err_t muse_gpio_button_init(muse_gpio_button_t *b, gpio_num_t gpio)
 {
     return button_init(b, gpio, false);
+}
+
+bool muse_gpio_safe_key(gpio_num_t gpio, bool pull)
+{
+    static uint64_t set;   /* the GPIOs already made inputs */
+    if (!(set & BIT64(gpio))) {
+        set |= BIT64(gpio);
+        gpio_set_direction(gpio, GPIO_MODE_INPUT);
+        if (pull) {
+            gpio_pullup_en(gpio);
+        }
+    }
+    return gpio_get_level(gpio) == 0;
 }
 
 esp_err_t muse_gpio_button_init_high(muse_gpio_button_t *b, gpio_num_t gpio)

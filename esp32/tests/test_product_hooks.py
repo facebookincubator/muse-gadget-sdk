@@ -17,9 +17,11 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_link_ota import function_source
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,7 +128,7 @@ static bool invoke_product(const char *command, cJSON *, noise_ctrl_session_gene
 #define PRODUCT_CONTROL_INVOKE invoke_product
 ''')
             flags = ["-Wall", "-Wextra", "-Werror", "-g", "-I", str(ROOT / "tests/link_fakes"),
-                     "-I", str(tmp)]
+                     "-I", str(tmp), "-I", str(ROOT / "main")]
             sanitizer = os.environ.get("HOST_SANITIZERS", "address,undefined")
             if sanitizer:
                 flags += [f"-fsanitize={sanitizer}", "-fno-omit-frame-pointer"]

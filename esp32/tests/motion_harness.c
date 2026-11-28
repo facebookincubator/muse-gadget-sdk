@@ -62,7 +62,13 @@ static int esp_codec_dev_write(void *dev, const void *data, int bytes)
 static bool mirror_only_test;
 static bool muse_mirror_audio_playback(const int16_t *pcm, size_t n)
 { (void)pcm; (void)n; return mirror_only_test; }
+/* The speaker path's codec open and its TX notes (muse_audio_tx.h), faked. */
+static bool ensure_open(void) { return true; }
+static esp_err_t closed_wait(size_t frames) { (void)frames; return ESP_FAIL; }
+static size_t muse_audio_tx_note_begin(size_t n) { return n; }
+static void muse_audio_tx_note_write(const int16_t *pcm, size_t n, bool mute) { (void)pcm; (void)n; (void)mute; }
 #include "motion_audio_write.inc"
+#define muse_audio_write muse_audio_write_chained   /* no speech chain here: the speaker path itself */
 
 static uint8_t regs[256];
 static int writes, transactions, delay_ms;

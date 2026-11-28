@@ -1,0 +1,72 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The core set, about a fifth of the host tests: what guards security, updates and recovery, and the
+# paths every user takes. Run these on every build; run every module daily and before a push.
+# One module per line; '#' starts a comment.
+
+# The device session, the protocol and the seal
+test_mg_session
+test_mg_session_seal
+test_mg_ble
+test_mg_token_proof
+test_link_noise_session
+test_noise_core
+test_noise_core_inplace
+test_link_transport_contract
+test_link_vm_auth_token_contract
+test_ws_mask
+
+# Updates over BLE (SMP) and Link, and what may write flash
+test_mg_smp
+test_link_ota
+test_flash_safety
+test_signing_key
+test_mg_att_confirm
+
+# The boot guard and SAFE, watchdogs, restarts and stacks
+test_muse_bootguard
+test_watchdogs
+test_muse_restart
+test_muse_stack
+
+# Pairing, setup, setting up again, and identity
+test_link_pairing_handshake
+test_link_pairing_state_contract
+test_link_pairing_transcript
+test_link_pairing_signer_policy
+test_link_encrypted_pairing_contract
+test_link_gadget_setup
+test_link_unpair_storage_contract
+test_link_identity
+test_link_node_id
+test_link_config_store
+test_pairing_fresh_press
+test_muse_ble_gate
+test_mg_confirm
+test_mg_unlock
+
+# The passcode lock
+test_muse_passcode
+
+# Push to talk, and video from the network (untrusted input)
+test_muse_ptt_ui
+test_video_untrusted
+
+# Codec vectors and secrets
+test_mg_codecs
+test_ghash32
+test_secure_random
+test_token_logs
+test_redact

@@ -14,10 +14,11 @@
 
 """Node ids.
 
-A new setup offers node_id gadget-XXXXXX (the same six hex digits as before)
-and stores it with its tokens. A device set up by earlier firmware, which
-stored no id, keeps homelink-XXXXXX, the id its tokens were issued for, until
-it is set up again.
+A gadget's new setup offers node_id gadget-XXXXXX (the same six hex digits as
+before) with CONFIG_MUSE_GADGET_NODE_ID_PREFIX, else homelink-XXXXXX, and
+stores it with its tokens (and K). A device set up earlier keeps its stored
+id, or the homelink-XXXXXX a setup that stored none was issued tokens for,
+until a setup commits a new one. A plain Home Link keeps homelink-XXXXXX.
 """
 
 from __future__ import annotations
@@ -50,29 +51,24 @@ def _function_body(source: str, signature: str) -> str:
 
 
 class NodeIdHarnessTest(unittest.TestCase):
-    def test_node_ids(self) -> None:
-        # With gadget ids on: new setup -> gadget-abcdef; an earlier setup
-        # keeps homelink- through reboots, an update's boot and a token
-        # refresh; setting up again, a reset or an unpair then a setup ->
-        # gadget-; a stored id is kept.
-        self.assertIn("node id harness: PASS", self.run_harness(gadget_ids=True))
-
-    def test_node_ids_off(self) -> None:
-        # Off (the default): new setups offer homelink- and store it; a stored
-        # gadget- id is kept until the next setup.
-        self.assertIn("node id harness (gadget ids off): PASS", self.run_harness(gadget_ids=False))
-
-    def run_harness(self, gadget_ids: bool) -> str:
+    def run_harness(self, gadget: bool, gadget_ids: bool = False) -> str:
         cc = shlex.split(os.environ.get("CC", "cc"))
         if not cc or shutil.which(cc[0]) is None:
             raise unittest.SkipTest("C compiler not available")
+        defines = [
+            f'-DCONFIG_GADGET_SDK_TOKEN="{BUILD_TOKEN}"',
+            '-DCONFIG_HOMEHUB_BLE_NAME_PREFIX="MuseGadget"',
+            '-DCONFIG_HOMEHUB_BLE_NAME_SUFFIX=""',
+            '-DCONFIG_HOMEHUB_BLE_PRODUCT_CODE=""',
+        ]
+        if gadget:
+            defines += ["-DGADGET_BUILD", "-DCONFIG_MUSE_GADGET_BLE_AUDIO=1"]
+        if gadget_ids:
+            defines += ["-DGADGET_IDS", "-DCONFIG_MUSE_GADGET_NODE_ID_PREFIX=1"]
         with tempfile.TemporaryDirectory(prefix="link-node-id-") as directory:
             binary = Path(directory) / "harness"
             r = subprocess.run(
-                [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                 f'-DCONFIG_GADGET_SDK_TOKEN="{BUILD_TOKEN}"',
-                 '-DCONFIG_HOMEHUB_BLE_NAME_PREFIX="MuseGadget"', '-DCONFIG_HOMEHUB_BLE_NAME_SUFFIX=""',
-                 *(["-DGADGET_IDS", "-DCONFIG_MUSE_GADGET_NODE_ID_PREFIX=1"] if gadget_ids else []),
+                [*cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", *defines,
                  "-I", str(ROOT / "tests/identity_fakes"), "-I", str(ROOT / "tests/link_fakes"),
                  "-I", str(ROOT / "main"),
                  str(ROOT / "tests/link_node_id_harness.c"), str(ROOT / "main/identity.c"),
@@ -83,24 +79,37 @@ class NodeIdHarnessTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             return r.stdout
 
+    def test_gadget_build(self) -> None:
+        # New setup -> gadget-abcdef; a stored homelink- id survives reboots,
+        # an update's boot and a credentials update; a stored id is never
+        # renamed; a re-setup takes gadget-, an abandoned or power-cut one
+        # keeps homelink-; a reset, or an unpair, then a new setup ->
+        # gadget-; credentials without a stored id stay homelink-.
+        self.assertIn("node id harness (gadget): PASS", self.run_harness(True, gadget_ids=True))
+
+    def test_gadget_release_build(self) -> None:
+        # CONFIG_MUSE_GADGET_NODE_ID_PREFIX off (off by default; bench builds
+        # turn it on): homelink- for new setups, the id
+        # still stored at the commit, a stored gadget- id kept until the next
+        # setup, the handover naming the current pair's id.
+        self.assertIn("node id harness (gadget, release): PASS", self.run_harness(True))
+
+    def test_plain_home_link_build(self) -> None:
+        # Homelink- offered and stored; a stored gadget- id kept until the
+        # next setup; credentials without a stored id are homelink-.
+        self.assertIn("node id harness (Home Link): PASS", self.run_harness(False))
+
+    def test_plain_home_link_ignores_the_switch(self) -> None:
+        # A plain Home Link offers homelink- with
+        # CONFIG_MUSE_GADGET_NODE_ID_PREFIX on too.
+        self.assertIn("node id harness (Home Link, gadget ids on): PASS", self.run_harness(False, gadget_ids=True))
+
 
 class NodeIdSourceTest(unittest.TestCase):
     """Where the app takes the setup id and where the id in use."""
 
     app = (ROOT / "main/app.c").read_text()
 
-    def test_setup_offers_and_stores_the_setup_id(self) -> None:
-        info = _function_body(self.app, "static void on_get_device_info(void)")
-        self.assertIn('cJSON_AddStringToObject(root, "node_id", identity_setup_node_id());', info)
-        self.assertIn("link_pairing_init(identity_setup_node_id(), identity_device_id(), identity_mac(),", self.app)
-        accept = _function_body(self.app, "static bool accept_pairing_credentials(")
-        store = 'config_set_str("node_id", identity_setup_node_id())'
-        # Stored before any of the setup's tokens, then taken.
-        self.assertLess(accept.index(store), accept.index("store_token_pair_unlocked("))
-        self.assertLess(accept.index(store), accept.index("mint_and_store_device_tokens_unlocked("))
-        self.assertIn("identity_setup_node_id(), NULL);", accept)
-        self.assertLess(accept.index("auth_lock_give();"), accept.index("identity_refresh_node_id()"))
-        self.assertIn("noise_ctrl_set_node_id(identity_node_id());", accept)
 
     def test_runtime_uses_the_id_in_use(self) -> None:
         for body in ("static bool migrate_legacy_auth_token_locked(",
@@ -108,6 +117,23 @@ class NodeIdSourceTest(unittest.TestCase):
             self.assertIn("identity_node_id()", _function_body(self.app, body))
             self.assertNotIn("identity_setup_node_id()", _function_body(self.app, body))
         self.assertIn("noise_ctrl_init(identity_node_id(), identity_ble_name(), on_ws_control_status)", self.app)
+
+
+    def test_handover_names_the_current_pairs_id(self) -> None:
+        # The device session's credentials: the id stored with the current
+        # pair (journal-aware, as the pair is), else the id in use; never the
+        # setup id a re-setup offers before its commit.
+        glue = (ROOT / "main/mg_glue.c").read_text()
+        creds = _function_body(glue, "static bool session_credentials(mg_session_creds_t *c)")
+        self.assertIn("app_gadget_read_session_setup(c->node_id, sizeof(c->node_id)", creds)
+        app = (ROOT / "main/app.c").read_text()
+        snapshot = _function_body(app, "bool app_gadget_read_session_setup(")
+        self.assertIn("config_get_node_id(node_id, node_size)", snapshot)
+        self.assertIn('snprintf(c->node_id, sizeof(c->node_id), "%s", identity_node_id());', creds)
+        self.assertNotIn("identity_setup_node_id", creds)
+        store = (ROOT / "main/config_store.c").read_text()
+        self.assertIn('config_get_str(config_reprovision_open() ? "rp_node" : "node_id", out, size)',
+                      _function_body(store, "bool config_get_node_id(char *out, size_t size)"))
 
     def test_switch_defaults_off_and_bench_turns_it_on(self) -> None:
         kconfig = (ROOT / "main/Kconfig.projbuild").read_text()
@@ -117,6 +143,8 @@ class NodeIdSourceTest(unittest.TestCase):
         self.assertIn("default n", entry)
         self.assertIn("CONFIG_MUSE_GADGET_NODE_ID_PREFIX=y",
                       (ROOT / "devices/sdkconfig.muse-bench").read_text().splitlines())
+        identity = (ROOT / "main/identity.c").read_text()
+        self.assertIn("#if CONFIG_MUSE_GADGET_BLE_AUDIO && CONFIG_MUSE_GADGET_NODE_ID_PREFIX", identity)
 
     def test_the_id_goes_with_the_tokens(self) -> None:
         store = (ROOT / "main/config_store.c").read_text()

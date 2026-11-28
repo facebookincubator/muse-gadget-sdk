@@ -60,10 +60,11 @@ The board ships with Waveshare's factory demo. Back up the flash before the
 first Muse flash; the whole 16 MB takes about two minutes:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT -b 921600 read-flash 0 0x1000000 waveshare-2.16-factory.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT -b 921600 read-flash 0 0x1000000 "$BK/waveshare-2.16-factory.bin")
 ```
 
-To go back, `python -m esptool --chip esp32s3 -p PORT write-flash 0 waveshare-2.16-factory.bin`.
+To go back, `python -m esptool --chip esp32s3 -p PORT write-flash 0 "$BK/waveshare-2.16-factory.bin"`.
 The factory partition table is a different layout (factory app at `0x20000`,
 `ota_0` at `0x620000`, two 3 MB data partitions after it), so restore the
 whole image, not just the app.

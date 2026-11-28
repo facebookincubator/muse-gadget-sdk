@@ -135,12 +135,16 @@ static void collect_snapshot(bug_report_snapshot_t *snapshot) {
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     snapshot->heap_psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 
+#if !CONFIG_MUSE_GADGET_BLE_STANDALONE
+    // A BLE-only gadget has no Wi-Fi or tunnel: they stay out of its image
+    // (esp32/AGENTS.md, BLE only), and the report says not connected.
     snapshot->wifi_connected = wifi_mgr_is_connected();
     wifi_ap_record_t ap = {0};
     if (snapshot->wifi_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
         snapshot->has_rssi = true;
         snapshot->rssi_dbm = ap.rssi;
     }
+#endif
 
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *boot = esp_ota_get_boot_partition();

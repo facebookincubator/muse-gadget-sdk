@@ -30,6 +30,16 @@ typedef enum {
     APP_WIFI_BUSY,          // another setup operation had the radio
 } app_wifi_join_t;
 
+// Not now: a tap anywhere but the prompt's confirm, or the back gesture, ends
+// the pairing prompt (first setup or re-setup) as a dismiss does; the phone can
+// start it again.
+void app_dismiss_pairing_prompt(void);
+// Setup mode now (resetup_gap.h): a set-up gadget whose only key is its talk key takes a re-setup only in it.
+bool app_setup_mode(void);
+// A set-up gadget's pairing_client_hello may start a re-setup: not in SAFE, and on a board whose only key is its
+// talk key only in setup mode (ble_server.c answers error_pairing_unavailable otherwise).
+bool app_resetup_open(void);
+
 #if CONFIG_MUSE_ENABLED
 // Muse (muse_glue.c) drives setup through these; all are safe from any task.
 
@@ -54,12 +64,40 @@ bool app_wifi_nap(void);
 // Starts the BLE server if needed and keeps it advertising (or not) for Muse's
 // phone-setup service once setup is complete.
 void app_ble_companion_set(bool advertise);
-// A talk-button press that began after pressed_after_us (esp_timer's clock).
-// Returns true when a pairing waits for a press: the press is Link's then,
-// and confirms it only if it began after the prompt.
-bool app_confirm_pairing_press(int64_t pressed_after_us);
+// A press of a control that can confirm pairing (the talk key, a second key, the prompt's on-screen Confirm).
+// Returns true when a pairing waits for a press: the press is Link's then, and on a Muse Gadget one press confirms
+// it, whenever it began (Home Link: only one that began after pressed_after_us, the prompt). talk_key: the talk
+// key, which never confirms a re-setup outside setup mode: it only dismisses the prompt.
+bool app_confirm_pairing_press(int64_t pressed_after_us, bool talk_key);
 // Full setup reset and reboot, from a worker task.
 void app_reset_setup_async(void);
+#endif
+
+#if CONFIG_MUSE_GADGET_BLE_AUDIO
+// The token proof's clear (mgcommands.h): erases the tokens, the proof key
+// and the setup markers, then restarts into Link setup. From any task.
+void app_gadget_clear_setup(void);
+// The device session's credentials_update: config_set_token_pair() (one
+// commit through the re-provisioning journal), refused (false) while the
+// gadget is being set up again. From the mg worker.
+bool app_gadget_store_session_tokens(const char *access_token, const char *refresh_token,
+                                     uint64_t access_expires_at);
+// The gadget is being set up again (a re-setup's journal begin until its
+// commit has ended the old setup's sessions, or a rollback): the device
+// session hands out no credentials meanwhile. From any task.
+bool app_gadget_session_busy(void);
+// The stored token pair, under the lock every pair read and write takes
+// (config_get_token_pair()). From any task.
+bool app_gadget_read_token_pair(char *access_token, size_t access_size, char *refresh_token,
+                                size_t refresh_size, uint64_t *access_expires_at);
+// The device session's credential in one snapshot under that lock: the node
+// id ("" if none stored), the pair with its expiry and the token proof key
+// (hex, "" if none), all one setup's. False with no pair, or while a
+// re-setup holds the pair (app_gadget_session_busy()). From any task.
+bool app_gadget_read_session_setup(char *node_id, size_t node_size, char *access_token,
+                                   size_t access_size, char *refresh_token, size_t refresh_size,
+                                   uint64_t *access_expires_at, char *proof_k_hex,
+                                   size_t proof_k_size);
 #endif
 
 #if CONFIG_MUSE_ENABLED || CONFIG_HOMEHUB_VOICE

@@ -36,7 +36,7 @@
 #define CONFIG_HOMEHUB_DAEMON_REQUESTS 1
 #define CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN 4096
 #define SMALL_CONTROL_SESSION 0
-#define SVC_FRAME_SCRATCH (64 * 1024)  // CONFIG_SPIRAM=1 in this harness
+#define SVC_FRAME_SCRATCH (64 * 1024)  // noise_control.cpp's inbound frame scratch with CONFIG_SPIRAM=1, as here (#250)
 #define OUT_SVC_SCRATCH 12288
 #define OUT_ENV_SCRATCH 12288
 #define MALLOC_CAP_8BIT 2
@@ -45,6 +45,7 @@
 #define pdMS_TO_TICKS(ms) (ms)
 #define ESP_LOGW(tag, ...) ((void)(tag))
 #define ESP_LOGD(tag, ...) ((void)(tag))
+#define ESP_LOGI(tag, ...) ((void)(tag))
 typedef int TickType_t;
 typedef int BaseType_t;
 typedef struct esp_tls esp_tls_t;
@@ -82,6 +83,12 @@ static bool s_headroom = true;
 static size_t heap_caps_get_largest_free_block(int) { return 32768; }
 static bool noise_tx_has_dma_headroom_reclaiming(size_t) { return s_headroom; }
 static bool noise_tx_has_contiguous_dma_headroom(void) { return s_headroom; }
+// noise_control.cpp's own (outside the request section): the sessions here
+// wait for the TLS path's DMA reserve, as a Wi-Fi gadget's do.
+template <typename Session>
+struct tx_needs_dma_reserve {
+    static constexpr bool value = true;
+};
 
 static std::string s_wire;   // plaintext of everything sent (TestCrypto seals as identity)
 struct sent_frame { ServiceType service; int64_t stream; ServiceFrameKind kind; };
@@ -186,23 +193,26 @@ int main() {
     assert(s_events.size() == 2);
     assert(!req_find(h));
 
-    // POST /fs/read with a JSON body sent after the open, and a header.
+    // POST /fs/upload (a gadget's file write) with a multipart body sent after the open, and a header.
     fresh();
-    const char *headers[] = {"content-type", "application/json", nullptr};
-    int64_t r = noise_ctrl_req_open("POST", "/fs/read", headers, false, on_event, &b);
+    const char *headers[] = {"content-type", "multipart/form-data; boundary=mgb", nullptr};
+    int64_t r = noise_ctrl_req_open("POST", "/fs/upload", headers, false, on_event, &b);
     assert(r > h);
-    const char *body = "{\"path\":\"notes/today.md\",\"offset\":0,\"len\":4096}";
+    const char *body = "--mgb\r\ncontent-disposition: form-data; name=\"path\"\r\n\r\nnotes/today.md\r\n"
+                       "--mgb\r\ncontent-disposition: form-data; name=\"file\"; filename=\"today.md\"\r\n\r\nhi\r\n"
+                       "--mgb--\r\n";
     assert(noise_ctrl_req_send(r, body, strlen(body), true, 0));
     pump_all();
-    assert(s_wire.find("/fs/read") != std::string::npos);
-    assert(s_wire.find("application/json") != std::string::npos);
+    assert(s_wire.find("/fs/upload") != std::string::npos);
+    assert(s_wire.find("multipart/form-data; boundary=mgb") != std::string::npos);
     assert(s_wire.find(body) != std::string::npos);
     respond(r, 404, "{\"error\":\"not found\"}", true);
     assert(s_events.size() == 1 && s_events[0].ctx == &b && s_events[0].status == 404 && s_events[0].end);
 
     // A server reset ends the request with -1; a cancel resets it and drops later frames.
     fresh();
-    int64_t x = noise_ctrl_req_open("POST", "/fs/read", nullptr, true, on_event, &a);
+    const char *range[] = {"range", "bytes=0-4095", nullptr};
+    int64_t x = noise_ctrl_req_open("GET", "/fs/raw/notes/today.md", range, true, on_event, &a);
     int64_t y = noise_ctrl_req_open("GET", "/chat/history", nullptr, true, on_event, &b);
     pump_all();
     reset_frame(x);
@@ -265,7 +275,7 @@ int main() {
     // Queued body bytes are bounded (16 KB with PSRAM): a send past it waits,
     // then fails, and the request carries on once the queue drains.
     fresh();
-    int64_t w = noise_ctrl_req_open("POST", "/fs/write", nullptr, false, on_event, &a);
+    int64_t w = noise_ctrl_req_open("POST", "/fs/upload", nullptr, false, on_event, &a);
     pump_all();
     s_headroom = false;
     static char big[REQ_QUEUE_BYTES + 1];
@@ -284,7 +294,7 @@ int main() {
     // One send larger than the outbound scratch can't be framed: that request
     // ends with -1 (callers send in pieces of at most 8 KB), the session doesn't.
     fresh();
-    int64_t v = noise_ctrl_req_open("POST", "/fs/write", nullptr, false, on_event, &a);
+    int64_t v = noise_ctrl_req_open("POST", "/fs/upload", nullptr, false, on_event, &a);
     int64_t u = noise_ctrl_req_open("GET", "/chat/history", nullptr, true, on_event, &b);
     pump_all();
     assert(noise_ctrl_req_send(v, big, OUT_SVC_SCRATCH, true, 0));

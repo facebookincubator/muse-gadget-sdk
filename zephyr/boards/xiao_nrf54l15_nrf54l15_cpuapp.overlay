@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Seeed XIAO nRF54L15 (Sense). The Sense's PDM microphone is on pdm20
+ * (dmic_dev in the board file), the user button is sw0 and the LED led0.
+ *
+ * The RRAM keeps the board's standard MCUboot map (nrf54l15_cpuapp_partition.dtsi):
+ * mcuboot 62 KB at 0, slot0 712 KB at 0x10000, slot1 712 KB at 0xc2000 and
+ * storage (settings) 36 KB at 0x174000. slot1 doubles as the offline clip
+ * queue while no firmware update needs it (src/mg_queue.h).
+ */
+
+/* The boot record's retained block (src/mg_health.c): the top 256 B
+ * of SRAM, outside the app's RAM; the XIAO's MCUboot (swap using move) uses
+ * RAM only up to about 0x200043e0 (CONFIG_MG_BOOT_RAM_END in the board's
+ * .conf). */
+&cpuapp_sram {
+	reg = <0x20000000 0x3ff00>;
+	ranges = <0x0 0x20000000 0x3ff00>;
+};
+
+/ {
+	soc {
+		mg_retained: memory@2003ff00 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x2003ff00 0x100>;
+			zephyr,memory-region = "MG_RETAINED";
+		};
+	};
+};
+
+/* The watchdog (CONFIG_MG_WATCHDOG); the board's watchdog0 alias. */
+&wdt31 {
+	status = "okay";
+};
+
+/ {
+	zephyr,user {
+		/* VBAT through the board's 2:1 divider, switched on by P1.15 (vbat_pwr,
+		 * on from boot), on AIN7: channel 7 of the board's ADC node. */
+		io-channels = <&adc 7>;
+		/* No mg-usb-sense-gpios: nothing on this board tells the nRF54L15
+		 * that USB power is there (src/mg_usb.c has the measurements). */
+	};
+};

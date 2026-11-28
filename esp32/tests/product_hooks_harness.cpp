@@ -29,12 +29,15 @@ extern "C" {
 #define MUSE_DEVICE_FAMILY "gadget"
 #define CONFIG_MUSE_DEVICE_MODEL_ID "test-model"
 #define CONFIG_MUSE_DEVICE_MODEL_NAME "Test Model"
+#include "register_family.h"
 using noise_ctrl_session_generation_t = uint32_t;
 struct pending_result {
     noise_ctrl_session_generation_t session_generation;
     char *request_id;
     cJSON *result;
+    int64_t queued_us;
 };
+static int64_t esp_timer_get_time(void) { return 0; }
 static std::vector<pending_result> results;
 static auto *s_result_q = &results;
 static int xQueueSend(std::vector<pending_result> *q, pending_result *p, int wait) {

@@ -42,6 +42,7 @@
 #include "led_strip.h"
 #include "muse_audio.h"
 #include "muse_board.h"
+#include "muse_lvgl_hold.h"   /* every pause bounded (muse_lvgl_hold.h) */
 #include "muse_link.h"
 #include "muse_mem.h"
 
@@ -184,7 +185,7 @@ static lv_display_t *display_start(lv_indev_t **touch)
 }
 
 static bool display_lock(int timeout_ms) { return esp_lv_adapter_lock(timeout_ms) == ESP_OK; }
-static void display_pause(bool pause) { if (pause) esp_lv_adapter_pause(-1); else esp_lv_adapter_resume(); }
+static void display_pause(bool pause) { if (pause) muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, true); else muse_lvgl_hold(MUSE_LVGL_HOLD_SCREEN, false); }
 static void panel_sleep(bool sleep) { esp_lcd_panel_disp_sleep(s_panel, sleep); }
 
 /* No speaker codec: NS4168 is an I2S amplifier. Codec device applies software volume. */

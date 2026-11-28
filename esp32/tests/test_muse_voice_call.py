@@ -29,19 +29,24 @@ import random
 import shlex
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_child import run_child  # noqa: E402 (macOS's pipe deadlock on a driver's input: host_child.py)
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MUSE = ROOT / 'components/muse'
 TESTS = ROOT / 'tests'
 FAKES = TESTS / 'voice_call_fakes'
-JSON_SRC = Path(os.environ.get('CJSON_SOURCE_DIR', ROOT / 'managed_components/espressif__cjson/cJSON'))
+JSON_SRC = cjson_dir()
 SANITIZE = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
 WARN = ['-Wall', '-Wextra', '-Werror']
+# cJSON's sprintf calls trip Apple's deprecation warning; they aren't this code's.
+JSON_WARN = ['-Wno-deprecated-declarations'] if sys.platform == 'darwin' else []
 ENV = {**os.environ,
        # Fill every allocation (not just its first 4 KB) so state read before
        # it's set up shows as garbage rather than zeros.
@@ -111,12 +116,12 @@ class VoiceCallCore(unittest.TestCase):
                 '-lm', '-o', str(cls.binary)]])
 
     def run_raw(self, *args, data=b''):
-        result = subprocess.run([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
+        result = run_child([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         return result.stdout
 
     def run_mode(self, *args, data=b''):
-        result = subprocess.run([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
+        result = run_child([str(self.binary), *map(str, args)], input=data, capture_output=True, env=ENV)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         return result.stdout.decode()
 
@@ -343,7 +348,7 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_gate_latest_item', 'ptt_gate_follow_up', 'ptt_stale_completion', 'ptt_hold_clock_gap', 'ptt_abandoned_start',
              'ptt_quiet_after_early_audio', 'ptt_cutover', 'ptt_many_edges_while_connecting',
              'ptt_bad_turn_identity', 'ptt_playing_while_waiting', 'ptt_captions', 'ptt_end_while_held_reply',
-             'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
+             'ptt_end_mid_pump', 'barge_resync', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
              'ptt_stop_paced_ack_only', 'ptt_stop_paced_ack_eof', 'ptt_stop_paced_eof_ack', 'ptt_stop_paced_output_only',
              'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts', 'hands_free_working',
              'hands_free_interrupted_settle', 'hands_free_early_media_and_keep_cap', 'long_call_captions', 'hands_free_playout', 'caption_waits_for_speaker',
@@ -557,6 +562,17 @@ class VoiceCallSession(unittest.TestCase):
     def test_barge_in_flush_is_fenced(self):
         self.run_case('barge_in')
 
+    def test_barge_in_resyncs_the_downlink(self):
+        # After a hands-free barge-in the next reply's speaker samples are
+        # bit-identical to the same reply on a fresh call (no resampler edge or phase from the reply talked over).
+        self.run_case('barge_resync')
+        # The PTT gate's flush of the playing reply resyncs it the same way (a press already did).
+        src = (ROOT / 'components/muse/muse_voice_call.cpp').read_text()
+        for start in ('static void gate_flush(void)\n{', 'static bool take(uint32_t acts)\n{', 'static void ptt_pressed(uint32_t press)\n{'):
+            body = src[src.index(start):]
+            body = body[:body.index('\n}\n')]
+            self.assertIn('muse_vc_resampler_init(&s_down, MUSE_VC_WIRE_RATE, MUSE_VC_MIC_RATE);', body, start)
+
     def test_switch_input_hold(self):
         self.run_case('hold')
 
@@ -643,15 +659,46 @@ class VoicePeCallLoop(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.binary = Path(cls.tmp.name) / 'voice_pe'
-        build([[*CC, '-std=gnu11', *SANITIZE, *WARN, '-Wno-unused-function', '-Wno-unused-parameter',
+        build([[*CC, '-std=gnu11', *SANITIZE, *WARN, *JSON_WARN, '-Wno-unused-function', '-Wno-unused-parameter',
                 '-Wno-unused-variable', '-I', str(FAKES / 'voice_pe'), '-I', str(FAKES), '-I', str(JSON_SRC),
                 '-I', str(TESTS), '-I', str(ROOT / 'main'), '-I', str(MUSE),
                 str(TESTS / 'voice_pe_call_harness.c'), str(MUSE / 'muse_voice_call_core.c'),
                 *cjson_source(JSON_SRC), '-lm', '-o', str(cls.binary)]])
 
-    def run_case(self, case):
-        result = subprocess.run([str(self.binary), str(case)], capture_output=True, text=True, env=ENV)
+        # With musegadgets BLE audio: a press goes to the phone or to Muse by route.
+        mg = ROOT / 'components/muse_gadget_ble'
+        cls.ble_binary = Path(cls.tmp.name) / 'voice_pe_ble'
+        build([[*CC, '-std=gnu11', *SANITIZE, *WARN, *JSON_WARN, '-Wno-unused-function', '-Wno-unused-parameter',
+                '-Wno-unused-variable', '-DCONFIG_MUSE_GADGET_BLE_AUDIO=1', '-I', str(FAKES / 'voice_pe'),
+                '-I', str(FAKES), '-I', str(JSON_SRC), '-I', str(TESTS), '-I', str(ROOT / 'main'), '-I', str(MUSE),
+                '-I', str(mg / 'include'), '-I', str(ROOT.parent / 'protocols'),
+                str(TESTS / 'voice_pe_call_harness.c'), str(MUSE / 'muse_voice_call_core.c'), str(mg / 'mg_route.c'),
+                str(JSON_SRC / 'cJSON.c'), '-lm', '-o', str(cls.ble_binary)]])
+
+    def run_case(self, case, binary=None):
+        result = subprocess.run([str(binary or self.binary), str(case)], capture_output=True, text=True, env=ENV)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ble_press_goes_to_the_phone_wifi_press_is_a_call(self):
+        self.run_case(0, self.ble_binary)   # the call loop is unchanged with BLE built in
+        self.run_case(2, self.ble_binary)   # a phone is up: BLE
+        self.run_case(3, self.ble_binary)   # Wi-Fi only: a realtime call
+        self.run_case(4, self.ble_binary)   # Wi-Fi-only policy with a phone up: still the call
+
+    def test_the_mute_switch_wins_over_ble_and_wifi_captures(self):
+        self.run_case(5, self.ble_binary)   # a client's start_mic while muted: the mic never opens
+        self.run_case(6, self.ble_binary)   # a press to the phone: the capture stops at the switch, unsent
+        self.run_case(7, self.ble_binary)   # a client's start_mic: the same
+        self.run_case(8, self.ble_binary)   # a Wi-Fi press: the turn is cancelled at the switch
+
+    def test_the_hold_contract_on_the_phone_route(self):
+        self.run_case(11, self.ble_binary)   # a tap: nothing reaches the client
+        self.run_case(12, self.ble_binary)   # held: button_down at the threshold, the pre-roll first, kept
+        self.run_case(13, self.ble_binary)   # 280 ms held: the release tail doesn't count toward the minimum
+
+    def test_a_client_gone_mid_turn_leaves_the_ring_idle(self):
+        self.run_case(9, self.ble_binary)    # the link drops as the press ends: idle, not 60 s of thinking
+        self.run_case(10, self.ble_binary)   # still linked: thinking
 
     def test_mute_during_capture_drops_that_chunk(self):
         self.run_case(0)
@@ -665,6 +712,7 @@ class VoiceCallWiring(unittest.TestCase):
     it neither names an app ID nor calls into the call."""
 
     def compile_session(self, calls, *extra):
+        require_cjson(JSON_SRC)
         inc = ['-I', str(FAKES / 'session'), '-I', str(FAKES), '-I', str(JSON_SRC), '-I', str(TESTS / 'link_fakes'),
                '-I', str(TESTS), '-I', str(MUSE), '-I', str(ROOT / 'components/noise_core/include'),
                '-I', str(ROOT / 'components/minimp3/include')]

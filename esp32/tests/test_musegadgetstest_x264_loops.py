@@ -72,7 +72,8 @@ class MuseGadgetsTestX264LoopsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             enc = Path(tmp, "enc")
             build = subprocess.run(
-                [cc, "-O2", "-w", f"-I{REPO / 'ios/musegadgetstest/native'}", "-o", str(enc),
+                [cc, "-O2", "-w", "-include", "stdint.h",  # x264.h needs stdint.h first
+                 f"-I{REPO / 'ios/musegadgetstest/native'}", "-o", str(enc),
                  str(ROOT / "tests/musegadgetstest_x264_loop_harness.c"), str(REPO / "ios/musegadgetstest/native/mgx264.c"),
                  *flags], capture_output=True, text=True)
             if build.returncode:

@@ -21,6 +21,7 @@
 
 #include "driver/i2c_master.h"
 #include "esp_err.h"
+#include "muse_charge_dark.h"
 #include "muse_state.h"
 
 /*
@@ -54,6 +55,12 @@ esp_err_t muse_pmu_set_key_shutdown(bool on);
 unsigned muse_pmu_poll_key(void);
 
 esp_err_t muse_pmu_read_power(muse_power_t *out);
+
+/* Charge dark: attaches the PMU on bus if muse_pmu_init() hasn't (it
+ * then reuses it), logs what turned the board on and off the first time, and
+ * reads USB, the battery and whether USB or the PWR key turned it on. For a
+ * board's muse_board_t.early_power. */
+esp_err_t muse_pmu_early(i2c_master_bus_handle_t bus, muse_cd_reading_t *out);
 
 /* Soft power-off: the AXP2101 cuts every rail. PWR turns the board back on. */
 esp_err_t muse_pmu_power_off(void);

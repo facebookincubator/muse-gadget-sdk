@@ -51,6 +51,8 @@ unsigned xEventGroupSetBits(EventGroupHandle_t g, unsigned b);
 unsigned xEventGroupClearBits(EventGroupHandle_t g, unsigned b);
 unsigned xEventGroupWaitBits(EventGroupHandle_t g, unsigned b, int c, int a, uint32_t t);
 ''',
+    # muse_state.c logs the bench nap (ESP_LOGI): a no-op here.
+    "esp_log.h": "#define ESP_LOGI(tag, ...) ((void)(tag))\n#define ESP_LOGW(tag, ...) ((void)(tag))\n",
     "freertos/event_groups.h": "",
     "freertos/semphr.h": "",
 }
@@ -243,16 +245,17 @@ class CaptionHint(unittest.TestCase):
         voice = (MUSE / "muse_voice.c").read_text()
         # Replies, errors from Muse and status stay up: go_idle() keeps a plain caption.
         self.assertNotIn("muse_state_set_hint", function(voice, "go_idle"))
-        # too_short()'s notice, worded for press-toggle notes or for holding.
-        self.assertEqual(re.findall(r'muse_state_set_hint\("([^"]*)"\)', voice),
-                         ["RECORD A LONGER NOTE", "HOLD LONGER TO TALK"])
-        self.assertIn("muse_state_set_hint", function(voice, "too_short"))
-        self.assertNotIn('go_idle("HOLD LONGER TO TALK")', voice)
-        self.assertNotIn('go_idle("RECORD A LONGER NOTE")', voice)
+        # too_short()'s notice (sentence case): a tap of the talk key
+        # (the hold contract), or a press-toggle note stopped too soon.
+        self.assertEqual(sorted(set(re.findall(r'too_short\("([^"]*)"\)', voice))),
+                         ["Hold to talk", "Record a longer note"])
+        self.assertIn("muse_state_set_hint(hint)", function(voice, "too_short"))
+        self.assertNotIn('go_idle("Hold to talk")', voice)
+        self.assertNotIn('go_idle("Record a longer note")', voice)
         inp = (MUSE / "muse_input.c").read_text()
         hints = re.findall(r"muse_state_set_hint\(([^;]*)\);", inp)
-        self.assertEqual(hints, ['"PHONE SETUP OFF"', 'saved_caption', 'on ? "SPEAKER ON" : "SPEAKER OFF"'])
-        self.assertIn('muse_state_set_caption("PHONE SETUP: %s", b.name)', inp)
+        self.assertEqual(hints, ['"Phone setup off"', 'saved_caption', 'on ? "Speaker on" : "Speaker off"'])
+        self.assertIn('muse_state_set_caption("Phone setup: %s", b.name)', inp)
         # Cancelling the power-off hold puts a hint back as a hint, anything else as it was.
         aux = function(inp, "aux_button")
         self.assertIn("saved_hint = muse_state_hint_pending();", aux)
@@ -261,7 +264,7 @@ class CaptionHint(unittest.TestCase):
         on_speaker = function(ui, "on_speaker_event")
         self.assertNotIn("muse_state_set_caption", on_speaker)
         self.assertEqual(re.findall(r"muse_state_set_hint\(([^;]*)\);", on_speaker),
-                         ['on ? "SPEAKER OFF" : "SPEAKER ON"', 'on ? "HOLD TO MUTE" : "HOLD TO UNMUTE"'])
+                         ['on ? "Speaker off" : "Speaker on"', 'on ? "Hold to mute" : "Hold to unmute"'])
 
 
 if __name__ == "__main__":

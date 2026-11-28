@@ -133,6 +133,20 @@ typedef struct storage
      * (h264bsdSetMaxSize), in macroblocks; 0: no limit but the overall one */
     u32 maxWidthMbs, maxHeightMbs;
     u32 maxRefFrames; /* optional caller limit; zero preserves streaming defaults */
+    /* OPT: the largest picture after frame cropping (h264bsdSetMaxCropped),
+     * in pixels; 0: no limit */
+    u32 maxCroppedWidth, maxCroppedHeight;
+    /* OPT: the stream's format, from its last IDR picture
+     * (h264bsdKeepParamSets): sequence parameter sets for another size or
+     * profile are refused; 0: not yet. And that picture's parameter sets,
+     * which h264bsdRestoreParamSets puts back after an error. */
+    u32 lockWidthMbs, lockHeightMbs, lockProfileIdc;
+    /* OPT: a parameter set that differs from the kept one with its id is
+     * taken only while this is set: in a keyframe's access unit
+     * (h264bsdAllowParamSetChange) */
+    u32 ppsChangeAllowed;
+    seqParamSet_t *goodSps;
+    picParamSet_t *goodPps;
 
     /* last valid NAL unit header is stored here */
     nalUnit_t prevNalUnit[1];

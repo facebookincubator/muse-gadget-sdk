@@ -43,6 +43,18 @@ final class X264 {
 
     static native void setBitrate(long h, int kbps);
 
+    /** A UI-stream encoder (protocols/UI.md): constant QP per frame, one keyframe, no deblocking. 0 on failure. */
+    static native long openUi(int w, int h, String preset, String params);
+
+    /** One picture at quantizer qp; idr: a keyframe. info[0]: IDR, info[1]: QP. Null: no output. */
+    static native byte[] encodeQp(long h, byte[] i420, long pts, boolean idr, int qp, int[] info);
+
+    /** The picture the last encodeQp frame decodes to (I420 w x h, as the gadget's decoder has it). */
+    static native boolean reconI420(long h, byte[] out);
+
+    /** UiRenderer's RGBA (a direct buffer) to I420 and, if rgb565 isn't null, RGB565 BE; false: not done. */
+    static native boolean rgbaConvert(java.nio.ByteBuffer rgba, int w, int h, byte[] i420, byte[] rgb565);
+
     static native void close(long h);
 
     /** PanelScaler.scale in C (bit-identical), when this library is present. */

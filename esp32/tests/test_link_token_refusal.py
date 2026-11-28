@@ -31,9 +31,11 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_link_unpair_storage_contract import _function_body
 
 
@@ -50,10 +52,13 @@ FUNCTIONS = (
     "static void setup_stage_set(",
     "static bool clear_setup_credentials(",
     "static bool setup_wipe_to_clean(",
+    "static bool commit_setup(",
+    "static void stop_setup_ble(",
     "static bool complete_setup_and_stop_ble(",
     "static char *load_token_unlocked(",
     "static char *load_token(",
     "static bool store_token_pair_unlocked(",
+    "static bool store_refreshed_pair_unlocked(",
     "static void store_pairing_username_unlocked(",
     "static void handle_device_token_revoked_unlocked(",
     "static void note_device_token_refused_unlocked(",
@@ -69,6 +74,7 @@ FUNCTIONS = (
     "static void schedule_vm_auth_refresh(",
     "static bool reset_setup_with_gate_held(",
     "static void on_unpair(",
+    "static bool reset_setup_checked(",
     "static bool reset_setup_from_control(",
     "static void on_button_long_press(",
     "static void reset_setup_task(",

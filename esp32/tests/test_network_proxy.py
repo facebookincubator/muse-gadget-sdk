@@ -33,10 +33,11 @@ import threading
 import time
 import unittest
 
-from host_cjson import cjson_source
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
+from host_cjson import cjson_dir, cjson_source, require_cjson  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-JSON = Path(os.environ.get("CJSON_SOURCE_DIR", ROOT / "managed_components/espressif__cjson/cJSON"))
+JSON = cjson_dir()
 PROXY = ROOT / "components/network_proxy"
 
 
@@ -68,8 +69,9 @@ class NetworkProxy(unittest.TestCase):
         if not shutil.which("pkg-config") or not shutil.which("openssl"):
             raise unittest.SkipTest("proxy TLS host tests need pkg-config and OpenSSL")
         flags = subprocess.run(["pkg-config", "--cflags", "--libs", "openssl"], capture_output=True, text=True)
-        if flags.returncode or not (JSON / "cJSON.c").exists():
-            raise unittest.SkipTest("proxy host tests need OpenSSL development files and cJSON (run idf.py build)")
+        if flags.returncode:
+            raise unittest.SkipTest("proxy TLS host tests need the OpenSSL development files")
+        require_cjson(JSON)
         cls.bin = cls.dir / "proxy-client"
         compiled = subprocess.run([
             *shlex.split(os.environ.get("CC", "cc")), "-std=gnu11", "-Wall", "-Wextra", "-Werror",

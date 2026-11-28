@@ -24,6 +24,13 @@ typedef void (*button_cb)(void);
 bool button_init(button_cb on_short_press, button_cb on_double_press,
                  button_cb on_long_press);
 
+// A Muse Gadget's setup prompt (app.c): at a press's down edge, confirm() says
+// whether the prompt took the press (it confirms, however long the press is
+// held). A taken press is no tap, double tap or long press (the 5 s setup
+// reset). Set before button_init().
+typedef bool (*button_claim_cb)(void);
+void button_set_confirm(button_claim_cb confirm);
+
 // From the short-press callback: a time (esp_timer's clock) the button was
 // last seen up before that press began.
 int64_t button_pressed_after_us(void);
@@ -43,3 +50,8 @@ void button_set_reader(button_read_cb read);
 typedef bool (*button_press_cb)(bool pressed);
 
 void button_set_press_cb(button_press_cb cb);
+
+// The way into SAFE (muse_bootguard_entry_watch): call at the boot's start,
+// before button_init(). A press it watches (the boot's first 3 s) doesn't run
+// the 5 s long press.
+void button_safe_entry_watch(void);

@@ -17,6 +17,11 @@
 #include <xplat/noise/core/PsaCryptoBackend.h>
 
 #include <psa/crypto.h>
+#if NOISE_CORE_SECURE_RANDOM
+// The firmware (CMakeLists.txt): each draw only with a radio on, else refused
+// (components/secure_random; ESP-IDF's PSA RNG is esp_fill_random()).
+#include "secure_random.h"
+#endif
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -299,6 +304,11 @@ Status PsaCryptoBackend::Random(ByteSpan out) noexcept {
   if (out.empty()) {
     return OkStatus();
   }
+#if NOISE_CORE_SECURE_RANDOM
+  if (!secure_random_ready()) {
+    return Status::FailedPrecondition();
+  }
+#endif
   Status status = EnsureInitialized();
   if (!status.ok()) {
     return status;
@@ -318,6 +328,11 @@ Status PsaCryptoBackend::X25519GenerateKeypair(
     return status;
   }
 
+#if NOISE_CORE_SECURE_RANDOM
+  if (!secure_random_ready()) {
+    return Status::FailedPrecondition();
+  }
+#endif
 #if NOISE_CORE_X25519_HACL
   std::array<uint8_t, kX25519KeySize> privateKey{};
   std::array<uint8_t, kX25519KeySize> publicKey{};

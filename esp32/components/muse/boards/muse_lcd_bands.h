@@ -21,6 +21,8 @@
 
 #include "esp_lv_adapter.h"
 
+#include "../muse_board_win.h"   /* muse_board_win_t (beside muse_board.h) */
+
 /*
  * LVGL on a QSPI panel, drawn in a few tall bands in PSRAM.
  *
@@ -82,3 +84,24 @@ void muse_lcd_bands_set_te(int gpio);
 void muse_lcd_bands_set_gap(int x, int y);
 typedef void (*muse_lcd_fill_fn)(uint8_t *dst, int stride, int row, int rows, void *arg);
 void muse_lcd_bands_frame(int x1, int y1, int x2, int y2, int rows, muse_lcd_fill_fn fill, void *arg);
+
+/*
+ * muse_board_t.draw_windows: n windows of a picture whose top left is (x0,
+ * y0), each its own panel window (CASET / RASET, then its pieces as Memory
+ * Write and Write Continue), the rest of the panel left as it was. Each piece
+ * is as many of its window's rows as a DMA buffer holds (in fours; rows is
+ * muse_board_t's and unused), filled while the one
+ * before is on the wire, the mic ring and the turn dot painted on it as on a
+ * frame. Timed against the scan a group of touching windows at a time (each
+ * group's write held clear of the scan over its own rows; its own stats line:
+ * "video window group"). Same rules as muse_lcd_bands_frame.
+ */
+typedef void (*muse_lcd_fill_win_fn)(uint8_t *dst, int stride, int x, int y, int w, int rows, void *arg);
+void muse_lcd_bands_windows(int x0, int y0, const muse_board_win_t *win, int n, int rows, muse_lcd_fill_win_fn fill,
+                            void *arg);
+/* muse_board_t.panel_writes: bumped by every band LVGL sends and every muse_lcd_bands_run (frames and
+ * windows included). */
+uint32_t muse_lcd_bands_writes(void);
+
+/* The send task's stack never used yet, in bytes (0: not started): muse_board_t.panel_stack_free. */
+uint32_t muse_lcd_bands_stack_free(void);

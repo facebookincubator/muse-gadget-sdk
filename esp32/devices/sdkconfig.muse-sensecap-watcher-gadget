@@ -1,0 +1,72 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The SenseCAP Watcher as a Muse Gadget (the catalog's SCW1, a reference
+# Wi-Fi + BLE gadget). Load after devices/sdkconfig.muse-sensecap-watcher:
+#   tools/muse/board.sh build watcher-gadget
+# The board's own overlay alone is the Wi-Fi Muse build the web flasher ships.
+
+# musegadgets BLE audio beside Wi-Fi: a phone that connects over BLE and
+# turns on push-to-talk gets the wheel's audio as SBC or LC3; otherwise it
+# goes to Muse over Wi-Fi as before. Offline clips go to the mg_queue
+# partition. Like the Waveshare S3 1.75C's gadget profile. Its BLE host
+# already allocates from PSRAM (the board's overlay).
+CONFIG_MUSE_GADGET_BLE_AUDIO=y
+
+# Advertises MuseGadget-SCW1-XXXXXX. ESP32 catalog boards keep the Wi-Fi MAC
+# tail, the same digits as before the code.
+CONFIG_HOMEHUB_BLE_PRODUCT_CODE="SCW1"
+# link.register metadata.model_name: the product name.
+CONFIG_HOMEHUB_MODEL_NAME="Watcher"
+CONFIG_HOMEHUB_BLE_NAME_TAIL_WIFI_MAC=y
+
+# The UI's type drawn at this panel's size (fonts/type, 412 px).
+CONFIG_MUSE_UI_PANEL_TYPE=y
+# The avatar face (main/mg_face.h): the home over the user's picture.
+CONFIG_MUSE_AVATAR_FACE=y
+
+# With BLE audio beside Wi-Fi the board's static buffers in PSRAM weren't
+# enough: the codecs' DMA buffers didn't fit (no voice). The captions' and
+# musegadgets' static buffers (about 13 KB more, Wi-Fi builds only) and the
+# stacks of the app tasks that never map flash (about 26 KB, and the boot
+# task's 8 KB until the UI is up; muse_stack.h) go to PSRAM too. Code runs
+# from PSRAM here, so flash writes leave the cache on and those tasks may
+# write NVS; mapping flash would still freeze it, so tasks that can (the
+# musegadgets worker, OTA) stay internal.
+CONFIG_MUSE_STACKS_IN_PSRAM=y
+
+# Both watchdogs on, as on every BLE gadget profile (other builds keep
+# sdkconfig.defaults', off): a hang restarts the gadget by itself. The
+# windows are long so PSRAM cache stalls and busy decode stretches stay clear
+# of them: the interrupt watchdog at 1.5 s, the task watchdog at 15 s on both
+# idle tasks and the gadget watchdog's users (CONFIG_MUSE_GADGET_WDT,
+# muse_wdt.h), each a panic with its crash record the boot guard counts.
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=1500
+CONFIG_ESP_INT_WDT_CHECK_CPU1=y
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+# The boot guard (muse_bootguard.h): a crash loop ends in SAFE mode, where
+# the BLE recovery tier stays up. On in the BLE gadget profiles only.
+CONFIG_MUSE_BOOTGUARD=y
+# ATT MTU exactly 247: a full 244-byte write is one 251-byte link-layer
+# packet. A write split across packets was lost when the phone stalled
+# between them (NimBLE's 30 s reassembly timeout).
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+# Speaker volume until one is saved in Settings.
+CONFIG_MUSE_DEFAULT_VOLUME=50

@@ -522,24 +522,31 @@ u32 h264bsdDecode(storage_t *pStorage, u8 *byteStrm, u32 len, u8 **picture, u32 
     pStorage->prevBufPointer = NULL;
 
     do {
-      /* OPT: never past the buffer */
+      /* OPT: never past the buffer (a resumed NAL unit's count from an
+       * earlier buffer wrapped len and the start code search read on) */
       if (readBytes > len)
         return(H264BSD_ERROR);
       len -= readBytes;
       byteStrm += readBytes;
       retCode = h264bsdDecodeInternal(pStorage, byteStrm, len, &readBytes);
-      /* OPT: a picture concealed without a single valid slice is not stored,
-       * so it has nothing to output: go on with the rest of the buffer (the
-       * NAL unit that ended it is decoded again) */
-    } while (retCode == 0 || retCode == 2 ||
+      /* OPT: stop at the buffer's end with H264BSD_RDY (upstream went on
+       * and failed on an empty buffer): parameter sets alone aren't an
+       * error, and the caller tells an unfinished picture by
+       * h264bsdPictureStarted. A picture concealed without a single valid
+       * slice is not stored, so it has nothing to output: go on with the
+       * rest of the buffer (the NAL unit that ended it is decoded again) */
+    } while (retCode == H264BSD_HDRS_RDY ||
+             (retCode == H264BSD_RDY && readBytes < len) ||
              (retCode == H264BSD_PIC_RDY &&
               pStorage->dpb->outIndex >= pStorage->dpb->numOut));
 
     if (retCode == H264BSD_PIC_RDY) {
-      /* OPT: never dereference a missing output picture */
+      /* OPT: a picture that reached no output (concealed with no valid
+       * slice, or not stored) is an error, not a NULL dereference: damaged
+       * parameter sets got here (tests/test_video_route.py, sps) */
       dpbOutPicture_t *out = h264bsdDpbOutputPicture(pStorage->dpb);
-      if (!out)
-        return(H264BSD_ERROR);
+      if (out == NULL || pStorage->activeSps == NULL)
+        return H264BSD_ERROR;
       *width = (pStorage->activeSps->picWidthInMbs)*16;
       *height = (pStorage->activeSps->picHeightInMbs)*16;
       *picture = out->data;
@@ -596,6 +603,21 @@ void h264bsdShutdown(storage_t *pStorage)
             FREE(pStorage->pps[i]->sliceGroupId);
             FREE(pStorage->pps[i]);
         }
+    }
+
+    if (pStorage->goodSps)
+    {
+        FREE(pStorage->goodSps->offsetForRefFrame);
+        FREE(pStorage->goodSps->vuiParameters);
+        FREE(pStorage->goodSps);
+    }
+    if (pStorage->goodPps)
+    {
+        FREE(pStorage->goodPps->runLength);
+        FREE(pStorage->goodPps->topLeft);
+        FREE(pStorage->goodPps->bottomRight);
+        FREE(pStorage->goodPps->sliceGroupId);
+        FREE(pStorage->goodPps);
     }
 
     FREE(pStorage->mbLayer);
@@ -666,10 +688,212 @@ void h264bsdSetMaxSize(storage_t *pStorage, u32 maxWidthMbs, u32 maxHeightMbs)
 }
 
 /* OPT: see h264bsd_decoder.h */
+void h264bsdSetMaxCropped(storage_t *pStorage, u32 maxWidth, u32 maxHeight)
+{
+    pStorage->maxCroppedWidth = maxWidth;
+    pStorage->maxCroppedHeight = maxHeight;
+}
+
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdCroppingOffsets(const storage_t *pStorage, u32 *left, u32 *right, u32 *top, u32 *bottom)
+{
+    const seqParamSet_t *sps = pStorage->activeSps;
+    *left = *right = *top = *bottom = 0;
+    if (sps == NULL)
+        return HANTRO_NOK;
+    if (sps->frameCroppingFlag)
+    {
+        *left = sps->frameCropLeftOffset;
+        *right = sps->frameCropRightOffset;
+        *top = sps->frameCropTopOffset;
+        *bottom = sps->frameCropBottomOffset;
+    }
+    return HANTRO_OK;
+}
+
+/* OPT: see h264bsd_decoder.h */
 void h264bsdSetProgress(storage_t *pStorage,
     void (*fn)(void *ctx, const u8 *pic, u32 widthMbs, u32 heightMbs, u32 rowsFinal), void *ctx)
 {
     pStorage->progressFn = fn;
     pStorage->progressCtx = ctx;
     pStorage->progressRows = 0;
+}
+
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdPictureStarted(const storage_t *pStorage)
+{
+    return pStorage->picStarted || pStorage->validSliceInAccessUnit ||
+        pStorage->prevBufNotFinished;
+}
+
+/* OPT: see h264bsd_decoder.h */
+void h264bsdAbandonPicture(storage_t *pStorage)
+{
+    pStorage->picStarted = HANTRO_FALSE;
+    pStorage->validSliceInAccessUnit = HANTRO_FALSE;
+    pStorage->skipRedundantSlices = HANTRO_FALSE;
+    /* the next buffer is always new: never resume inside the old one (the
+     * caller reuses one buffer for every access unit) */
+    pStorage->prevBufNotFinished = HANTRO_FALSE;
+    pStorage->prevBufPointer = NULL;
+    pStorage->numConcealedMbs = 0;
+    /* mb is sized for picSizeInMbs only once a pending activation is done
+     * (and then cleared whole) */
+    if (!pStorage->pendingActivation && pStorage->mb)
+        h264bsdResetStorage(pStorage);
+    pStorage->dbNextMb = pStorage->dbRowsDone = pStorage->dbBad = 0;
+    pStorage->progressRows = 0;
+}
+
+static seqParamSet_t *CopySps(const seqParamSet_t *src)
+{
+    seqParamSet_t *d;
+    ALLOCATE(d, 1, seqParamSet_t);
+    if (d == NULL)
+        return NULL;
+    *d = *src;
+    d->offsetForRefFrame = NULL;
+    d->vuiParameters = NULL;
+    if (src->offsetForRefFrame && src->numRefFramesInPicOrderCntCycle)
+    {
+        ALLOCATE(d->offsetForRefFrame, src->numRefFramesInPicOrderCntCycle, i32);
+        if (d->offsetForRefFrame == NULL)
+            goto fail;
+        memcpy(d->offsetForRefFrame, src->offsetForRefFrame,
+            src->numRefFramesInPicOrderCntCycle * sizeof(i32));
+    }
+    if (src->vuiParameters)
+    {
+        ALLOCATE(d->vuiParameters, 1, vuiParameters_t);
+        if (d->vuiParameters == NULL)
+            goto fail;
+        *d->vuiParameters = *src->vuiParameters;
+    }
+    return d;
+fail:
+    FREE(d->offsetForRefFrame);
+    FREE(d);
+    return NULL;
+}
+
+static void FreeSps(seqParamSet_t **p)
+{
+    if (*p)
+    {
+        FREE((*p)->offsetForRefFrame);
+        FREE((*p)->vuiParameters);
+        FREE(*p);
+    }
+}
+
+static u32 *CopyU32(const u32 *src, u32 n, u32 *ok)
+{
+    u32 *d = NULL;
+    if (src == NULL || n == 0)
+        return NULL;
+    ALLOCATE(d, n, u32);
+    if (d == NULL)
+        *ok = HANTRO_FALSE;
+    else
+        memcpy(d, src, n * sizeof(u32));
+    return d;
+}
+
+static void FreePps(picParamSet_t **p)
+{
+    if (*p)
+    {
+        FREE((*p)->runLength);
+        FREE((*p)->topLeft);
+        FREE((*p)->bottomRight);
+        FREE((*p)->sliceGroupId);
+        FREE(*p);
+    }
+}
+
+static picParamSet_t *CopyPps(const picParamSet_t *src)
+{
+    picParamSet_t *d;
+    u32 ok = HANTRO_TRUE;
+    u32 groups = src->numSliceGroups;
+    ALLOCATE(d, 1, picParamSet_t);
+    if (d == NULL)
+        return NULL;
+    *d = *src;
+    d->runLength = CopyU32(src->runLength, groups, &ok);
+    d->topLeft = CopyU32(src->topLeft, groups ? groups - 1 : 0, &ok);
+    d->bottomRight = CopyU32(src->bottomRight, groups ? groups - 1 : 0, &ok);
+    d->sliceGroupId = CopyU32(src->sliceGroupId, src->picSizeInMapUnits, &ok);
+    if (!ok)
+        FreePps(&d);
+    return d;
+}
+
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdKeepParamSets(storage_t *pStorage)
+{
+    seqParamSet_t *sps;
+    picParamSet_t *pps;
+
+    if (pStorage->activeSps == NULL || pStorage->activePps == NULL)
+        return HANTRO_OK;
+    /* The format locks even if the copies below can't be made. */
+    pStorage->lockWidthMbs = pStorage->activeSps->picWidthInMbs;
+    pStorage->lockHeightMbs = pStorage->activeSps->picHeightInMbs;
+    pStorage->lockProfileIdc = pStorage->activeSps->profileIdc;
+    sps = CopySps(pStorage->activeSps);
+    pps = sps ? CopyPps(pStorage->activePps) : NULL;
+    if (pps == NULL)
+    {
+        FreeSps(&sps);
+        return MEMORY_ALLOCATION_ERROR;
+    }
+    FreeSps(&pStorage->goodSps);
+    FreePps(&pStorage->goodPps);
+    pStorage->goodSps = sps;
+    pStorage->goodPps = pps;
+    return HANTRO_OK;
+}
+
+/* OPT: see h264bsd_decoder.h */
+void h264bsdAllowParamSetChange(storage_t *pStorage, u32 allow)
+{
+    pStorage->ppsChangeAllowed = allow;
+}
+
+/* OPT: see h264bsd_decoder.h */
+u32 h264bsdRestoreParamSets(storage_t *pStorage)
+{
+    seqParamSet_t *sps;
+    picParamSet_t *pps;
+    u32 tmp, allowed;
+
+    if (pStorage->goodSps == NULL || pStorage->goodPps == NULL)
+        return HANTRO_OK;
+    sps = CopySps(pStorage->goodSps);
+    pps = sps ? CopyPps(pStorage->goodPps) : NULL;
+    if (pps == NULL)
+    {
+        FreeSps(&sps);
+        return MEMORY_ALLOCATION_ERROR;
+    }
+    /* Stored as if they had come in the stream: unchanged ones are no-ops,
+     * changed ones are re-activated at the next IDR picture. The store takes
+     * the copies' arrays (and frees them when it doesn't keep them). */
+    allowed = pStorage->ppsChangeAllowed;
+    pStorage->ppsChangeAllowed = HANTRO_TRUE;   /* the kept ones: never refused */
+    tmp = h264bsdStoreSeqParamSet(pStorage, sps);
+    if (tmp == MEMORY_ALLOCATION_ERROR)
+        FreeSps(&sps);   /* not taken */
+    FREE(sps);
+    if (tmp == HANTRO_OK)
+        tmp = h264bsdStorePicParamSet(pStorage, pps);
+    else
+        FreePps(&pps);
+    if (tmp == MEMORY_ALLOCATION_ERROR)
+        FreePps(&pps);
+    FREE(pps);
+    pStorage->ppsChangeAllowed = allowed;
+    return tmp;
 }

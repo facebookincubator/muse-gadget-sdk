@@ -482,6 +482,18 @@ static esp_err_t power_off(void)
     return ESP_FAIL;
 }
 
+/* SAFE mode (muse_board_t.safe_display_off): the backlight off (active high: its PWM's duty 0). */
+static void safe_display_off(void)
+{
+    muse_board_pin_hold(LCD_BL, 0);
+}
+
+/* The SAFE key (muse_board_t.safe_key: the way into and out of SAFE): BOOT (GPIO0, the talk key), read raw. */
+static bool safe_key(void)
+{
+    return muse_gpio_safe_key(TALK_GPIO, true);
+}
+
 static const muse_board_t s_board = {
     .name = "Guition JC3248W535",
     .width = LCD_W,
@@ -502,6 +514,7 @@ static const muse_board_t s_board = {
     .display_lock = display_lock,
     .display_unlock = display_unlock,
     .set_brightness = set_brightness,
+    .safe_display_off = safe_display_off,
     .audio_init = audio_init,
 #if CONFIG_MUSE_JC3248W535_MIC_PDM
     /* The PDM filter fills both slots from the one data line, and which one
@@ -513,6 +526,7 @@ static const muse_board_t s_board = {
     .set_mic_gain = set_mic_gain,
     .poll_buttons = poll_buttons,
     .power_off = power_off,
+    .safe_key = safe_key,
 };
 
 /* Home Link's app_main starts Muse with this board (main/main.c). */

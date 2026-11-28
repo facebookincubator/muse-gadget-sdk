@@ -12,8 +12,10 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,7 +82,7 @@ class StickyPowerTest(unittest.TestCase):
 #define CONFIG_MUSE_POWER_TEST 1
 #define GPIO_NUM_9 9
 #define ESP_LOGI(...) ((void)0)
-typedef struct { bool usb, charging; int battery_pct, battery_mv; } muse_power_t;
+typedef struct { bool usb, charging, charge_done; int battery_pct, battery_mv; } muse_power_t;   /* charge_done: Sleep when charged */
 static bool s_gauge = true;
 static int s_gauge_log_us;
 static uint16_t voltage = 4200, percent = 100, current;

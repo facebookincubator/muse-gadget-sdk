@@ -39,6 +39,15 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "noise_tunnel_internal.h"
+
+// A BLE-only gadget has no network of its own: only files from the VM, over
+// the device session; a URL is refused, and the HTTP client stays out of the
+// image (esp32/AGENTS.md, BLE only).
+#if CONFIG_MUSE_GADGET_BLE_STANDALONE
+#define IMAGE_FETCH_HTTP 0
+#else
+#define IMAGE_FETCH_HTTP 1
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -48,6 +57,9 @@
 #include "driver/jpeg_decode.h"
 #else
 #include "rom/tjpgd.h"
+#endif
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+#include "mg_ble.h"
 #endif
 
 static const char *TAG = "link.image";
@@ -208,6 +220,7 @@ static void log_memory(const char *stage) {
 
 // Bound the next socket operation by the time left. False once it is up,
 // when the next operation is left 1 ms so that a call in progress returns.
+#if IMAGE_FETCH_HTTP
 static bool within_deadline(fetch_t *f) {
     int64_t left_ms = (f->deadline_us - esp_timer_get_time()) / 1000;
     if (left_ms <= 0) {
@@ -219,6 +232,7 @@ static bool within_deadline(fetch_t *f) {
                                    left_ms < FETCH_TIMEOUT_MS ? (int)left_ms : FETCH_TIMEOUT_MS);
     return true;
 }
+#endif
 
 static int vm_read(fetch_t *f, uint8_t *buf, size_t len);
 
@@ -235,6 +249,7 @@ static int fetch_read(fetch_t *f, uint8_t *buf, size_t len) {
         int n = vm_read(f, buf + have, len - have);
         return n < 0 ? -1 : (int)have + n;
     }
+#if IMAGE_FETCH_HTTP
     while (have < len && !f->eof) {
         if (internal_free() < FETCH_FLOOR_BYTES) {
             f->low_memory = true;
@@ -250,6 +265,7 @@ static int fetch_read(fetch_t *f, uint8_t *buf, size_t len) {
         have += (size_t)n;
         f->bytes += (size_t)n;
     }
+#endif
     return (int)have;
 }
 
@@ -652,6 +668,13 @@ static void vm_get_range(fetch_t *f, vm_reply_t *out) {
     s_vm.done = s_vm.complete = s_vm.too_large = false;
     xSemaphoreGive(s_vm.lock);
 
+#if CONFIG_MUSE_GADGET_BLE_SESSION
+    // Over the device session the file comes through the phone's BLE link:
+    // the gadget's own activity (link modes' active), so each range
+    // arrives at the short interval, not the ready mode's 30 ms (a
+    // 47 KB picture took 13 s at ready).
+    mg_ble_link_action("VM file download");
+#endif
     int64_t id = noise_ctrl_req_open("GET", f->url, headers, true, vm_on_frame,
                                      (void *)(uintptr_t)token);
     while (id && !vm_done()) {
@@ -743,6 +766,7 @@ static bool vm_open(fetch_t *f, image_fetch_result_t *result, char *msg, size_t 
 
 // ---- Task --------------------------------------------------------------------
 
+#if IMAGE_FETCH_HTTP
 // esp_http_client_read keeps reading until it has all it was asked for, so a
 // server trickling bytes holds a single call far past the deadline. It
 // raises an event after each socket read, which re-clamps the next one.
@@ -815,6 +839,7 @@ static bool http_open(fetch_t *f, image_fetch_result_t *result, char *msg, size_
     }
     return false;
 }
+#endif  // IMAGE_FETCH_HTTP
 
 static void fetch_task(void *arg) {
     fetch_t *f = arg;
@@ -824,8 +849,12 @@ static void fetch_task(void *arg) {
     log_memory("image download start");
 
     char msg[64];
-    if (f->vm ? vm_open(f, &result, msg, sizeof(msg))
-              : http_open(f, &result, msg, sizeof(msg))) {
+#if IMAGE_FETCH_HTTP
+    bool opened = f->vm ? vm_open(f, &result, msg, sizeof(msg)) : http_open(f, &result, msg, sizeof(msg));
+#else
+    bool opened = vm_open(f, &result, msg, sizeof(msg));   // start() refuses a URL
+#endif
+    if (opened) {
         int n = fetch_read(f, f->peek, sizeof(f->peek));
         f->peek_len = n > 0 ? (size_t)n : 0;
         const char *fail;
@@ -868,7 +897,9 @@ static void fetch_task(void *arg) {
             result.code = NULL;
         }
     }
+#if IMAGE_FETCH_HTTP
     if (f->http) esp_http_client_cleanup(f->http);
+#endif
     free(f->body);
 
     result.bytes = f->bytes;
@@ -946,6 +977,10 @@ static bool start(const char *target, bool vm, int row, int gray_levels,
             *message = "path names no file";
             return false;
         }
+    } else if (!IMAGE_FETCH_HTTP) {
+        *code = "unsupported";
+        *message = "no network on a BLE-only gadget: draw_file takes a file from the VM";
+        return false;
     } else if (!https && strncasecmp(target, "http://", 7) != 0) {
         *code = "invalid_params";
         *message = "url must be http:// or https://";

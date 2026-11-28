@@ -159,7 +159,15 @@ static inline int32_t bayer_q(int x, int y)
 
 static inline float bayer(int x, int y)
 {
-    return (BAYER4[y & 3][x & 3] + 0.5f) / 16.0f;
+    /* Exact dyadic values of (BAYER4 + 0.5f) / 16. Avoid software int-to-float,
+     * addition and multiplication on every ring/shadow/blush/wave sample. */
+    static const float VALUES[4][4] = {
+        { 0.03125f, 0.53125f, 0.15625f, 0.65625f },
+        { 0.78125f, 0.28125f, 0.90625f, 0.40625f },
+        { 0.21875f, 0.71875f, 0.09375f, 0.59375f },
+        { 0.96875f, 0.46875f, 0.84375f, 0.34375f },
+    };
+    return VALUES[y & 3][x & 3];
 }
 
 static inline rgb_t hex_rgb(uint32_t c)
@@ -208,11 +216,15 @@ static void update_palette(const scheme_t *target, float dt)
     for (int i = 0; i < 5; i++) {
         s_scheme[i] = mix(s_scheme[i], tgt[i], k);
     }
-    s_scheme_init = true;
-
     rgb_t pal[C_COUNT];
-    for (int i = 0; i < C_COUNT; i++) {
-        pal[i] = hex_rgb(FIXED[i]);
+    if (!s_scheme_init) {
+        for (int i = 0; i < C_COUNT; i++) {
+            pal[i] = hex_rgb(FIXED[i]);
+        }
+    } else {
+        /* Only these fixed colours participate in the live palette blends. */
+        pal[C_BL] = hex_rgb(FIXED[C_BL]);
+        pal[C_WHITE] = hex_rgb(FIXED[C_WHITE]);
     }
     pal[C_BG] = hex_rgb(s_background);
     rgb_t acc = s_scheme[4];
@@ -226,11 +238,25 @@ static void update_palette(const scheme_t *target, float dt)
     pal[C_AURA2] = mix(pal[C_BG], acc, 0.34f);
     pal[C_SPK] = mix(acc, pal[C_WHITE], 0.45f);
 
-    for (int i = 0; i < C_COUNT; i++) {
-        s_pal[i] = to565(pal[i]);
-        /* The block edge shade gives the enlarged pixels a faint grid texture. */
-        s_pal_dim[i] = i == C_BG ? s_pal[i] : to565(scale_rgb(pal[i], 0.72f));
+    /* Fixed colours (including their float-rounded dim variants) only need
+     * conversion on the first frame. Keep the live blend arithmetic exact. */
+    if (!s_scheme_init) {
+        for (int i = 0; i < C_COUNT; i++) {
+            s_pal[i] = to565(pal[i]);
+            s_pal_dim[i] = to565(scale_rgb(pal[i], 0.72f));
+        }
     }
+    /* The background is live too: the appearance can change it. */
+    static const uint8_t LIVE[] = {
+        C_BG, C_G0, C_G1, C_G2, C_G3, C_ACC, C_RIM, C_AURA1, C_AURA2, C_SPK,
+    };
+    for (unsigned i = 0; i < sizeof(LIVE); i++) {
+        uint8_t c = LIVE[i];
+        s_pal[c] = to565(pal[c]);
+        /* The block edge shade gives the enlarged pixels a faint grid texture. */
+        s_pal_dim[c] = c == C_BG ? s_pal[c] : to565(scale_rgb(pal[c], 0.72f));
+    }
+    s_scheme_init = true;
 }
 
 /* ---------------------------------------------------------------------------
@@ -250,6 +276,11 @@ static inline uint8_t get_px(int x, int y)
         return s_fb[y * W + x];
     }
     return C_BG;
+}
+
+uint16_t muse_pixel_cell_rgb565(int x, int y)
+{
+    return s_pal[get_px(x, y)];
 }
 
 static inline int iround(float v)
@@ -396,7 +427,25 @@ static void draw_aura(float cx, float cy, float radius, float strength)
     }
 }
 
-/* Expanding dotted rings (listening / speaking). */
+/* Expanding dotted rings (listening / speaking). The angles depend only on
+ * the integer dot count, not time, radius or mode. Two bounded slots keep the
+ * original sinf/cosf results without doing software trig for every dot on every
+ * frame. A count change is a cold miss; no approximate trig/recurrence is used. */
+#define RING_N_MAX 68                   /* (int)(31 * 2.2f), level in [0, 1] */
+/* MUSE_PIXEL_RING_CACHE=0 (components/muse/CMakeLists.txt: builds without
+ * BLE gadget audio) leaves the slots out, 1 KB of internal RAM, and computes
+ * every dot as before them; the same pixels either way. */
+#ifndef MUSE_PIXEL_RING_CACHE
+#define MUSE_PIXEL_RING_CACHE 1
+#endif
+#if MUSE_PIXEL_RING_CACHE
+typedef struct {
+    int n;
+    float c[RING_N_MAX], s[RING_N_MAX];
+} ring_angles_t;
+static ring_angles_t s_ring_angles[2];
+#endif
+
 static void draw_rings(float cx, float cy, float t, float level, float speed)
 {
     for (int k = 0; k < 2; k++) {
@@ -404,10 +453,32 @@ static void draw_rings(float cx, float cy, float t, float level, float speed)
         float r = 20 + ph * 11;
         float fade = (1 - ph) * (0.35f + level);
         int n = (int)(r * 2.2f);
+#if MUSE_PIXEL_RING_CACHE
+        ring_angles_t *angles = n > 0 && n <= RING_N_MAX ? &s_ring_angles[k] : NULL;
+        if (angles && angles->n != n) {
+            for (int i = 0; i < n; i++) {
+                float a = i * TAU / n;
+                angles->c[i] = cosf(a);
+                angles->s[i] = sinf(a);
+            }
+            angles->n = n;
+        }
+#endif
         for (int i = 0; i < n; i++) {
-            float a = i * TAU / n;
-            int x = iround(cx + cosf(a) * r);
-            int y = iround(cy + sinf(a) * r * 0.92f);
+            float c, s;
+#if MUSE_PIXEL_RING_CACHE
+            if (angles) {
+                c = angles->c[i];
+                s = angles->s[i];
+            } else
+#endif
+            {
+                float a = i * TAU / n;
+                c = cosf(a);
+                s = sinf(a);
+            }
+            int x = iround(cx + c * r);
+            int y = iround(cy + s * r * 0.92f);
             if (get_px(x, y) == C_BG || get_px(x, y) == C_AURA1) {
                 if (bayer(x, y) < fade) {
                     px(x, y, fade > 0.6f ? C_ACC : C_AURA2);
@@ -562,11 +633,25 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
     y1 = y1 >= H ? H - 1 : y1;
     int ox = iround(j->cx), oy = iround(j->cy);
     int32_t cx = QF(j->cx), fcx = QF(j->fx), inv_fa = QF(1.0f / j->fa);
+    /* The horizontal face field is invariant across rows. Keep the original
+     * Q12 truncations and clamp, but compute them once per column. */
+    int32_t face_u2[W], face_u4[W];
+    for (int x = x0; x <= x1; x++) {
+        int32_t fu = (((x * ONE + ONE / 2) - fcx) * inv_fa) >> Q;
+        fu = fu > 3 * ONE ? 3 * ONE : fu < -3 * ONE ? -3 * ONE : fu;
+        face_u2[x] = (fu * fu) >> Q;
+        face_u4[x] = (face_u2[x] * face_u2[x]) >> Q;
+    }
 
     for (int y = y0; y <= y1; y++) {
         row_t row;
         row_setup(j, y + 0.5f, &row);
         int32_t fy = y * ONE + ONE / 2;
+        bool arm_row[2], foot_row[2];
+        for (int i = 0; i < 2; i++) {
+            arm_row[i] = abs(fy - arm_q[i].y) <= arm_q[i].r;
+            foot_row[i] = abs(fy - foot_q[i].y) <= foot_q[i].r;
+        }
         for (int x = x0; x <= x1; x++) {
             int32_t fx = x * ONE + ONE / 2;
             int32_t lx, ly;
@@ -574,7 +659,7 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
             /* Arms sit in front of the body. */
             bool arm = false;
             for (int a = 0; a < 2 && !arm; a++) {
-                if (in_limb(&arm_q[a], fx, fy, &lx, &ly)) {
+                if (arm_row[a] && in_limb(&arm_q[a], fx, fy, &lx, &ly)) {
                     s_mask[y * W + x] = M_ARM;
                     int32_t nx = ((lx * QF(0.85f)) >> Q) + (a ? QF(0.25f) : -QF(0.25f));
                     px(x, y, fur(nx, (ly * QF(0.8f)) >> Q, x, y, ox, oy));
@@ -587,13 +672,18 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
 
             int32_t ux, uy = row.v;
             int32_t v = body_field(&row, fx - cx, &ux);
-            /* Fuzzy silhouette: tufts poke in and out along the edge. */
-            int32_t tuft = ((hash16(x - ox, y - oy) - 32768) * QF(0.16f)) >> 16;
-            if (v <= ONE + tuft) {
-                int32_t fu = ((fx - fcx) * inv_fa) >> Q;
-                fu = fu > 3 * ONE ? 3 * ONE : fu < -3 * ONE ? -3 * ONE : fu;
-                int32_t fu2 = (fu * fu) >> Q;
-                int32_t ff = ((fu2 * fu2) >> Q) + row.fv4;
+            /* Tufts span exactly [-328, 327] in Q12. Hash only the narrow
+             * silhouette band: interior is always in, exterior always out. */
+            int32_t tuft_amp = QF(0.16f);
+            bool body = v <= ONE - (tuft_amp + 1) / 2;
+            if (!body && v <= ONE + tuft_amp / 2) {
+                int32_t tuft = ((hash16(x - ox, y - oy) - 32768) * tuft_amp) >> 16;
+                body = v <= ONE + tuft;
+            }
+            if (body) {
+                /* Beyond this vertical field the face/seam tests cannot pass. */
+                int32_t fu2 = face_u2[x];
+                int32_t ff = row.fv4 >= QF(1.75f) ? QF(1.75f) : face_u4[x] + row.fv4;
                 int32_t b = bayer_q(x, y);
                 if (ff <= ONE) {
                     s_mask[y * W + x] = M_FACE;
@@ -620,7 +710,7 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
             }
 
             for (int f = 0; f < 2; f++) {
-                if (in_limb(&foot_q[f], fx, fy, &lx, &ly)) {
+                if (foot_row[f] && in_limb(&foot_q[f], fx, fy, &lx, &ly)) {
                     s_mask[y * W + x] = M_FOOT;
                     px(x, y, ly < -QF(0.2f) ? C_BM : C_BD);
                     break;
@@ -629,21 +719,45 @@ static void draw_avatar(const avatar_t *j, const limb_t arms[2], const limb_t fe
         }
     }
 
-    /* Hard outline on the silhouette, and seams where parts overlap. */
-    static const int8_t N4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-    for (int y = 0; y < H; y++) {
-        for (int x = 0; x < W; x++) {
-            uint8_t m = s_mask[y * W + x];
-            if (m == M_NONE || m == M_FACE) {
-                continue;
+    /* Hard outline on the silhouette, and seams where parts overlap: a body,
+     * arm or foot cell next to (4-neighbour) nothing, an arm next to the body
+     * or face, the body next to a foot. Each part's neighbours that make an
+     * edge, as bits by mask value; off the panel counts as nothing. */
+    static const uint8_t EDGE[5] = {
+        [M_BODY] = 1 << M_NONE | 1 << M_FOOT,
+        [M_ARM] = 1 << M_NONE | 1 << M_BODY | 1 << M_FACE,
+        [M_FOOT] = 1 << M_NONE,
+    };
+    /* Only the box the parts can reach (every cell outside it is M_NONE, which
+     * the pass skips), a pixel past each part, inside the shading box: the
+     * body (with its tufts and the LUT's step, |u| and |v| stay under 1.035;
+     * the base widens 7 %) and each limb's |d| <= r square. */
+    int bx0 = (int)(j->cx - j->a * 1.12f) - 1, bx1 = (int)(j->cx + j->a * 1.12f) + 1;
+    int by0 = (int)(j->cy - j->b * 1.04f) - 1, by1 = (int)(j->cy + j->b * 1.04f) + 1;
+    const limb_q_t *limbs[4] = { &arm_q[0], &arm_q[1], &foot_q[0], &foot_q[1] };
+    for (int i = 0; i < 4; i++) {
+        int lx0 = (limbs[i]->x - limbs[i]->r) / ONE - 1, lx1 = (limbs[i]->x + limbs[i]->r) / ONE + 1;
+        int ly0 = (limbs[i]->y - limbs[i]->r) / ONE - 1, ly1 = (limbs[i]->y + limbs[i]->r) / ONE + 1;
+        bx0 = lx0 < bx0 ? lx0 : bx0;
+        bx1 = lx1 > bx1 ? lx1 : bx1;
+        by0 = ly0 < by0 ? ly0 : by0;
+        by1 = ly1 > by1 ? ly1 : by1;
+    }
+    bx0 = bx0 < x0 ? x0 : bx0;
+    bx1 = bx1 > x1 ? x1 : bx1;
+    by0 = by0 < y0 ? y0 : by0;
+    by1 = by1 > y1 ? y1 : by1;
+    for (int y = by0; y <= by1; y++) {
+        const uint8_t *row = &s_mask[y * W];
+        for (int x = bx0; x <= bx1; x++) {
+            unsigned e = EDGE[row[x]];
+            if (!e) {
+                continue;   /* nothing, or the face */
             }
-            for (int k = 0; k < 4; k++) {
-                int xx = x + N4[k][0], yy = y + N4[k][1];
-                uint8_t n = ((unsigned)xx < W && (unsigned)yy < H) ? s_mask[yy * W + xx] : M_NONE;
-                if (n == M_NONE || (m == M_ARM && (n == M_BODY || n == M_FACE)) || (m == M_BODY && n == M_FOOT)) {
-                    px(x, y, C_OUT);
-                    break;
-                }
+            unsigned nr = x + 1 < W ? row[x + 1] : M_NONE, nl = x > 0 ? row[x - 1] : M_NONE;
+            unsigned nd = y + 1 < H ? row[x + W] : M_NONE, nu = y > 0 ? row[x - W] : M_NONE;
+            if ((e >> nr | e >> nl | e >> nd | e >> nu) & 1) {
+                px(x, y, C_OUT);
             }
         }
     }

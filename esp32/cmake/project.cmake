@@ -45,7 +45,11 @@ if(MOSAICO_UTILS)
     )
 endif()
 
-# ESP-IDF reads version.txt from the active project root unless PROJECT_VER is set.
+# The firmware version (cmake/version.cmake): version.txt's release number,
+# plus +g<commit>[.dirty] unless this is the tagged release. It sets
+# PROJECT_VER, which ESP-IDF then uses instead of reading version.txt itself.
+include("${CMAKE_CURRENT_LIST_DIR}/version.cmake")
+muse_version_setup()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Product integration is explicit and per project. Build properties carry it

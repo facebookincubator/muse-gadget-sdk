@@ -153,10 +153,12 @@ static void touch_sample(bool down, int16_t nx, int16_t ny)
     }
     if (down && !t.was_down) {
         t.epoch = s_presented_epoch.load();
-        /* As muse_ui.c's on_any_press. */
-        if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
-            muse_input_touch_talk(true);
-            muse_input_touch_talk(false);
+        /* As muse_ui.c's on_any_press. The pairing prompt draws no Confirm
+         * control here: the whole screen is its Confirm, so on a touch board
+         * one tap confirms it (a first setup or a re-setup), never as the
+         * talk key's press. */
+        if (muse_link_state() == MUSE_LINK_CONFIRM && muse_board->touch) {
+            (void)muse_link_confirm_key_press();
         }
         muse_state_poke();
         t.swallow = false;
@@ -1092,6 +1094,32 @@ extern "C" void muse_eink_display_pause(bool pause)
 extern "C" bool muse_ui_dark(void)
 {
     return s_dark;
+}
+
+/* The LVGL UI's v1.0 home and its bench hooks (muse_ui.h): this UI has no
+ * screen hold region, no pages to go to by name, and nothing for a bench
+ * press to run on (muse_input.c's tap= / page= / ui.redraw= answer that). */
+extern "C" bool muse_ui_has_hold_region(void)
+{
+    return false;
+}
+
+extern "C" void muse_ui_goto(const char *page)
+{
+    (void)page;
+}
+
+extern "C" bool muse_ui_run_in_lvgl(void (*fn)(const char *arg), const char *arg)
+{
+    (void)fn;
+    (void)arg;
+    return false;
+}
+
+extern "C" void muse_ui_redraw_cost(int n, uint32_t *min_us, uint32_t *avg_us, uint32_t *max_us)
+{
+    (void)n;
+    *min_us = *avg_us = *max_us = 0;
 }
 
 extern "C" bool muse_ui_face_active(void)

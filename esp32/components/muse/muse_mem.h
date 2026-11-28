@@ -31,6 +31,26 @@
 #define MUSE_LOW_MEM 1
 #endif
 
+/*
+ * Buffers and task stacks SIMD (PIE) code touches: main SRAM only
+ * (MALLOC_CAP_DMA). The heap also hands out RTC/LP RAM as MALLOC_CAP_INTERNAL
+ * once main SRAM runs low (CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP: the
+ * S31's LP RAM at 0x2E000000, the S3's 8 KB of RTC fast memory), and PIE
+ * loads from it fault (a decode task's stack in the S31's LP
+ * RAM: a pie_load panic). On chips without SIMD (the C6, C5, C3) plain
+ * internal: nothing there faults.
+ * The free and largest-block checks before such an allocation use the same
+ * caps.
+ */
+#if __has_include("soc/soc_caps.h")
+#include "soc/soc_caps.h"
+#endif
+#if defined(SOC_SIMD_INSTRUCTION_SUPPORTED) && SOC_SIMD_INSTRUCTION_SUPPORTED
+#define MUSE_SIMD_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT)
+#else
+#define MUSE_SIMD_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
+
 /* Core for audio work: the second core when there is one. */
 #if CONFIG_FREERTOS_UNICORE
 #define MUSE_AUDIO_CORE 0

@@ -20,9 +20,11 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # its helpers, also when run from esp32/ as tests.<module>
 from test_link_unpair_storage_contract import _function_body
 
 
@@ -39,7 +41,10 @@ class LinkEndpointLifecycleTest(unittest.TestCase):
         noise = (ROOT / "main/noise_control.cpp").read_text()
         provision = _function_body(app, "static void on_provision(")
         provision = provision.split('config_erase_key("vm_url");', 1)[1]
-        provision = provision.split("if (start_wifi_join_ota_if_requested", 1)[0]
+        # Up to the session check before the OTA step (a gadget build's OTA
+        # step sits in its own #if).
+        provision = provision.split("start_wifi_join_ota_if_requested(ota_url", 1)[0]
+        provision = provision.rsplit("if (!require_provisioning_pairing_session", 1)[0]
         boot = _function_body(app, "void app_run(")
         boot = boot.split('heap_snapshot("after noise_ctrl_init");', 1)[1]
         boot = boot.split("bool skip_boot_scan", 1)[0]
@@ -131,9 +136,11 @@ static bool config_get_str(const char *key, char *value, size_t cap) {
 static bool config_setup_complete(void) { checked_setup = true; return complete; }
 static bool config_is_provisioned(void) { return provisioned; }
 static bool config_mark_setup_complete(void) { complete = true; return true; }
+static bool skipped;   /* a gadget's token-only setup: Wi-Fi skipped */
+static bool config_wifi_skipped(void) { return skipped; }
 static bool config_clear_setup(void) {
     memset(stored, 0, sizeof(stored));
-    complete = provisioned = false;
+    complete = provisioned = skipped = false;
     return true;
 }
 static bool config_clear_pairing(void) {
@@ -151,6 +158,8 @@ static bool clear_setup_credentials(setup_reset_scope_t scope) {
     return scope == SETUP_RESET_FORGET_WIFI ? config_clear_setup() : config_unpair();
 }
 #define CONFIG_KEY_NOT_FOUND 0
+#define CONFIG_KEY_FOUND 1
+#define GADGET_PROOF 0   /* app.c's: a Wi-Fi build here (no token proof key) */
 static int config_key_lookup(const char *key) {
     (void)key;
     return provisioned ? 1 : CONFIG_KEY_NOT_FOUND;
@@ -256,6 +265,29 @@ static void check_boot(bool setup, bool token, bool wifi, bool keep_endpoints) {
     check_boot_v2(setup, token, wifi, keep_endpoints, false);
     check_boot_v2(setup, token, wifi, keep_endpoints, true);
 }
+/* A gadget's token-only setup (protocols/README.md, Gadget setup over Muse Link). */
+static void check_token_only_boot(void) {
+    /* Complete without Wi-Fi: kept, even where Muse forgets Wi-Fi. */
+    reset_fixture();
+    config_set_str("api_url_v2", custom_api_v2);
+    config_set_str("noise_host", custom_noise);
+    complete = provisioned = skipped = true;
+    boot_endpoints();
+    assert(complete && provisioned && skipped);
+    expect_endpoints(custom_api_v2, custom_noise);
+    /* Cut off before its marker: wiped, even with Wi-Fi saved since, and
+     * never migrated as a legacy Wi-Fi pair. */
+    reset_fixture();
+    config_set_str("ssid", "saved-wifi");
+    provisioned = skipped = true;
+    boot_endpoints();
+    assert(!complete && !provisioned && !skipped && !stored[0][0]);
+    /* Only the marker survived: wiped too. */
+    reset_fixture();
+    skipped = true;
+    boot_endpoints();
+    assert(!complete && !skipped);
+}
 int main(void) {
     reset_fixture();
     assert(apply_endpoints(custom_api, custom_noise));
@@ -339,6 +371,7 @@ int main(void) {
     complete = provisioned = true;
     boot_endpoints();
     expect_endpoints(api_used, noise_used);
+    if (!CONFIG_HOMEHUB_WIFI_SSID[0]) check_token_only_boot();
     return 0;
 }
 """

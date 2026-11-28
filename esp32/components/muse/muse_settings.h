@@ -43,6 +43,7 @@
 #define MUSE_TOKEN_MAX 1023
 
 #define MUSE_MIC_GAIN_MAX 36      /* dB; ES7210 PGA, applied in 3 dB steps */
+#define MUSE_MIC_GAIN_TUNED 30    /* dB; the default Settings gain, the boards' tuned capture gain */
 
 typedef enum {
     MUSE_SETTING_VOLUME,
@@ -60,7 +61,28 @@ typedef enum {
 #if CONFIG_MUSE_WAKEWORD_ENABLE
     MUSE_SETTING_WAKEWORD,      /* the wake word opt-in changed */
 #endif
+    MUSE_SETTING_TALK,
+    MUSE_SETTING_HAPTICS,
+    MUSE_SETTING_DEVELOPER,
 } muse_setting_t;
+
+/* Who changed the speaker (the gadget shows every change it didn't
+ * make itself). A boot's restore
+ * from NVS is no change at all. */
+typedef enum {
+    MUSE_VOL_BY_DEVICE = 0,   /* the gadget's own keys, sliders, a call's controls */
+    MUSE_VOL_BY_PHONE,        /* an app's set_settings speaker_volume, Muse's phone setup */
+    MUSE_VOL_BY_BENCH,        /* the console's vol= (RAM only) */
+} muse_vol_by_t;
+
+/* Which inputs talk (Settings > Talk): the screen's hold
+ * region on the home, the talk button, or both (the default where a board
+ * has both). Persisted. */
+typedef enum {
+    MUSE_TALK_BOTH = 0,
+    MUSE_TALK_SCREEN = 1,
+    MUSE_TALK_BUTTON = 2,
+} muse_talk_mode_t;
 
 typedef void (*muse_setting_cb_t)(muse_setting_t what);
 
@@ -76,6 +98,8 @@ esp_err_t muse_settings_set_avatar_source(muse_avatar_source_t source);
 muse_theme_mode_t muse_settings_theme(void);
 esp_err_t muse_settings_set_theme(muse_theme_mode_t mode);
 #endif
+/* A second listener, called after the first (the BLE client's setting reports). */
+void muse_settings_set_observer(muse_setting_cb_t cb);
 
 int muse_settings_volume(void);         /* 0..100 */
 bool muse_settings_speaker_on(void);    /* off: replies are shown, not played */
@@ -88,6 +112,10 @@ bool muse_settings_face_down_quiet(void);
 void muse_settings_set_lift_wake(bool on);
 void muse_settings_set_face_down_quiet(bool on);
 #endif
+/* Display > Sleep when charged (muse_charged.h): true =
+ * Always (the default), the normal timeout; false = Never, a lit screen held
+ * on while on USB with the battery charged. Saved on the gadget only. */
+bool muse_settings_sleep_when_charged(void);
 /* The size of reply text on screen, from Extra small to Extra large. Until
  * it's chosen, the screen's own default (muse_settings_set_text_size_default). */
 enum { MUSE_TEXT_XSMALL, MUSE_TEXT_SMALL, MUSE_TEXT_MEDIUM, MUSE_TEXT_LARGE, MUSE_TEXT_XLARGE, MUSE_TEXT_SIZES };
@@ -122,9 +150,47 @@ size_t muse_settings_hatch_token_len(void);
 
 void muse_settings_set_volume(int pct);
 void muse_settings_set_speaker_on(bool on);
+/* The same, made from outside the gadget (shown with "Set by phone"). */
+void muse_settings_set_volume_by(int pct, muse_vol_by_t by);
+void muse_settings_set_speaker_on_by(bool on, muse_vol_by_t by);
+/* A count of the speaker's changes since boot (the level or the switch; none
+ * at boot) and, in *by, who made the latest: the UI shows the outside ones
+ * (muse_vol_show.h). Any task. */
+uint32_t muse_settings_volume_changes(muse_vol_by_t *by);
+/* The bench volume (bench and test mutes are RAM-only; the console's
+ * vol=, muse_vol_word.h): the speaker at pct in RAM only (0: off, the level
+ * kept), never written to NVS; the saved values are kept aside until
+ * muse_settings_volume_restore() or the next user or app change (the two
+ * setters above), which brings them back first and then saves its own.
+ * Notifies MUSE_SETTING_VOLUME (once) like any change. */
+void muse_settings_set_volume_ram(int pct);
+void muse_settings_volume_restore(void);   /* vol=saved: back to the saved volume */
+bool muse_settings_volume_is_ram(void);
+/* The saved volume as speaker_volume reads it (0 when the saved speaker is off). */
+int muse_settings_saved_speaker_volume(void);
 void muse_settings_set_mic_gain(int db);
 void muse_settings_set_brightness(int pct);
 void muse_settings_set_sleep_s(int secs);
+void muse_settings_set_sleep_when_charged(bool always);
+muse_talk_mode_t muse_settings_talk_mode(void);
+void muse_settings_set_talk_mode(muse_talk_mode_t mode);
+/* The vibration motor's buzz at the talk threshold; a client's
+ * haptics_enabled setting sets it too. Boards without a motor ignore it. */
+bool muse_settings_haptics(void);
+void muse_settings_set_haptics(bool on);
+/* Developer mode: off by default;
+ * five taps on About's card turn it on, the switch at the top of the
+ * Developer page turns it off. Persisted; a factory reset clears it. Only
+ * then does Settings show the Developer row. */
+bool muse_settings_developer(void);
+void muse_settings_set_developer(bool on);
+/* A factory reset (Link's setup reset, before its restart): what a reset
+ * clears of these settings (Developer mode). Works before muse_settings_init
+ * too (SAFE mode never starts Muse). */
+void muse_settings_factory_reset(void);
+/* An unpair or reset: the Muse server, VM and device token set by hand back
+ * to their defaults, in storage and here. False: storage didn't take the erase. */
+bool muse_settings_forget_server(void);
 void muse_settings_set_text_size(int size);
 void muse_settings_set_wifi_on(bool on);
 void muse_settings_set_ble_on(bool on);

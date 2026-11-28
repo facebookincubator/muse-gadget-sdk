@@ -24,6 +24,9 @@
 
 // Before app_run(): registers Muse's BLE service and Link operations.
 void muse_glue_start(void);
+// The board's only key is its talk key (no touch screen, menu keys or second key): it takes a re-setup only in setup
+// mode (app_resetup_open).
+bool muse_glue_talk_key_only(void);
 // From app_run(): NVS and identity are up, so Muse can start its UI.
 void muse_glue_storage_ready(void);
 // From app_run(): boot Wi-Fi/VM connect is done; Muse may drive the radios.

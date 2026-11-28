@@ -24,10 +24,10 @@
  * CODEC: h264 or vp8 (muse_vdec_open / muse_vdec_decode), or, built
  * with -DSTALE_DIRECT, "direct" (tinyh264's h264bsdDecode alone, no glue).
  * "reset" closes and reopens the decoder. Prints one "NAME LEN RC W H SUM"
- * line per frame (SUM: FNV-1a of the picture's planes, "- - -" when there's
- * no picture) and "guard ok" when the bytes past AU_MAX are untouched. Under
- * AddressSanitizer the guard and, for each frame, the stale bytes between its
- * end and AU_MAX are poisoned, so a read past the frame fails the run too.
+ * line per frame (SUM: FNV-1a of the picture's planes; "- - -" when there's no picture) and "guard ok"
+ * when the bytes past AU_MAX are untouched. Under AddressSanitizer the
+ * guard and, for each frame, the stale bytes between its end and AU_MAX are
+ * poisoned, so a read past the frame fails the run too.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -119,7 +119,16 @@ static void dec_decode(dec_t *d, uint8_t *au, uint32_t len)
     if (rc == H264BSD_PIC_RDY && pic) {
         w = (int)pw;
         h = (int)ph;
+#ifdef H264BSD_HAS_INPLACE
+        /* the low-memory copy: its chroma planes don't follow the luma */
+        u8 *cb, *cr;
+        h264bsdPicturePlanes(d->s, pic, &cb, &cr);
+        sum = plane(sum, pic, w, w, h);
+        sum = plane(sum, cb, w / 2, w / 2, h / 2);
+        sum = plane(sum, cr, w / 2, w / 2, h / 2);
+#else
         sum = plane(sum, pic, w, w, h * 3 / 2);   /* Y, then U and V */
+#endif
     }
 #else
     muse_pic_t pic = { 0 };

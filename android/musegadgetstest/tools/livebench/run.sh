@@ -35,6 +35,11 @@ out=${OUT:-/tmp/livebench}/$tag
 CLIPS=${CLIPS:?set CLIPS to the directory holding CLIP_640x480.yuv}
 pkg=com.musegadgets.test
 adb shell am force-stop $pkg
+# The launch extras below need files/bench; one this script creates goes again when it ends.
+if ! adb shell run-as $pkg ls files/bench >/dev/null 2>&1; then
+    adb shell run-as $pkg touch files/bench
+    trap 'adb shell run-as "$pkg" rm -f files/bench' EXIT
+fi
 adb logcat -c
 adb shell rm -rf /sdcard/Android/data/$pkg/files/bench
 adb shell am start -n $pkg/.MainActivity ${TARGET:+--es target "$TARGET"} --ez auto true --es source "file:$clip.yuv" \

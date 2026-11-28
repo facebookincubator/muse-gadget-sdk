@@ -51,7 +51,8 @@ port. To keep the factory firmware, back up the whole flash first and store it
 outside version control:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 atk-box2-factory.bin
+BK=~/.local/share/muse-gadgets/backups && install -d -m 700 "$BK"   # flash backups: 0600 in a 0700 directory
+(umask 077; python -m esptool --chip esp32s3 -p PORT read-flash 0 0x1000000 "$BK/atk-box2-factory.bin")
 ```
 
 ### Options

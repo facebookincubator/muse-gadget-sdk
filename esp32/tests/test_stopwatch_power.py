@@ -272,8 +272,11 @@ static int ioe_set(uint16_t pins, bool high) {
 static void vTaskDelay(int ms) { note("wait%d", ms); }
 static void tp_reset(void) { note("tp-reset", 0); }
 static int reg_write(void *dev, uint8_t reg, const uint8_t *v, size_t n) { assert(dev == s_tp && reg == TP_REG_SLEEP && n == 1 && v[0] == 3); note("tp-sleep", 0); return 0; }
-static void esp_lv_adapter_pause(int ms) { assert(ms == -1); note("lv-pause", 0); }
+static void esp_lv_adapter_pause(int ms) { assert(ms == 500); note("lv-pause", 0); }   /* MUSE_LVGL_PAUSE_MS */
 static void esp_lv_adapter_resume(void) { note("lv-resume", 0); }
+/* muse_lvgl_hold.c with nothing else holding LVGL: a hold pauses it, a release resumes it. */
+enum { MUSE_LVGL_HOLD_SCREEN = 1, MUSE_LVGL_HOLD_VIDEO = 2 };
+static bool muse_lvgl_hold(int who, bool hold) { (void)who; if (hold) esp_lv_adapter_pause(500); else esp_lv_adapter_resume(); return hold; }
 static int esp_lv_adapter_lock(int ms) { (void)ms; return ESP_OK; }
 static void esp_lv_adapter_unlock(void) {}
 static void *lv_screen_active(void) { return (void *)4; }
@@ -373,6 +376,7 @@ static struct {
     void (*audio_power)(bool);
     void (*codec_power)(bool);
     int (*mic_init)(void);
+    bool i2s_ready_at_init;
     int (*mic_power)(bool);
     int (*mic_read)(int16_t *, size_t);
 } board = { .audio_init = board_audio_init, .audio_power = board_audio_power,
@@ -386,10 +390,26 @@ static float s_mic_scale;
 static esp_codec_dev_handle_t s_spk;
 static esp_codec_dev_handle_t s_mic;
 static bool s_open;
+static bool s_want_open;
+static bool s_short;
+static volatile int s_mic_gain_override = -1;
+static volatile bool s_mic_gain_dirty;
+#define MUSE_MIC_GAIN_MAX 36
 static SemaphoreHandle_t s_lock;
+/* Who holds the lock (muse_audio_lock_holder): each caller names itself. */
+static const char *volatile s_lock_what;
+#define LOCK() do { lock(); s_lock_what = __func__; } while (0)
+/* The DMA guard (test_muse_audio_dma.py) always lets them open here. */
+static bool dma_fits(void) { return true; }
+static size_t s_held_buf;
+typedef struct { size_t buf, need; } fake_dma_t;
+static fake_dma_t dma_budget(void) { fake_dma_t b = { 960, 12512 }; return b; }
+/* The speaker's speech chain (the ESP-Mosaico's, test_muse_spk_dsp.py): none on this board. */
+static void speech_chain_init(void) {}
 ''' + "\n".join(function(audio, n) for n in (
-            "lock", "unlock", "codec_power", "codecs_reachable", "apply_volume", "apply_mic_gain", "open_codecs",
-            "muse_audio_set_volume", "muse_audio_set_mic_gain", "muse_audio_init", "muse_audio_power")) + r'''
+            "lock", "unlock", "codec_power", "codecs_reachable", "apply_volume", "muse_audio_mic_gain", "apply_mic_gain", "open_codecs",
+            "muse_audio_set_volume", "muse_audio_set_mic_gain", "muse_audio_mic_gain_override", "muse_audio_init", "open_locked",
+            "muse_audio_power")) + r'''
 static void expect(const char *want) {
     if (strcmp(ev, want)) { printf("got:  %s\nwant: %s\n", ev, want); exit(1); }
     ev[0] = 0;
@@ -445,6 +465,20 @@ int main(int argc, char **argv) {
         assert(s_open && s_mic_scale > 9.9f && s_mic_scale < 10.1f);
         muse_audio_power(false); expect("pdm-off ");
         muse_audio_power(true); expect("pdm-on ");
+    } else if (test == 6) {   /* set_mic_gain's per-connection gain: RAM only, every open uses it, then the Settings gain again */
+        assert(muse_audio_mic_gain() == 24);
+        muse_audio_mic_gain_override(15);
+        expect("");                                  /* never blocks: the next read (or open) applies it */
+        assert(s_mic_gain_dirty && muse_audio_mic_gain() == 15);
+        muse_audio_power(false); ev[0] = 0;
+        muse_audio_power(true);
+        expect("rail-on open-spk open-mic vol70 gain15 amp-on ");   /* a wake keeps the connection's gain */
+        muse_audio_mic_gain_override(99); assert(muse_audio_mic_gain() == MUSE_MIC_GAIN_MAX);
+        muse_audio_mic_gain_override(-1);            /* the connection ended */
+        assert(muse_audio_mic_gain() == 24);
+        muse_audio_power(false); ev[0] = 0;
+        muse_audio_power(true);
+        expect("rail-on open-spk open-mic vol70 gain24 amp-on ");   /* the user's (tuned) gain again */
     } else {   /* other boards (no codec_power): unchanged, setters reach a closed codec as before */
         board.codec_power = NULL;
         muse_audio_power(false); expect("amp-off close-spk close-mic ");
@@ -454,7 +488,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 '''
-        self.run_cases(self.build("audio", code), 6)
+        self.run_cases(self.build("audio", code), 7)
         init = function(audio, "muse_audio_init")
         self.assertLess(init.index("codec_power(true)"), init.index("muse_board->audio_init("))
 

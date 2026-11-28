@@ -30,7 +30,7 @@ VECTORS = json.loads(
     (Path(__file__).parent / "vectors" / "link_pairing_v5.json").read_text()
 )["vectors"]
 APP = next(v for v in VECTORS if v["name"] == "community_app_v5")
-# The same device offering a new pairing's node id, gadget-000001.
+# The same device set up as a new gadget: node id gadget-000001.
 APP_GADGET = next(v for v in VECTORS if v["name"] == "community_app_gadget_v5")
 
 

@@ -38,9 +38,9 @@ package com.musegadgets.test;
  */
 final class PanelScaler {
     private final int nIn, nOut;
-    private final int[] start;     /* first source tap of each output */
-    private final int[] taps;      /* nOut x len weights, Q12 */
-    private final int len;
+    final int[] start;     /* first source tap of each output */
+    final int[] taps;      /* nOut x len weights, Q12, each row summing to 4096 */
+    final int len;
     private int[] tmp, acc;
 
     PanelScaler(int nIn, int nOut, int panel, double lambda, int halfTaps) {
@@ -84,12 +84,23 @@ final class PanelScaler {
                 sum += r[o][i];
             }
             start[o] = lo;
+            /* An output the panel doesn't show (a panel smaller than the picture, as a 16x16 display
+             * makes the chroma's 8) has no weights to normalize (0/0): the box over its window. */
+            double[] wt = new double[hi - lo];
+            boolean box = Math.abs(sum) < 1e-9;
+            for (int i = lo; i < hi; i++) {
+                wt[i - lo] = r[o][i] / sum;
+                box |= !(Math.abs(wt[i - lo]) <= 64);   /* NaN, infinite or wild */
+            }
+            if (box) {
+                java.util.Arrays.fill(wt, 1.0 / (hi - lo));
+            }
             int acc = 0, big = lo;
             for (int i = lo; i < hi; i++) {
-                int w = (int) Math.round(r[o][i] / sum * 4096);
+                int w = (int) Math.round(wt[i - lo] * 4096);
                 taps[o * len + i - lo] = w;
                 acc += w;
-                if (r[o][i] > r[o][big]) {
+                if (wt[i - lo] > wt[big - lo]) {
                     big = i;
                 }
             }

@@ -97,6 +97,15 @@ const char *muse_text_showable(const char *text, char *buf, size_t cap);
  */
 size_t muse_text_strip_markdown(char *s, uint64_t wrapped);
 
+/*
+ * Captions in sentence case. A caption written all in
+ * capitals ("CALL ENDED", "CAN'T REACH MUSE") becomes "Call ended", "Can't
+ * reach Muse" in place; one with any lowercase letter is left alone. Keeps
+ * the names that stay capitalized (Muse, Wi-Fi, BLE, USB, SDK, VM, OK, I)
+ * and starts a new sentence after ". ", "! " and "? ".
+ */
+void muse_text_sentence_case(char *s);
+
 #ifdef __cplusplus
 }
 #endif

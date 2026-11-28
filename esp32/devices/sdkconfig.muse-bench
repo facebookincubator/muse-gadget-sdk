@@ -20,7 +20,50 @@
 # code, plus a buffer the size of the screen (RGB565) while taking one.
 CONFIG_LV_USE_SNAPSHOT=y
 
-# New setups offer gadget-XXXXXX node ids (off by default; on here for
-# development). A device keeps the id it was set up with until it is set up
-# again.
+# UI timing on mg.perf (components/muse/muse_perf.h): frame time, frame rate,
+# touch and talk-button latency, and each task's CPU share every 5 s. About
+# 4 KB of code and a 4 KB task; the run-time counters add a little to every
+# context switch.
+CONFIG_MUSE_PERF=y
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# LVGL's profiler hooks into mg.perf (components/muse/lvprof): '>prof=on' adds
+# where each gesture's render time went, by LVGL function and draw task type.
+# Off until asked; each hook then costs a call and a test.
+CONFIG_LV_USE_PROFILER=y
+CONFIG_LV_USE_PROFILER_BUILTIN=n
+CONFIG_LV_PROFILER_INCLUDE="muse_lv_profiler.h"
+CONFIG_LV_PROFILER_LAYOUT=y
+CONFIG_LV_PROFILER_REFR=y
+CONFIG_LV_PROFILER_DRAW=y
+CONFIG_LV_PROFILER_INDEV=n
+CONFIG_LV_PROFILER_DECODER=y
+CONFIG_LV_PROFILER_FONT=n
+CONFIG_LV_PROFILER_FS=n
+CONFIG_LV_PROFILER_STYLE=n
+CONFIG_LV_PROFILER_TIMER=n
+CONFIG_LV_PROFILER_CACHE=n
+CONFIG_LV_PROFILER_EVENT=n
+
+# Test rigs confirm Muse app setup over the console (>pair.confirm): bench
+# builds only, never a shipping one.
+CONFIG_MUSE_PAIR_CONFIRM_CONSOLE=y
+# A bench/debug image: on-screen diagnostics (the calling screen's step line).
+CONFIG_MUSE_BENCH_IMAGE=y
+
+# New setups offer gadget-XXXXXX node ids (off by default; bench builds turn
+# it on). A unit set up with a homelink- id keeps it until it is set up again.
 CONFIG_MUSE_GADGET_NODE_ID_PREFIX=y
+
+# The gadget automation tools: every Nordic UART word open to any connection,
+# injected input, bench hooks (components/muse_gadget_ble/Kconfig).
+CONFIG_MUSE_GADGET_AUTOMATION=y
+
+# The sealed clear's cap (mg_session_cap_sealed_clear), off in release images,
+# which keep accepting the unsealed clear.
+CONFIG_MUSE_GADGET_SEALED_CLEAR=y
+
+# Muse's phone setup service takes Wi-Fi and account writes in its setup
+# window (tools/muse/ble_setup.html); release builds leave them to the app.
+CONFIG_MUSE_GADGET_TEST_BUILD=y
