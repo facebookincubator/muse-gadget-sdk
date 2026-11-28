@@ -119,6 +119,7 @@ static const char *TAG = "muse_ui";
 #define METER_GAP_PX 4
 #define RING_RANGE 1000
 #define CAPTION_W 256           /* 16 columns of unscii_16, the width reply captions wrap to */
+#define CAPTION_FIT_W 160         /* widest single line the standby bottom row survives on the round panel */
 #define CAPTION_LINE_SPACE 2
 #define LATIN_BAND_MARGIN 26    /* a small screen's accented captions clear its button icons */
 #define LONG_MUSE_TOP 44        /* long layout: Muse's top, under the state and name rows, while a reply shows */
@@ -3497,6 +3498,44 @@ static void update_status(muse_mode_t mode, float now)
 #endif
         if (lbl == s_caption_lbl && shown == caption) {
             muse_text_sentence_case(caption);   /* captions in sentence case; a reply's own text stays as written */
+        }
+        if (lbl == s_caption_lbl && !s_long && !s_small) {
+            /* The standby bottom row must hold a status
+             * caption on ONE line. The reply pager wraps it to the answer
+             * layout's narrower pixel width, and a second line falls off
+             * the round panel's lower chord, half-clipped. Join the paged
+             * lines back into one and, when the joined text measures wider
+             * than CAPTION_FIT_W (a width a single line is known to
+             * survive on this panel), shrink the label to fit instead of
+             * wrapping. Short captions keep the native size. Keep this
+             * when merging upstream. */
+            static char joined[MUSE_CAPTION_MAX];
+            const char *fit_text = shown;
+            int fit_scale = 256;
+            if (strchr(shown, '\n')) {
+                size_t o = 0;
+                for (const char *p = shown; *p && o < sizeof(joined) - 1; p++) {
+                    if (*p != '\n') joined[o++] = *p;
+                }
+                joined[o] = '\0';
+                fit_text = joined;
+            }
+            lv_point_t fit_size;
+            lv_text_get_size(&fit_size, fit_text, lv_obj_get_style_text_font(s_caption_lbl, 0), 0,
+                             CAPTION_LINE_SPACE, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (fit_size.x > CAPTION_FIT_W) {
+                fit_scale = CAPTION_FIT_W * 256 / fit_size.x;
+                lv_obj_set_width(s_caption_lbl, fit_size.x + 2);
+            } else {
+                lv_obj_set_width(s_caption_lbl, CAPTION_W);
+            }
+            lv_obj_set_style_transform_scale_x(s_caption_lbl, fit_scale, 0);
+            lv_obj_set_style_transform_scale_y(s_caption_lbl, fit_scale, 0);
+            lv_obj_set_style_transform_pivot_x(s_caption_lbl,
+                                               lv_obj_get_width(s_caption_lbl) / 2, 0);
+            lv_obj_set_style_transform_pivot_y(s_caption_lbl,
+                                               lv_obj_get_height(s_caption_lbl) / 2, 0);
+            shown = fit_text;   /* the label takes the joined one-liner */
         }
         if (answer >= 0 && muse_voice_in_call()) {
             shown = live_caption_tail(shown, &s_answers[answer], lv_obj_get_style_text_font(lbl, 0));
